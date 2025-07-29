@@ -2,6 +2,7 @@
 import torch
 from torch.utils.data import DataLoader
 from typing import Union, Sequence, Callable, Dict
+
 # TODO: Add the discriminator class taking an MPS as input
 #       and returning a pytorch module that is the MPS with an
 #       MLP at the end to discriminate real from fake inputs to the MPS
@@ -9,6 +10,7 @@ from typing import Union, Sequence, Callable, Dict
 
 # TODO: Classical discriminator initialisation based on predefined MPS or data.
 # TODO: Optimizer initialisation
+# TODO: Add discriminator ensemble, one for each class. 
 
 
 #------------------------------------------------------------------------------------------------´
