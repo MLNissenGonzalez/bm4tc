@@ -1,5 +1,5 @@
 ## Adversarial training with MPS
-In this repository, the complete pipeline to improve the generative capabilities of a discriminatively pretrained Matrix Product State (MPS) using GAN-style adversarial training is implemented using `tensorkrowch`. This is not to be confused with the defense method "adversarial training" where a classifier is trained on adversarial examples alongside normal data to improve robustness against adversarial attacks. 
+In this repository, the complete pipeline to improve the generative capabilities of a discriminatively pretrained Matrix Product State (MPS) using GAN-style adversarial training is implemented using `tensorkrowch`, reproducing [Mossi et al. 2024](https://arxiv.org/abs/2406.17441). This is not to be confused with the defense method "adversarial training" where a classifier is trained on adversarial examples alongside normal data to improve robustness against adversarial attacks. 
 
 The first implementation uses 2D toy datasets and others whose generation / download scripts are in `datasets/`. The scripts perform preprocessing that needs to be accessed somehow. The data itself will be stored only locally in a folder called `data/`. 
 
