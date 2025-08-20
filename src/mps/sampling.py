@@ -1,6 +1,7 @@
 # script with sampling functions
 import torch
 
+# TODO: Add documentation
 # Single-shot secant sampling (sss_sampling)
 def pre_select(p: torch.Tensor):
     """  
@@ -19,6 +20,7 @@ def pre_select(p: torch.Tensor):
     ids = p.detach().size(1) - torch.le(nu, cdf_norm.detach()).sum(dim=1) # batch length number of indices j
     return cdf_norm, nu, ids
 
+# TODO: Add documentation
 def sss_sampling(p: torch.Tensor,
                     z: torch.Tensor):
     cdf, nu, ids_b = pre_select(p=p)

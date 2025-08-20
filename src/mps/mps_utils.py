@@ -5,13 +5,23 @@ import sampling
 from torch.utils.data import DataLoader
 import torch.nn as nn
 
-# TODO: Add/change documentation
-def born_sequential(mps: tk.models.MPS, embs: dict | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
-    """  
-    Input:
-    mps:    tk.models.MPS instance defining the prob amplitude
-    embs:   dictionary with input position as key and embedded input as value: batch_size x phys_dim OR
-            single tensor with embedded input: batch_size x n_feat x phys_dim
+# TODO: Change name to just born or something
+def born_sequential(mps: tk.models.MPS, 
+                    embs: dict | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
+    """ 
+    Applies Born rule to MPS contracted with MPS.
+    Allows both for sequential and parallel contraction of MPS.
+    Parameters
+    ----------
+    mps:    tk.models.MPS
+        instance defining the prob amplitude
+    embs:   embedded input
+        dict of batch_size x phys_dim tensors or batch_size x n_feat x phys_dim tensor
+    
+    Returns
+    -------
+    tensor
+        probability distribution(s)
     """
 
     
@@ -39,7 +49,7 @@ def born_sequential(mps: tk.models.MPS, embs: dict | torch.Tensor)-> torch.Tenso
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-# TODO: Add documentation
+# TODO: Add documentation, is this at the interface or implementation level?
 # TODO: Think about moving away from dictionaries
 def _cc_mps_sampling(mps: tk.models.MPS,
                     input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
@@ -48,8 +58,31 @@ def _cc_mps_sampling(mps: tk.models.MPS,
                     cls_pos: int, # extract this once for the mps, not at every sampling step
                     cls_emb: torch.Tensor, # perform embedding once, torch.Size=[num_cls]
                     device: torch.device
-                    ):
-    
+                    )-> torch.Tensor:
+    """
+    This samples num_samples samples per class.
+
+    Parameters
+    ----------
+    mps: MPS instance
+        mps to sample from
+    input_space: list of tensors
+        space to sample into. 
+    embedding: 
+        mapping input dimension to larger embedding dimension
+    num_samples: int
+        number of samples per class
+    cls_pos: int
+        which position in the mps corresponds to the class output assuming a central tensor mps design
+    cls_emb: tensor
+        the basis embedding of a single class, just a one-hot vector in most cases
+    device: torch device
+
+    Returns
+    -------
+    tensor
+        num_samples samples with dims num
+    """
     if isinstance(input_space, torch.Tensor):
         input_space = [input_space.clone() for _ in range(mps.n_features - 1)]
     elif len(input_space) != (mps.n_features-1):

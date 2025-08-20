@@ -22,6 +22,27 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
                                 d_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
                                 g_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
                                 ):
+    """
+    Standard step in adversarial training with half the samples real, the other samples being synthesised by the generator.
+    
+    Parameters
+    ----------
+    dis: nn.Module
+        pretrained discriminator distinguishing real from synthesised samples
+    mps: tk.MPS
+        pretrained (via classification) Matrix Product State-type generator
+    batch_size: int
+        ??? how many examples per step?
+    real_data_loader: DataLoader
+        loads the minibatch of real examples
+    d_optimizer: Optimizer
+        optimizer for the discriminator
+    g_optimizer: Optimizer
+        optimizer for the generator
+    input_space: tensor
+        interval I, expecting observed data space to be of type I^d
+    embedding: 
+    """
     if d_loss_fn is None:
         d_loss_fn = nn.BCELoss()
     if g_loss_fn is None:
