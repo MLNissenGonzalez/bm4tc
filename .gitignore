@@ -10,6 +10,10 @@ images/
 # Notebooks are right now only for personal experimentation
 notebooks/
 
+# Experiment folder containing actual runs
+# Config framework may be added to the source code somewhere else
+experiments/
+
 # PyTorch
 *.pt
 *.pth
