@@ -9,5 +9,5 @@ There are multiple components to adversarial training:
 - In the classical adversarial training scheme: An independent, pretrained discriminator `discriminator_pretraining.py`.
 - The adversarial training script itself. `adversarial_training.py`.
 
-Experiments are conducted in the folder `experiments/`. Exploratory notebooks are stored only locally. Dependencies are captured in the `environment.yml` file. 
+Experiments are conducted in the non-tracked folder `experiments/`. Exploratory notebooks are stored only locally. Dependencies are captured in the `environment.yml` file. 
 
