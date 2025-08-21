@@ -51,6 +51,7 @@ def born_sequential(mps: tk.models.MPS,
 
 # TODO: Add documentation, is this at the interface or implementation level?
 # TODO: Think about moving away from dictionaries
+# TODO: Add other sampling methods and add it as configuration for experiments
 def _cc_mps_sampling(mps: tk.models.MPS,
                     input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
                     embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
@@ -115,14 +116,13 @@ def _cc_mps_sampling(mps: tk.models.MPS,
         
         p = born_sequential(mps=mps, embs=embs).view(num_samples, num_bins) # [num_samples, num_bins]
         
-        # Later, include an if clause here to inclue other sampling methods
+        # Later, include an if clause here to inclue other sampling methods, or make this a configuration
         samples[site] = sampling.sss_sampling(p, input_space[site])
         
         embs[i] = embedding[site](samples[site], phys_dim[site])[:, None, :].expand(-1, num_bins, -1).reshape(num_samples*num_bins, -1)
         site += 1
     return samples
 
-# TODO: Add documentation
 # TODO: Think about moving away from dictionaries
 def mps_sampling(   mps: tk.models.MPS,
                     input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
@@ -130,7 +130,28 @@ def mps_sampling(   mps: tk.models.MPS,
                     num_samples: int, # per class
                     cls_pos: int,
                     cls_embs: Sequence[torch.Tensor], # one embedding per class,
-                    device: torch.device):
+                    device: torch.device) -> torch.Tensor:
+    """
+    Samples num_samples samples for each class. Basically just a loop around _cc_mps_sampling.
+
+    Parameters
+    ----------
+    mps: MPS model
+    input_space: tensor
+    embedding: tk.embedding
+    num_samples: int
+        number of samples per class
+    cls_pos: int
+        position of central tensor
+    cls_embs: list of tensors
+        precomputed class embeddings for each class
+    device: torch.device
+
+    Returns
+    -------
+    tensor
+        (num_classes x num_samples) number of samples in input space (not embedded)
+    """
     
     samples = []
     for cls_emb in cls_embs:
@@ -148,17 +169,45 @@ def mps_sampling(   mps: tk.models.MPS,
     samples = torch.concat(samples) # (num_classes x num_samples) x (n_features-1), ordered by class for later retrieval, if wanted
     return samples 
 
-# TODO: Add documentation
+# TODO: Add tensor shape description
+# TODO: Consider parallel implementation
 def batch_sampling_mps( mps: tk.models.MPS,
                         input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
                         embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
                         batch_size: int, # will be num_samples in mps_sampling
                         cls_pos: int,
                         cls_embs: Sequence[torch.Tensor], # one embedding per class,
-                        total_n_samples: int, # total number of samples per class, ought to be divisible by batch_size
+                        total_n_samples: int, # total number of samples per class, ought to be divisible by batch_size? hard coding is bad
                         device: torch.device,
                         save_classes = False, # only needed for visualisation
 ):
+    """
+    Dividing up sampling of many samples into smaller batches for more economic memory usage.
+    Steps in the loop don't depend on each other -> Parallization possible.
+
+    Parameters
+    ----------
+    mps: MPS model
+    input_space: tensor
+    embedding: tk.embeddings
+        mapping input feature to larger physical dimension
+    batch_size: int
+        number of samples to be sampled per (mini)batch
+    cls_pos: int
+        position of central tensor in mps
+    cls_embs: list of tensors
+        precomputed class embeddings (one hot vectors)
+    total_n_samples: int
+        total number of samples to be sampled
+    device: torch.device
+    save_classes: Boolean
+        If true, class labels are saved and returned.
+    
+    Returns
+    -------
+    tensor
+        samples
+    """
     num_batches = (total_n_samples + batch_size - 1) // batch_size
     labels = []
     samples = []
@@ -191,11 +240,25 @@ def batch_sampling_mps( mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# TODO: Add documentation
-def mps_acc_eval(mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
+# TODO: Think of removing the str variable and only use a dataloader.
+def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
                     loaders: Dict[str, DataLoader],
                     split: str,
-                    device: torch.device):
+                    device: torch.device) -> float:
+    """
+    Computes the prediction accuracy of a MPS Born machine on a dataset.
+
+    Parameters
+    ----------
+    mps: MPS model
+    loaders: DataLoader
+    device: torch.device
+
+    Returns
+    -------
+    float
+        prediction accuracy
+    """
     mps.eval()
     correct = 0
     total = 0
@@ -211,13 +274,28 @@ def mps_acc_eval(mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
     acc = correct / total
     return acc
 
-# TODO: Add documentation
+
 def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos]
                        loader: DataLoader,
                        device: torch.device,
                        optimizer: torch.optim.Optimizer,
                        loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] # expects score, not probs
                        ) -> list:
+    """
+    Single epoch classification training. Returns minibatch-wise train_loss.
+
+    Parameters
+    ----------
+    mps: MPS model
+    loader: DataLoader
+    optimizer: Optimizer
+    loss_fn: LossFunction
+
+    Returns
+    -------
+    list of floats
+        minibatch-wise trainloss 
+    """
     train_loss = []
     mps.train()
     for X, t in loader:
@@ -234,8 +312,8 @@ def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos
         train_loss.append(loss.item())
     return train_loss
 
-# TODO: Add documentation
 # TODO: Think about logging different or more quantities
+# TODO: Consider removing title parameter
 def disr_train_mps( mps: tk.models.MPS,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
                     optimizer: torch.optim.Optimizer,
@@ -249,6 +327,43 @@ def disr_train_mps( mps: tk.models.MPS,
                     print_early_stop = True,
                     print_updates = True
                     ):
+    """
+    Full classification loop for MPS with patience stopping criterion 
+    based on prediction accuracy on validation set.
+    Returns tensors of best performing MPS, minibatch-wise training loss, and
+    epoch-wise validation accuracy. 
+
+    Parameters
+    ----------
+    mps: MPS model
+    loaders: dict of DataLoaders
+    optimizer: Optimizer
+    max_epoch: int
+    patience: int
+        maximal number of epochs without improvement before early stopping
+    cls_pos: int
+        position of central tensor in the MPS
+    loss_fn: Callable
+        loss function
+    device: torch.device
+    title: str, optional
+        title of dataset
+    goal_acc: float, optional
+        If not None, this gives the goal accuracy on the validation set. If this is surpassed, stop training early.
+    print_early_stop: Boolean
+        If True, print early stopping epoch.
+    print_updates: Boolean
+        If True, epoch-wise printing of pred. accuracy on validation set.
+
+    Returns
+    -------
+    best_tensors: list of tensors
+        list of tensors that define best performing MPS
+    train_loss: list of floats
+        minibatchwise training loss
+    val_accuracy: list of floats
+        epoch_wise pred. accuracy on validation set
+    """
     val_accuracy = []
     train_loss = []
     best_acc = 0.0
@@ -280,11 +395,14 @@ def disr_train_mps( mps: tk.models.MPS,
             patience_counter += 1
 
         # Early stopping via patience
-        if print_early_stop and (patience_counter > patience):
-            print(f"Early stopping via patience at epoch {i}")
+        if patience_counter > patience:
+            if print_early_stop:
+                print(f"Early stopping via patience at epoch {i}")
             break
-        if print_early_stop and (goal_acc is not None) and (goal_acc < best_acc):
-            print(f"Early stopping via goal acc at epoch {i}")
+        # Optional early stopping via goal accuracy
+        if (goal_acc is not None) and (goal_acc < best_acc):
+            if print_early_stop:
+                print(f"Early stopping via goal acc at epoch {i}")
             break
         # Update report
         if (i == 0) and (title is not None):
@@ -307,7 +425,8 @@ def disr_train_mps( mps: tk.models.MPS,
 
 # TODO: Write a function that for a given MPS (Layer) returns class embeddings
 
-# TODO: Write a function that gives input potential form of input embeddings
+# TODO: Write a function that gives input potential form of input embeddings, what? 
+#       I could write a function that takes an input unprocessed dataset and an embedding and returns preprocessed data (may, or may not be embedded)
 
 
 #-----------------------------------------------------------------------------------------------------

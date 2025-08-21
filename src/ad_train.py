@@ -5,8 +5,16 @@ from mps.mps_utils import mps_sampling, mps_acc_eval, disr_train_mps
 from torch.utils.data import DataLoader
 import torch.nn as nn
 
+"""
+Currently, this script contains only two functions. A function performing the adversarial training (GAN-style) step,
+and another performing the loop with a check on the classification accuracy of the MPS. 
+"""
+
+# TODO: Think about how to implement configuration. .yml lend themselves well to strings (e.g. 'BCE'), 
+#       but arguments to functions in my scripts are currently often functions (e.g. nn.BCEloss).
+
+
 # TODO: Add other checks for gradients
-# TODO: Add documentation
 def _adversarial_training_step(dis, # TODO: define abstract discriminator class
                                 mps: tk.models.MPS,
                                 batch_size: int,
@@ -16,7 +24,7 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
                                 input_space: torch.Tensor | Sequence[torch.Tensor],
                                 embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
                                 cls_pos: int,
-                                cls_embs: Sequence[torch.Tensor], # one embedding per class,
+                                cls_embs: Sequence[torch.Tensor],
                                 check: bool,
                                 device: torch.device,
                                 d_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
@@ -32,7 +40,7 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
     mps: tk.MPS
         pretrained (via classification) Matrix Product State-type generator
     batch_size: int
-        ??? how many examples per step?
+        (number of synthesised samples per step) = batch_size x num_cls
     real_data_loader: DataLoader
         loads the minibatch of real examples
     d_optimizer: Optimizer
@@ -41,7 +49,26 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
         optimizer for the generator
     input_space: tensor
         interval I, expecting observed data space to be of type I^d
-    embedding: 
+    embedding: tk.embeddings
+        embedding of every single input feature to a larger space with dimension phys_dim
+    cls_pos: int
+        position of central tensor (assumes single MPS)
+    check: Boolean
+        If true, save metrics on gradient flow to MPS
+    device: torch.device
+    d_loss_fn: Callable
+        loss function for discriminator, usually BCE loss
+    g_loss_fn: Callable
+        loss function for generator
+
+    Returns
+    -------
+    d_loss: float
+        step-wise classification loss of discriminator
+    g_loss: float
+        step-wise loss of generator (MPS)
+    gradient_flow_metric: float, optional
+        metric for gradient flow to MPS
     """
     if d_loss_fn is None:
         d_loss_fn = nn.BCELoss()
@@ -57,7 +84,7 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
     synth_X = mps_sampling( mps=mps,
                             input_space=input_space,
                             embedding=embedding,
-                            num_samples=batch_size,# x2 samples
+                            num_samples=batch_size, # returns num_cls x batch_size
                             cls_pos=cls_pos,
                             cls_embs=cls_embs,
                             device=device
@@ -98,8 +125,9 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
         return d_loss.item(), g_loss.item()
     
 
-# TODO: Add documentation
-# TODO: Also return loss on validation set as a more sensitive measure of change
+# TODO: Return loss on validation set as a more sensitive measure of change
+# TODO: Use different metric for gradient flow to MPS parameters
+# TODO: Reorder and maybe rename function parameters for better readability
  
 def ad_train_loop(  dis, # TODO: define abstract discriminator class,
                     mps: tk.models.MPS,
@@ -124,7 +152,60 @@ def ad_train_loop(  dis, # TODO: define abstract discriminator class,
                     cat_loss_fn = torch.nn.NLLLoss(),
                     title: str | None = None,
                     recompute_best_acc: bool = False) -> tuple[list[float], list[float], list[float], list[int], list[float]]:
-    
+    """
+    Full adversarial training loop with retraining of MPS if classification accuracy drops (too low).
+
+    Parameters
+    ----------
+    dis: MLP model
+        pretrained discriminator distinguishing real from synthesised samples
+    mps: MPS model
+        pretrained (as a classifier) MPS that acts as generator in the adversarial training framework
+    batch_size: int
+        (batch_size x num classes) = num of samples MPS generates during each ad. train. step. 
+    real_data_loader: DataLoader
+        loads real samples. its minibatch size is equal to (batch_size x num classes) in default config
+    d_optimizer: Optimizer
+        optimizer for discriminator in ad. train.
+    g_optimizer: Optimizer
+        optimizer for MPS (generator) in ad. train.
+    cat_optimizer: Optimizer
+        optimizer for MPS during classification retraining
+    input_space: tensor
+        preprocessed inputspace
+    embedding: Callable
+    cls_pos: int
+        position of central tensor of MPS. Currently assumes central tensor setup of MPS
+    cls_embs: list of tensors
+        class embeddings, one-hot vectors
+    acc_drop_tol: float
+        tolerated drop in prediction accuracy on the validation set of the MPS as classifier
+    num_acc_check: int
+        number of epochs without checking MPS classification accuracy
+    cat_patience: int
+        patience parameter for early stopping in retraining of MPS as classifier
+    d_loss_fn: Callable
+        loss function for discriminator in ad. train.
+    g_loss_fn: Callable
+        loss function for MPS as generator in ad. train.
+    cat_loss_fn: Callable
+        loss function for MPS as classifier in retraining
+    title: str, optional
+        title of dataset being used
+    recompute_best_acc: Boolean
+        If true, best accuracy to measure drop against is the one after retraining, not the one before ad. train.
+
+    Returns
+    -------
+    d_losses: list of floats
+        batch-wise loss of discriminator during ad train
+    g_losses: list of floats
+        batch-wise loss of MPS as generator during ad train
+    cat_acc: epoch-wise classification accuracy of MPS
+    retrain_epochs: list of ints
+        epochs where retraining of MPS as classifier was performed
+    gradient_flow_metric: list of floats
+    """
     d_losses, g_losses, cat_acc, retrain_epochs, l_t_comps = [], [], [], [], []
 
     mps.unset_data_nodes()

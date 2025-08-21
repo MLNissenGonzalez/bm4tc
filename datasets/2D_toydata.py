@@ -59,7 +59,7 @@ def preprocess_pipeline(X: np.ndarray,
     Also split data into train, validation, and test.
 
     Parameters
-    ---------
+    ----------
     X: array, shape: (batch_size, n_features)
         The array of raw features
     t: array, shape: (batch_size,)

@@ -18,12 +18,19 @@ def create_2d_scatter(X, t, title=None, ax=None, show_legend=True):
     """
     Create a 2D scatter plot that handles both numpy arrays and torch tensors
     And can be embedded in larger figures
-    Parameters:
-    X : feature data (shape: N x 2)
-    t : labels (shape: N)
-    title : string, optional
-    ax : matplotlib axis, optional (for subplot usage)
-    show_legend : bool, whether to show legend with class labels
+
+    Parameters
+    ----------
+    X : tensor or array
+        2D samples. Shape (N, 2)
+    t : tensor or array
+        class labels of samples, shape: (N,)
+    title : str, optional
+        title of dataset
+    ax : matplotlib axis, optional 
+        for subplot usage
+    show_legend : bool
+        whether to show legend with class labels
 
     Returns:
     ax : matplotlib axis
@@ -71,8 +78,22 @@ def create_2d_scatter(X, t, title=None, ax=None, show_legend=True):
 
 
 # Visiualisation of training
-# TODO: Add documentation
-def _epoch_wise_loss_averaging(train_loss: list, epochs: int):
+def _epoch_wise_loss_averaging(train_loss: list, 
+                               epochs: int) -> list:
+    """
+    Running average over epoch of minbatch-wise loss
+
+    Parameters
+    ----------
+    train_loss: list of floats
+        minibatch-wise training loss
+    epochs: int
+        number of epochs of the training
+
+    Returns
+    -------
+    list of floats
+    """
     mini = len(train_loss) // epochs
     train_loss_average = [sum(train_loss[(i*mini) : ((i+1)*mini)]) / mini for i in range(epochs)]
     return train_loss_average
@@ -90,15 +111,21 @@ def plot_train_test_curves(
     """
     Plot averaged train loss and test accuracy.
 
-    Parameters:
-    - train_loss: list of loss values (flattened over batches and classes)
-    - test_accuracy: list of test accuracy values per epoch
-    - num_batches: int, number of batches per epoch per class
-    - ax: tuple of matplotlib axes (optional)
-    - title: str, optional title for plots
+    Parameters
+    ----------
+    train_loss: list of floats
+        list of loss values (flattened over batches and classes)
+    test_accuracy: list of floats 
+        val accuracy values per epoch
+    num_batches: int 
+        number of batches per epoch per class
+    ax: tuple of matplotlib axes, optional
+    title: str, optional 
+        title for plots, names of datasets
 
-    Returns:
-    - axes: tuple of matplotlib axes
+    Returns
+    -------
+    axes: tuple of matplotlib axes
     """
     averaged_loss = _epoch_wise_loss_averaging(train_loss, epochs)
 
@@ -121,7 +148,6 @@ def plot_train_test_curves(
     plt.tight_layout()
     return ax
 
-# TODO: Add documentation
 # TODO: Maybe use other curves like loss on validation set
 # TODO: Also instead of component plot nothing or gradient plot
 # TODO: Think about doing something like a multiplot option like above
@@ -129,7 +155,21 @@ def plot_train_test_curves(
 def ad_train_results(cat_acc: list,
                      d_losses: list,
                      l_t_comps: list):
-    
+    """
+    Plotting function of logged adversarial training.
+
+    Parameters
+    ----------
+    cat_acc: list of floats
+        epoch-wise categorisation accuracy
+    d_losses: list of floats
+        minibatch-wise loss of discriminator
+    gradient_flow_metric
+
+    Returns
+    -------
+    Figure with three subplots to judge adversarial training. 
+    """
     # X-axis for accuracy: one point per epoch (or per accuracy check)
     epochs = range(len(cat_acc))
 
@@ -169,7 +209,7 @@ def ad_train_results(cat_acc: list,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
+# TODO: Think of using MLFlow instead of logging. 
 
 def makedirs(dirname):
     if not os.path.exists(dirname):
