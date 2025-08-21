@@ -20,8 +20,10 @@ from typing import Union, Sequence, Callable, Dict
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 
-# TODO: Add documentation
 # TODO: Allow for other losses
+# TODO: Rename test loader to validation loader as it is used for hyperparameter optimization (early stopping)
+# TODO: Why this i? Remove it if it is unnesessary to log. 
+
 bce_loss = torch.nn.BCELoss() 
 def discriminator_pretraining(dis,
                               max_epoch: int,
@@ -30,6 +32,35 @@ def discriminator_pretraining(dis,
                               loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
                               loader_train: DataLoader,
                               loader_test: DataLoader):
+    """
+    Pretraining of discriminator in binary classification setting. Synthesised samples are precomputed.
+
+    Parameters
+    ----------
+    dis: MLP model
+        discriminator
+    max_epoch: int
+    patience: int
+        patience method for early stopping
+    optimizer: Optimizer
+    loss_fn: Callable
+        loss function for classification problem. Default config: BCE loss
+    loader_train: DataLoader
+    loader_test: DataLoader
+
+    Returns
+    -------
+    dis: MLP model 
+        best performing discriminator
+    train_loss: list of floats
+        minibatch-wise train loss
+    test_loss: list of floats
+        epoch-wise validation loss
+    test_accuracy: list of floats
+        epoch-wise classification accuracy of discriminator
+    i: int
+        last epoch with training
+    """
         
     train_loss = []
     test_loss = []
