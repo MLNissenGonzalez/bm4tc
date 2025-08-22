@@ -1,12 +1,43 @@
 # Building the discriminator class out of a predefined MPS. 
 import torch
-from torch.utils.data import DataLoader
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 from typing import Union, Sequence, Callable, Dict
+
+#------------------------------------------------------------------------------------------------´
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+#--------------------DISCRIMINIATOR INITIALIZATION-----------------------------------------------
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+
 
 # TODO: Add the discriminator class taking an MPS as input
 #       and returning a pytorch module that is the MPS with an
 #       MLP at the end to discriminate real from fake inputs to the MPS
 
+class MLPdis(nn.Module):
+    def __init__(self, 
+                 hidden_dims: list,
+                 nonlinearity=nn.ReLU,
+                 input_dim=2):
+        super().__init__()
+
+        layers = []
+
+        layers.append(nn.Linear(input_dim, hidden_dims[0]))
+
+        for i in range(len(hidden_dims)-1):
+            layers.append(nonlinearity())
+            layers.append(nn.Linear(hidden_dims[i], hidden_dims[i+1]))
+
+        layers.append(nonlinearity())
+        layers.append(nn.Linear(hidden_dims[-1], 1))
+
+        self.stack = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.stack(x) # returns logit
 
 # TODO: Classical discriminator initialisation based on predefined MPS or data.
 # TODO: Optimizer initialisation
@@ -19,6 +50,50 @@ from typing import Union, Sequence, Callable, Dict
 #--------------------DISCRIMINIATOR PRETRAINING----------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
+
+
+# Data loader for the discrimination between real and synthesied examples
+# The construction below could be used for a single discriminator for all classes
+# or for a ensemble of discriminators, one for each class
+
+def dis_pre_train_loader(   samples_train: torch.Tensor, 
+                            samples_test: torch.Tensor, 
+                            dataset_train: torch.Tensor,
+                            dataset_test: torch.Tensor,
+                            batch_size: int) -> tuple[DataLoader, DataLoader]:
+    """
+    DataLoader constructor for discriminator pretraining. Could be class dependent or not.
+
+    Parameters
+    ----------
+    samples_train: tensor, shape=(num_samples_train, n_features)
+        batch of unlabelled and by the MPS generated samples for training
+    sampeles_test: tensor, shape=(num_samples_test, n_features)
+    dataset_train: tensor, shape=(num_samples_train, n_features)
+        batch of unlabelled natural samples for training
+    dataset_test: tensor, shape=(num_samples_test, n_features)
+    batch_size: int
+        number of samples in the final loader (synthetic mixed with natural)
+
+    Returns
+    -------
+    tuple[DataLoader, DataLoader]
+        the train and test dataloader for pretraining of the discriminator
+    """        
+        
+    X_train = torch.concat([dataset_train, samples_train])
+    t_train = torch.concat([torch.ones(len(dataset_train)), 
+                torch.zeros(len(samples_train), dtype=torch.long)])
+    train_data = TensorDataset(X_train, t_train)
+    loader_train = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    X_test = torch.concat([dataset_test, samples_test])
+    t_test = torch.concat([torch.ones(len(dataset_test)), 
+                torch.zeros(len(samples_test), dtype=torch.long)])
+    test_data = TensorDataset(X_test, t_test)
+    loader_test = DataLoader(test_data, batch_size=batch_size)
+    
+    return loader_train, loader_test 
 
 # TODO: Allow for other losses
 # TODO: Rename test loader to validation loader as it is used for hyperparameter optimization (early stopping)

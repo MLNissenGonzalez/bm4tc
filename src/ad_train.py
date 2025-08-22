@@ -2,13 +2,39 @@ import torch
 import tensorkrowch as tk
 from typing import Union, Sequence, Callable, Dict
 from mps.mps_utils import mps_sampling, mps_acc_eval, disr_train_mps
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
 
 """
-Currently, this script contains only two functions. A function performing the adversarial training (GAN-style) step,
+Currently, this script contains only three functions. A function performing the adversarial training (GAN-style) step,
 and another performing the loop with a check on the classification accuracy of the MPS. 
 """
+
+def real_loader(X: torch.Tensor,
+                batch_size: int,
+                split: str) -> DataLoader:
+    """
+    Loader for real, but unlabelled data. Used in ad. train.
+    
+    Parameters
+    ----------
+    X: tensor
+        whole batch of preprocessed, non-embedded data features
+    batch_size: int
+    split: str in {'train', 'valid'}
+        adtrain needs only train for training and valid for evaluation
+
+    Returns
+    -------
+    DataLoader
+    """
+    dataset = TensorDataset(X)
+    loader = DataLoader(dataset,
+                        batch_size=batch_size,
+                        shuffle=(split in ['train', 'valid']),
+                        drop_last=(split == 'train')
+                        )
+    return loader
 
 # TODO: Think about how to implement configuration. .yml lend themselves well to strings (e.g. 'BCE'), 
 #       but arguments to functions in my scripts are currently often functions (e.g. nn.BCEloss).

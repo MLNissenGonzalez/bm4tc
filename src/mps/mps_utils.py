@@ -2,7 +2,7 @@ import torch
 import tensorkrowch as tk
 from typing import Union, Sequence, Callable, Dict
 import sampling
-from torch.utils.data import DataLoader
+from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
 
 # TODO: Change name to just born or something
@@ -49,7 +49,7 @@ def born_sequential(mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-# TODO: Add documentation, is this at the interface or implementation level?
+# TODO: Interface or implementation level?
 # TODO: Think about moving away from dictionaries
 # TODO: Add other sampling methods and add it as configuration for experiments
 def _cc_mps_sampling(mps: tk.models.MPS,
@@ -239,6 +239,44 @@ def batch_sampling_mps( mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+def mps_cat_loader( X: torch.Tensor, 
+                    t: torch.Tensor, 
+                    embedding: Callable[[torch.Tensor, int], torch.Tensor], 
+                    batch_size: int, 
+                    phys_dim: int,
+                    split: str) -> DataLoader:
+    """
+    Create DataLoaders for multiple datasets and splits
+
+    Parameters
+    ----------
+        X: torch.Tensor, shape: (batch_size, n_feat)
+            The preprocessed, non-embedded features.
+        t: torch.Tensor, shape (batch_size,)
+            The labels of the features X.
+        batch_size: int
+            The number of examples of features
+        embedding: tk.embeddings.embedding
+            Embedding for features X.
+        phys_dim: int, 
+            Dimension of embedding space
+
+    Returns
+    -------
+        DataLoader
+            Dataloader for supervised classification.
+    """
+    X = embedding(X, phys_dim)
+    dataset = TensorDataset(X, t)
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=(split in ['train', 'valid']),
+        drop_last=(split == 'train')
+    )
+    return loader
 
 # TODO: Think of removing the str variable and only use a dataloader.
 def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
