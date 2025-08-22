@@ -3,14 +3,11 @@
 # Hyperparams enter here aswell.
 
 import torch
-import tensorkrowch as tk
 import sklearn.datasets
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 import numpy as np
-from typing import Union, Sequence, Callable, Dict
-from torch.utils.data import TensorDataset, DataLoader
+from typing import Sequence
 
 #-----------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
@@ -18,22 +15,9 @@ from torch.utils.data import TensorDataset, DataLoader
 #------Hyperparameter config here---------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 
-# TODO: (Added as an issue) Add Hyperparameter config here.
-# TODO: (Added as an issue) Load or initialise embedding here. Needed for preprocessing and dataloader
+# TODO: (Added as an issue) Add Hyperparameter config here. No, src stays free of configuration code. 
+# TODO: (Added as an issue) Load or initialise embedding here. Needed for preprocessing
 
-
-batch_size = 32
-phys_dim = 6
-num_batches = 25  # tune this for more samples. 
-num_samples = batch_size * num_batches  # total number of samples per class and dataset, rn 1
-
-# Parameters for split into train, val, test
-test_size = 0.2
-valid_size = 0.25
-
-# Total real samples
-N = int(np.ceil(num_samples / ((1-test_size) * (1-valid_size)))) #for initial training of discriminator using only training split
-print(N, 32*25)
 
 
 #---------------------------------------------------------------------------------------------------------------
@@ -43,15 +27,30 @@ print(N, 32*25)
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 
-
 # Preprocessing to [0,1]^2
 # TODO: Think of ditching dictionary structure
-# TODO: (Added as an issue) Make preprocessing embedding dependent
+
+def _embedding_to_range(embedding: str):
+    """
+    Given embedding identifier, return the associated domain of that embedding. 
+    """
+    if isinstance(embedding, str):
+        if embedding == "fourier":
+            return (0., 1.)
+        elif embedding == "legendre":
+            return (-1., 1.)
+        else:
+            raise ValueError(f"{embedding} not recognised")
+
+    else:
+        raise TypeError("Expected embedding name as string.")
+    
+
 def preprocess_pipeline(X: np.ndarray, 
                         t: np.ndarray,
-                        test_size: float,
-                        valid_size: float, 
-                        random_state: int):
+                        split: Sequence[float],
+                        random_state: int,
+                        embedding: str):
     
     """
     Preprocess 2D data wit MinMaxScaler to fit into [0,1]^2. 
@@ -64,10 +63,8 @@ def preprocess_pipeline(X: np.ndarray,
         The array of raw features
     t: array, shape: (batch_size,)
         Array of class labels
-    test_size: float
-        Proportion of test samples relative to total number of raw samples
-    valid_size: float
-        (1-test_size) * valid_size is the proportion of valid samples
+    split: list of floats
+        [train, valid, test], e.g. [0.8, 0.1, 0.1]
     random_state: int
         Seed
 
@@ -78,28 +75,23 @@ def preprocess_pipeline(X: np.ndarray,
         Keys: {"X_split", "t_split"| split in {"train", "valid", "test"}}
     """
     # First split: separate test set
-    X_temp, X_test, t_temp, t_test = train_test_split(
-        X, t, test_size=test_size, random_state=random_state
+    X_remain, X_test, t_remain, t_test = train_test_split(
+        X, t, test_size=split[-1], random_state=random_state
     )
     
     # Second split: separate validation set from remaining data
-    # valid_size is relative to the size of X_temp
+    # ratio_new = ratio_old / ratio_remaining
     X_train, X_valid, t_train, t_valid = train_test_split(
-        X_temp, t_temp, test_size=valid_size, random_state=random_state
+        X_remain, t_remain, test_size=split[1]/(1-split[-1]), random_state=random_state
     )
     
     # Initialize and fit the MinMaxScaler on training data only
-    scaler = MinMaxScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
+    scaler = MinMaxScaler(_embedding_to_range(embedding=embedding), clip=True) # returns range^input_dim. Would need a custom scaler for feature by feature image range.
+    X_train = scaler.fit_transform(X_train)
     
     # Transform validation and test sets using the scaler fitted on training data
-    X_valid_scaled = scaler.transform(X_valid)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Clip all scaled data to [0,1]
-    X_train = np.clip(X_train_scaled, 0, 1)
-    X_valid = np.clip(X_valid_scaled, 0, 1)
-    X_test = np.clip(X_test_scaled, 0, 1)
+    X_valid = scaler.transform(X_valid)
+    X_test = scaler.transform(X_test)
 
     # Convert to PyTorch tensors for subsequent training
     X_train = torch.FloatTensor(X_train)
@@ -183,117 +175,3 @@ def raw_data_gen(title: str, size: int, noise: float, random_state: int,
     else:
         print(f"title string = {title} does not match. Setting title='2 moons'.")
         return raw_data_gen("2 moons", size, noise, random_state)
-
-#---------------------------------------------------------------------------------------------------------------
-#---------------------------------------------------------------------------------------------------------------
-#---------------------------------------------------------------------------------------------------------------
-#---------DataLoader------------------------------------------------------------------------------------------------------
-#---------------------------------------------------------------------------------------------------------------
-#---------------------------------------------------------------------------------------------------------------
-
-
-def mps_cat_loader( X: torch.Tensor, 
-                    t: torch.Tensor, 
-                    embedding: Callable[[torch.Tensor, int], torch.Tensor], 
-                    batch_size: int, 
-                    phys_dim: int,
-                    split: str) -> DataLoader:
-    """
-    Create DataLoaders for multiple datasets and splits
-
-    Parameters
-    ----------
-        X: torch.Tensor, shape: (batch_size, n_feat)
-            The preprocessed, non-embedded features.
-        t: torch.Tensor, shape (batch_size,)
-            The labels of the features X.
-        batch_size: int
-            The number of examples of features
-        embedding: tk.embeddings.embedding
-            Embedding for features X.
-        phys_dim: int, 
-            Dimension of embedding space
-
-    Returns
-    -------
-        DataLoader
-            Dataloader for supervised classification.
-    """
-    X = embedding(X, phys_dim)
-    dataset = TensorDataset(X, t)
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=(split in ['train', 'valid']),
-        drop_last=(split == 'train')
-    )
-    return loader
-
-def real_loader(X: torch.Tensor,
-                batch_size: int,
-                split: str) -> DataLoader:
-    """
-    Loader for real, but unlabelled data. Used in ad. train.
-    
-    Parameters
-    ----------
-    X: tensor
-        whole batch of preprocessed, non-embedded data features
-    batch_size: int
-    split: str in {'train', 'valid'}
-        adtrain needs only train for training and valid for evaluation
-
-    Returns
-    -------
-    DataLoader
-    """
-    dataset = TensorDataset(X)
-    loader = DataLoader(dataset,
-                        batch_size=batch_size,
-                        shuffle=(split in ['train', 'valid']),
-                        drop_last=(split == 'train')
-                        )
-    return loader
-
-# Data loader for the discrimination between real and synthesied examples
-# The construction below could be used for a single discriminator for all classes
-# or for a ensemble of discriminators, one for each class
-
-def dis_pre_train_loader(   samples_train: torch.Tensor, 
-                            samples_test: torch.Tensor, 
-                            dataset_train: torch.Tensor,
-                            dataset_test: torch.Tensor,
-                            batch_size: int) -> tuple[DataLoader, DataLoader]:
-    """
-    DataLoader constructor for discriminator pretraining. Could be class dependent or not.
-
-    Parameters
-    ----------
-    samples_train: tensor, shape=(num_samples_train, n_features)
-        batch of unlabelled and by the MPS generated samples for training
-    sampeles_test: tensor, shape=(num_samples_test, n_features)
-    dataset_train: tensor, shape=(num_samples_train, n_features)
-        batch of unlabelled natural samples for training
-    dataset_test: tensor, shape=(num_samples_test, n_features)
-    batch_size: int
-        number of samples in the final loader (synthetic mixed with natural)
-
-    Returns
-    -------
-    tuple[DataLoader, DataLoader]
-        the train and test dataloader for pretraining of the discriminator
-    """        
-        
-    X_train = torch.concat([dataset_train, samples_train])
-    t_train = torch.concat([torch.ones(len(dataset_train)), 
-                torch.zeros(len(samples_train), dtype=torch.long)])
-    train_data = TensorDataset(X_train, t_train)
-    loader_train = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
-
-    X_test = torch.concat([dataset_test, samples_test])
-    t_test = torch.concat([torch.ones(len(dataset_test)), 
-                torch.zeros(len(samples_test), dtype=torch.long)])
-    test_data = TensorDataset(X_test, t_test)
-    loader_test = DataLoader(test_data, batch_size=batch_size)
-    
-    return loader_train, loader_test 
