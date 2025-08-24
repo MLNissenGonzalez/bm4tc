@@ -1,9 +1,7 @@
 defaults:
-  ad_train: default
-  dataset: moons_1
-  model/mps: default
-  model/dis: default
-  pretrain/mps: default
-  pretrain/dis: default
-  
-   
+  - ad_train: default
+  - dataset: moons_1
+  - model/mps: default
+  - model/dis: default
+  - pretrain/mps: default
+  - pretrain/dis: default

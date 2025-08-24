@@ -154,6 +154,8 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
 # TODO: Return loss on validation set as a more sensitive measure of change
 # TODO: Use different metric for gradient flow to MPS parameters
 # TODO: Reorder and maybe rename function parameters for better readability
+# TODO: Reinitialize cat optimizer with each retraining? Bring up to speed with dis.train changes.
+#       same with generator optimizer. should these be reinitialised with each retraining? 
  
 def ad_train_loop(  dis, # TODO: define abstract discriminator class,
                     mps: tk.models.MPS,
