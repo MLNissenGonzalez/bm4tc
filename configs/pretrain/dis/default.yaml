@@ -1,0 +1,7 @@
+n_real_samples: 32 # per class or not? per batch
+n_synth_samples: 32 # n_real_samples + n_synth_samples = batch_size of dataloader.
+loss_fn: "BCE"
+optimizer: "adam"
+max_epoch: 200
+patience: 35
+# maybe add what to log and what not?

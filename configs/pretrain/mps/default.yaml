@@ -1,0 +1,13 @@
+optimizer: "adam"
+max_epoch: 150
+patience: 35
+loss_fn: "negative log-likelihood"
+lr: 0.01
+weight_decay: 0.0
+auto_stack: True
+auto_unbind: False
+# cls_pos should be inherited from the mps config file
+title: "${dataset.title}"
+goal_acc: None
+print_early_stop: True
+print_updates: True

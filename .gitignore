@@ -10,9 +10,8 @@ images/
 # Notebooks are right now only for personal experimentation
 notebooks/
 
-# Experiment folder containing actual runs
-# Config framework may be added to the source code somewhere else
-experiments/
+# This folder contains the results of experiment runs, the logging, images, and model parameters.
+outputs/
 
 # PyTorch
 *.pt

@@ -1,0 +1,11 @@
+# n_features: ${dataset.n_feat} + 1. (Do this in the experiment script itself)
+in_dim: 3 # physical dimension
+out_dim: ${dataset.n_cls} # could do this in the script
+bond_dim: 2
+design: True # if True: central tensor design; if False ensemble design
+out_position: None # means that the central tensor in in the middle (central), i could also do something like floor((datset.n_feat + 1) / 2)
+boundary: "obc"
+init_method: "randn_eye"
+std: 1e-9
+embedding: "fourier"
+batch_size: 32 # dataloader only needed in pretraining.

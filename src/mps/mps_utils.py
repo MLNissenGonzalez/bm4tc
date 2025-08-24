@@ -352,13 +352,14 @@ def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
+# TODO: Include optimizer initialization into this function.
 def disr_train_mps( mps: tk.models.MPS,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
-                    optimizer: torch.optim.Optimizer,
+                    optimizer: torch.optim.Optimizer, # needs to be initialized once per call of this function, right?
                     max_epoch: int,
                     patience: int,
                     cls_pos: int,
-                    loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+                    loss_fn: str,
                     device: torch.device,
                     title: str | None = None,
                     goal_acc: float | None = None,
@@ -381,8 +382,8 @@ def disr_train_mps( mps: tk.models.MPS,
         maximal number of epochs without improvement before early stopping
     cls_pos: int
         position of central tensor in the MPS
-    loss_fn: Callable
-        loss function
+    loss_fn: str
+        name of loss function
     device: torch.device
     title: str, optional
         title of dataset
@@ -407,7 +408,17 @@ def disr_train_mps( mps: tk.models.MPS,
     best_acc = 0.0
     best_tensors = []  # Container for best model parameters
 
-    # Prepare training
+    # Initialize loss function
+    if not isinstance(loss_fn, str):
+        raise TypeError("loss function specified by name, e.g. NLLL")
+    
+    loss_fn = loss_fn.replace(" ", "").replace("-", "").lower()
+    if loss_fn in ["nlll", "nll", "negloglikelihood", "negativeloglikelihood"]:
+        loss_fn = nn.NLLLoss()
+    else:
+        raise ValueError(f"{loss_fn} not recognised or implemented.")
+    
+    # Prepare MPS for training
     mps.unset_data_nodes()
     mps.reset()
     mps.out_features = [cls_pos]

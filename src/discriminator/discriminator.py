@@ -11,33 +11,48 @@ from typing import Union, Sequence, Callable, Dict
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 
-
-# TODO: Add the discriminator class taking an MPS as input
-#       and returning a pytorch module that is the MPS with an
-#       MLP at the end to discriminate real from fake inputs to the MPS
-
 class MLPdis(nn.Module):
+    """
+    Discriminator for GAN training. This architecture is just a fully connected feed forward network with single logit output for BCE loss. 
+    One could use this class in a single discriminator setup (one for all classes of samples) or for the ensemble approach. 
+    """
     def __init__(self, 
                  hidden_dims: list,
-                 nonlinearity=nn.ReLU,
-                 input_dim=2):
+                 nonlinearity: str,
+                 input_dim: int,
+                 negative_slope: float | None):
         super().__init__()
 
+        nonlinearity = nonlinearity.replace(" ", "").lower()
+
+        if nonlinearity == "relu":
+            def get_activation(): return nn.ReLU()
+        elif nonlinearity == "leakyrelu":
+            if negative_slope == None:
+                raise ValueError("LeakyReLU needs negative_slope parameter.")
+            def get_activation(): return nn.LeakyReLU(negative_slope)
+        else:
+            raise ValueError(f"{nonlinearity} not recognised. Try ReLU or LeakyReLU instead.")
+        
+        if not hidden_dims:
+            raise ValueError("hidden_dims must contain at least one layer size.")
+
         layers = []
-
         layers.append(nn.Linear(input_dim, hidden_dims[0]))
-
         for i in range(len(hidden_dims)-1):
-            layers.append(nonlinearity())
+            layers.append(get_activation())
             layers.append(nn.Linear(hidden_dims[i], hidden_dims[i+1]))
-
-        layers.append(nonlinearity())
-        layers.append(nn.Linear(hidden_dims[-1], 1))
+        layers.append(get_activation())
+        layers.append(nn.Linear(hidden_dims[-1], 1)) # always binary classification
 
         self.stack = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.stack(x) # returns logit
+
+# TODO: Add the discriminator class taking an MPS as input
+#       and returning a pytorch module that is the MPS with an
+#       MLP at the end to discriminate real from fake inputs to the MPS
 
 # TODO: Classical discriminator initialisation based on predefined MPS or data.
 # TODO: Optimizer initialisation
@@ -95,11 +110,12 @@ def dis_pre_train_loader(   samples_train: torch.Tensor,
     
     return loader_train, loader_test 
 
-# TODO: Allow for other losses
+# TODO: Allow for other losses, string input
 # TODO: Rename test loader to validation loader as it is used for hyperparameter optimization (early stopping)
 # TODO: Why this i? Remove it if it is unnesessary to log. 
+# TODO: initialize optimizer inside function. string based for better config.
 
-bce_loss = torch.nn.BCELoss() 
+bce_loss = torch.nn.BCELoss() # move initialization inside the function
 def discriminator_pretraining(dis,
                               max_epoch: int,
                               patience: int,
