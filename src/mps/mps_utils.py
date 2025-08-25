@@ -5,40 +5,123 @@ import sampling
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
 
-# TODO: Change name to just born or something
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#------Born rule. Sequential and parallel code.------------------------------------------------------------------------------------------------------------------
+#------Could add this maybe as method in a custom MPS class.--------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# TODO: batch_size could be a confusing misnomer in the documentation. batch_size could be the product of num_bins and num_dist one want so compute.
 def born_sequential(mps: tk.models.MPS, 
                     embs: dict | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
     """ 
-    Applies Born rule to MPS contracted with MPS.
-    Allows both for sequential and parallel contraction of MPS.
+    Sequential contraction of MPS with embedded input and computation of probabilities using the Born rule. Mainly used for sampling.
+
+    Cases
+    -----
+    - Not all variables (including class index) appear in p({x_i}_I|{x_j}_J), i.e. in embs. 
+        In that case, one has to marginalize over the missing variables resulting in
+        a density matrix whose diagonal contrains the unnormalized distribution(s) (batch_size x num_bins values). 
+    - All variables appear in embs, one has to square the output of the mps to obtain the unnormalized distribution(s). 
+    
     Parameters
     ----------
     mps:    tk.models.MPS
         instance defining the prob amplitude
-    embs:   embedded input
-        dict of batch_size x phys_dim tensors or batch_size x n_feat x phys_dim tensor
+    embs:   dict
+        embedded input as dict of batch_size x phys_dim tensors  with keys indicating input position.
     
     Returns
     -------
     tensor
         probability distribution(s)
     """
+    
+    # TODO: Maybe remove this check, as it might slow the code down.
+    if not isinstance(embs, dict):
+        raise TypeError("embs input needs to be dictionary with keys indicating input position and values embedded input feature.")
+    
+    # Advantage of dictionaries is that one can use the keys to save which legs are input and which are not. 
+    mps.in_features = [i for i in embs.keys()]
+    # tensorkrowch processes lists of inputs sequentially.
+    in_tensors = [embs[i] for i in mps.in_features]
+    
+    # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
+    if len(in_tensors) < mps.n_features:
+        return torch.diagonal(mps(in_tensors, marginalize_output=True))
+    # Case 2: All variables appear.
+    else:
+        return torch.square(mps.forward(data=in_tensors))
+    
+def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer class for this one actually
+                  embs: torch.Tensor)-> torch.Tensor:
+    """ 
+    Parallel contraction of MPS with embedded input and computation of probabilities using the Born rule. Mainy used for classification.
 
-    
-    if isinstance(embs, dict):
-        mps.in_features = [i for i in embs.keys()]
-        # input a list of tensors -> inefficient, if clauses could make this more general
-        in_tensors = [embs[i] for i in mps.in_features]
+    Cases
+    -----
+    - If mps has n_features = D (only input sites):
+        Returns joint Born probabilities p(x₁,…,x_D) ∝ |ψ(x)|².
+        Shape: (batch_size, 1)
 
-        
-        if len(in_tensors) < mps.n_features:
-            return torch.diagonal(mps(in_tensors, marginalize_output=True))
-        else:
-            return torch.square(mps.forward(data=in_tensors))
+    - If mps has n_features = D+1 (input sites + output site):
+        Returns conditional class probabilities p(c|x₁,…,x_D).
+        Shape: (batch_size, num_cls)
+
+    Parameters
+    ----------
+    mps : tk.models.MPSLayer | tk.models.MPS
+        MPS model defining the probability amplitude.
+    embs : torch.Tensor
+        Embedded input of shape (batch_size, D, phys_dim).
+
+    Returns
+    -------
+    torch.Tensor
+        Probabilities with shape (batch_size, num_cls).
+    """
     
-    elif isinstance(embs, torch.Tensor): # embs=tensor (parallizable), assume mps.out_feature = [cls_pos] globally
-        return torch.square(mps.forward(data=embs))
+    # TODO: Think about removing this check for efficiency. 
+    if not isinstance(embs, torch.Tensor): # embs=tensor (parallizable), assume mps.out_feature = [cls_pos] globally??
+        raise TypeError("embs input needs to be tensor of shape: (batch_size, D, phys_dim)")
     
+    is_joint = isinstance(mps, tk.models.MPS) and (mps.n_features == embs.shape[1])
+    # Case: p(c|x_1,..., x_D), since n_features = D+1 (with output site)
+    if not is_joint:
+        p = torch.square(mps.forward(data=embs)) 
+        return p / p.sum(dim=1, keepdim=True) 
+    # Case: p(x_1,...,x_D), since n_features = D (no central tensor).
+    else:
+        return torch.square(mps.forward(data=embs)).unsqueeze(1) # Z x p(x_1,..., x_D) # shape (batch_size, 1)
+    
+
+# TODO: Think of deleting this function as it may never be used.
+def batch_normalize(p: torch.Tensor,
+                    num_bins: int,
+                    batch_size: int):
+    """
+    Normalize a batch of unnormalized discretized (univariate) probability distributions stored in a single tensor.
+    
+    Parameters
+    ----------
+    p: tensor
+        batch of unnormalized probability distributions stored in a single tensor of shape (batch_size, num_bins) or (batch_size x num_bins).
+    batch_size: int
+        number of unnormalized probability distributions stored in the tensor p
+    num_bins: int
+        number of discretization points for every single unnormalized probability distribution p[i, :].
+
+    Returns
+    -------
+    tensor
+        single tensor storing batch_size many normalized univariate discrete probability distributions of num_bins bins.
+    """
+    if p.shape == (batch_size*num_bins,):
+        p = p.reshape(batch_size, num_bins)
+
+    return p / p.sum(dim=1, keepdim=True)
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -52,6 +135,9 @@ def born_sequential(mps: tk.models.MPS,
 # TODO: Interface or implementation level?
 # TODO: Think about moving away from dictionaries
 # TODO: Add other sampling methods and add it as configuration for experiments
+# TODO: Simplify code assuming:
+#       - same embedding at all input sites (this excludes the class site).
+#       - same number of bins for all input sites
 def _cc_mps_sampling(mps: tk.models.MPS,
                     input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
                     embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
@@ -240,6 +326,7 @@ def batch_sampling_mps( mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# TODO: Use parallel version of born and think of merge-ing the normalize function with the parallel born version. 
 
 def mps_cat_loader( X: torch.Tensor, 
                     t: torch.Tensor, 
@@ -252,21 +339,21 @@ def mps_cat_loader( X: torch.Tensor,
 
     Parameters
     ----------
-        X: torch.Tensor, shape: (batch_size, n_feat)
-            The preprocessed, non-embedded features.
-        t: torch.Tensor, shape (batch_size,)
-            The labels of the features X.
-        batch_size: int
-            The number of examples of features
-        embedding: tk.embeddings.embedding
-            Embedding for features X.
-        phys_dim: int, 
-            Dimension of embedding space
+    X: torch.Tensor, shape: (batch_size, n_feat)
+        The preprocessed, non-embedded features.
+    t: torch.Tensor, shape (batch_size,)
+        The labels of the features X.
+    batch_size: int
+        The number of examples of features
+    embedding: tk.embeddings.embedding
+        Embedding for features X.
+    phys_dim: int, 
+        Dimension of embedding space
 
     Returns
     -------
-        DataLoader
-            Dataloader for supervised classification.
+    DataLoader
+        Dataloader for supervised classification.
     """
     X = embedding(X, phys_dim)
     dataset = TensorDataset(X, t)
@@ -279,7 +366,7 @@ def mps_cat_loader( X: torch.Tensor,
     return loader
 
 # TODO: Think of removing the str variable and only use a dataloader.
-def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
+def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out_features = [cls_pos]
                     loaders: Dict[str, DataLoader],
                     split: str,
                     device: torch.device) -> float:
@@ -288,7 +375,7 @@ def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
 
     Parameters
     ----------
-    mps: MPS model
+    mps: MPS model with central tensor
     loaders: DataLoader
     device: torch.device
 
@@ -303,7 +390,7 @@ def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
     with torch.no_grad():
         for X, t in loaders[split]:
             X, t = X.to(device), t.to(device)
-            p = born_sequential(mps, X)
+            p = born_parallel(mps, X)
             _, preds = torch.max(p, 1)
 
             # Counting correct predictions
@@ -312,19 +399,19 @@ def mps_acc_eval(   mps: tk.models.MPS, # relies on mps.out_features = [cls_pos]
     acc = correct / total
     return acc
 
-
-def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos]
+# TODO: Add loss_fn for config as str parameter
+def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.out_features = [cls_pos]
                        loader: DataLoader,
                        device: torch.device,
                        optimizer: torch.optim.Optimizer,
-                       loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] # expects score, not probs
+                       loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] # expects score, not probs. switch for str parameter
                        ) -> list:
     """
     Single epoch classification training. Returns minibatch-wise train_loss.
 
     Parameters
     ----------
-    mps: MPS model
+    mps: MPS model with central tensor
     loader: DataLoader
     optimizer: Optimizer
     loss_fn: LossFunction
@@ -338,11 +425,13 @@ def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos
     mps.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
-        p = born_sequential(mps, X)
+        p = born_parallel(mps, X)
+
         # Computing Scores for loss, depending on model type
         score = torch.log(p)
         # Computing loss
         loss = loss_fn(score, t)
+
         # Backpropagate and update parameters
         optimizer.zero_grad()
         loss.backward()
@@ -353,7 +442,8 @@ def _mps_cls_train_step(mps: tk.models.MPS, # expect mps.out_features = [cls_pos
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
 # TODO: Include optimizer initialization into this function.
-def disr_train_mps( mps: tk.models.MPS,
+# TODO: Add loss function as string parameter for config 
+def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
                     optimizer: torch.optim.Optimizer, # needs to be initialized once per call of this function, right?
                     max_epoch: int,
