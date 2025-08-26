@@ -1,9 +1,11 @@
 import torch
 import tensorkrowch as tk
 from typing import Union, Sequence, Callable, Dict
-import sampling
+import src.sampling as sampling
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
+
+# TODO: Think about splitting utils into utils and pretraining. 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -122,6 +124,10 @@ def batch_normalize(p: torch.Tensor,
         p = p.reshape(batch_size, num_bins)
 
     return p / p.sum(dim=1, keepdim=True)
+
+# TODO: Write code that helps initialise the right kind of loss_fn for MPS
+# TODO: Subclass nn.Module to create custom loss functions for efficiency.
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -255,7 +261,7 @@ def mps_sampling(   mps: tk.models.MPS,
     samples = torch.concat(samples) # (num_classes x num_samples) x (n_features-1), ordered by class for later retrieval, if wanted
     return samples 
 
-# TODO: Add tensor shape description
+# TODO: Add code to discard surplus of samples
 # TODO: Consider parallel implementation
 def batch_sampling_mps( mps: tk.models.MPS,
                         input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
@@ -278,13 +284,13 @@ def batch_sampling_mps( mps: tk.models.MPS,
     embedding: tk.embeddings
         mapping input feature to larger physical dimension
     batch_size: int
-        number of samples to be sampled per (mini)batch
+        number of samples to be sampled per (mini)batch per class
     cls_pos: int
         position of central tensor in mps
     cls_embs: list of tensors
         precomputed class embeddings (one hot vectors)
     total_n_samples: int
-        total number of samples to be sampled
+        total number of samples to be sampled per class
     device: torch.device
     save_classes: Boolean
         If true, class labels are saved and returned.
@@ -306,13 +312,13 @@ def batch_sampling_mps( mps: tk.models.MPS,
                                 cls_embs=cls_embs,
                                 device=device
             
-        )
+        ) # (batch_size x num_cls, data.dim) samples
         samples = samples + [batch]
         if save_classes == True:
             batch_label = torch.concat([torch.full((batch_size,), cls, dtype=torch.long) for cls in range(len(cls_embs))])
             labels = labels + [batch_label]
     
-    samples = torch.concat(samples)
+    samples = torch.concat(samples) # (num_batches x num_cls, data.dim) samples (I would have to clip this such that there aonly total_n_samples x num_classes)
     if save_classes == True:
         labels = torch.concat(labels)
         return samples, labels
@@ -325,8 +331,6 @@ def batch_sampling_mps( mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-# TODO: Use parallel version of born and think of merge-ing the normalize function with the parallel born version. 
 
 def mps_cat_loader( X: torch.Tensor, 
                     t: torch.Tensor, 
@@ -344,7 +348,7 @@ def mps_cat_loader( X: torch.Tensor,
     t: torch.Tensor, shape (batch_size,)
         The labels of the features X.
     batch_size: int
-        The number of examples of features
+        The number of examples of features for all classes (not per class!)
     embedding: tk.embeddings.embedding
         Embedding for features X.
     phys_dim: int, 
@@ -365,10 +369,8 @@ def mps_cat_loader( X: torch.Tensor,
     )
     return loader
 
-# TODO: Think of removing the str variable and only use a dataloader.
 def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out_features = [cls_pos]
-                    loaders: Dict[str, DataLoader],
-                    split: str,
+                    loader: DataLoader,
                     device: torch.device) -> float:
     """
     Computes the prediction accuracy of a MPS Born machine on a dataset.
@@ -376,7 +378,7 @@ def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out
     Parameters
     ----------
     mps: MPS model with central tensor
-    loaders: DataLoader
+    loader: DataLoader
     device: torch.device
 
     Returns
@@ -388,7 +390,7 @@ def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out
     correct = 0
     total = 0
     with torch.no_grad():
-        for X, t in loaders[split]:
+        for X, t in loader:
             X, t = X.to(device), t.to(device)
             p = born_parallel(mps, X)
             _, preds = torch.max(p, 1)
@@ -399,7 +401,7 @@ def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out
     acc = correct / total
     return acc
 
-# TODO: Add loss_fn for config as str parameter
+# TODO: Think about dynamically implemnting loss function here versus in the whole training loop
 def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.out_features = [cls_pos]
                        loader: DataLoader,
                        device: torch.device,
@@ -443,6 +445,7 @@ def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.ou
 # TODO: Consider removing title parameter
 # TODO: Include optimizer initialization into this function.
 # TODO: Add loss function as string parameter for config 
+# TODO: Add auto_stack and auto_unbind.
 def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
                     optimizer: torch.optim.Optimizer, # needs to be initialized once per call of this function, right?
@@ -522,7 +525,7 @@ def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
                                   device, optimizer, loss_fn)
 
         # Validation
-        acc = mps_acc_eval(mps, loaders, 'valid', device)
+        acc = mps_acc_eval(mps, loaders['valid'], device)
         val_accuracy.append(acc)
 
         # Progress tracking and best model update

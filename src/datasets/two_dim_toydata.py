@@ -7,7 +7,7 @@ import sklearn.datasets
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 import numpy as np
-from typing import Sequence
+from typing import Sequence, Tuple, Dict
 
 #-----------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
@@ -45,12 +45,14 @@ def _embedding_to_range(embedding: str):
     else:
         raise TypeError("Expected embedding name as string.")
     
-
 def preprocess_pipeline(X: np.ndarray, 
                         t: np.ndarray,
                         split: Sequence[float],
                         random_state: int,
-                        embedding: str):
+                        embedding: str
+                        )-> Tuple[Dict[str, torch.Tensor], 
+                                  Dict[str, torch.Tensor], 
+                                  MinMaxScaler]:
     
     """
     Preprocess 2D data wit MinMaxScaler to fit into [0,1]^2. 
@@ -70,48 +72,42 @@ def preprocess_pipeline(X: np.ndarray,
 
     Returns
     -------
-    dict
-        dictionary of preprocessed and split data. 
-        Keys: {"X_split", "t_split"| split in {"train", "valid", "test"}}
+    tuple X, t, scaler
+        X   dict
+            split gives keys
+        t   dict
+        scaler  MinMaxScaler
+            fitted to training data
     """
+    # Initalize dictionaries
+    X = {}
+    t = {}
+
     # First split: separate test set
-    X_remain, X_test, t_remain, t_test = train_test_split(
+    X_remain, X["test"], t_remain, t["test"] = train_test_split(
         X, t, test_size=split[-1], random_state=random_state
     )
     
     # Second split: separate validation set from remaining data
     # ratio_new = ratio_old / ratio_remaining
-    X_train, X_valid, t_train, t_valid = train_test_split(
+    X["train"], X["valid"], t["train"], t["valid"] = train_test_split(
         X_remain, t_remain, test_size=split[1]/(1-split[-1]), random_state=random_state
     )
     
-    # Initialize and fit the MinMaxScaler on training data only
+    # Initialize and fit the MinMaxScaler to training data only
     scaler = MinMaxScaler(_embedding_to_range(embedding=embedding), clip=True) # returns range^input_dim. Would need a custom scaler for feature by feature image range.
-    X_train = scaler.fit_transform(X_train)
+    X["train"] = scaler.fit_transform(X["train"])
     
     # Transform validation and test sets using the scaler fitted on training data
-    X_valid = scaler.transform(X_valid)
-    X_test = scaler.transform(X_test)
+    X["valid"]= scaler.transform(X["valid"])
+    X["test"] = scaler.transform(X["test"])
 
     # Convert to PyTorch tensors for subsequent training
-    X_train = torch.FloatTensor(X_train)
-    X_valid = torch.FloatTensor(X_valid)
-    X_test = torch.FloatTensor(X_test)
-    t_train = torch.LongTensor(t_train)
-    t_valid = torch.LongTensor(t_valid)
-    t_test = torch.LongTensor(t_test)
-    
-    return (
-        {
-            'X_train': X_train,
-            't_train': t_train,
-            'X_valid': X_valid,
-            't_valid': t_valid,
-            'X_test': X_test,
-            't_test': t_test,
-        },
-        scaler
-        )
+    for split in ["train", "valid", "test"]:
+        X[split]= torch.FloatTensor(X[split])
+        t[split] = torch.LongTensor(t[split])
+
+    return (X, t, scaler)
 
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
