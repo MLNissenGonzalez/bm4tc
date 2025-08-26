@@ -5,3 +5,4 @@ size: 2000 # number of samples per class
 split: [0.8, 0.1, 0.1] # Keep split in dataset generation for rigerous seperation of the different sets
 seed: 25
 noise: 0.1 # noise on top of true data manifold
+factor: None

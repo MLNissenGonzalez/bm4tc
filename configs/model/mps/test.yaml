@@ -1,5 +1,5 @@
 # n_features: ${dataset.n_feat} + 1. (Do this in the experiment script itself)
-in_dim: 3 # physical dimension
+phys_dim: 3 # physical dimension
 out_dim: ${dataset.n_cls} # could do this in the script
 bond_dim: 2
 design: True # if True: central tensor design; if False ensemble design
@@ -8,4 +8,3 @@ boundary: "obc"
 init_method: "randn_eye"
 std: 1e-9
 embedding: "fourier"
-batch_size: 32 # dataloader only needed in pretraining.

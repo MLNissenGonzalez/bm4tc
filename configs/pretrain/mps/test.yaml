@@ -11,3 +11,4 @@ title: "${dataset.title}"
 goal_acc: None
 print_early_stop: True
 print_updates: True
+batch_size: 32 # samples loaded per categorisation step for all classes involved
