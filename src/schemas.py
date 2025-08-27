@@ -1,7 +1,10 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any, Text, Sequence
+import torch
 from hydra.core.config_store import ConfigStore
+import tensorkrowch as tk
 
+mps = tk.models.MPSLayer()
 
 # --- Sub-configs ---
 
@@ -16,16 +19,25 @@ class DatasetConfig:
     noise: float
     factor: Optional[float]
 
+# TODO: Make compatible with ensemble design
+# TODO: Implement the below in the scripts
+@dataclass
+class MPSInitConfig:
+    n_features: int | None = None
+    in_dim: int | Sequence[int] | None = None
+    out_dim: int | None = None
+    bond_dim: int | Sequence[int] | None = None
+    out_position: int | None = None
+    boundary: Text = 'obc'
+    tensors: Sequence[torch.Tensor] | None = None
+    n_batches: int = 1
+    init_method: Text = 'randn'
+    dtype: torch.dtype | None = None
+
 @dataclass
 class MPSConfig:
-    phys_dim: int
-    bond_dim: int
-    phys_dim: int
-    boundary: str = "obc"  # "obc" or "pbc"
+    init_kwargs: MPSInitConfig
     design: bool = True # central tensor or not
-    out_dim: Optional[int] # dimension of visible leg of central tensor. usually equal to num_cls
-    out_position: Optional[int]
-    init_method: str
     std: float
     embedding: str
 
@@ -37,28 +49,36 @@ class DisConfig:
     input_dim: int
 
 @dataclass
+class OptimizerConfig:
+    name: str # e.g. "adam"
+    kwargs: Optional[Dict[str, Any]]  # e.g. {"lr": 1e-4, "weight_decay": 0.01}
+
+@dataclass
+class CriterionConfig:
+    name: str # e.g nlll
+    kwargs: Optional[Dict[str, Any]] = None # e.g. {"eps": 1e-12}
+
+# TODO: Add some interpolations in configs here (mps.phys_dim, dataset.dim) and so on.
+@dataclass
 class PretrainMPSConfig:
-    optimizer: str
-    lr: float
+    optimizer_cfg: OptimizerConfig
+    criterion_cfg: CriterionConfig
     max_epochs: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     patience: int
-    weight_decay: Optional[float]
     auto_stack: bool = True
     auto_unbind: bool = False
-    title: str
     goal_acc: Optional[float]
     print_early_stop: bool = True
     print_updates: bool = True
 
 @dataclass
 class PretrainDisConfig:
-    optimizer: str
-    lr: float
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig
     max_epochs: int
     n_real_samples: int # per class or not? per batch
     n_synth_samples: int # n_real_samples + n_synth_samples = batch_size of dataloader.
-    loss_fn: str
     patience: int
 
 # TODO: Add adtraining schema and config file for test case.

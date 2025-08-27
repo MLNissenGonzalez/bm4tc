@@ -1,9 +1,11 @@
 import torch
 import tensorkrowch as tk
-from typing import Union, Sequence, Callable, Dict
+from typing import Union, Sequence, Callable, Dict, Optional, Any
 import src.sampling as sampling
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
+from schemas import CriterionConfig, PretrainMPSConfig, OptimizerConfig
+from _utils import get_optimizer
 
 # TODO: Think about splitting utils into utils and pretraining. 
 
@@ -13,7 +15,7 @@ import torch.nn as nn
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #------Born rule. Sequential and parallel code.------------------------------------------------------------------------------------------------------------------
 #------Could add this maybe as method in a custom MPS class.--------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------torch.optim.Optimizer------------------------------------------------------------
 
 # TODO: batch_size could be a confusing misnomer in the documentation. batch_size could be the product of num_bins and num_dist one want so compute.
 def born_sequential(mps: tk.models.MPS, 
@@ -125,10 +127,43 @@ def batch_normalize(p: torch.Tensor,
 
     return p / p.sum(dim=1, keepdim=True)
 
-# TODO: Write code that helps initialise the right kind of loss_fn for MPS
-# TODO: Subclass nn.Module to create custom loss functions for efficiency.
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------Loss functions adjusted for MPSs------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
+class MPSNLLL(nn.Module):
+    def __init__(self, eps: float = 1e-12):
+        super().__init__()
+        self.eps = eps
 
+    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        p = p.clamp(min=self.eps)
+        return -torch.log(p[torch.arange(p.size(0)), t]).mean()
+
+_LOSS_MAP = {
+    "nll": MPSNLLL,
+    "nlll": MPSNLLL,
+    "negativeloglikelihood": MPSNLLL,
+    "negloglikelihood": MPSNLLL,
+}
+
+def _criterion_selector(name: str, kwargs: Optional[Dict[str, Any]] = None):
+    key = name.replace(" ", "").replace("-", "").lower()
+    if key not in _LOSS_MAP:
+        raise ValueError(f"Loss '{name}' not recognised")
+    # use empty dict if kwargs is None
+    return _LOSS_MAP[key](**(kwargs or {}))
+
+def get_criterion(config: CriterionConfig):
+    """
+    Returns a loss instance given a CriterionConfig.
+    Safe: does not mutate config.kwargs.
+    """
+    return _criterion_selector(config.name, config.kwargs)
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----Sampling routines using mps------------------------------------------------------------------------------------------------------------------------------------
@@ -427,12 +462,10 @@ def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.ou
     mps.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
-        p = born_parallel(mps, X)
 
-        # Computing Scores for loss, depending on model type
-        score = torch.log(p)
-        # Computing loss
-        loss = loss_fn(score, t)
+        # Compute probs and loss
+        p = born_parallel(mps, X)
+        loss = loss_fn(p, t)
 
         # Backpropagate and update parameters
         optimizer.zero_grad()
@@ -443,88 +476,91 @@ def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.ou
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
-# TODO: Include optimizer initialization into this function.
-# TODO: Add loss function as string parameter for config 
 # TODO: Add auto_stack and auto_unbind.
 def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
-                    optimizer: torch.optim.Optimizer, # needs to be initialized once per call of this function, right?
-                    max_epoch: int,
-                    patience: int,
+                    cfg: PretrainMPSConfig,
                     cls_pos: int,
-                    loss_fn: str,
+                    phys_dim: int,
                     device: torch.device,
                     title: str | None = None,
-                    goal_acc: float | None = None,
-                    print_early_stop = True,
-                    print_updates = True
                     ):
     """
-    Full classification loop for MPS with patience stopping criterion 
-    based on prediction accuracy on validation set.
-    Returns tensors of best performing MPS, minibatch-wise training loss, and
-    epoch-wise validation accuracy. 
+    Full classification loop for MPS with early stopping based on validation accuracy.
+
+    The training loop uses patience stopping and optional goal accuracy stopping. 
+    Loss and optimizer are instantiated from the provided config objects. 
+    Model-specific flags (`auto_stack`, `auto_unbind`) and device placement are set automatically.
 
     Parameters
     ----------
-    mps: MPS model
-    loaders: dict of DataLoaders
-    optimizer: Optimizer
-    max_epoch: int
-    patience: int
-        maximal number of epochs without improvement before early stopping
-    cls_pos: int
-        position of central tensor in the MPS
-    loss_fn: str
-        name of loss function
-    device: torch.device
-    title: str, optional
-        title of dataset
-    goal_acc: float, optional
-        If not None, this gives the goal accuracy on the validation set. If this is surpassed, stop training early.
-    print_early_stop: Boolean
-        If True, print early stopping epoch.
-    print_updates: Boolean
-        If True, epoch-wise printing of pred. accuracy on validation set.
+    mps : tk.models.MPS or tk.models.MPSLayer
+        The MPS model to train.
+    loaders : dict[str, DataLoader]
+        Dictionary containing 'train' and 'valid' DataLoaders with embedded inputs and labels.
+    cfg : PretrainMPSConfig
+        Configuration object containing all training hyperparameters and sub-configs:
+        
+        Fields:
+        - optimizer_cfg : OptimizerConfig
+            Name and kwargs for optimizer, e.g., {"name": "adam", "optimizer_kwargs": {"lr": 1e-4}}
+        - criterion_cfg : CriterionConfig
+            Name and kwargs for loss function, e.g., {"name": "nlll", "kwargs": {"eps": 1e-12}}
+        - max_epochs : int
+            Maximum number of training epochs.
+        - patience : int
+            Number of epochs without improvement on validation accuracy before stopping.
+        - auto_stack : bool
+        - auto_unbind : bool
+        - goal_acc : Optional[float]
+            If provided, training stops early once validation accuracy reaches this value.
+        - print_early_stop : bool
+            If True, prints early stopping information.
+        - print_updates : bool
+            If True, prints epoch-wise validation accuracy.
+    cls_pos : int
+        Position of the central/output tensor in the MPS.
+    device : torch.device
+        Device to place model and inputs on (CPU or GPU).
+    title : str, optional
+        Optional title for printing progress messages.
 
     Returns
     -------
-    best_tensors: list of tensors
-        list of tensors that define best performing MPS
-    train_loss: list of floats
-        minibatchwise training loss
-    val_accuracy: list of floats
-        epoch_wise pred. accuracy on validation set
+    best_tensors : list[torch.Tensor]
+        The tensors of the MPS corresponding to the best validation accuracy.
+    train_loss : list[float]
+        Mini-batch-wise training loss collected during training.
+    val_accuracy : list[float]
+        Epoch-wise validation accuracy.
     """
     val_accuracy = []
     train_loss = []
     best_acc = 0.0
     best_tensors = []  # Container for best model parameters
 
-    # Initialize loss function
-    if not isinstance(loss_fn, str):
-        raise TypeError("loss function specified by name, e.g. NLLL")
-    
-    loss_fn = loss_fn.replace(" ", "").replace("-", "").lower()
-    if loss_fn in ["nlll", "nll", "negloglikelihood", "negativeloglikelihood"]:
-        loss_fn = nn.NLLLoss()
-    else:
-        raise ValueError(f"{loss_fn} not recognised or implemented.")
-    
     # Prepare MPS for training
+    mps.to(device)
+    mps.auto_stack = cfg.auto_stack
+    mps.auto_unbind = cfg.auto_unbind
     mps.unset_data_nodes()
     mps.reset()
-    mps.out_features = [cls_pos]
-
-    phys_dim = mps.phys_dim[cls_pos-1]
+    # TODO: Check whether both MPS and MPSLayer instances work here. If not, check or just assume MPSLayer (straight forward).
+    mps.out_features = [cls_pos] 
+    phys_dim = mps.phys_dim[cls_pos-1] 
     mps.trace(torch.zeros(1, len(mps.in_features), phys_dim).to(device))
         
-    for i in range(max_epoch):
-        # Training
-        train_loss = train_loss + _mps_cls_train_step(mps, loaders['train'], 
-                                  device, optimizer, loss_fn)
+    # Instantiate criterion and optimizer
+    criterion = get_criterion(cfg.criterion_cfg)
+    optimizer = get_optimizer(mps.parameters(), cfg.optimizer_cfg)
 
-        # Validation
+    patience_counter = 0
+    for epoch in range(cfg.max_epochs):
+        # Training step
+        train_loss = train_loss + _mps_cls_train_step(mps, loaders['train'], 
+                                  device, optimizer, criterion)
+
+        # Validation step
         acc = mps_acc_eval(mps, loaders['valid'], device)
         val_accuracy.append(acc)
 
@@ -537,22 +573,20 @@ def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
             patience_counter += 1
 
         # Early stopping via patience
-        if patience_counter > patience:
-            if print_early_stop:
-                print(f"Early stopping via patience at epoch {i}")
+        if patience_counter > cfg.patience:
+            if cfg.print_early_stop:
+                print(f"Early stopping via patience at epoch {epoch}")
             break
         # Optional early stopping via goal accuracy
-        if (goal_acc is not None) and (goal_acc < best_acc):
-            if print_early_stop:
-                print(f"Early stopping via goal acc at epoch {i}")
+        if (cfg.goal_acc is not None) and (cfg.goal_acc < best_acc):
+            if cfg.print_early_stop:
+                print(f"Early stopping via goal acc at epoch {epoch}")
             break
         # Update report
-        if (i == 0) and (title is not None):
-            print('')
-            print(f'Training of {title} dataset:')
-            print('')  
-        elif print_updates and ((i+1) % 10 == 0):
-            print(f"Epoch {i+1}: val_accuracy={acc:.4f}")
+        if (epoch == 0) and (title is not None):
+            print(f'\nTraining of {title} dataset:\n')
+        elif cfg.print_updates and ((epoch+1) % 10 == 0):
+            print(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
 
     return best_tensors, train_loss, val_accuracy
 

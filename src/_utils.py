@@ -4,7 +4,54 @@ import logging
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+from torch import optim
+from typing import Any, Dict, Optional
 
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Optimizer-----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+from schemas import OptimizerConfig
+
+_OPTIMIZER_MAP = {
+    "sgd": optim.SGD,
+    "adam": optim.Adam,
+    "adamw": optim.AdamW,
+    "rmsprop": optim.RMSprop,
+    "adagrad": optim.Adagrad,
+    "adamax": optim.Adamax,
+    "nadam": optim.NAdam,
+}
+
+def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
+    """
+    Select and instantiate a PyTorch optimizer.
+
+    Parameters
+    ----------
+    params : iterable
+        Parameters to optimize, e.g. model.parameters()
+    config.name : str
+        Name of the optimizer, e.g. "adam"
+    config.kwargs : dict, optional
+        Extra arguments passed to the optimizer, e.g. {"lr": 1e-3}
+
+    Returns
+    -------
+    optim.Optimizer
+        Instantiated optimizer.
+    """
+    key = config.name.replace("-", "").replace("_", "").lower()
+    try:
+        optimizer_cls = _OPTIMIZER_MAP[key]
+    except KeyError:
+        raise ValueError(f"Optimizer {config.name} not recognised. "
+                         f"Available: {list(_OPTIMIZER_MAP.keys())}")
+
+    return optimizer_cls(params, **config.kwargs)
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

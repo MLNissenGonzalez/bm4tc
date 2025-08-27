@@ -1,7 +1,13 @@
 n_real_samples: 32 # per class or not? per batch
 n_synth_samples: 32 # n_real_samples + n_synth_samples = batch_size of dataloader.
-loss_fn: "BCE"
-optimizer: "adam"
+critierion:
+  name: "BCE"
+  kwargs: None
+optimizer:
+  name: "adam"
+  optimizer_kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
 max_epoch: 200
 patience: 35
 # maybe add what to log and what not?
