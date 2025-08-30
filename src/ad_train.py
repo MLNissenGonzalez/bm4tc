@@ -4,6 +4,8 @@ from typing import Union, Sequence, Callable, Dict
 from src.mps.utils import mps_sampling, mps_acc_eval, disr_train_mps
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
+from schemas import OptimizerConfig, CriterionConfig, PretrainMPSConfig
+from _utils import get_criterion, get_optimizer
 
 """
 Currently, this script contains only three functions. A function performing the adversarial training (GAN-style) step,
@@ -11,7 +13,7 @@ and another performing the loop with a check on the classification accuracy of t
 """
 
 def real_loader(X: torch.Tensor,
-                batch_size: int,
+                n_real: int,
                 split: str) -> DataLoader:
     """
     Loader for real, but unlabelled data. Used in ad. train.
@@ -20,7 +22,7 @@ def real_loader(X: torch.Tensor,
     ----------
     X: tensor
         whole batch of preprocessed, non-embedded data features
-    batch_size: int
+    n_real: int
     split: str in {'train', 'valid'}
         adtrain needs only train for training and valid for evaluation
 
@@ -30,7 +32,7 @@ def real_loader(X: torch.Tensor,
     """
     dataset = TensorDataset(X)
     loader = DataLoader(dataset,
-                        batch_size=batch_size,
+                        batch_size=n_real,
                         shuffle=(split in ['train', 'valid']),
                         drop_last=(split == 'train')
                         )
@@ -43,7 +45,7 @@ def real_loader(X: torch.Tensor,
 # TODO: Add other checks for gradients
 def _adversarial_training_step(dis, # TODO: define abstract discriminator class
                                 mps: tk.models.MPS,
-                                batch_size: int,
+                                n_synth: int,
                                 real_data_loader: DataLoader, # train version
                                 d_optimizer: torch.optim.Optimizer,
                                 g_optimizer: torch.optim.Optimizer,
@@ -96,10 +98,6 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
     gradient_flow_metric: float, optional
         metric for gradient flow to MPS
     """
-    if d_loss_fn is None:
-        d_loss_fn = nn.BCELoss()
-    if g_loss_fn is None:
-        g_loss_fn = nn.BCELoss()
     
     # 1. Get a batch of real data
     real_X = next(iter(real_data_loader))[0]
@@ -110,7 +108,7 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
     synth_X = mps_sampling( mps=mps,
                             input_space=input_space,
                             embedding=embedding,
-                            num_samples=batch_size, # returns num_cls x batch_size
+                            num_samples=n_synth, # returns num_cls x batch_size
                             cls_pos=cls_pos,
                             cls_embs=cls_embs,
                             device=device
@@ -157,29 +155,30 @@ def _adversarial_training_step(dis, # TODO: define abstract discriminator class
 # TODO: Reinitialize cat optimizer with each retraining? Bring up to speed with dis.train changes.
 #       same with generator optimizer. should these be reinitialised with each retraining? 
  
-def ad_train_loop(  dis, # TODO: define abstract discriminator class,
+def ad_train_loop(  dis: nn.Module, # TODO: define abstract discriminator class,
                     mps: tk.models.MPS,
-                    batch_size: int,
                     real_data_loader: DataLoader,
-                    d_optimizer: torch.optim.Optimizer,
-                    g_optimizer: torch.optim.Optimizer,
-                    cat_optimizer: torch.optim.Optimizer,
-                    input_space: torch.Tensor | Sequence[torch.Tensor],
-                    embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
-                    cls_pos: int,
-                    cls_embs: Sequence[torch.Tensor], # one embedding per class,
-                    acc_drop_tol: float, # allowed drop in accuracy, might be zero
-                    num_acc_check: int, # number of accuracy checks per epoch (going through the original dataste)
-                    mps_cat_loader: Dict[str, DataLoader],
-                    device: torch.device,
+                    n_synth: int,
+                    d_optimizer: OptimizerConfig,
+                    d_criterion: CriterionConfig,
+                    g_optimizer: OptimizerConfig,
+                    g_criterion: CriterionConfig,
                     ad_max_epoch: int,
-                    cat_max_epoch: int,
-                    cat_patience: int,
-                    d_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
-                    g_loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
-                    cat_loss_fn = torch.nn.NLLLoss(),
-                    title: str | None = None,
-                    recompute_best_acc: bool = False) -> tuple[list[float], list[float], list[float], list[int], list[float]]:
+                    
+                    input_space: torch.Tensor | Sequence[torch.Tensor],
+                    embedding: str, # only one embedding for all input sites, given by cfg.model.mps.embedding, for sampling
+                    cls_pos: int, # In the outside script
+                    cls_embs: Sequence[torch.Tensor], # one embedding per class. Just use basis embedding, right?
+
+                    acc_drop_tol: float,
+                    recompute_best_acc: bool, # allowed drop in accuracy, might be zero
+                    num_acc_check: int, # number of accuracy checks per epoch (going through the original dataste)
+                    
+                    device: torch.device,
+                    
+                    mps_cat_loader: Dict[str, DataLoader],
+                    retrain_cfg: PretrainMPSConfig,
+                    title: str) -> tuple[list[float], list[float], list[float], list[int], list[float]]:
     """
     Full adversarial training loop with retraining of MPS if classification accuracy drops (too low).
 
@@ -238,13 +237,23 @@ def ad_train_loop(  dis, # TODO: define abstract discriminator class,
 
     mps.unset_data_nodes()
     mps.reset()
+    
+    # Rethink this.  
     mps.out_features = [cls_pos]
     phys_dim = mps.phys_dim[cls_pos-1] # assume cls_pos not equal to 0
+
+    # Computing best accuracy
     mps.trace(torch.zeros(0, len(mps.in_features), phys_dim))
     mps.to(device)
-    
     best_acc = mps_acc_eval(mps, mps_cat_loader, 'valid', device)
     print(f"Initial classification accuracy: {best_acc:.4f}")
+
+    # Initializing optimizer and loss_functions
+    d_criterion = get_criterion(d_criterion)
+    d_optimizer = get_optimizer(params=dis.parameters(), config=d_optimizer)
+    g_criterion = get_criterion(g_criterion)
+    g_optimizer = get_optimizer(params=mps.parameters(), config=g_optimizer)
+
 
     check_counter = 0
     for epoch in range(ad_max_epoch):
@@ -254,7 +263,7 @@ def ad_train_loop(  dis, # TODO: define abstract discriminator class,
             d_loss, g_loss, *l_t_comp = _adversarial_training_step(
                 dis=dis,
                 mps=mps,
-                batch_size=batch_size, # interacts with batch_size of real_data_loader
+                n_synth=n_synth, # interacts with batch_size of real_data_loader
                 real_data_loader=real_data_loader,
                 d_optimizer=d_optimizer,
                 g_optimizer=g_optimizer,
@@ -263,8 +272,8 @@ def ad_train_loop(  dis, # TODO: define abstract discriminator class,
                 cls_pos=cls_pos, # these I could compute once within this ad_train_loop
                 cls_embs=cls_embs, # these I could compute once within this ad_train_loop
                 check=True,
-                d_loss_fn=d_loss_fn,
-                g_loss_fn=g_loss_fn,
+                d_loss_fn=d_criterion,
+                g_loss_fn=g_criterion,
                 device=device
             )
 
@@ -291,16 +300,11 @@ def ad_train_loop(  dis, # TODO: define abstract discriminator class,
                 (best_tensors, _, 
                  val_accuracy) = disr_train_mps(mps=mps,
                                                 loaders=mps_cat_loader,
-                                                optimizer=cat_optimizer,
-                                                max_epoch=cat_max_epoch,
-                                                patience=cat_patience,
+                                                cfg=retrain_cfg,
                                                 cls_pos=cls_pos,
-                                                loss_fn=cat_loss_fn,
+                                                phys_dim=phys_dim,
                                                 device=device,
-                                                title=title,
-                                                goal_acc=best_acc,
-                                                print_early_stop=True,
-                                                print_updates=False)
+                                                title=title)
                 
                 mps = tk.models.MPS(tensors=best_tensors)
                 cat_acc.append(acc)

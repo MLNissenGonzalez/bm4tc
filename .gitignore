@@ -22,8 +22,8 @@ checkpoints/
 logs/
 *.log
 
-# Data
-data/
+# Data on disk
+.datasets/
 
 # Jupyter
 .ipynb_checkpoints
