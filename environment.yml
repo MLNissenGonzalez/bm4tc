@@ -1,23 +1,24 @@
 name: TNML
 channels:
+  - nvidia    # for GPU CUDA packages
   - pytorch
   - defaults
 dependencies:
   - python=3.10
-  - pytorch=2.0
+  - pytorch=2.0.*        # stable with TensorKrowch
   - torchvision
   - torchaudio
-  - cpuonly  # remove this if you want GPU versions later
   - matplotlib
   - jupyter
   - ipykernel
-  - numpy
-  - pandas
+  - numpy=1.25.*          # compatible with PyTorch 2.0
   - scipy
   - scikit-learn
   - tqdm
+  - mlflow
   - pip
   - pip:
       - tensorkrowch
-      - opt_einsum==3.2 # This is a requirement for TensorKrowch
-      - hydra-core # for config management
+      - opt_einsum==3.2
+      - hydra-core
+

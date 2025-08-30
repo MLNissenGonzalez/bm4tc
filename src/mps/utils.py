@@ -1,11 +1,11 @@
 import torch
 import tensorkrowch as tk
-from typing import Union, Sequence, Callable, Dict, Optional, Any
+from typing import Union, Sequence, Callable, Dict
 import src.sampling as sampling
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
-from schemas import CriterionConfig, PretrainMPSConfig, OptimizerConfig
-from _utils import get_optimizer
+from schemas import PretrainMPSConfig
+from _utils import get_optimizer, get_criterion
 
 # TODO: Think about splitting utils into utils and pretraining. 
 
@@ -127,43 +127,7 @@ def batch_normalize(p: torch.Tensor,
 
     return p / p.sum(dim=1, keepdim=True)
 
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------Loss functions adjusted for MPSs------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
-class MPSNLLL(nn.Module):
-    def __init__(self, eps: float = 1e-12):
-        super().__init__()
-        self.eps = eps
-
-    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        p = p.clamp(min=self.eps)
-        return -torch.log(p[torch.arange(p.size(0)), t]).mean()
-
-_LOSS_MAP = {
-    "nll": MPSNLLL,
-    "nlll": MPSNLLL,
-    "negativeloglikelihood": MPSNLLL,
-    "negloglikelihood": MPSNLLL,
-}
-
-def _criterion_selector(name: str, kwargs: Optional[Dict[str, Any]] = None):
-    key = name.replace(" ", "").replace("-", "").lower()
-    if key not in _LOSS_MAP:
-        raise ValueError(f"Loss '{name}' not recognised")
-    # use empty dict if kwargs is None
-    return _LOSS_MAP[key](**(kwargs or {}))
-
-def get_criterion(config: CriterionConfig):
-    """
-    Returns a loss instance given a CriterionConfig.
-    Safe: does not mutate config.kwargs.
-    """
-    return _criterion_selector(config.name, config.kwargs)
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----Sampling routines using mps------------------------------------------------------------------------------------------------------------------------------------
@@ -476,7 +440,6 @@ def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.ou
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
-# TODO: Add auto_stack and auto_unbind.
 def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
                     cfg: PretrainMPSConfig,

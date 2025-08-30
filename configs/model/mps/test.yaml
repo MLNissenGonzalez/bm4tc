@@ -1,9 +1,7 @@
 # n_features: ${dataset.n_feat} + 1. (Do this in the experiment script itself)
 init_kwargs:
   in_dim: 3 # physical dimension
-  out_dim: ${dataset.n_cls} # could do this in the script
   bond_dim: 2
-  out_position: None # means that the central tensor in in the middle (central), i could also do something like floor((datset.n_feat + 1) / 2)
   boundary: "obc"
   init_method: "randn_eye"
   std: 1e-9

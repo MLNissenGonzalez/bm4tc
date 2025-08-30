@@ -3,9 +3,50 @@ import os
 import logging
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import numpy as np
 from torch import optim
-from typing import Any, Dict, Optional
+from typing import Optional, Dict, Any
+from schemas import CriterionConfig
+
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Criterion-----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
+
+class MPSNLLL(nn.Module):
+    def __init__(self, eps: float = 1e-12):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        p = p.clamp(min=self.eps)
+        return -torch.log(p[torch.arange(p.size(0)), t]).mean()
+
+_LOSS_MAP = {
+    "nll": MPSNLLL,
+    "nlll": MPSNLLL,
+    "negativeloglikelihood": MPSNLLL,
+    "negloglikelihood": MPSNLLL,
+}
+
+def _criterion_selector(name: str, kwargs: Optional[Dict[str, Any]] = None):
+    key = name.replace(" ", "").replace("-", "").lower()
+    if key not in _LOSS_MAP:
+        raise ValueError(f"Loss '{name}' not recognised")
+    # use empty dict if kwargs is None
+    return _LOSS_MAP[key](**(kwargs or {}))
+
+def get_criterion(config: CriterionConfig):
+    """
+    Returns a loss instance given a CriterionConfig.
+    Safe: does not mutate config.kwargs.
+    """
+    return _criterion_selector(config.name, config.kwargs)
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -13,6 +54,8 @@ from typing import Any, Dict, Optional
 #---------------Optimizer-----------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# TODO: Add documentation
 
 from schemas import OptimizerConfig
 

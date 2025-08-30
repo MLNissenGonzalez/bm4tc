@@ -1,0 +1,19 @@
+n_real: 32
+n_synth: 32
+d_loss: "bce"
+g_loss: "vanilla"
+d_optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+g_optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+max_steps: 200
+retrain_crit: "loss"
+stopping_crit: "acc"
+patience: 60
+smoothing: 0.0
