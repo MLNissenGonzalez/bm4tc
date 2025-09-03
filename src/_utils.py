@@ -9,7 +9,6 @@ from torch import optim
 from typing import Optional, Dict, Any
 from schemas import CriterionConfig
 
-
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -17,6 +16,8 @@ from schemas import CriterionConfig
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
+
+# TODO: Add documentation
 
 class MPSNLLL(nn.Module):
     def __init__(self, eps: float = 1e-12):
@@ -32,22 +33,16 @@ _LOSS_MAP = {
     "nlll": MPSNLLL,
     "negativeloglikelihood": MPSNLLL,
     "negloglikelihood": MPSNLLL,
+    "bce": nn.BCELoss, # BCE loss expects probabilities and target is float between 0 and 1
+    "binarycrossentropy": nn.BCELoss
 }
 
-def _criterion_selector(name: str, kwargs: Optional[Dict[str, Any]] = None):
-    key = name.replace(" ", "").replace("-", "").lower()
+def get_criterion(cfg: CriterionConfig):
+    key = cfg.name.replace(" ", "").replace("-", "").lower()
     if key not in _LOSS_MAP:
-        raise ValueError(f"Loss '{name}' not recognised")
+        raise ValueError(f"Loss '{cfg.name}' not recognised")
     # use empty dict if kwargs is None
-    return _LOSS_MAP[key](**(kwargs or {}))
-
-def get_criterion(config: CriterionConfig):
-    """
-    Returns a loss instance given a CriterionConfig.
-    Safe: does not mutate config.kwargs.
-    """
-    return _criterion_selector(config.name, config.kwargs)
-
+    return _LOSS_MAP[key](**(cfg.kwargs or {}))
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -291,43 +286,3 @@ def ad_train_results(cat_acc: list,
     # Improve spacing
     plt.tight_layout()
     plt.show()
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#----------------LOGGIN AND OTHER FUNCTIONS----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-# TODO: Think of using MLFlow instead of logging. 
-
-def makedirs(dirname):
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
-
-
-def get_logger(logpath, filepath, package_files=[], displaying=True, saving=True, debug=False):
-    logger = logging.getLogger()
-    if debug:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-    logger.setLevel(level)
-    if saving:
-        info_file_handler = logging.FileHandler(logpath, mode="a")
-        info_file_handler.setLevel(level)
-        logger.addHandler(info_file_handler)
-    if displaying:
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(level)
-        logger.addHandler(console_handler)
-    logger.info(filepath)
-    with open(filepath, "r") as f:
-        logger.info(f.read())
-
-    for f in package_files:
-        logger.info(f)
-        with open(f, "r") as package_f:
-            logger.info(package_f.read())
-
-    return logger

@@ -46,12 +46,11 @@ class CriterionConfig:
     name: str # e.g nlll
     kwargs: Optional[Dict[str, Any]]# e.g. {"eps": 1e-12}
 
-# TODO: Add some interpolations in configs here (mps.phys_dim, dataset.dim) and so on.
 @dataclass
 class PretrainMPSConfig:
-    optimizer_cfg: OptimizerConfig
-    criterion_cfg: CriterionConfig
-    max_epochs: int
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig
+    max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     patience: int
     goal_acc: Optional[float] = None
@@ -64,9 +63,9 @@ class PretrainMPSConfig:
 class PretrainDisConfig:
     optimizer: OptimizerConfig
     criterion: CriterionConfig
-    max_epochs: int
-    n_real_samples: int # per class or not? per batch
-    n_synth_samples: int # n_real_samples + n_synth_samples = batch_size of dataloader.
+    max_epoch: int
+    n_real: int # per class or not? per batch
+    n_synth: int # n_real_samples + n_synth_samples = batch_size of dataloader.
     patience: int
 
 # TODO: Add adtraining schema and config file for test case.
@@ -128,9 +127,11 @@ cs.store(name="base_config", node=Config)
 
 # Register subgroups so Hydra can override them
 cs.store(group="dataset", name="schema", node=DatasetConfig)
+cs.store(group="model", name="wrapper", node=ModelConfig)
 cs.store(group="model/mps", name="schema", node=MPSConfig)
 # cs.store(group="model/mps", name="init_schema", node=MPSInitConfig)
 cs.store(group="model/dis", name="schema", node=DisConfig)
+cs.store(group="pretrain", name="wrapper", node=PretrainConfig)
 cs.store(group="pretrain/mps", name="schema", node=PretrainMPSConfig)
 cs.store(group="pretrain/dis", name="schema", node=PretrainDisConfig)
 cs.store(group="ad_train", name="schema", node=GANStyleConfig)

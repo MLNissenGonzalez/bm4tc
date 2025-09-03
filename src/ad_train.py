@@ -7,6 +7,9 @@ import torch.nn as nn
 from schemas import OptimizerConfig, CriterionConfig, PretrainMPSConfig
 from _utils import get_criterion, get_optimizer
 
+import logging
+logger = logging.getLogger(__name__)
+
 """
 Currently, this script contains only three functions. A function performing the adversarial training (GAN-style) step,
 and another performing the loop with a check on the classification accuracy of the MPS. 

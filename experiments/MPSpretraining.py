@@ -11,12 +11,14 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))  # make sr
 
 import hydra
 from src.schemas import Config
-from src.mps.utils import mps_cat_loader, disr_train_mps, mps_acc_eval
+
+from src.mps.categorisation import mps_cat_loader, disr_train_mps, mps_acc_eval
 from src.datasets.preprocess import preprocess_pipeline
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 import tensorkrowch as tk
 import torch
 from omegaconf import OmegaConf
+
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(cfg: Config):
@@ -36,9 +38,8 @@ def main(cfg: Config):
                              device=device,
                              **init_cfg
                              )
-    
     # 3. Data preprocessing, 
-    X, t, scaler = preprocess_pipeline(X=dataset.X, t=dataset.t, 
+    X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t, 
                                        split=cfg.dataset.split, 
                                        random_state=cfg.dataset.split_seed, 
                                        embedding=cfg.model.mps.embedding)
@@ -53,15 +54,12 @@ def main(cfg: Config):
                                         phys_dim=cfg.model.mps.init_kwargs.in_dim,
                                         split=split)
     
-    # TODO: Include configuration schemsa in training functions
     # 5. MPS pretraining
     best_tensors, train_loss, val_accuracy = disr_train_mps(mps=mps, loaders=loader,
                                                             cfg=cfg.pretrain.mps,
-                                                            cls_pos=cfg.model.mps.init_kwargs.out_position,
-                                                            device=device, 
-                                                            phys_dim=cfg.model.mps.init_kwargs.in_dim,
+                                                            device=device,
                                                             title=dataset_name)
-    mps = tk.models.MPS(best_tensors)
+    mps = tk.models.MPS(tensors=best_tensors)
 
     test_accuracy = mps_acc_eval(mps, loader["test"], device)
 

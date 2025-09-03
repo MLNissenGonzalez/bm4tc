@@ -3,7 +3,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Union, Sequence, Callable, Dict
+from schemas import DisConfig, PretrainDisConfig
+from _utils import get_criterion, get_optimizer
 
+import logging
+logger = logging.getLogger(__name__)
 #------------------------------------------------------------------------------------------------´
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
@@ -17,33 +21,30 @@ class MLPdis(nn.Module):
     One could use this class in a single discriminator setup (one for all classes of samples) or for the ensemble approach. 
     """
     def __init__(self, 
-                 hidden_dims: list,
-                 nonlinearity: str,
-                 input_dim: int,
-                 negative_slope: float | None):
+                 cfg: DisConfig):
         super().__init__()
 
-        nonlinearity = nonlinearity.replace(" ", "").lower()
+        nonlinearity = cfg.nonlinearity.replace(" ", "").lower()
 
         if nonlinearity == "relu":
             def get_activation(): return nn.ReLU()
         elif nonlinearity == "leakyrelu":
-            if negative_slope == None:
+            if cfg.negative_slope == None:
                 raise ValueError("LeakyReLU needs negative_slope parameter.")
-            def get_activation(): return nn.LeakyReLU(negative_slope)
+            def get_activation(): return nn.LeakyReLU(cfg.negative_slope)
         else:
             raise ValueError(f"{nonlinearity} not recognised. Try ReLU or LeakyReLU instead.")
         
-        if not hidden_dims:
+        if not cfg.hidden_dims:
             raise ValueError("hidden_dims must contain at least one layer size.")
 
         layers = []
-        layers.append(nn.Linear(input_dim, hidden_dims[0]))
-        for i in range(len(hidden_dims)-1):
+        layers.append(nn.Linear(cfg.input_dim, cfg.hidden_dims[0]))
+        for i in range(len(cfg.hidden_dims)-1):
             layers.append(get_activation())
-            layers.append(nn.Linear(hidden_dims[i], hidden_dims[i+1]))
+            layers.append(nn.Linear(cfg.hidden_dims[i], cfg.hidden_dims[i+1]))
         layers.append(get_activation())
-        layers.append(nn.Linear(hidden_dims[-1], 1)) # always binary classification
+        layers.append(nn.Linear(cfg.hidden_dims[-1], 1)) # always binary classification
 
         self.stack = nn.Sequential(*layers)
 
@@ -110,17 +111,32 @@ def dis_pre_train_loader(   samples_train: torch.Tensor,
     
     return loader_train, loader_test 
 
-# TODO: Allow for other losses, string input
+
+def dis_eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module):
+    dis.eval()
+    total_test_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for X, t in loader:
+            logit = dis(X)
+            prob = torch.sigmoid(logit.squeeze())
+            preds = (prob >= 0.5).long()
+            loss = criterion(prob, t.float())
+            total_test_loss += loss.item() * t.size(0)
+            correct += (preds == t).sum().item()
+            total += t.size(0)
+
+        avg_test_loss = total_test_loss / total
+        acc = correct / total
+    return acc, avg_test_loss
+
 # TODO: Rename test loader to validation loader as it is used for hyperparameter optimization (early stopping)
 # TODO: Why this i? Remove it if it is unnesessary to log. 
-# TODO: initialize optimizer inside function. string based for better config.
 
-bce_loss = torch.nn.BCELoss() # move initialization inside the function
-def discriminator_pretraining(dis,
-                              max_epoch: int,
-                              patience: int,
-                              optimizer: torch.optim.Optimizer,
-                              loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+
+def discriminator_pretraining(dis: nn.Module,
+                              cfg: PretrainDisConfig,
                               loader_train: DataLoader,
                               loader_test: DataLoader):
     """
@@ -158,13 +174,17 @@ def discriminator_pretraining(dis,
     test_accuracy = []
     patience_counter = 0
     best_loss = float('inf')
+
+    optimizer = get_optimizer(dis.parameters(), cfg.optimizer)
+    criterion = get_criterion(cfg.criterion)
+
     optimizer.zero_grad()
-    for i in range(max_epoch):
+    for epoch in range(cfg.max_epoch):
         dis.train()
         for X, t in loader_train:
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
-            loss = loss_fn(prob, t.float())
+            loss = criterion(prob, t.float())
             train_loss.append(loss.item())
 
             # Backpropagation
@@ -172,37 +192,22 @@ def discriminator_pretraining(dis,
             optimizer.step()
             optimizer.zero_grad()
 
-        dis.eval()
-        total_test_loss = 0.0
-        correct = 0
-        total = 0
+        acc, avg_test_loss = dis_eval(dis, loader_test, criterion)
+        test_loss.append(avg_test_loss)
+        test_accuracy.append(acc)
 
-        with torch.no_grad():
-            for X, t in loader_test:
-                logit = dis(X)
-                prob = torch.sigmoid(logit.squeeze())
-                preds = (prob >= 0.5).long()
-                loss = bce_loss(prob, t.float())
-                total_test_loss += loss.item() * t.size(0)
-                correct += (preds == t).sum().item()
-                total += t.size(0)
-
-            avg_test_loss = total_test_loss / total
-            acc = correct / total
-            test_loss.append(avg_test_loss)
-            test_accuracy.append(acc)
-
-            # Progress tracking and best model update
-            if avg_test_loss < best_loss:
-                best_loss = avg_test_loss
-                patience_counter = 0
-                best_model_state = dis.state_dict()
-            else:
-                patience_counter += 1
-            # Early stopping
-            if patience_counter > patience:
-                break
+        # Progress tracking and best model update
+        if avg_test_loss < best_loss:
+            best_loss = avg_test_loss
+            patience_counter = 0
+            best_model_state = dis.state_dict()
+        else:
+            patience_counter += 1
+        # Early stopping
+        if patience_counter > cfg.patience:
+            logger.info(f"Early stopping at epoch {epoch+1}")
+            break
 
     dis.load_state_dict(best_model_state)
     
-    return dis, train_loss, test_loss, test_accuracy, i
+    return dis, train_loss, test_loss, test_accuracy, epoch

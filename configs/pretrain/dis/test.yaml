@@ -1,8 +1,8 @@
-n_real_samples: 32 # per class or not? per batch
-n_synth_samples: 32 # n_real_samples + n_synth_samples = batch_size of dataloader.
+n_real: 32 # per class or not? per batch
+n_synth: 32 # n_real_samples + n_synth_samples = batch_size of dataloader.
 critierion:
   name: "BCE"
-  kwargs: None
+  kwargs: null
 optimizer:
   name: "adam"
   optimizer_kwargs:
