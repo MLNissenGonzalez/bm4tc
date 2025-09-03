@@ -1,13 +1,12 @@
 import torch
 import tensorkrowch as tk
-from typing import Union, Sequence, Callable, Dict
+from typing import Union, Sequence, Callable
 import src.sampling as sampling
-from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
-from schemas import PretrainMPSConfig
-from _utils import get_optimizer, get_criterion
 
-# TODO: Think about splitting utils into utils and pretraining. 
+import logging
+logger = logging.getLogger(__name__)
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -54,10 +53,13 @@ def born_sequential(mps: tk.models.MPS,
     
     # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
     if len(in_tensors) < mps.n_features:
-        return torch.diagonal(mps(in_tensors, marginalize_output=True))
+        p = torch.diagonal(mps(in_tensors, marginalize_output=True))
     # Case 2: All variables appear.
     else:
-        return torch.square(mps.forward(data=in_tensors))
+        p = torch.square(mps.forward(data=in_tensors))
+        
+    # logger.debug(f"born_sequential output {p.shape=}")
+    return p
     
 def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer class for this one actually
                   embs: torch.Tensor)-> torch.Tensor:
@@ -95,11 +97,12 @@ def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer 
     # Case: p(c|x_1,..., x_D), since n_features = D+1 (with output site)
     if not is_joint:
         p = torch.square(mps.forward(data=embs)) 
-        return p / p.sum(dim=1, keepdim=True) 
+        p = p / p.sum(dim=1, keepdim=True) 
     # Case: p(x_1,...,x_D), since n_features = D (no central tensor).
     else:
-        return torch.square(mps.forward(data=embs)).unsqueeze(1) # Z x p(x_1,..., x_D) # shape (batch_size, 1)
-    
+        p = torch.square(mps.forward(data=embs)).unsqueeze(1) # Z x p(x_1,..., x_D) # shape (batch_size, 1)
+    # logger.debug(f"born_parallel output: {p.shape=}")
+    return p
 
 # TODO: Think of deleting this function as it may never be used.
 def batch_normalize(p: torch.Tensor,
@@ -264,13 +267,13 @@ def mps_sampling(   mps: tk.models.MPS,
 # TODO: Consider parallel implementation
 def batch_sampling_mps( mps: tk.models.MPS,
                         input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
-                        embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
-                        batch_size: int, # will be num_samples in mps_sampling
+                        embedding: str,
                         cls_pos: int,
                         cls_embs: Sequence[torch.Tensor], # one embedding per class,
                         total_n_samples: int, # total number of samples per class, ought to be divisible by batch_size? hard coding is bad
                         device: torch.device,
-                        save_classes = False, # only needed for visualisation
+                        save_classes = False,
+                        batch_size: int = 32 # will be num_samples in mps_sampling # only needed for visualisation
 ):
     """
     Dividing up sampling of many samples into smaller batches for more economic memory usage.
@@ -299,6 +302,7 @@ def batch_sampling_mps( mps: tk.models.MPS,
     tensor
         samples
     """
+    embedding = get_embedding(embedding)
     num_batches = (total_n_samples + batch_size - 1) // batch_size
     labels = []
     samples = []
@@ -330,228 +334,26 @@ def batch_sampling_mps( mps: tk.models.MPS,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# TODO: Rewrite this to fit papers definition
+def legendre_embedding(x: torch.Tensor, dim: int):
+    return tk.embeddings.poly
 
-def mps_cat_loader( X: torch.Tensor, 
-                    t: torch.Tensor, 
-                    embedding: Callable[[torch.Tensor, int], torch.Tensor], 
-                    batch_size: int, 
-                    phys_dim: int,
-                    split: str) -> DataLoader:
-    """
-    Create DataLoaders for multiple datasets and splits
+_EMBEDDING_MAP = {
+    "fourier": tk.embeddings.fourier,
+    "poly": tk.embeddings.poly,
+    "polynomial": tk.embeddings.poly,
+    "legendre": legendre_embedding
+}
 
-    Parameters
-    ----------
-    X: torch.Tensor, shape: (batch_size, n_feat)
-        The preprocessed, non-embedded features.
-    t: torch.Tensor, shape (batch_size,)
-        The labels of the features X.
-    batch_size: int
-        The number of examples of features for all classes (not per class!)
-    embedding: tk.embeddings.embedding
-        Embedding for features X.
-    phys_dim: int, 
-        Dimension of embedding space
+def get_embedding(name: str):
+    key = name.lower()
+    try:
+        embedding = _EMBEDDING_MAP[key]
+    except KeyError:
+        raise ValueError(f"Embedding {name} not recognised. "
+                         f"Available: {list(_EMBEDDING_MAP.keys())}")
+    return embedding
 
-    Returns
-    -------
-    DataLoader
-        Dataloader for supervised classification.
-    """
-    X = embedding(X, phys_dim)
-    dataset = TensorDataset(X, t)
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=(split in ['train', 'valid']),
-        drop_last=(split == 'train')
-    )
-    return loader
-
-def mps_acc_eval(   mps: tk.models.MPS | tk.models.MPSLayer, # relies on mps.out_features = [cls_pos]
-                    loader: DataLoader,
-                    device: torch.device) -> float:
-    """
-    Computes the prediction accuracy of a MPS Born machine on a dataset.
-
-    Parameters
-    ----------
-    mps: MPS model with central tensor
-    loader: DataLoader
-    device: torch.device
-
-    Returns
-    -------
-    float
-        prediction accuracy
-    """
-    mps.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for X, t in loader:
-            X, t = X.to(device), t.to(device)
-            p = born_parallel(mps, X)
-            _, preds = torch.max(p, 1)
-
-            # Counting correct predictions
-            correct += (preds == t).sum().item()
-            total += t.size(0)
-    acc = correct / total
-    return acc
-
-# TODO: Think about dynamically implemnting loss function here versus in the whole training loop
-def _mps_cls_train_step(mps: tk.models.MPS | tk.models.MPSLayer, # expect mps.out_features = [cls_pos]
-                       loader: DataLoader,
-                       device: torch.device,
-                       optimizer: torch.optim.Optimizer,
-                       loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] # expects score, not probs. switch for str parameter
-                       ) -> list:
-    """
-    Single epoch classification training. Returns minibatch-wise train_loss.
-
-    Parameters
-    ----------
-    mps: MPS model with central tensor
-    loader: DataLoader
-    optimizer: Optimizer
-    loss_fn: LossFunction
-
-    Returns
-    -------
-    list of floats
-        minibatch-wise trainloss 
-    """
-    train_loss = []
-    mps.train()
-    for X, t in loader:
-        X, t = X.to(device), t.to(device)
-
-        # Compute probs and loss
-        p = born_parallel(mps, X)
-        loss = loss_fn(p, t)
-
-        # Backpropagate and update parameters
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        train_loss.append(loss.item())
-    return train_loss
-
-# TODO: Think about logging different or more quantities
-# TODO: Consider removing title parameter
-def disr_train_mps( mps: tk.models.MPS | tk.models.MPSLayer,
-                    loaders: Dict[str, DataLoader], #loads embedded inputs and labels
-                    cfg: PretrainMPSConfig,
-                    cls_pos: int,
-                    phys_dim: int,
-                    device: torch.device,
-                    title: str | None = None,
-                    ):
-    """
-    Full classification loop for MPS with early stopping based on validation accuracy.
-
-    The training loop uses patience stopping and optional goal accuracy stopping. 
-    Loss and optimizer are instantiated from the provided config objects. 
-    Model-specific flags (`auto_stack`, `auto_unbind`) and device placement are set automatically.
-
-    Parameters
-    ----------
-    mps : tk.models.MPS or tk.models.MPSLayer
-        The MPS model to train.
-    loaders : dict[str, DataLoader]
-        Dictionary containing 'train' and 'valid' DataLoaders with embedded inputs and labels.
-    cfg : PretrainMPSConfig
-        Configuration object containing all training hyperparameters and sub-configs:
-        
-        Fields:
-        - optimizer_cfg : OptimizerConfig
-            Name and kwargs for optimizer, e.g., {"name": "adam", "optimizer_kwargs": {"lr": 1e-4}}
-        - criterion_cfg : CriterionConfig
-            Name and kwargs for loss function, e.g., {"name": "nlll", "kwargs": {"eps": 1e-12}}
-        - max_epochs : int
-            Maximum number of training epochs.
-        - patience : int
-            Number of epochs without improvement on validation accuracy before stopping.
-        - auto_stack : bool
-        - auto_unbind : bool
-        - goal_acc : Optional[float]
-            If provided, training stops early once validation accuracy reaches this value.
-        - print_early_stop : bool
-            If True, prints early stopping information.
-        - print_updates : bool
-            If True, prints epoch-wise validation accuracy.
-    cls_pos : int
-        Position of the central/output tensor in the MPS.
-    device : torch.device
-        Device to place model and inputs on (CPU or GPU).
-    title : str, optional
-        Optional title for printing progress messages.
-
-    Returns
-    -------
-    best_tensors : list[torch.Tensor]
-        The tensors of the MPS corresponding to the best validation accuracy.
-    train_loss : list[float]
-        Mini-batch-wise training loss collected during training.
-    val_accuracy : list[float]
-        Epoch-wise validation accuracy.
-    """
-    val_accuracy = []
-    train_loss = []
-    best_acc = 0.0
-    best_tensors = []  # Container for best model parameters
-
-    # Prepare MPS for training
-    mps.to(device)
-    mps.auto_stack = cfg.auto_stack
-    mps.auto_unbind = cfg.auto_unbind
-    mps.unset_data_nodes()
-    mps.reset()
-    # TODO: Check whether both MPS and MPSLayer instances work here. If not, check or just assume MPSLayer (straight forward).
-    mps.out_features = [cls_pos] 
-    phys_dim = mps.phys_dim[cls_pos-1] 
-    mps.trace(torch.zeros(1, len(mps.in_features), phys_dim).to(device))
-        
-    # Instantiate criterion and optimizer
-    criterion = get_criterion(cfg.criterion_cfg)
-    optimizer = get_optimizer(mps.parameters(), cfg.optimizer_cfg)
-
-    patience_counter = 0
-    for epoch in range(cfg.max_epochs):
-        # Training step
-        train_loss = train_loss + _mps_cls_train_step(mps, loaders['train'], 
-                                  device, optimizer, criterion)
-
-        # Validation step
-        acc = mps_acc_eval(mps, loaders['valid'], device)
-        val_accuracy.append(acc)
-
-        # Progress tracking and best model update
-        if acc > best_acc:
-            best_acc = acc
-            patience_counter = 0
-            best_tensors = mps.tensors
-        else:
-            patience_counter += 1
-
-        # Early stopping via patience
-        if patience_counter > cfg.patience:
-            if cfg.print_early_stop:
-                print(f"Early stopping via patience at epoch {epoch}")
-            break
-        # Optional early stopping via goal accuracy
-        if (cfg.goal_acc is not None) and (cfg.goal_acc < best_acc):
-            if cfg.print_early_stop:
-                print(f"Early stopping via goal acc at epoch {epoch}")
-            break
-        # Update report
-        if (epoch == 0) and (title is not None):
-            print(f'\nTraining of {title} dataset:\n')
-        elif cfg.print_updates and ((epoch+1) % 10 == 0):
-            print(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
-
-    return best_tensors, train_loss, val_accuracy
 
 
 

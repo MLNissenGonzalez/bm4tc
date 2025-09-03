@@ -4,6 +4,8 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 from typing import Sequence, Tuple, Dict
 
+import logging
+logger = logging.getLogger(__name__)
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
@@ -11,23 +13,26 @@ from typing import Sequence, Tuple, Dict
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 
+
+_EMBEDDING_TO_RANGE = {
+    "fourier": (0., 1.),
+    "legendre": (-1., 1.)
+}
 def _embedding_to_range(embedding: str):
     """
     Given embedding identifier, return the associated domain of that embedding. 
     """
-    if isinstance(embedding, str):
-        if embedding == "fourier":
-            return (0., 1.)
-        elif embedding == "legendre":
-            return (-1., 1.)
-        else:
-            raise ValueError(f"{embedding} not recognised")
+    key = embedding.replace(" ", "").lower()
+    try:
+        rang = _EMBEDDING_TO_RANGE[key]
+    except KeyError:
+        raise ValueError(f"Embedding {embedding} not recognised. "
+                         f"Available: {list(_EMBEDDING_TO_RANGE.keys())}")
+    return rang
 
-    else:
-        raise TypeError("Expected embedding name as string.")
     
-def preprocess_pipeline(X: np.ndarray, 
-                        t: np.ndarray,
+def preprocess_pipeline(X_raw: np.ndarray, 
+                        t_raw: np.ndarray,
                         split: Sequence[float],
                         random_state: int,
                         embedding: str
@@ -66,7 +71,7 @@ def preprocess_pipeline(X: np.ndarray,
 
     # First split: separate test set
     X_remain, X["test"], t_remain, t["test"] = train_test_split(
-        X, t, test_size=split[-1], random_state=random_state
+        X_raw, t_raw, test_size=split[-1], random_state=random_state
     )
     
     # Second split: separate validation set from remaining data
@@ -88,4 +93,5 @@ def preprocess_pipeline(X: np.ndarray,
         X[split]= torch.FloatTensor(X[split])
         t[split] = torch.LongTensor(t[split])
 
+    logger.info("Data preprocessed.")
     return (X, t, scaler)

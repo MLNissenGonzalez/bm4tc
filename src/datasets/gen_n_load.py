@@ -10,6 +10,8 @@ from schemas import DatasetConfig, DataGenDowConfig
 import os
 import numpy.typing as npt
 
+import logging
+logger = logging.getLogger(__name__)
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
@@ -90,7 +92,7 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]: 
     -------
     tuple[np.ndarray, np.ndarray], shape: [(num_cls*size, n_feat), (num_cls,)]
     """
-
+    logger.info("New 2D data generated")
     canonical, _ = _parse_dataset_name(cfg.name)
 
     if canonical == "moons":
@@ -164,7 +166,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     X: npt.NDArray[np.float32] = data["X"]  # shape: (size, n_feat)
     t: npt.NDArray[np.int_] = data["y"]     # shape: (size,)
-    
+    logger.debug(f"{X.shape=}, {t.shape=}")
     return LabelledDataset(
         name=variant,
         X=X,
