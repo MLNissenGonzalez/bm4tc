@@ -1,6 +1,6 @@
 defaults:
-  - ad_train: test
-  - dataset: moons_2k
+  - gantrain: test
+  - dataset: test
   - model/mps: test
   - model/dis: test
   - pretrain/mps: test

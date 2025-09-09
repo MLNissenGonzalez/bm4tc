@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from typing import Union, Sequence, Callable, Dict
+from typing import Any, Dict
 from schemas import DisConfig, PretrainDisConfig
 from _utils import get_criterion, get_optimizer
 
@@ -22,7 +22,8 @@ class MLPdis(nn.Module):
     One could use this class in a single discriminator setup (one for all classes of samples) or for the ensemble approach. 
     """
     def __init__(self, 
-                 cfg: DisConfig):
+                 cfg: DisConfig,
+                 input_dim: int):
         super().__init__()
 
         nonlinearity = cfg.nonlinearity.replace(" ", "").lower()
@@ -41,7 +42,7 @@ class MLPdis(nn.Module):
 
         if cfg.mode == "single":
             layers = []
-            layers.append(nn.Linear(cfg.input_dim, cfg.hidden_dims[0]))
+            layers.append(nn.Linear(input_dim, cfg.hidden_dims[0]))
             for i in range(len(cfg.hidden_dims)-1):
                 layers.append(get_activation())
                 layers.append(nn.Linear(cfg.hidden_dims[i], cfg.hidden_dims[i+1]))
@@ -88,6 +89,9 @@ def dis_pretrain_dataset(X_real: torch.FloatTensor,
         t_synth = torch.zeros(len(X_synth), dtype=torch.long)  # fake
         t_real = torch.ones(len(X_real), dtype=torch.long)      # real
         
+        logger.debug(f"{_class_wise_dataset_size(t_real)=}")
+        logger.debug(f"{_class_wise_dataset_size(t_synth)=}")
+
         X = torch.cat([X_real, X_synth], dim=0)
         t = torch.cat([t_real, t_synth], dim=0)
         return TensorDataset(X, t)
@@ -113,7 +117,7 @@ def dis_pretrain_loader(X_real: torch.FloatTensor,
                         X_synth: torch.FloatTensor, 
                         mode: str,
                         batch_size: int,
-                        split: str):
+                        split: str) -> Dict[Any, DataLoader]:
     if split not in ["train", "valid", "test"]:
         raise KeyError(f"{split} not recognised.")
     
@@ -205,7 +209,10 @@ def discriminator_pretraining(dis: nn.Module,
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            
+            logger.debug("Step worked.")
 
+        dis.eval()
         acc, avg_test_loss = dis_eval(dis, loader_test, criterion)
         test_loss.append(avg_test_loss)
         test_accuracy.append(acc)

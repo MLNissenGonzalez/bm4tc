@@ -14,7 +14,7 @@ class MPSInitConfig:
     in_dim: Optional[int] = None
     out_dim: Optional[int] = None
     bond_dim: Optional[int] = None
-    out_position: Optional[int] = None
+    out_position: Optional[int] = None 
     boundary: Text = 'obc'
     tensors: Optional[str] = None # path to where tensors are stored
     n_batches: int = 1
@@ -34,7 +34,6 @@ class DisConfig:
     mode: str
     nonlinearity: str = "relu"  # could also use Literal if you want stricter typing
     negative_slope: Optional[float] = None # for leaky relu
-    input_dim: Optional[int] = None # derived from dataset usually
 
 @dataclass
 class OptimizerConfig:

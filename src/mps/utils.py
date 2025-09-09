@@ -1,7 +1,7 @@
 import torch
 import tensorkrowch as tk
 from typing import Union, Sequence, Callable, Dict, Tuple, List
-import src.sampling as sampling
+import sampling as sampling
 import torch.nn as nn
 from dataclasses import dataclass
 
@@ -312,7 +312,7 @@ def cc_mps_sampling(mps: tk.models.MPS,
     in_dim, num_cls = _get_indim_and_ncls(mps)
 
     # Class basis embedding (one-hot) -> expand to (num_spc * num_bins, num_cls)
-    cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls)
+    cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls).float()
     embs[cls_pos] = cls_emb[None, :].expand(num_spc * num_bins, -1).to(device)
 
     # Input embedding -
@@ -450,7 +450,7 @@ def mps_sampling(   mps: tk.models.MPS,
     in_dim, num_cls = _get_indim_and_ncls(mps)
 
     for cls in range(num_cls):
-        cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls)
+        cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls).float()
         cls_samples = _cc_mps_sampling(
             mps=mps,embedding=embedding, cls_pos=cls_pos, in_dim=in_dim,
             cls_emb=cls_emb, num_bins=num_bins, input_space=input_space,
@@ -553,20 +553,16 @@ def batch_sampling_mps( mps: tk.models.MPS,
     input_space = torch.linspace(rang[0], rang[1], num_bins)
     in_dim, num_cls = _get_indim_and_ncls(mps)
     for cls in range(num_cls):
-        cls_embs.append(tk.embeddings.basis(torch.tensor(cls), num_cls))
+        cls_embs.append(tk.embeddings.basis(torch.tensor(cls), num_cls).float())
 
     num_batches = (num_spc + batch_spc - 1) // batch_spc
     samples = []
     for _ in range(num_batches): # could compute these batches in parallel, not to bad
-        batch = _mps_sampling(   mps=mps,
-                                input_space=input_space,
-                                embedding=embedding,
-                                num_samples=batch_spc,
-                                cls_pos=cls_pos,
-                                in_dim=in_dim,
-                                cls_embs=cls_embs,
-                                device=device
-            
+        batch = _mps_sampling(
+            mps=mps, embedding=embedding, cls_embs=cls_embs,
+            cls_pos=cls_pos, in_dim=in_dim,
+            num_bins=num_bins, input_space=input_space,
+            num_spc=batch_spc, device=device
         ) # (batch_size, num_cls, data.dim) samples
         samples.append(batch)
     

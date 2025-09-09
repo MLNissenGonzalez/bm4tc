@@ -1,10 +1,10 @@
-batch_size: 64
-critierion:
+batch_size: 32
+criterion:
   name: "BCE"
   kwargs: null
 optimizer:
   name: "adam"
-  optimizer_kwargs:
+  kwargs:
     lr: 1e-4
     weight_decay: 0.00
 max_epoch: 200

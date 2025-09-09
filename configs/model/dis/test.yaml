@@ -1,4 +1,4 @@
 hidden_dims: [6, 6]
 nonlinearity: LeakyReLU
 negative_slope: 0.01
-mode: "single"
+mode: "single" 

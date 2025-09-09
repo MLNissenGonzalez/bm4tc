@@ -1,7 +1,7 @@
 import torch
 import tensorkrowch as tk
 from typing import Union, Sequence, Callable, Dict
-from src.mps.utils import mps_sampling, mps_acc_eval, disr_train_mps
+from mps.utils import mps_sampling, mps_acc_eval, disr_train_mps
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
 from schemas import OptimizerConfig, CriterionConfig, PretrainMPSConfig

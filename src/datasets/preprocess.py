@@ -80,3 +80,9 @@ def preprocess_pipeline(X_raw: np.ndarray,
 
     logger.info("Data preprocessed.")
     return (X, t, scaler)
+
+def _get_split_size(size: int, split: Sequence[float]):
+    arr = np.array(split)
+    return np.floor(float(size) * arr )
+    
+    
