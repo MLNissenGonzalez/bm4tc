@@ -31,3 +31,6 @@ logs/
 # Python
 __pycache__/
 *.pyc
+
+# Debugging script
+debug.py

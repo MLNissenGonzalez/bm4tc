@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any, Text, Sequence
-import torch
 from hydra.core.config_store import ConfigStore
 
 # --- Low-level-configs ---
@@ -15,7 +14,7 @@ class MPSInitConfig:
     in_dim: Optional[int] = None
     out_dim: Optional[int] = None
     bond_dim: Optional[int] = None
-    out_position: Optional[int] = None
+    out_position: Optional[int] = None 
     boundary: Text = 'obc'
     tensors: Optional[str] = None # path to where tensors are stored
     n_batches: int = 1
@@ -32,9 +31,9 @@ class MPSConfig:
 @dataclass
 class DisConfig:
     hidden_dims: List[int]
+    mode: str
     nonlinearity: str = "relu"  # could also use Literal if you want stricter typing
     negative_slope: Optional[float] = None # for leaky relu
-    input_dim: Optional[int] = None # derived from dataset usually
 
 @dataclass
 class OptimizerConfig:
@@ -64,17 +63,14 @@ class PretrainDisConfig:
     optimizer: OptimizerConfig
     criterion: CriterionConfig
     max_epoch: int
-    n_real: int # per class or not? per batch
-    n_synth: int # n_real_samples + n_synth_samples = batch_size of dataloader.
+    batch_size: int
     patience: int
-
-# TODO: Add adtraining schema and config file for test case.
 
 # --- Mid-level config ---
 @dataclass
 class DataGenDowConfig:
     name: str
-    size: Optional[int]
+    size: Optional[int] # per class? yes. consider renaming to n_spc
     seed: Optional[int]
     noise: Optional[float]
     circ_factor: Optional[float]
@@ -99,6 +95,7 @@ class PretrainConfig:
 
 @dataclass
 class GANStyleConfig:
+    num_bins: int
     n_real: int
     n_synth: int
     d_loss: str
@@ -118,6 +115,7 @@ class Config:
     dataset: DatasetConfig
     model: ModelConfig
     pretrain: PretrainConfig
+    gantrain: GANStyleConfig
 
 
 # --- Register schemas with Hydra ---

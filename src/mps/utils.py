@@ -1,12 +1,117 @@
 import torch
 import tensorkrowch as tk
-from typing import Union, Sequence, Callable
-import src.sampling as sampling
+from typing import Union, Sequence, Callable, Dict, Tuple, List
+import sampling as sampling
 import torch.nn as nn
+from dataclasses import dataclass
+
+import numpy as np
+
 
 import logging
 logger = logging.getLogger(__name__)
 
+# Input to batch_sampling_mps
+@dataclass
+class PretrainSamplingConfig:
+    # mps
+    embedding: str
+    cls_pos: int
+    num_spc: int
+    num_bins: int
+    batch_spc: int
+    # device
+
+@dataclass 
+class MPSSamplingConfig:
+    # mps
+    embedding: str
+    cls_pos: int
+    num_bins: int
+    num_spc: int
+    # device 
+
+# cc_mps_sampling input
+@dataclass
+class ClassSamplingConfig:
+    # mps
+    embedding: str
+    cls_pos: int
+    num_bins:int
+    num_spc: int
+    cls: int
+    # device
+
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#---------------Getter functions for MPS-----------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+
+# TODO: Rewrite this to fit papers definition
+def legendre_embedding(x: torch.Tensor, dim: int):
+    return tk.embeddings.poly
+
+_EMBEDDING_MAP = {
+    "fourier": tk.embeddings.fourier,
+    "poly": tk.embeddings.poly,
+    "polynomial": tk.embeddings.poly,
+    "legendre": legendre_embedding
+}
+
+def get_embedding(name: str):
+    """
+    Given embedding identifier, return the associated embedding function
+    using the `_EMBEDDING_TO_RANGE` dictionary.
+    """
+    key = name.lower()
+    try:
+        embedding = _EMBEDDING_MAP[key]
+    except KeyError:
+        raise ValueError(f"Embedding {name} not recognised. "
+                         f"Available: {list(_EMBEDDING_MAP.keys())}")
+    return embedding
+
+
+_EMBEDDING_TO_RANGE = {
+    "fourier": (0., 1.),
+    "legendre": (-1., 1.)
+}
+
+def _embedding_to_range(embedding: str):
+    """
+    Given embedding identifier, return the associated domain of that embedding
+    using the `_EMBEDDING_TO_RANGE` dictionary.
+    """
+    key = embedding.replace(" ", "").lower()
+    try:
+        rang = _EMBEDDING_TO_RANGE[key]
+    except KeyError:
+        raise ValueError(f"Embedding {embedding} not recognised. "
+                         f"Available: {list(_EMBEDDING_TO_RANGE.keys())}")
+    return rang
+
+def _get_indim_and_ncls(mps: tk.models.MPS)-> Tuple[int, int]:
+    """
+    Extracts `in_dim`, the input embedding dimension, and `n_cls`, the number of classes assuming same input embedding dimension.
+
+    Returns
+    -------
+    Tuple[int, int]
+        (in_dim, n_cls)
+    """
+    phys = np.array(mps.phys_dim)
+    val, counts = np.unique(ar=phys, return_counts=True)
+    if np.max(counts) < phys.size-1:
+        raise ValueError("Can only handle same dimensional input embedding dimensions.")
+    in_dim = val[np.argmax(counts)]
+    if len(val) == 2:
+        n_cls = val[val!=in_dim][0]
+    else:
+        n_cls = in_dim
+    return int(in_dim), int(n_cls)
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -17,8 +122,10 @@ logger = logging.getLogger(__name__)
 #--------------------------------------------------------------------------------------------------------torch.optim.Optimizer------------------------------------------------------------
 
 # TODO: batch_size could be a confusing misnomer in the documentation. batch_size could be the product of num_bins and num_dist one want so compute.
+# TODO: Add tensor shapes
+
 def born_sequential(mps: tk.models.MPS, 
-                    embs: dict | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
+                    embs: Dict[int, torch.Tensor] | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
     """ 
     Sequential contraction of MPS with embedded input and computation of probabilities using the Born rule. Mainly used for sampling.
 
@@ -97,7 +204,7 @@ def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer 
     # Case: p(c|x_1,..., x_D), since n_features = D+1 (with output site)
     if not is_joint:
         p = torch.square(mps.forward(data=embs)) 
-        p = p / p.sum(dim=1, keepdim=True) 
+        p = p / p.sum(dim=-1, keepdim=True) 
     # Case: p(x_1,...,x_D), since n_features = D (no central tensor).
     else:
         p = torch.square(mps.forward(data=embs)).unsqueeze(1) # Z x p(x_1,..., x_D) # shape (batch_size, 1)
@@ -128,7 +235,7 @@ def batch_normalize(p: torch.Tensor,
     if p.shape == (batch_size*num_bins,):
         p = p.reshape(batch_size, num_bins)
 
-    return p / p.sum(dim=1, keepdim=True)
+    return p / p.sum(dim=-1, keepdim=True)
 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -139,235 +246,330 @@ def batch_normalize(p: torch.Tensor,
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
-# TODO: Interface or implementation level?
-# TODO: Think about moving away from dictionaries
 # TODO: Add other sampling methods and add it as configuration for experiments
-# TODO: Simplify code assuming:
-#       - same embedding at all input sites (this excludes the class site).
-#       - same number of bins for all input sites
-def _cc_mps_sampling(mps: tk.models.MPS,
-                    input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
-                    embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
-                    num_samples: int, # per class
+# TODO: Add num_bins as a hyperparameter in ad_train.
+
+
+
+def cc_mps_sampling(mps: tk.models.MPS,
+                    embedding: str,
                     cls_pos: int, # extract this once for the mps, not at every sampling step
-                    cls_emb: torch.Tensor, # perform embedding once, torch.Size=[num_cls]
+                    num_bins: int,
+                    num_spc: int, # per class                    
+                    cls: int,
                     device: torch.device
                     )-> torch.Tensor:
     """
-    This samples num_samples samples per class.
+    Class-conditional sampling from an MPS (single class).
+
+    This function samples `num_spc` independent samples conditioned on a single
+    class label `cls`. Sampling is sequential over the feature sites of the MPS
+    (skipping the site `cls_pos` which is fixed to the class embedding), using
+    the Born rule computed by `born_sequential`.
+
+    Important shapes / notes
+    -----------------------
+    - n_sites = mps.n_features
+    - input_space: 1D grid of length `num_bins` (torch.linspace)
+    - embedding(input_space, in_dim) -> (num_bins, in_dim)
+    - For born_sequential, each `embs[site]` must be shaped (num_spc * num_bins, phys_dim)
+      where phys_dim == in_dim for your embedding function.
+    - The probability vector returned by born_sequential is reshaped to (num_spc, num_bins),
+      then sampling.sss_sampling(p, input_space) is used to draw one value per sample.
 
     Parameters
     ----------
-    mps: MPS instance
-        mps to sample from
-    input_space: list of tensors
-        space to sample into. 
-    embedding: 
-        mapping input dimension to larger embedding dimension
-    num_samples: int
-        number of samples per class
-    cls_pos: int
-        which position in the mps corresponds to the class output assuming a central tensor mps design
-    cls_emb: tensor
-        the basis embedding of a single class, just a one-hot vector in most cases
-    device: torch device
+    mps : tk.models.MPS
+        The trained MPS model object used to compute Born probabilities.
+    embedding : str
+        Identifier for the embedding; converted to a callable via get_embedding(embedding).
+    cls_pos : int
+        Index of the MPS site reserved for the class label (this site is fixed to a class embedding).
+    num_bins : int
+        Number of candidate discrete values per site (resolution of `input_space`).
+    num_spc : int
+        Number of independent samples to draw for this class.
+    cls : int
+        Integer class index (used to form a one-hot / basis embedding).
+    device : torch.device
+        Device to put tensors on (cpu/cuda).
 
     Returns
     -------
-    tensor
-        num_samples samples with dims num
+    torch.Tensor
+        Tensor of shape (num_spc, data_dim) where data_dim == n_sites - 1 (class site excluded).
+        Each row is a sampled vector in the original input space (not embedded).
     """
-    if isinstance(input_space, torch.Tensor):
-        input_space = [input_space.clone() for _ in range(mps.n_features - 1)]
-    elif len(input_space) != (mps.n_features-1):
-        raise ValueError(f'Expected {mps.n_features-1} input spaces, got {len(input_space)}')
-    
-    if isinstance(embedding, Callable):
-        embedding = [embedding] * (mps.n_features-1)
-    elif len(embedding) != (mps.n_features-1):
-        raise ValueError(f'Expected {mps.n_features-1} embedding functions, got {len(embedding)}')
-    
-    phys_dim = mps.phys_dim[:cls_pos] + mps.phys_dim[cls_pos+1:]
     embs = {}
-    samples = {}
+    samples = []
+    mps.to(device)
 
-    num_bins = input_space[0].shape[0] # Assumes same batch_size for input feature
-    embs[cls_pos] = cls_emb[None, :].expand(num_samples * num_bins, -1).to(device)
-    site = 0
-    for i in range(mps.n_features):
-        if i == cls_pos:
+    # Create the 1D grid (input_space) and instanciate the embedding callable
+    rang = _embedding_to_range(embedding)
+    embedding = get_embedding(embedding)
+    input_space = torch.linspace(rang[0], rang[1], num_bins)
+
+    in_dim, num_cls = _get_indim_and_ncls(mps)
+
+    # Class basis embedding (one-hot) -> expand to (num_spc * num_bins, num_cls)
+    cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls).float()
+    embs[cls_pos] = cls_emb[None, :].expand(num_spc * num_bins, -1).to(device)
+
+    # Input embedding -
+    in_emb = embedding(input_space, in_dim)  # [num_bins, in_dim]
+    in_emb = in_emb[None, :, :].expand(num_spc, -1, -1)  # [num_samples, num_bins, in_dim]
+    in_emb = in_emb.reshape(num_spc * num_bins, in_dim).to(device) # [num_samples * num_bins, phys_dim]
+
+    # Sequentially sample each non-class site.
+    for site in range(mps.n_features):
+        if site == cls_pos:
             continue   
 
-        num_bins = input_space[site].shape[0]
-        embedding_out = embedding[site](input_space[site], phys_dim[site])  # [num_bins, phys_dim]
-        expanded = embedding_out[None, :, :].expand(num_samples, -1, -1)  # [num_samples, num_bins, phys_dim]
-        embs[i] = expanded.reshape(num_samples * num_bins, phys_dim[site]).to(device) # [num_samples * num_bins, phys_dim]
+        embs[site] = in_emb 
 
+        # This reset has to be performed as born_sequential assigns new in features everytime new embedding is added
         mps.unset_data_nodes()
         mps.reset()
-        mps.to(device)
         
-        p = born_sequential(mps=mps, embs=embs).view(num_samples, num_bins) # [num_samples, num_bins]
+        # Compute marginal probability over the bins for the current site for each sample.
+        p = born_sequential(mps=mps, embs=embs).view(num_spc, num_bins) # shape (num_spc, num_bins)
         
-        # Later, include an if clause here to inclue other sampling methods, or make this a configuration
-        samples[site] = sampling.sss_sampling(p, input_space[site])
+        # Draw one bin value per sample and site from p, TODO: Make configable
+        samples.append(sampling.sss_sampling(p, input_space)) # shape (num_spc,)
         
-        embs[i] = embedding[site](samples[site], phys_dim[site])[:, None, :].expand(-1, num_bins, -1).reshape(num_samples*num_bins, -1)
-        site += 1
+        # Embed drawn samples and use for conditioning for the next site.
+        embs[site] = embedding(samples[-1], in_dim)[:, None, :].expand(-1, num_bins, -1).reshape(num_spc*num_bins, -1)
+
+    # Stack sampled per-site arrays across sites 
+    samples = torch.stack(tensors=samples, dim=1) # shape (num_spc, data_dim)
     return samples
 
-# TODO: Think about moving away from dictionaries
-def mps_sampling(   mps: tk.models.MPS,
-                    input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
-                    embedding: Union[Callable[[torch.Tensor, int], torch.Tensor], Sequence[Callable[[torch.Tensor, int], torch.Tensor]]],
-                    num_samples: int, # per class
-                    cls_pos: int,
-                    cls_embs: Sequence[torch.Tensor], # one embedding per class,
-                    device: torch.device) -> torch.Tensor:
+def _cc_mps_sampling(mps: tk.models.MPS,
+                     embedding: Callable[[torch.Tensor, int], torch.Tensor],
+                     cls_pos: int, # extract this once for the mps, not at every sampling step
+                     cls_emb: torch.Tensor, # perform embedding once, torch.Size=[num_cls]  
+                     in_dim: int,
+                     num_bins: int,
+                     input_space: torch.Tensor, # need to have the same number of bins                                   
+                     num_spc: int, # samples per class             
+                     device: torch.device
+                    )-> torch.Tensor:
     """
-    Samples num_samples samples for each class. Basically just a loop around _cc_mps_sampling.
+    Class-conditional sampling helper that expects a callable embedding and prebuilt input_space.
+
+    This is functionally the same as cc_mps_sampling but receives already-prepared
+    embedding callable, input_space and cls_emb tensor to avoid recomputation.
 
     Parameters
     ----------
-    mps: MPS model
-    input_space: tensor
-    embedding: tk.embedding
-    num_samples: int
-        number of samples per class
-    cls_pos: int
-        position of central tensor
-    cls_embs: list of tensors
-        precomputed class embeddings for each class
-    device: torch.device
+    mps : tk.models.MPS
+    embedding : Callable[[torch.Tensor, int], torch.Tensor]
+        Callable that maps a 1D tensor of real inputs of length B to a (B, in_dim) tensor.
+    cls_pos : int
+        Index of the class site in the MPS.
+    in_dim : int
+        Physical dimension (embedding size) returned by `embedding`.
+    num_bins : int
+        Size of the discretization for each site.
+    input_space : torch.Tensor
+        1D tensor of length `num_bins` giving the candidate real-values for each site.
+    cls_emb : torch.Tensor
+        Precomputed class embedding (one-hot vector sized to match MPS physical dim at cls_pos).
+        Expected shape: (num_cls,)
+    num_spc : int
+        Number of samples to produce per class.
+    device : torch.device
 
     Returns
     -------
-    tensor
-        (num_classes x num_samples) number of samples in input space (not embedded)
+    torch.Tensor
+        (num_spc, data_dim) sampled values in real input space (not embedded).
+    """
+
+    samples = []
+    embs = {} # best way to save embeddings and their position
+
+    embs[cls_pos] = cls_emb[None, :].expand(num_spc * num_bins, -1).to(device)
+
+    # Input embedding TODO: Could move outside, as class and batch independent
+    in_emb = embedding(input_space, in_dim)  # [num_bins, in_dim]
+    in_emb = in_emb[None, :, :].expand(num_spc, -1, -1)  # [num_samples, num_bins, in_dim]
+    in_emb = in_emb.reshape(num_spc * num_bins, in_dim).to(device) # [num_samples * num_bins, phys_dim]
+
+    for site in range(mps.n_features):
+        if site == cls_pos:
+            continue   
+
+        # This reset has to be performed as born_sequential assigns new in features everytime new embedding is added
+        mps.unset_data_nodes()
+        mps.reset()
+    
+        # Compute marginal probability over the bins for the current site for each sample.
+        p = born_sequential(mps=mps, embs=embs).view(num_spc, num_bins) # shape (num_spc, num_bins)
+        
+        # Draw one bin value per sample and site from p, TODO: Make configable
+        samples.append(sampling.sss_sampling(p, input_space)) # shape (num_spc,)
+        
+        # Embed drawn samples and use for conditioning for the next site.
+        embs[site] = embedding(samples[-1], in_dim)[:, None, :].expand(-1, num_bins, -1).reshape(num_spc*num_bins, -1)
+
+    # Stack sampled per-site arrays across sites 
+    samples = torch.stack(tensors=samples, dim=1) # shape (num_spc, data_dim)
+    return samples
+
+
+# TODO: Vectorize across classes ? 
+def mps_sampling(   mps: tk.models.MPS,
+                    embedding: str,
+                    cls_pos: int, # need to provide this if num_cls == in_dim.
+                    num_bins: int,
+                    num_spc: int, # per class                    
+                    device: torch.device) -> torch.Tensor:
+    """
+    Top-level class-conditional sampler using string-identified embedding.
+    Sample multiple classes by looping over class-conditional sampler `_cc_mps_sampling`.
+
+    This prepares `input_space`, converts `embedding` (string -> callable) and runs
+    `_cc_mps_sampling` (one call per class).
+
+    Returns a tensor shaped (num_spc, num_classes, data_dim) where data_dim = n_sites - 1.
+    
+
+    Returns
+    -------
+    torch.Tensor
+        (num_spc, num_classes, data_dim)
     """
     
+    # Initilization code
+    samples = []
+    mps.to(device)
+    rang = _embedding_to_range(embedding)
+    embedding = get_embedding(embedding)
+    input_space = torch.linspace(rang[0], rang[1], num_bins)
+    in_dim, num_cls = _get_indim_and_ncls(mps)
+
+    for cls in range(num_cls):
+        cls_emb = tk.embeddings.basis(torch.tensor(cls), num_cls).float()
+        cls_samples = _cc_mps_sampling(
+            mps=mps,embedding=embedding, cls_pos=cls_pos, in_dim=in_dim,
+            cls_emb=cls_emb, num_bins=num_bins, input_space=input_space,
+            num_spc=num_spc, device=device
+        ) # shape (num_spc, data_dim)
+        samples.append(cls_samples)
+
+    samples = torch.stack(tensors=samples, dim=1) # shape: (n_spc, num_cls, data_dim)
+    return samples 
+
+# TODO: Vectorize across classes ? 
+def _mps_sampling(mps: tk.models.MPS,
+                  embedding: Callable[[torch.Tensor, int], torch.Tensor],
+                  cls_embs: Sequence[torch.Tensor], # one embedding per class,
+                  cls_pos: int,
+                  in_dim: int,  
+                  num_bins: int,
+                  input_space: torch.Tensor,                    
+                  num_spc: int, # per class,                                        
+                  device: torch.device) -> torch.Tensor:
+    """
+    Helper version of `mps_sampling` with some computation already assumed to be have been done before.
+
+    Parameters
+    ----------
+    mps : tk.models.MPS
+    embedding : Callable
+    cls_embs : sequence of torch.Tensor
+        Precomputed embeddings (one per class) — each should match the MPS's class-embedding size.
+    cls_pos : int
+        Position of the class site in the MPS.
+    in_dim : int
+        Physical embedding dimension.
+    num_bins : int
+    input_space : torch.Tensor
+    num_spc : int
+        Number of samples per class.
+    device : torch.device
+
+    Returns
+    -------
+    torch.Tensor
+        (num_spc, num_classes, data_dim)
+    """
+    
+    # Initialization code
     samples = []
     for cls_emb in cls_embs:
         cls_samples = _cc_mps_sampling(
-            mps=mps,
-            input_space=input_space,
-            embedding=embedding,
-            num_samples=num_samples,
-            cls_pos=cls_pos,
-            cls_emb=cls_emb,
-            device=device
-        )
-        samples = samples + [torch.stack(list(cls_samples.values()), dim=1)] # num_samples x (n_features-1), where n_features counts class as feature
+            mps=mps,embedding=embedding, cls_pos=cls_pos, in_dim=in_dim,
+            cls_emb=cls_emb, num_bins=num_bins, input_space=input_space,
+            num_spc=num_spc, device=device
+        ) # shape (num_spc, data_dim)
+        samples.append(cls_samples)
 
-    samples = torch.concat(samples) # (num_classes x num_samples) x (n_features-1), ordered by class for later retrieval, if wanted
-    return samples 
+    samples = torch.stack(tensors=samples, dim=1) # shape: (n_spc, num_cls, data_dim)
+    return samples
 
-# TODO: Add code to discard surplus of samples
-# TODO: Consider parallel implementation
+
+# TODO: Vectorize across batches/classes 
 def batch_sampling_mps( mps: tk.models.MPS,
-                        input_space: Union[torch.Tensor, Sequence[torch.Tensor]], # need to have the same number of bins
                         embedding: str,
                         cls_pos: int,
-                        cls_embs: Sequence[torch.Tensor], # one embedding per class,
-                        total_n_samples: int, # total number of samples per class, ought to be divisible by batch_size? hard coding is bad
-                        device: torch.device,
-                        save_classes = False,
-                        batch_size: int = 32 # will be num_samples in mps_sampling # only needed for visualisation
+                        num_spc: int, # total number of samples per class, ought to be divisible by batch_size? hard coding is bad
+                        num_bins: int,
+                        batch_spc: int, # will be num_spc in mps_sampling # only needed for visualisation
+                        device: torch.device
 ):
     """
-    Dividing up sampling of many samples into smaller batches for more economic memory usage.
-    Steps in the loop don't depend on each other -> Parallization possible.
+    Draw many samples per class in batches to limit peak memory use.
+
+    This function splits the total requested `num_spc` into batches of size `batch_spc`
+    (the last batch may be smaller). Each batch is produced by `_mps_sampling` and
+    concatenated to build the final dataset.
 
     Parameters
     ----------
-    mps: MPS model
-    input_space: tensor
-    embedding: tk.embeddings
-        mapping input feature to larger physical dimension
-    batch_size: int
-        number of samples to be sampled per (mini)batch per class
-    cls_pos: int
-        position of central tensor in mps
-    cls_embs: list of tensors
-        precomputed class embeddings (one hot vectors)
-    total_n_samples: int
-        total number of samples to be sampled per class
-    device: torch.device
-    save_classes: Boolean
-        If true, class labels are saved and returned.
-    
+    mps : tk.models.MPS
+    embedding : str
+        Embedding identifier -> converted via get_embedding.
+    cls_pos : int
+    num_spc : int
+        Total number of samples to draw per class (will be split into batches).
+    num_bins : int
+    batch_spc : int
+        Number of per-class samples produced per sub-batch (used to call _mps_sampling).
+    device : torch.device
+
     Returns
     -------
-    tensor
-        samples
+    samples: tensor
+        shape: (num_spc, num_cls, data.dim)
     """
+
+    # Initialization code
+    cls_embs = []
+    mps.to(device)
+    rang = _embedding_to_range(embedding)
     embedding = get_embedding(embedding)
-    num_batches = (total_n_samples + batch_size - 1) // batch_size
-    labels = []
+    input_space = torch.linspace(rang[0], rang[1], num_bins)
+    in_dim, num_cls = _get_indim_and_ncls(mps)
+    for cls in range(num_cls):
+        cls_embs.append(tk.embeddings.basis(torch.tensor(cls), num_cls).float())
+
+    num_batches = (num_spc + batch_spc - 1) // batch_spc
     samples = []
     for _ in range(num_batches): # could compute these batches in parallel, not to bad
-        batch = mps_sampling(   mps=mps,
-                                input_space=input_space,
-                                embedding=embedding,
-                                num_samples=batch_size,
-                                cls_pos=cls_pos,
-                                cls_embs=cls_embs,
-                                device=device
-            
-        ) # (batch_size x num_cls, data.dim) samples
-        samples = samples + [batch]
-        if save_classes == True:
-            batch_label = torch.concat([torch.full((batch_size,), cls, dtype=torch.long) for cls in range(len(cls_embs))])
-            labels = labels + [batch_label]
+        batch = _mps_sampling(
+            mps=mps, embedding=embedding, cls_embs=cls_embs,
+            cls_pos=cls_pos, in_dim=in_dim,
+            num_bins=num_bins, input_space=input_space,
+            num_spc=batch_spc, device=device
+        ) # (batch_size, num_cls, data.dim) samples
+        samples.append(batch)
     
-    samples = torch.concat(samples) # (num_batches x num_cls, data.dim) samples (I would have to clip this such that there aonly total_n_samples x num_classes)
-    if save_classes == True:
-        labels = torch.concat(labels)
-        return samples, labels
-    else:
-        return samples
+    samples = torch.concat(tensors=samples, dim=0) # (batch_size x num_batches, num_cls, data.dim)
+    samples = samples[:num_spc, :, :] # slice to (num_spc, num_cls, data.dim)
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#------MPS usage as a classifier-------------------------------------------------------------------------------------------------------------------------------------
-#------Functions and training steps----------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# TODO: Rewrite this to fit papers definition
-def legendre_embedding(x: torch.Tensor, dim: int):
-    return tk.embeddings.poly
-
-_EMBEDDING_MAP = {
-    "fourier": tk.embeddings.fourier,
-    "poly": tk.embeddings.poly,
-    "polynomial": tk.embeddings.poly,
-    "legendre": legendre_embedding
-}
-
-def get_embedding(name: str):
-    key = name.lower()
-    try:
-        embedding = _EMBEDDING_MAP[key]
-    except KeyError:
-        raise ValueError(f"Embedding {name} not recognised. "
-                         f"Available: {list(_EMBEDDING_MAP.keys())}")
-    return embedding
-
-
-
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#------Other mps methods-------------------------------------------------------------------------------------------------------------------------------------
-#------May or may not be used----------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-# TODO: Write a function that for a given MPS (Layer) returns class embeddings
-
-# TODO: Write a function that gives input potential form of input embeddings, what? 
-#       I could write a function that takes an input unprocessed dataset and an embedding and returns preprocessed data (may, or may not be embedded)
+    return samples
 
 
 #-----------------------------------------------------------------------------------------------------

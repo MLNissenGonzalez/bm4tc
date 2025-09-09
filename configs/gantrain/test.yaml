@@ -1,5 +1,6 @@
-n_real: 32
-n_synth: 32
+num_bins: 200
+n_real: 8
+n_synth: 8
 d_loss: "bce"
 g_loss: "vanilla"
 d_optimizer:
