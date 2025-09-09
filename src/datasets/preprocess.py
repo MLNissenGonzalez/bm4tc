@@ -3,32 +3,17 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 import numpy as np
 from typing import Sequence, Tuple, Dict
+from src.mps.utils import _embedding_to_range
 
 import logging
 logger = logging.getLogger(__name__)
+
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 #----Preprocessing-----------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------
-
-
-_EMBEDDING_TO_RANGE = {
-    "fourier": (0., 1.),
-    "legendre": (-1., 1.)
-}
-def _embedding_to_range(embedding: str):
-    """
-    Given embedding identifier, return the associated domain of that embedding. 
-    """
-    key = embedding.replace(" ", "").lower()
-    try:
-        rang = _EMBEDDING_TO_RANGE[key]
-    except KeyError:
-        raise ValueError(f"Embedding {embedding} not recognised. "
-                         f"Available: {list(_EMBEDDING_TO_RANGE.keys())}")
-    return rang
 
     
 def preprocess_pipeline(X_raw: np.ndarray, 

@@ -19,10 +19,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))  # make sr
 import hydra
 from src.schemas import Config
 
-from src.mps.categorisation import mps_cat_loader, disr_train_mps, mps_acc_eval
+from src.mps.categorisation import mps_cat_loader, cat_train_mps, mps_acc_eval
+from src.mps.utils import batch_sampling_mps
 from src.datasets.preprocess import preprocess_pipeline
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
-from src.discriminator.utils import MLPdis, dis_pre_train_loader, discriminator_pretraining
+from src.discriminator.utils import MLPdis, dis_pretrain_loader, discriminator_pretraining
 import tensorkrowch as tk
 import torch
 from omegaconf import OmegaConf
@@ -38,7 +39,6 @@ def main(cfg: Config):
     # 1. Raw data loading
     dataset: LabelledDataset = load_dataset(cfg=cfg.dataset)
     dataset_name = dataset.name
-    dataset_size = dataset.size
     data_dim = dataset.num_feat
     num_cls = dataset.num_cls
 
@@ -57,6 +57,7 @@ def main(cfg: Config):
     
     # 4. Data embedding and data loaders
     loader = {}
+    size_per_class = {}
     for split in ["train", "valid", "test"]:
         loader[split] = mps_cat_loader( X=X[split],
                                         t=t[split], 
@@ -64,9 +65,11 @@ def main(cfg: Config):
                                         embedding=cfg.model.mps.embedding,
                                         phys_dim=cfg.model.mps.init_kwargs.in_dim,
                                         split=split)
+        size_per_class[split] = t[split].shape[0] // num_cls
+        logging.debug(f"{size_per_class[split]=}")
     
     # 5. MPS pretraining
-    best_tensors, train_loss, val_accuracy = disr_train_mps(mps=mps, loaders=loader,
+    best_tensors, train_loss, val_accuracy = cat_train_mps(mps=mps, loaders=loader,
                                                             cfg=cfg.pretrain.mps,
                                                             device=device,
                                                             title=dataset_name)
@@ -80,6 +83,9 @@ def main(cfg: Config):
     dis = MLPdis(cfg.model.dis)
 
     # 7. Synthezesing and wrapping to data loader
-    
+    synths = {}
+    for split in ["train", "valid", "test"]:
+        synths[split] = batch_sampling_mps(mps, )
+
 if __name__ == "__main__":
     main()

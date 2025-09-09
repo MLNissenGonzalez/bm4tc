@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 
+# TODO: Add ensemble method
 class MLPdis(nn.Module):
     """
     Discriminator for GAN training. This architecture is just a fully connected feed forward network with single logit output for BCE loss. 
@@ -38,15 +39,20 @@ class MLPdis(nn.Module):
         if not cfg.hidden_dims:
             raise ValueError("hidden_dims must contain at least one layer size.")
 
-        layers = []
-        layers.append(nn.Linear(cfg.input_dim, cfg.hidden_dims[0]))
-        for i in range(len(cfg.hidden_dims)-1):
+        if cfg.mode == "single":
+            layers = []
+            layers.append(nn.Linear(cfg.input_dim, cfg.hidden_dims[0]))
+            for i in range(len(cfg.hidden_dims)-1):
+                layers.append(get_activation())
+                layers.append(nn.Linear(cfg.hidden_dims[i], cfg.hidden_dims[i+1]))
             layers.append(get_activation())
-            layers.append(nn.Linear(cfg.hidden_dims[i], cfg.hidden_dims[i+1]))
-        layers.append(get_activation())
-        layers.append(nn.Linear(cfg.hidden_dims[-1], 1)) # always binary classification
+            layers.append(nn.Linear(cfg.hidden_dims[-1], 1)) # always binary classification
 
-        self.stack = nn.Sequential(*layers)
+            self.stack = nn.Sequential(*layers)
+        elif cfg.mode == "ensemble":
+            raise KeyError(f"ensemble mode not implemented yet")
+        else:
+            raise KeyError(f"{cfg.mode} not recognised.")
 
     def forward(self, x):
         return self.stack(x) # returns logit
@@ -57,8 +63,6 @@ class MLPdis(nn.Module):
 
 # TODO: Classical discriminator initialisation based on predefined MPS or data.
 # TODO: Optimizer initialisation
-# TODO: Add discriminator ensemble, one for each class. 
-
 
 #------------------------------------------------------------------------------------------------´
 #------------------------------------------------------------------------------------------------
@@ -67,49 +71,59 @@ class MLPdis(nn.Module):
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 
+# (Class-wise) dataset sizes should be controlled/logged (e.g. via config)
+def _class_wise_dataset_size(t: torch.LongTensor):
+    _, cwds = t.unique(return_counts=True)
+    return cwds
 
-# Data loader for the discrimination between real and synthesied examples
-# The construction below could be used for a single discriminator for all classes
-# or for a ensemble of discriminators, one for each class
 
-def dis_pre_train_loader(   samples_train: torch.Tensor, 
-                            samples_test: torch.Tensor, 
-                            dataset_train: torch.Tensor,
-                            dataset_test: torch.Tensor,
-                            batch_size: int) -> tuple[DataLoader, DataLoader]:
-    """
-    DataLoader constructor for discriminator pretraining. Could be class dependent or not.
+def dis_pretrain_dataset(X_real: torch.FloatTensor, 
+                         c_real: torch.LongTensor, 
+                         X_synth: torch.FloatTensor, 
+                         mode="single"):
+    num_spc, num_cls, data_dim = X_synth.shape
 
-    Parameters
-    ----------
-    samples_train: tensor, shape=(num_samples_train, n_features)
-        batch of unlabelled and by the MPS generated samples for training
-    sampeles_test: tensor, shape=(num_samples_test, n_features)
-    dataset_train: tensor, shape=(num_samples_train, n_features)
-        batch of unlabelled natural samples for training
-    dataset_test: tensor, shape=(num_samples_test, n_features)
-    batch_size: int
-        number of samples in the final loader (synthetic mixed with natural)
-
-    Returns
-    -------
-    tuple[DataLoader, DataLoader]
-        the train and test dataloader for pretraining of the discriminator
-    """        
+    if mode == "single":
+        X_synth = X_synth.reshape(num_spc * num_cls, data_dim)
+        t_synth = torch.zeros(len(X_synth), dtype=torch.long)  # fake
+        t_real = torch.ones(len(X_real), dtype=torch.long)      # real
         
-    X_train = torch.concat([dataset_train, samples_train])
-    t_train = torch.concat([torch.ones(len(dataset_train)), 
-                torch.zeros(len(samples_train), dtype=torch.long)])
-    train_data = TensorDataset(X_train, t_train)
-    loader_train = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
+        X = torch.cat([X_real, X_synth], dim=0)
+        t = torch.cat([t_real, t_synth], dim=0)
+        return TensorDataset(X, t)
 
-    X_test = torch.concat([dataset_test, samples_test])
-    t_test = torch.concat([torch.ones(len(dataset_test)), 
-                torch.zeros(len(samples_test), dtype=torch.long)])
-    test_data = TensorDataset(X_test, t_test)
-    loader_test = DataLoader(test_data, batch_size=batch_size)
+    elif mode == "ensemble":
+        datasets = {}
+        for c in range(num_cls):
+            X_real_c = X_real[c_real == c]                # select class c
+            X_synth_c = X_synth[:, c, :]                  # synthetic for class c
+            t_real = torch.ones(len(X_real_c), dtype=torch.long)
+            t_synth = torch.zeros(len(X_synth_c), dtype=torch.long)
+            
+            X = torch.cat([X_real_c, X_synth_c], dim=0)
+            t = torch.cat([t_real, t_synth], dim=0)
+            datasets[c] = TensorDataset(X, t)
+        return datasets
+
+    else:
+        raise KeyError(f"{mode} has to be either single or ensemble.")
+
+def dis_pretrain_loader(X_real: torch.FloatTensor, 
+                        c_real: torch.LongTensor, 
+                        X_synth: torch.FloatTensor, 
+                        mode: str,
+                        batch_size: int,
+                        split: str):
+    if split not in ["train", "valid", "test"]:
+        raise KeyError(f"{split} not recognised.")
     
-    return loader_train, loader_test 
+    dataset = dis_pretrain_dataset(X_real, c_real, X_synth, mode=mode)
+    if mode == "single":
+        return {"all": DataLoader(dataset, batch_size=batch_size, shuffle=(split=="train"), drop_last=(split=="train"))}
+    elif mode == "ensemble":
+        loaders = {c: DataLoader(ds, batch_size=batch_size, shuffle=(split=="train"), drop_last=(split=="train")) 
+                   for c, ds in dataset.items()}
+        return loaders
 
 
 def dis_eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module):

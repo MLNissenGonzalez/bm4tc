@@ -45,8 +45,10 @@ def mps_cat_loader( X: torch.Tensor,
         shuffle=(split in ['train', 'valid']),
         drop_last=(split == 'train')
     )
+    logger.debug("DataLoader for categorisation intialized.")
     return loader
 
+# TODO: Add tensor shape description
 def mps_acc_eval(   mps: tk.models.MPSLayer, # relies on mps.out_features = [cls_pos]
                     loader: DataLoader,
                     device: torch.device) -> float:
@@ -71,7 +73,7 @@ def mps_acc_eval(   mps: tk.models.MPSLayer, # relies on mps.out_features = [cls
         for X, t in loader:
             X, t = X.to(device), t.to(device)
             p = born_parallel(mps, X)
-            _, preds = torch.max(p, 1)
+            _, preds = torch.max(input=p, dim=-1)
 
             # Counting correct predictions
             correct += (preds == t).sum().item()
@@ -79,7 +81,7 @@ def mps_acc_eval(   mps: tk.models.MPSLayer, # relies on mps.out_features = [cls
     acc = correct / total
     return acc
 
-
+# TODO: Add tensor shape description
 def _mps_cls_train_step(mps: tk.models.MPSLayer, # expect mps.out_features = [cls_pos]
                        loader: DataLoader,
                        device: torch.device,
@@ -120,7 +122,7 @@ def _mps_cls_train_step(mps: tk.models.MPSLayer, # expect mps.out_features = [cl
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
-def disr_train_mps( mps: tk.models.MPSLayer,
+def cat_train_mps( mps: tk.models.MPSLayer,
                     loaders: Dict[str, DataLoader], #loads embedded inputs and labels
                     cfg: PretrainMPSConfig,
                     device: torch.device,

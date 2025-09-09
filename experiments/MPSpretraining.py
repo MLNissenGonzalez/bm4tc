@@ -12,7 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))  # make sr
 import hydra
 from src.schemas import Config
 
-from src.mps.categorisation import mps_cat_loader, disr_train_mps, mps_acc_eval
+from src.mps.categorisation import mps_cat_loader, cat_train_mps, mps_acc_eval
 from src.datasets.preprocess import preprocess_pipeline
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 import tensorkrowch as tk
@@ -55,7 +55,7 @@ def main(cfg: Config):
                                         split=split)
     
     # 5. MPS pretraining
-    best_tensors, train_loss, val_accuracy = disr_train_mps(mps=mps, loaders=loader,
+    best_tensors, train_loss, val_accuracy = cat_train_mps(mps=mps, loaders=loader,
                                                             cfg=cfg.pretrain.mps,
                                                             device=device,
                                                             title=dataset_name)
