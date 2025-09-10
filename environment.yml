@@ -1,4 +1,4 @@
-name: TNML
+name: tn_adv_train
 channels:
   - nvidia    # for GPU CUDA packages
   - pytorch
