@@ -40,7 +40,7 @@ def pre_select(p: torch.Tensor):
     ids = cmp.float().argmax(dim=-1) # torch.argmax returns index of first (by the index count of the dimension to be reduced) maximal value
     return cdf_norm, nu, ids
 
-def sss_sampling(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+def os_secant(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     """
     Single-shot secant sampling on a predefined grid of x-values. 
     Interpolation step gives gradient signal.

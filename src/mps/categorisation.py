@@ -9,12 +9,13 @@ from mps.utils import get_embedding, born_parallel
 import logging
 logger = logging.getLogger(__name__)
 
-def mps_cat_loader( X: torch.Tensor, 
-                    t: torch.Tensor, 
-                    embedding: str, 
-                    batch_size: int, 
-                    phys_dim: int,
-                    split: str) -> DataLoader:
+
+def loader_creator(X: torch.Tensor,
+                   t: torch.Tensor,
+                   embedding: str,
+                   batch_size: int,
+                   phys_dim: int,
+                   split: str) -> DataLoader:
     """
     Create DataLoaders for multiple datasets and splits
 
@@ -49,9 +50,11 @@ def mps_cat_loader( X: torch.Tensor,
     return loader
 
 # TODO: Add tensor shape description
-def mps_acc_eval(   mps: tk.models.MPSLayer, # relies on mps.out_features = [cls_pos]
-                    loader: DataLoader,
-                    device: torch.device) -> float:
+
+
+def acc_eval(mps: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
+             loader: DataLoader,
+             device: torch.device) -> float:
     """
     Computes the prediction accuracy of a MPS Born machine on a dataset.
 
@@ -82,12 +85,15 @@ def mps_acc_eval(   mps: tk.models.MPSLayer, # relies on mps.out_features = [cls
     return acc
 
 # TODO: Add tensor shape description
-def _mps_cls_train_step(mps: tk.models.MPSLayer, # expect mps.out_features = [cls_pos]
-                       loader: DataLoader,
-                       device: torch.device,
-                       optimizer: torch.optim.Optimizer,
-                       loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] # expects score, not probs. switch for str parameter
-                       ) -> list:
+
+
+def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
+                loader: DataLoader,
+                device: torch.device,
+                optimizer: torch.optim.Optimizer,
+                # expects score, not probs. switch for str parameter
+                loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+                ) -> list:
     """
     Single epoch classification training. Returns minibatch-wise train_loss.
 
@@ -122,12 +128,14 @@ def _mps_cls_train_step(mps: tk.models.MPSLayer, # expect mps.out_features = [cl
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
-def cat_train_mps( mps: tk.models.MPSLayer,
-                    loaders: Dict[str, DataLoader], #loads embedded inputs and labels
-                    cfg: PretrainMPSConfig,
-                    device: torch.device,
-                    title: str | None = None,
-                    ):
+
+
+def train(mps: tk.models.MPSLayer,
+          loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
+          cfg: PretrainMPSConfig,
+          device: torch.device,
+          title: str | None = None,
+          ):
     """
     Full classification loop for MPS with early stopping based on validation accuracy.
 
@@ -143,7 +151,7 @@ def cat_train_mps( mps: tk.models.MPSLayer,
         Dictionary containing 'train' and 'valid' DataLoaders with embedded inputs and labels.
     cfg : PretrainMPSConfig
         Configuration object containing all training hyperparameters and sub-configs:
-        
+
         Fields:
         - optimizer_cfg : OptimizerConfig
             Name and kwargs for optimizer, e.g., {"name": "adam", "optimizer_kwargs": {"lr": 1e-4}}
@@ -176,6 +184,8 @@ def cat_train_mps( mps: tk.models.MPSLayer,
         Mini-batch-wise training loss collected during training.
     val_accuracy : list[float]
         Epoch-wise validation accuracy.
+    test_accuracy : float
+        Final test accuracy.
     """
     logger.info("Categorisation training begins.")
     val_accuracy = []
@@ -199,11 +209,11 @@ def cat_train_mps( mps: tk.models.MPSLayer,
     patience_counter = 0
     for epoch in range(cfg.max_epoch):
         # Training step
-        train_loss = train_loss + _mps_cls_train_step(mps, loaders['train'], 
-                                  device, optimizer, criterion)
+        train_loss = train_loss + _train_step(mps, loaders['train'],
+                                              device, optimizer, criterion)
 
         # Validation step
-        acc = mps_acc_eval(mps, loaders['valid'], device)
+        acc = acc_eval(mps, loaders['valid'], device)
         val_accuracy.append(acc)
 
         # Progress tracking and best model update
@@ -223,7 +233,8 @@ def cat_train_mps( mps: tk.models.MPSLayer,
         if (cfg.goal_acc is not None):
             if cfg.goal_acc < best_acc:
                 if cfg.print_early_stop:
-                    logger.info(f"Early stopping via goal acc at epoch {epoch}")
+                    logger.info(
+                        f"Early stopping via goal acc at epoch {epoch}")
             break
         # Update report
         if (epoch == 0) and (title is not None):
@@ -231,4 +242,15 @@ def cat_train_mps( mps: tk.models.MPSLayer,
         elif cfg.print_updates and ((epoch+1) % 10 == 0):
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
 
-    return best_tensors, train_loss, val_accuracy
+    mps = tk.models.MPS(tensors=best_tensors)
+    test_accuracy = acc_eval(mps, loaders["test"], device)
+    logger.info(f"{test_accuracy=}")
+
+    result = {
+        "best tensors": best_tensors, 
+        "train loss": train_loss, 
+        "validation accuracy": val_accuracy,
+        "test accuracy": test_accuracy
+    }
+
+    return best_tensors, train_loss, val_accuracy, test_accuracy
