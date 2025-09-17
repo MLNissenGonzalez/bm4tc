@@ -1,8 +1,12 @@
 num_bins: 200
 n_real: 8
-n_synth: 8
-d_loss: "bce"
-g_loss: "vanilla"
+r_synth: 1.0 # ratio n_synth / n_real
+d_criterion:
+  name: "bce"
+  kwargs: null
+g_criterion: 
+  name: "bce"
+  kwargs: null
 d_optimizer:
   name: "adam"
   kwargs:
@@ -13,8 +17,27 @@ g_optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-max_steps: 200
+max_epoch: 10
 retrain_crit: "loss"
 stopping_crit: "acc"
-patience: 60
+acc_drop_tol: 0.01
+check_step: 1
+patience: 5
 smoothing: 0.0
+retrain_cfg: 
+  criterion: 
+    name: "negative log-likelihood"
+    kwargs:
+      eps: 1e-8
+  optimizer:
+    name: "adam"
+    kwargs:
+      lr: 1e-4
+      weight_decay: 0.00
+  max_epoch: 40
+  batch_size: 32 # samples loaded per categorisation step for all classes involved
+  patience: 5
+  auto_stack: True
+  auto_unbind: False
+  print_early_stop: True
+  print_updates: True

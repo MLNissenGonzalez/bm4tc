@@ -45,7 +45,7 @@ def main(cfg: Config):
                              device=device,
                              **init_cfg
                              )
-    cls_pos = mps.out_features[0]
+    cls_pos = mps.out_features[0] # important global variable
 
     # 3. Data preprocessing,
     X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
@@ -54,23 +54,26 @@ def main(cfg: Config):
                                        embedding=cfg.model.mps.embedding)
 
     # 4. Data embedding and data loaders
-    loader = {}
+    loaders = {}
     size_per_class = {}
     for split in ["train", "valid", "test"]:
-        loader[split] = mps_cat.loader_creator(X=X[split],
+        loaders[split] = mps_cat.loader_creator(X=X[split],
                                                t=t[split],
                                                batch_size=cfg.pretrain.mps.batch_size,
                                                embedding=cfg.model.mps.embedding,
                                                phys_dim=cfg.model.mps.init_kwargs.in_dim,
                                                split=split)
-        size_per_class[split] = _class_wise_dataset_size(t[split])
+        size_per_class[split] = _class_wise_dataset_size(t[split], num_cls)
         logging.debug(f"{size_per_class[split]=}")
 
     # 5. MPS pretraining
-    mps_pretrain_results = mps_cat.train(mps=mps, loaders=loader,
+    mps_pretrain_results = mps_cat.train(mps=mps, loaders=loaders,
                                          cfg=cfg.pretrain.mps,
                                          device=device,
                                          title=dataset_name)
     mps = tk.models.MPS(tensors=mps_pretrain_results["best tensors"])
 
     logger.info("MPS pretraining done.")
+
+if __name__ == "__main__":
+    main()

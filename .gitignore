@@ -32,5 +32,6 @@ logs/
 __pycache__/
 *.pyc
 
-# Debugging script
-debug.py
+# Debugging
+experiments/debug.py
+.vscode/

@@ -189,7 +189,11 @@ def _single_class(mps: tk.models.MPS,
     torch.Tensor
         (num_spc, data_dim) sampled values in real input space (not embedded).
     """
-
+    if num_spc == 0:
+    # Return empty tensor with correct feature dimension
+        logger.debug(f"No real examples of class {cls_emb.argmax()} in this batch.")
+        return torch.empty((0, mps.n_features - 1), device=device)
+    
     samples = []
     embs = {}  # best way to save embeddings and their position
 
