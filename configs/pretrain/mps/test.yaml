@@ -1,5 +1,3 @@
-max_epoch: 150
-patience: 35
 criterion: 
   name: "negative log-likelihood"
   kwargs:
@@ -9,11 +7,10 @@ optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
+max_epoch: 150
+batch_size: 32 # samples loaded per categorisation step for all classes involved
+patience: 35
 auto_stack: True
 auto_unbind: False
-# cls_pos should be inherited from the mps config file
-title: "${dataset.title}"
-goal_acc: null
 print_early_stop: True
 print_updates: True
-batch_size: 32 # samples loaded per categorisation step for all classes involved

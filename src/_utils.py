@@ -34,7 +34,8 @@ _LOSS_MAP = {
     "negativeloglikelihood": MPSNLLL,
     "negloglikelihood": MPSNLLL,
     "bce": nn.BCELoss, # BCE loss expects probabilities and target is float between 0 and 1
-    "binarycrossentropy": nn.BCELoss
+    "binarycrossentropy": nn.BCELoss,
+    "vanilla": nn.BCELoss # TODO: Has to be adapted to the swapped logarithm
 }
 
 def get_criterion(cfg: CriterionConfig):
@@ -92,8 +93,10 @@ def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
     return optimizer_cls(params, **config.kwargs)
 
 
-def _class_wise_dataset_size(t: torch.LongTensor) -> list:
-    _, cwds = t.unique(return_counts=True)
+def _class_wise_dataset_size(t: torch.LongTensor, num_cls: int) -> list:
+    cwds = torch.zeros(num_cls, dtype=torch.long, device=t.device)
+    uniques, counts = t.unique(return_counts=True)
+    cwds[uniques] = counts
     return cwds.tolist()
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

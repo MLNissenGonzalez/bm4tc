@@ -63,7 +63,7 @@ def init_discriminator(cfg: DisConfig,
                        num_classes: int,
                        device: torch.device) -> Dict[Any, nn.Module]:
     if cfg.mode == "single":
-        return {"all": MLP(cfg, input_dim).to(device)}
+        return {"single": MLP(cfg, input_dim).to(device)}
     elif cfg.mode == "ensemble":
         return {c: MLP(cfg, input_dim).to(device) for c in range(num_classes)}
     else:
@@ -116,7 +116,7 @@ def pretrain_dataset(X_real: torch.FloatTensor,
         If `mode` is not "single" or "ensemble".
     """
     num_cls = X_synth.shape[1]
-    num_spc = _class_wise_dataset_size(c_real)
+    num_spc = _class_wise_dataset_size(c_real, num_cls)
     logger.debug(f"class wise dataset size = {num_spc}")
     if mode == "single":
         synths = []
@@ -128,8 +128,8 @@ def pretrain_dataset(X_real: torch.FloatTensor,
         t_synth = torch.zeros(len(X_synth), dtype=torch.long)  # fake
         t_real = torch.ones(len(X_real), dtype=torch.long)      # real
 
-        logger.debug(f"{_class_wise_dataset_size(t_real)=}")
-        logger.debug(f"{_class_wise_dataset_size(t_synth)=}")
+        logger.debug(f"{_class_wise_dataset_size(t_real, num_cls)=}")
+        logger.debug(f"{_class_wise_dataset_size(t_synth, num_cls)=}")
 
         X = torch.cat([X_real, X_synth], dim=0)
         t = torch.cat([t_real, t_synth], dim=0)
@@ -182,7 +182,7 @@ def pretrain_loader(X_real: torch.FloatTensor,
     Returns
     -------
     Dict[str, torch.utils.data.DataLoader] or Dict[int, torch.utils.data.DataLoader]
-        - If `mode="single"`, returns {"all": DataLoader(...)}.
+        - If `mode="single"`, returns {"single": DataLoader(...)}.
         - If `mode="ensemble"`, returns {class_idx: DataLoader(...), ...}.
 
     Raises
@@ -195,7 +195,7 @@ def pretrain_loader(X_real: torch.FloatTensor,
 
     dataset = pretrain_dataset(X_real, c_real, X_synth, mode=mode)
     if mode == "single":
-        return {"all": DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"), drop_last=(split == "train"))}
+        return {"single": DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"), drop_last=(split == "train"))}
     elif mode == "ensemble":
         loaders = {c: DataLoader(ds, batch_size=batch_size, shuffle=(split == "train"), drop_last=(split == "train"))
                    for c, ds in dataset.items()}

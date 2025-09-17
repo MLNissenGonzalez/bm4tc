@@ -52,7 +52,6 @@ class PretrainMPSConfig:
     max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     patience: int
-    goal_acc: Optional[float] = None
     auto_stack: bool = True
     auto_unbind: bool = False
     print_early_stop: bool = True
@@ -97,14 +96,17 @@ class PretrainConfig:
 class GANStyleConfig:
     num_bins: int
     n_real: int
-    n_synth: int
-    d_loss: str
-    g_loss: str
-    d_optim: OptimizerConfig
-    g_optim: OptimizerConfig
-    max_steps: int
-    retrain_crit: str
+    r_synth: float # in (0.0, infty). n_synth = n_real * r_synth
+    d_criterion: CriterionConfig
+    g_criterion: CriterionConfig
+    d_optimizer: OptimizerConfig
+    g_optimizer: OptimizerConfig
+    max_epoch: int
     stopping_crit: str
+    check_step: int
+    retrain_crit: str
+    acc_drop_tol: float
+    retrain_cfg: PretrainMPSConfig
     patience: Optional[int]
     smoothing: float = 0.0
 
