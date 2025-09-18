@@ -368,11 +368,13 @@ def batched(mps: tk.models.MPS,
     mps.to(device)
     rang = _embedding_to_range(embedding)
     embedding = get_embedding(embedding)
-    input_space = torch.linspace(rang[0], rang[1], num_bins)
+    input_space = torch.linspace(rang[0], rang[1], num_bins).to(device)
     in_dim, num_cls = _get_indim_and_ncls(mps)
     for cls in range(num_cls):
-        cls_embs.append(tk.embeddings.basis(
-            torch.tensor(cls), num_cls).float())
+        cls_emb = tk.embeddings.basis(torch.tensor(cls), 
+                                      num_cls).to(device=device, 
+                                                  dtype=torch.float32)
+        cls_embs.append(cls_emb)
 
     num_batches = (num_spc + batch_spc - 1) // batch_spc
     samples = []

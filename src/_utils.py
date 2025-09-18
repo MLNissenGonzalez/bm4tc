@@ -94,10 +94,7 @@ def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
 
 
 def _class_wise_dataset_size(t: torch.LongTensor, num_cls: int) -> list:
-    cwds = torch.zeros(num_cls, dtype=torch.long, device=t.device)
-    uniques, counts = t.unique(return_counts=True)
-    cwds[uniques] = counts
-    return cwds.tolist()
+    return torch.bincount(input=t, minlength=num_cls).tolist()
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

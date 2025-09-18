@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(cfg: Config):
 
-    device = torch.device("cpu")  # change later when device calls are tracked
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # 1. Raw data loading
     dataset: LabelledDataset = load_dataset(cfg=cfg.dataset)
     dataset_name = dataset.name

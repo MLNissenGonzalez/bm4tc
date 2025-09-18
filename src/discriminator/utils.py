@@ -202,7 +202,7 @@ def pretrain_loader(X_real: torch.FloatTensor,
         return loaders
 
 
-def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module):
+def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device):
     """
     Evaluate a discriminator on a binary classification task.
 
@@ -226,8 +226,10 @@ def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module):
     total_loss = 0.0
     correct = 0
     total = 0
+    dis.to(device)
     with torch.no_grad():
         for X, t in loader:
+            X, t = X.to(device), t.to(device)
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
             preds = (prob >= 0.5).long()
@@ -243,7 +245,8 @@ def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module):
 
 def pretraining(dis: nn.Module,
                 cfg: PretrainDisConfig,
-                loaders: Dict[str, DataLoader]):
+                loaders: Dict[str, DataLoader],
+                device: torch.device):
     """
     Pretrain a single discriminator in a binary classification setting.
     Real samples are labeled 1, synthetic samples are labeled 0.
@@ -287,10 +290,12 @@ def pretraining(dis: nn.Module,
     optimizer = get_optimizer(dis.parameters(), cfg.optimizer)
     criterion = get_criterion(cfg.criterion)
 
+    dis.to(device)
     optimizer.zero_grad()
     for epoch in range(cfg.max_epoch):
         dis.train()
         for X, t in loaders["train"]:
+            X, t = X.to(device), t.to(device)
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
             loss = criterion(prob, t.float())
@@ -301,8 +306,7 @@ def pretraining(dis: nn.Module,
             optimizer.step()
             optimizer.zero_grad()
 
-        dis.eval()
-        acc, avg_valid_loss = eval(dis, loaders["valid"], criterion)
+        acc, avg_valid_loss = eval(dis, loaders["valid"], criterion, device)
         valid_loss.append(avg_valid_loss)
         valid_accuracy.append(acc)
 
@@ -320,7 +324,8 @@ def pretraining(dis: nn.Module,
 
     # If mode == ensemble, then this would be only one member
     dis.load_state_dict(best_model_state)
-    test_accuracy, _ = eval(dis, loaders["test"], criterion)
+    dis.to(device)
+    test_accuracy, _ = eval(dis, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
 
     result = {

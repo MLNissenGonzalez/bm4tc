@@ -125,8 +125,10 @@ def _batch_constructor(mps: tk. models.MPS,
                                            num_spc=n_synth_c,
                                            device=device)
 
-        t_real_c = torch.ones(len(X_real_c), dtype=torch.long)
-        t_synth_c = torch.zeros(n_synth_c, dtype=torch.long)
+        t_real_c = torch.ones(len(X_real_c))
+        t_synth_c = torch.zeros(n_synth_c)
+        t_real_c.to(device=device, dtype=torch.long)
+        t_synth_c.to(device=device, dtype=torch.long)
         X_c = torch.cat([X_real_c, X_synth_c.detach()], dim=0)
         t_c = torch.cat([t_real_c, t_synth_c], dim=0)
         perm = torch.randperm(X_c.shape[0])
@@ -320,7 +322,7 @@ def check_and_retrain(mps: tk.models.MPS,
         accuracy.append(retrain_results["validation accuracy"])
         loss.append(retrain_results["validation loss"])
 
-    mps = tk.models.MPS(tensors=mps.tensors)
+    mps = tk.models.MPS(tensors=mps.tensors, device=device)
 
     return mps, accuracy, loss
 
@@ -382,9 +384,10 @@ def loop(mps: tk.models.MPS,
 
     # First preperations
     d_losses, g_losses, valid_acc, valid_loss = [], [], [], []
-    trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0)
+    trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0.0)
     mps.unset_data_nodes()
     mps.reset()
+    mps.to(device)
 
     # Initialize gantraining specific objects
     d_optimizer = {}
@@ -397,11 +400,13 @@ def loop(mps: tk.models.MPS,
     # Initialize other objects needed for sampling
     input_space = _embedding_to_range(embedding)
     input_space = torch.linspace(input_space[0], input_space[1], cfg.num_bins)
+    input_space = input_space.to(device, dtype=torch.float32)
     embedding = get_embedding(embedding)
     in_dim, num_cls = _get_indim_and_ncls(mps)
     cls_embs = []
     for c in range(num_cls):
-        cls_emb = tk.embeddings.basis(torch.tensor(c), num_cls).float()
+        cls_emb = tk.embeddings.basis(torch.tensor(c), num_cls)
+        cls_emb = cls_emb.to(device=device, dtype=torch.float32)
         cls_embs.append(cls_emb)
 
     # Epoch loop
@@ -409,6 +414,7 @@ def loop(mps: tk.models.MPS,
         logger.info(f"GAN training at epoch={epoch+1}")
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
+            X_real, c_real = X_real.to(device), c_real.to(device)
             d_loss, g_loss = _step(mps=mps, dis=dis, X_real=X_real, c_real=c_real,
                                    r_synth=cfg.r_synth, cls_pos=cls_pos,
                                    num_bins=cfg.num_bins, in_dim=in_dim, 
