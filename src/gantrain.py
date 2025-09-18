@@ -237,7 +237,8 @@ def _step(mps: tk.models.MPS,
         d_optimizer[c].zero_grad()
         d_logit = d(X[c])
         d_prob = torch.sigmoid(d_logit.squeeze())
-        d_loss = d_criterion(d_prob, t[c].float())
+        d_target = t[c].to(device=device, dtype=torch.float32)
+        d_loss = d_criterion(d_prob, d_target)
         d_loss.backward()
         d_optimizer[c].step()
         d_losses.append(d_loss.detach().unsqueeze(0))
@@ -246,7 +247,8 @@ def _step(mps: tk.models.MPS,
         g_optimizer.zero_grad()
         g_logit = d(X_synth[c])
         g_prob = torch.sigmoid(g_logit.squeeze())
-        g_loss = g_criterion(g_prob, torch.ones(X_synth[c].shape[0]))
+        g_target = torch.ones(X_synth[c].shape[0]).to(device=device, dtype=torch.float32)
+        g_loss = g_criterion(g_prob, g_target)
         g_loss.backward()
         g_optimizer.step()
         g_losses.append(g_loss.detach().unsqueeze(0))
@@ -298,8 +300,8 @@ def check_and_retrain(mps: tk.models.MPS,
     """
     accuracy, loss = [], []
 
-    mps = tk.models.MPSLayer(tensors=mps.tensors, out_position=cls_pos)
-    mps.trace(torch.zeros(0, len(mps.in_features), mps.in_dim[0]))
+    mps = tk.models.MPSLayer(tensors=mps.tensors, out_position=cls_pos, device=device)
+    mps.trace(torch.zeros(0, len(mps.in_features), mps.in_dim[0]).to(device))
     mps.to(device)
 
     criterion = get_criterion(cfg.criterion)

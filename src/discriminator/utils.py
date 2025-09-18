@@ -131,7 +131,7 @@ def pretrain_dataset(X_real: torch.FloatTensor,
         logger.debug(f"{_class_wise_dataset_size(t_real, num_cls)=}")
         logger.debug(f"{_class_wise_dataset_size(t_synth, num_cls)=}")
 
-        X = torch.cat([X_real, X_synth], dim=0)
+        X = torch.cat([X_real, X_synth.cpu()], dim=0)
         t = torch.cat([t_real, t_synth], dim=0)
         return TensorDataset(X, t)
 
@@ -140,7 +140,7 @@ def pretrain_dataset(X_real: torch.FloatTensor,
         for c in range(num_cls):
             X_real_c = X_real[c_real == c]                # select class c
             # synthetic for class c
-            X_synth_c = X_synth[:num_spc[c], c, :]
+            X_synth_c = X_synth[:num_spc[c], c, :].cpu()
             t_real = torch.ones(len(X_real_c), dtype=torch.long)
             t_synth = torch.zeros(len(X_synth_c), dtype=torch.long)
 
