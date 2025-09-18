@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 def main(cfg: Config):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"{device=}")
 
     # 1. Raw data loading
     dataset: LabelledDataset = load_dataset(cfg=cfg.dataset)
@@ -52,9 +53,8 @@ def main(cfg: Config):
     mps = tk.models.MPSLayer(n_features=data_dim+1,
                              out_dim=num_cls,
                              device=device,
-                             **init_cfg
-                             )
-    cls_pos = mps.out_features[0] # important global variable
+                             **init_cfg)
+    cls_pos = mps.out_features[0]  # important global variable
 
     # 3. Data preprocessing,
     X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
@@ -67,11 +67,11 @@ def main(cfg: Config):
     size_per_class = {}
     for split in ["train", "valid", "test"]:
         loaders[split] = mps_cat.loader_creator(X=X[split],
-                                               t=t[split],
-                                               batch_size=cfg.pretrain.mps.batch_size,
-                                               embedding=cfg.model.mps.embedding,
-                                               phys_dim=cfg.model.mps.init_kwargs.in_dim,
-                                               split=split)
+                                                t=t[split],
+                                                batch_size=cfg.pretrain.mps.batch_size,
+                                                embedding=cfg.model.mps.embedding,
+                                                phys_dim=cfg.model.mps.init_kwargs.in_dim,
+                                                split=split)
         size_per_class[split] = _class_wise_dataset_size(t[split], num_cls)
         logging.debug(f"{size_per_class[split]=}")
 
@@ -80,7 +80,8 @@ def main(cfg: Config):
                                          cfg=cfg.pretrain.mps,
                                          device=device,
                                          title=dataset_name)
-    mps = tk.models.MPS(tensors=mps_pretrain_results["best tensors"])
+    mps = tk.models.MPS(
+        tensors=mps_pretrain_results["best tensors"], device=device)
 
     logger.info("MPS pretraining done.")
 
@@ -100,15 +101,13 @@ def main(cfg: Config):
             num_spc=n_spc,
             num_bins=cfg.gantrain.num_bins,
             batch_spc=cfg.gantrain.n_real,
-            device=device
-        ).detach()  # We do not want MPS gradients.
+            device=device).detach()  # We do not want MPS gradients.
         dis_loaders[split] = dis.pretrain_loader(X_real=X[split],
                                                  c_real=t[split],
                                                  X_synth=X_synth[split],
                                                  mode=cfg.model.dis.mode,
                                                  batch_size=cfg.pretrain.dis.batch_size,
-                                                 split=split
-                                                 )
+                                                 split=split)
 
     d_loaders = defaultdict(dict)
     for split, dic in dis_loaders.items():
@@ -121,7 +120,8 @@ def main(cfg: Config):
     for i in d.keys():
         dis_pretrain_results[i] = dis.pretraining(dis=d[i],
                                                   cfg=cfg.pretrain.dis,
-                                                  loaders=d_loaders[i])
+                                                  loaders=d_loaders[i],
+                                                  device=device)
         logger.info(f"Pretraining of discriminator {i} completed.")
     logger.info("Pretraining completed.")
 

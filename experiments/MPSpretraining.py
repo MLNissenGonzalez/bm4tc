@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 def main(cfg: Config):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+    logger.info(f"{device=}")
+
     # 1. Raw data loading
     dataset: LabelledDataset = load_dataset(cfg=cfg.dataset)
     dataset_name = dataset.name
@@ -43,9 +44,8 @@ def main(cfg: Config):
     mps = tk.models.MPSLayer(n_features=data_dim+1,
                              out_dim=num_cls,
                              device=device,
-                             **init_cfg
-                             )
-    cls_pos = mps.out_features[0] # important global variable
+                             **init_cfg)
+    cls_pos = mps.out_features[0]  # important global variable
 
     # 3. Data preprocessing,
     X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
@@ -58,11 +58,11 @@ def main(cfg: Config):
     size_per_class = {}
     for split in ["train", "valid", "test"]:
         loaders[split] = mps_cat.loader_creator(X=X[split],
-                                               t=t[split],
-                                               batch_size=cfg.pretrain.mps.batch_size,
-                                               embedding=cfg.model.mps.embedding,
-                                               phys_dim=cfg.model.mps.init_kwargs.in_dim,
-                                               split=split)
+                                                t=t[split],
+                                                batch_size=cfg.pretrain.mps.batch_size,
+                                                embedding=cfg.model.mps.embedding,
+                                                phys_dim=cfg.model.mps.init_kwargs.in_dim,
+                                                split=split)
         size_per_class[split] = _class_wise_dataset_size(t[split], num_cls)
         logging.debug(f"{size_per_class[split]=}")
 
@@ -71,7 +71,8 @@ def main(cfg: Config):
                                          cfg=cfg.pretrain.mps,
                                          device=device,
                                          title=dataset_name)
-    mps = tk.models.MPS(tensors=mps_pretrain_results["best tensors"])
+    mps = tk.models.MPS(
+        tensors=mps_pretrain_results["best tensors"], device=device)
 
     logger.info("MPS pretraining done.")
 

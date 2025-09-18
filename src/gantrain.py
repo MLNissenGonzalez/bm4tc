@@ -217,9 +217,9 @@ def _step(mps: tk.models.MPS,
     d_losses, g_losses = [], []
 
     X, t, X_synth = _batch_constructor(
-        mps=mps, X_real=X_real, c_real=c_real, 
-        cls_pos=cls_pos, num_bins=num_bins, r_synth=r_synth, 
-        in_dim=in_dim, num_cls=num_cls, cls_embs=cls_embs, 
+        mps=mps, X_real=X_real, c_real=c_real,
+        cls_pos=cls_pos, num_bins=num_bins, r_synth=r_synth,
+        in_dim=in_dim, num_cls=num_cls, cls_embs=cls_embs,
         embedding=embedding, input_space=input_space, device=device)
 
     if len(dis.keys()) == 1:  # i.e. single discriminator instead ensemble of discriminators
@@ -247,7 +247,8 @@ def _step(mps: tk.models.MPS,
         g_optimizer.zero_grad()
         g_logit = d(X_synth[c])
         g_prob = torch.sigmoid(g_logit.squeeze())
-        g_target = torch.ones(X_synth[c].shape[0]).to(device=device, dtype=torch.float32)
+        g_target = torch.ones(X_synth[c].shape[0]).to(
+            device=device, dtype=torch.float32)
         g_loss = g_criterion(g_prob, g_target)
         g_loss.backward()
         g_optimizer.step()
@@ -300,7 +301,8 @@ def check_and_retrain(mps: tk.models.MPS,
     """
     accuracy, loss = [], []
 
-    mps = tk.models.MPSLayer(tensors=mps.tensors, out_position=cls_pos, device=device)
+    mps = tk.models.MPSLayer(
+        tensors=mps.tensors, out_position=cls_pos, device=device)
     mps.trace(torch.zeros(0, len(mps.in_features), mps.in_dim[0]).to(device))
     mps.to(device)
 
@@ -419,11 +421,11 @@ def loop(mps: tk.models.MPS,
             X_real, c_real = X_real.to(device), c_real.to(device)
             d_loss, g_loss = _step(mps=mps, dis=dis, X_real=X_real, c_real=c_real,
                                    r_synth=cfg.r_synth, cls_pos=cls_pos,
-                                   num_bins=cfg.num_bins, in_dim=in_dim, 
-                                   num_cls=num_cls, embedding=embedding, 
-                                   cls_embs=cls_embs, input_space=input_space, 
-                                   d_optimizer=d_optimizer, g_optimizer=g_optimizer, 
-                                   d_criterion=d_criterion, g_criterion=g_criterion, 
+                                   num_bins=cfg.num_bins, in_dim=in_dim,
+                                   num_cls=num_cls, embedding=embedding,
+                                   cls_embs=cls_embs, input_space=input_space,
+                                   d_optimizer=d_optimizer, g_optimizer=g_optimizer,
+                                   d_criterion=d_criterion, g_criterion=g_criterion,
                                    device=device)
             d_losses.append(d_loss), g_losses.append(g_loss)
 
@@ -439,5 +441,6 @@ def loop(mps: tk.models.MPS,
 
     # Reshape
     d_losses, g_losses = torch.cat(d_losses, dim=0), torch.cat(g_losses, dim=0)
-    logger.info(f"{d_losses.shape=}, {g_losses.shape=}, {len(valid_acc)=}, {len(valid_loss)=}, ")
+    logger.info(
+        f"{d_losses.shape=}, {g_losses.shape=}, {len(valid_acc)=}, {len(valid_loss)=}, ")
     return d_losses, g_losses, valid_acc, valid_loss
