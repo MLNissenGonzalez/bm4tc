@@ -264,8 +264,7 @@ def train(mps: tk.models.MPSLayer,
     test_accuracy, _ = eval(mps, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
 
-    result = {
-        "best tensors": best_tensors,
+    results = {
         "train loss": train_loss,
         "validation accuracy": val_accuracy,
         "best accuracy": best_acc,
@@ -273,4 +272,4 @@ def train(mps: tk.models.MPSLayer,
         "test accuracy": test_accuracy
     }
 
-    return result
+    return best_tensors, results

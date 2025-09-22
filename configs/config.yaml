@@ -5,11 +5,13 @@ defaults:
   - model/dis: test
   - pretrain/mps: test
   - pretrain/dis: test
-  - override hydra/job_logging: debug
-  - override hydra/hydra_logging: default
+  - wandb: defaults
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
 
-  # to turn off hydra logging: set the overrides above to none and add https://stackoverflow.com/questions/65104134/disable-file-output-of-hydra?rq=3:
-  # hydra:
-  #   output_subdir: null
-  #   run: 
-  #     dir: .
+  # to turn off hydra logging: set the overrides above to null and add https://stackoverflow.com/questions/65104134/disable-file-output-of-hydra?rq=3:
+hydra:
+  output_subdir: null
+  run: 
+    dir: .

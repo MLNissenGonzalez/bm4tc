@@ -443,4 +443,11 @@ def loop(mps: tk.models.MPS,
     d_losses, g_losses = torch.cat(d_losses, dim=0), torch.cat(g_losses, dim=0)
     logger.info(
         f"{d_losses.shape=}, {g_losses.shape=}, {len(valid_acc)=}, {len(valid_loss)=}, ")
-    return d_losses, g_losses, valid_acc, valid_loss
+    results = {
+        "d_loss": d_losses,
+        "g_loss": g_losses,
+        "valid_acc": valid_acc,
+        "valid_loss": valid_loss
+    }
+
+    return results

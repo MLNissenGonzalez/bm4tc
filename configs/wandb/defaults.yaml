@@ -1,0 +1,7 @@
+setup:
+    project: gan_train
+    entity: martin-nissen-gonzalez-heidelberg-university
+    mode: online
+watch:
+    log: all
+    log_freq: 100

@@ -329,11 +329,10 @@ def pretraining(dis: nn.Module,
     logger.info(f"{test_accuracy=}")
 
     result = {
-        "model": dis,
         "train loss": train_loss,
         "valid loss": valid_loss,
         "valid accuracy": valid_accuracy,
         "test accuracy": test_accuracy
     }
 
-    return result
+    return dis, result
