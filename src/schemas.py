@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any, Text, Sequence
 from hydra.core.config_store import ConfigStore
+import omegaconf
+import wandb
+import hydra
 
 # --- Low-level-configs ---
 
@@ -27,6 +30,7 @@ class MPSConfig:
     init_kwargs: MPSInitConfig
     std: float
     embedding: str
+    sampler: str
 
 @dataclass
 class DisConfig:
@@ -64,6 +68,11 @@ class PretrainDisConfig:
     max_epoch: int
     batch_size: int
     patience: int
+
+@dataclass
+class WandbSetupConfig:
+    entity: str
+    project: str
 
 # --- Mid-level config ---
 @dataclass
@@ -110,6 +119,11 @@ class GANStyleConfig:
     patience: Optional[int]
     smoothing: float = 0.0
 
+@dataclass
+class WandbConfig:
+    setup: WandbSetupConfig
+    watch: Dict[str, Any]
+
 #--- Top-level config ---
 
 @dataclass
@@ -118,6 +132,7 @@ class Config:
     model: ModelConfig
     pretrain: PretrainConfig
     gantrain: GANStyleConfig
+    wandb: WandbConfig
 
 
 # --- Register schemas with Hydra ---
@@ -135,3 +150,24 @@ cs.store(group="pretrain", name="wrapper", node=PretrainConfig)
 cs.store(group="pretrain/mps", name="schema", node=PretrainMPSConfig)
 cs.store(group="pretrain/dis", name="schema", node=PretrainDisConfig)
 cs.store(group="ad_train", name="schema", node=GANStyleConfig)
+cs.store(group="wandb", name="schema", node=WandbConfig)
+
+
+def init_wandb(cfg: Config):
+    # Convert only loggable types
+    wandb_cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)
+    
+    # Optional: add Hydra job info to group for multiruns
+    runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
+    job_num = runtime_cfg.job.get("num", 0)
+    
+    group_key = f"{cfg.dataset.name}-{cfg.model.dis.mode}"
+    
+    run = wandb.init(
+        project=cfg.wandb.setup.project,
+        entity=cfg.wandb.setup.entity,
+        config=wandb_cfg,
+        group=group_key,
+        name=f"{cfg.model.mps.sampler}-job{job_num}",
+    )
+    return run

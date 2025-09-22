@@ -35,3 +35,7 @@ __pycache__/
 # Debugging
 experiments/debug.py
 .vscode/
+
+# Tracking
+/wandb/
+experiments/wandb_test.py
