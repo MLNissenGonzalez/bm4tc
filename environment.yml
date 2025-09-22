@@ -15,10 +15,10 @@ dependencies:
   - scipy
   - scikit-learn
   - tqdm
-  - mlflow
   - pip
   - pip:
       - tensorkrowch
       - opt_einsum==3.2
       - hydra-core
+      - wandb
 
