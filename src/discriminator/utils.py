@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import Any, Dict
 from schemas import DisConfig, PretrainDisConfig
 from _utils import get_criterion, get_optimizer, _class_wise_dataset_size
+import wandb
 
 import logging
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 # --------------------DISCRIMINIATOR INITIALIZATION-----------------------------------------------
 # ------------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------------------
+
 
 class MLP(nn.Module):
     """
@@ -58,6 +60,8 @@ class MLP(nn.Module):
         return self.stack(x)  # returns logit
 
 # TODO: Add other discriminator types, e.g. MPS with MLP module
+
+
 def init_discriminator(cfg: DisConfig,
                        input_dim: int,
                        num_classes: int,
@@ -79,6 +83,7 @@ def init_discriminator(cfg: DisConfig,
 # --------------------DISCRIMINIATOR PRETRAINING----------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------------------------
+
 
 def pretrain_dataset(X_real: torch.FloatTensor,
                      c_real: torch.LongTensor,
@@ -117,7 +122,6 @@ def pretrain_dataset(X_real: torch.FloatTensor,
     """
     num_cls = X_synth.shape[1]
     num_spc = _class_wise_dataset_size(c_real, num_cls)
-    logger.debug(f"class wise dataset size = {num_spc}")
     if mode == "single":
         synths = []
         for c in range(num_cls):
@@ -159,7 +163,6 @@ def pretrain_loader(X_real: torch.FloatTensor,
                     mode: str,
                     batch_size: int,
                     split: str) -> Dict[Any, DataLoader]:
-    
     """
     Wrap the pretraining datasets into PyTorch DataLoaders for a given split.
 
@@ -246,7 +249,9 @@ def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch
 def pretraining(dis: nn.Module,
                 cfg: PretrainDisConfig,
                 loaders: Dict[str, DataLoader],
-                device: torch.device):
+                key: Any,
+                device: torch.device
+                ):
     """
     Pretrain a single discriminator in a binary classification setting.
     Real samples are labeled 1, synthetic samples are labeled 0.
@@ -281,9 +286,6 @@ def pretraining(dis: nn.Module,
       call this function separately per member.
     """
 
-    train_loss = []
-    valid_loss = []
-    valid_accuracy = []
     patience_counter = 0
     best_loss = float('inf')
 
@@ -299,7 +301,7 @@ def pretraining(dis: nn.Module,
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
             loss = criterion(prob, t.float())
-            train_loss.append(loss.item())
+            wandb.log({f"dis/{key}/pre/train/loss": loss.item()})
 
             # Backpropagation
             loss.backward()
@@ -307,8 +309,10 @@ def pretraining(dis: nn.Module,
             optimizer.zero_grad()
 
         acc, avg_valid_loss = eval(dis, loaders["valid"], criterion, device)
-        valid_loss.append(avg_valid_loss)
-        valid_accuracy.append(acc)
+        wandb.log({
+            f"dis/{key}/pre/valid/acc": acc,
+            f"dis/{key}/pre/valid/loss": avg_valid_loss
+        })
 
         # Progress tracking and best model update
         if avg_valid_loss < best_loss:
@@ -327,12 +331,6 @@ def pretraining(dis: nn.Module,
     dis.to(device)
     test_accuracy, _ = eval(dis, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
+    wandb.log({f"dis/{key}/pre/test/acc": test_accuracy})
 
-    result = {
-        "train loss": train_loss,
-        "valid loss": valid_loss,
-        "valid accuracy": valid_accuracy,
-        "test accuracy": test_accuracy
-    }
-
-    return dis, result
+    return dis

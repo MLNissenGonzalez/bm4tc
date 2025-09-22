@@ -1,10 +1,11 @@
 import torch
 import tensorkrowch as tk
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple, List
 from torch.utils.data import TensorDataset, DataLoader
 from schemas import PretrainMPSConfig
 from _utils import get_optimizer, get_criterion
 from mps.utils import get_embedding, born_parallel
+import wandb
 
 import logging
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ def loader_creator(X: torch.Tensor,
 def eval(mps: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
          loader: DataLoader,
          criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
-         device: torch.device) -> float:
+         device: torch.device) -> Tuple[float, float]:
     """
     Computes the prediction accuracy of a MPS Born machine on a dataset.
 
@@ -99,8 +100,9 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
                 device: torch.device,
                 optimizer: torch.optim.Optimizer,
                 # expects score, not probs. switch for str parameter
-                loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-                ) -> list:
+                loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+                stage: str
+                ) -> None:
     """
     Single epoch classification training. Returns minibatch-wise train_loss.
 
@@ -117,7 +119,7 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
     list of floats
         minibatch-wise trainloss 
     """
-    train_loss = []
+
     mps.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
@@ -130,8 +132,9 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        train_loss.append(loss.item())
-    return train_loss
+
+        wandb.log({f"mps/{stage}/train/loss": loss})
+
 
 # TODO: Think about logging different or more quantities
 # TODO: Consider removing title parameter
@@ -141,9 +144,10 @@ def train(mps: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
           cfg: PretrainMPSConfig,
           device: torch.device,
+          stage: str,
           title: str | None = None,
           goal_acc: float | None = None
-          ):
+          ) -> Tuple[List[torch.FloatTensor], float]:
     """
     Full classification loop for MPS with early stopping based on validation accuracy.
 
@@ -197,9 +201,6 @@ def train(mps: tk.models.MPSLayer,
         Final test accuracy.
     """
     logger.info("Categorisation training begins.")
-    val_accuracy = []
-    train_loss = []
-    valid_loss = []
     best_acc = 0.0
     best_tensors = []  # Container for best model parameters
 
@@ -219,13 +220,17 @@ def train(mps: tk.models.MPSLayer,
     patience_counter = 0
     for epoch in range(cfg.max_epoch):
         # Training step
-        train_loss = train_loss + _train_step(mps, loaders['train'],
-                                              device, optimizer, criterion)
+        _train_step(
+            mps=mps, loader=loaders['train'], device=device,
+            optimizer=optimizer, loss_fn=criterion, stage=stage
+        )
 
         # Validation step
         acc, val_loss = eval(mps, loaders['valid'], criterion, device)
-        val_accuracy.append(acc)
-        valid_loss.append(val_loss)
+        wandb.log({
+            f"mps/{stage}/valid/acc": acc,
+            f"mps/{stage}/valid/loss": val_loss
+        })
 
         # Progress tracking and best model update
         if acc > best_acc:
@@ -263,13 +268,9 @@ def train(mps: tk.models.MPSLayer,
 
     test_accuracy, _ = eval(mps, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
+    wandb.log({
+        f"mps/{stage}/test/acc": test_accuracy,
+        f"mps/{stage}/best/acc": best_acc
+    })
 
-    results = {
-        "train loss": train_loss,
-        "validation accuracy": val_accuracy,
-        "best accuracy": best_acc,
-        "validiation loss": valid_loss,
-        "test accuracy": test_accuracy
-    }
-
-    return best_tensors, results
+    return best_tensors, best_acc

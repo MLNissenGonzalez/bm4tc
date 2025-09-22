@@ -6,7 +6,7 @@ defaults:
   - pretrain/mps: test
   - pretrain/dis: test
   - wandb: defaults
-  - override hydra/job_logging: none
+  - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
   - _self_
 

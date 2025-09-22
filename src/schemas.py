@@ -169,6 +169,5 @@ def init_wandb(cfg: Config):
         config=wandb_cfg,
         group=group_key,
         name=f"{cfg.model.mps.sampler}-job{job_num}",
-        reinit=True,  # important if multiple runs in same process
     )
     return run
