@@ -301,7 +301,7 @@ def pretraining(dis: nn.Module,
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
             loss = criterion(prob, t.float())
-            wandb.log({f"dis/{key}/pre/train/loss": loss.item()})
+            wandb.log({f"pre_dis/{key}/train/loss": loss.item()})
 
             # Backpropagation
             loss.backward()
@@ -310,8 +310,8 @@ def pretraining(dis: nn.Module,
 
         acc, avg_valid_loss = eval(dis, loaders["valid"], criterion, device)
         wandb.log({
-            f"dis/{key}/pre/valid/acc": acc,
-            f"dis/{key}/pre/valid/loss": avg_valid_loss
+            f"pre_dis/{key}/valid/acc": acc,
+            f"pre_dis/{key}/valid/loss": avg_valid_loss
         })
 
         # Progress tracking and best model update
@@ -331,6 +331,6 @@ def pretraining(dis: nn.Module,
     dis.to(device)
     test_accuracy, _ = eval(dis, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
-    wandb.log({f"dis/{key}/pre/test/acc": test_accuracy})
+    wandb.log({f"pre_dis/{key}/test/acc": test_accuracy})
 
     return dis

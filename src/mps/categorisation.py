@@ -133,7 +133,7 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
         loss.backward()
         optimizer.step()
 
-        wandb.log({f"mps/{stage}/train/loss": loss})
+        wandb.log({f"{stage}_mps/train/loss": loss})
 
 
 # TODO: Think about logging different or more quantities
@@ -228,8 +228,8 @@ def train(mps: tk.models.MPSLayer,
         # Validation step
         acc, val_loss = eval(mps, loaders['valid'], criterion, device)
         wandb.log({
-            f"mps/{stage}/valid/acc": acc,
-            f"mps/{stage}/valid/loss": val_loss
+            f"{stage}_mps/valid/acc": acc,
+            f"{stage}_mps/valid/loss": val_loss
         })
 
         # Progress tracking and best model update
@@ -269,8 +269,8 @@ def train(mps: tk.models.MPSLayer,
     test_accuracy, _ = eval(mps, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
     wandb.log({
-        f"mps/{stage}/test/acc": test_accuracy,
-        f"mps/{stage}/best/acc": best_acc
+        f"{stage}_mps/test/acc": test_accuracy,
+        f"{stage}_mps/best/acc": best_acc
     })
 
     return best_tensors, best_acc

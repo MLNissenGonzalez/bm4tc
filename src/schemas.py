@@ -123,6 +123,7 @@ class GANStyleConfig:
 class WandbConfig:
     setup: WandbSetupConfig
     watch: Dict[str, Any]
+    gen_viz: int
 
 #--- Top-level config ---
 
@@ -162,12 +163,12 @@ def init_wandb(cfg: Config):
     job_num = runtime_cfg.job.get("num", 0)
     
     group_key = f"{cfg.dataset.name}-{cfg.model.dis.mode}"
-    
+    run_name = f"j{job_num}-D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
     run = wandb.init(
         project=cfg.wandb.setup.project,
         entity=cfg.wandb.setup.entity,
         config=wandb_cfg,
         group=group_key,
-        name=f"{cfg.model.mps.sampler}-job{job_num}",
+        name=run_name,
     )
     return run
