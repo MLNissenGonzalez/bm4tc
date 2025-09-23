@@ -129,6 +129,7 @@ def _class_wise_dataset_size(t: torch.LongTensor, num_cls: int) -> list:
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# TODO: Implement this also for other visualisable datatypes
 def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTensor] = None, gen_viz: Optional[int]=None):
     """
     Visualise real or synthetised samples. 
