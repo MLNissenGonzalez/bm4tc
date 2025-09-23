@@ -252,8 +252,8 @@ def _step(mps: tk.models.MPS,
         g_optimizer.step()
 
         wandb.log({
-            f"dis/{c}/gan/loss": d_loss.detach().unsqueeze(0),
-            f"mps/gan/loss": g_loss.detach().unsqueeze(0)})
+            f"gan_dis/{c}/loss": d_loss.detach().unsqueeze(0),
+            f"gan_mps/loss": g_loss.detach().unsqueeze(0)})
 
 
 def check_and_retrain(mps: tk.models.MPS,
@@ -306,8 +306,8 @@ def check_and_retrain(mps: tk.models.MPS,
                                  criterion=criterion, device=device)
 
     wandb.log({
-        "mps/re/valid/acc": acc,
-        "mps/re/valid/loss": avg_loss
+        "gan_mps/valid/acc": acc,
+        "gan_mps/valid/loss": avg_loss
     })
 
     if acc < trigger_accuracy:
@@ -319,7 +319,7 @@ def check_and_retrain(mps: tk.models.MPS,
             loaders=loaders,
             cfg=cfg,
             device=device,
-            stage="re"
+            stage="gan"
         )
 
         mps = tk.models.MPS(tensors=best_tensors, device=device)
@@ -343,7 +343,7 @@ def loop(mps: tk.models.MPS,
          cat_loaders: Dict[str, DataLoader],
 
          device: torch.device
-         ) -> None:
+         ) -> tk.models.MPS:
     """
     Main training loop for GAN-style training with MPS generator and discriminators.
 
@@ -433,3 +433,4 @@ def loop(mps: tk.models.MPS,
 
             # Reinitialize MPS optimizer after retraining
             g_optimizer = get_optimizer(mps.parameters(), cfg.g_optimizer)
+    return mps, dis
