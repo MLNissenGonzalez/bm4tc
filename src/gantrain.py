@@ -433,4 +433,4 @@ def loop(mps: tk.models.MPS,
 
             # Reinitialize MPS optimizer after retraining
             g_optimizer = get_optimizer(mps.parameters(), cfg.g_optimizer)
-    return mps
+    return mps, dis

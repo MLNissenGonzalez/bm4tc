@@ -1,6 +1,4 @@
 # utils that are practical for experiments
-import os
-import logging
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -8,6 +6,33 @@ import numpy as np
 from torch import optim
 from typing import Optional, Dict, Any
 from schemas import CriterionConfig
+from pathlib import Path
+import hydra
+
+def save_model(model: torch.nn.Module, run_name: str, model_type: str):
+    """
+    Save model inside the Hydra run's output directory:
+    ${hydra:run.dir}/models/{model_type}_{run_name}.pt
+    """
+    assert model_type in ["pre_mps", "pre_dis", "gan_mps", "gan_dis"], \
+        f"Invalid model_type {model_type}"
+
+    # Hydra's current run dir
+    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+
+    # Models subfolder inside it
+    folder = run_dir / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    # Save path
+    filename = f"{model_type}_{run_name}.pt"
+    save_path = folder / filename
+
+    # Save state dict
+    torch.save(model.state_dict(), save_path)
+
+    return str(save_path)
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
