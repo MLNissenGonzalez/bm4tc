@@ -6,6 +6,7 @@ from typing import Any, Dict
 from schemas import DisConfig, PretrainDisConfig
 from _utils import get_criterion, get_optimizer, _class_wise_dataset_size
 import wandb
+from math import ceil
 
 import logging
 logger = logging.getLogger(__name__)
@@ -19,46 +20,42 @@ logger = logging.getLogger(__name__)
 
 class MLP(nn.Module):
     """
-    Discriminator for GAN training. This architecture is just a fully connected feed forward network with single logit output. 
-    One could use this class in a single discriminator setup (one for all classes of samples) or for the ensemble approach. 
+    Flexible discriminator MLP where hidden layers scale with input dimension.
     """
 
-    def __init__(self,
-                 cfg: DisConfig,
-                 input_dim: int):
+    def __init__(self, cfg: DisConfig, input_dim: int):
         super().__init__()
 
-        nonlinearity = cfg.nonlinearity.replace(" ", "").lower()
-
-        if nonlinearity == "relu":
-            def get_activation(): return nn.ReLU()
-        elif nonlinearity == "leakyrelu":
-            if cfg.negative_slope == None:
+        # Determine activation
+        act = cfg.nonlinearity.replace(" ", "").lower()
+        if act == "relu":
+            get_activation = lambda: nn.ReLU()
+        elif act == "leakyrelu":
+            if cfg.negative_slope is None:
                 raise ValueError("LeakyReLU needs negative_slope parameter.")
-
-            def get_activation(): return nn.LeakyReLU(cfg.negative_slope)
+            get_activation = lambda: nn.LeakyReLU(cfg.negative_slope)
         else:
-            raise ValueError(
-                f"{nonlinearity} not recognised. Try ReLU or LeakyReLU instead.")
+            raise ValueError(f"{cfg.nonlinearity} not recognised. Try ReLU or LeakyReLU.")
 
-        if not cfg.hidden_dims:
-            raise ValueError(
-                "hidden_dims must contain at least one layer size.")
+        # Determine hidden_dims
+        if cfg.hidden_multipliers is None or len(cfg.hidden_multipliers) == 0:
+            raise ValueError("hidden_multipliers must be provided as a list of floats.")
 
-        # TODO: Make hidden dims dependent on input dim
-        layers = []
-        layers.append(nn.Linear(input_dim, cfg.hidden_dims[0]))
-        for i in range(len(cfg.hidden_dims)-1):
+        hidden_dims = [max(1, ceil(mult * input_dim)) for mult in cfg.hidden_multipliers]
+
+        # Build layers
+        layers = [nn.Linear(input_dim, hidden_dims[0])]
+        for i in range(len(hidden_dims) - 1):
             layers.append(get_activation())
-            layers.append(nn.Linear(cfg.hidden_dims[i], cfg.hidden_dims[i+1]))
+            layers.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
         layers.append(get_activation())
-        # always binary classification
-        layers.append(nn.Linear(cfg.hidden_dims[-1], 1))
+        layers.append(nn.Linear(hidden_dims[-1], 1))  # binary classification
 
         self.stack = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.stack(x)  # returns logit
+        return self.stack(x)
+
 
 # TODO: Add other discriminator types, e.g. MPS with MLP module
 
