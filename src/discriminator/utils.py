@@ -45,6 +45,7 @@ class MLP(nn.Module):
             raise ValueError(
                 "hidden_dims must contain at least one layer size.")
 
+        # TODO: Make hidden dims dependent on input dim
         layers = []
         layers.append(nn.Linear(input_dim, cfg.hidden_dims[0]))
         for i in range(len(cfg.hidden_dims)-1):

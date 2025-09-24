@@ -39,3 +39,6 @@ experiments/debug.py
 # Tracking
 /wandb/
 experiments/wandb_test.py
+
+# scratchpad
+scratchpad.py

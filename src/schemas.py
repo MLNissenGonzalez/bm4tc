@@ -124,6 +124,7 @@ class WandbConfig:
     setup: WandbSetupConfig
     watch: Dict[str, Any]
     gen_viz: int
+    isWatch: bool
 
 #--- Top-level config ---
 
