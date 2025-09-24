@@ -8,6 +8,9 @@ from typing import Optional, Dict, Any
 from schemas import CriterionConfig
 from pathlib import Path
 import hydra
+import logging
+
+logger = logging.getLogger(__name__)
 
 def save_model(model: torch.nn.Module, run_name: str, model_type: str):
     """
@@ -143,9 +146,11 @@ def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTen
     ax
         axis object of matplotlib (either image or scatter plot)
     """
+    # I expected that something goes wrong here
     if labels is None:
+        logger.info(f"Assuming shape (n, num_classes, data_dim): {samples.shape}")
         n, num_classes, data_dim = samples.shape
-        samples = samples.reshape(-1, data_dim)                # (n*num_classes, data_dim)
+        samples = samples.reshape(n*num_classes, data_dim)                # (n*num_classes, data_dim)
         labels = torch.arange(num_classes).repeat(n)    # (n*num_classes,)
 
     if samples.shape[1]==2:

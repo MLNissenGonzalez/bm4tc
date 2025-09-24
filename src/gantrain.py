@@ -241,6 +241,10 @@ def _step(mps: tk.models.MPS,
         d_loss.backward()
         d_optimizer[c].step()
 
+        # Convert probabilities to binary predictions
+        d_pred = (d_prob >= 0.5).float()
+        d_acc = (d_pred == d_target).float().mean()
+
         # Generator update
         g_optimizer.zero_grad()
         g_logit = d(X_synth[c])
@@ -252,8 +256,10 @@ def _step(mps: tk.models.MPS,
         g_optimizer.step()
 
         wandb.log({
-            f"gan_dis/{c}/loss": d_loss.detach().unsqueeze(0),
-            f"gan_mps/loss": g_loss.detach().unsqueeze(0)})
+            f"gan_dis/{c}/loss": d_loss.detach(),
+            f"gan_mps/loss": g_loss.detach(),
+            f"gan_dis/{c}/acc": d_acc.detach()
+            })
 
 
 def check_and_retrain(generator: tk.models.MPS,

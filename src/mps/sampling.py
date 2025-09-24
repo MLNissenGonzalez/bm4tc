@@ -329,6 +329,7 @@ def _batch(mps: tk.models.MPS,
 
 
 # TODO: Vectorize across batches/classes
+# TODO: After batch of samples is generated, move it to CPU.
 def batched(mps: tk.models.MPS,
             embedding: str,
             cls_pos: int,
@@ -336,7 +337,7 @@ def batched(mps: tk.models.MPS,
             num_bins: int,
             batch_spc: int,  # will be num_spc in mps_sampling # only needed for visualisation
             device: torch.device
-            ):
+            ) -> torch.FloatTensor:
     """
     Draw many samples per class in batches to limit peak memory use.
 

@@ -147,7 +147,7 @@ def train(mps: tk.models.MPSLayer,
           stage: str,
           title: str | None = None,
           goal_acc: float | None = None
-          ) -> Tuple[List[torch.FloatTensor], float]:
+          ) -> Tuple[dict, List[torch.FloatTensor], float]:
     """
     Full classification loop for MPS with early stopping based on validation accuracy.
 

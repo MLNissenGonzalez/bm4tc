@@ -3,22 +3,23 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__),
                 "..", "src"))  # make src importable
 
-from collections import defaultdict
-import logging
-from omegaconf import OmegaConf
-import torch
-import tensorkrowch as tk
-import hydra
-import matplotlib.pyplot as plt
-from src._utils import _class_wise_dataset_size, visualise_samples, save_model
-import src.schemas as schemas
-from src.datasets.gen_n_load import load_dataset, LabelledDataset
-from src.datasets.preprocess import preprocess_pipeline
-import src.mps.categorisation as mps_cat
-import src.discriminator.utils as discr
-import src.mps.sampling as sampling
-import src.gantrain as gantrain
 import wandb
+import src.gantrain as gantrain
+import src.mps.sampling as sampling
+import src.discriminator.utils as discr
+import src.mps.categorisation as mps_cat
+from src.datasets.preprocess import preprocess_pipeline
+from src.datasets.gen_n_load import load_dataset, LabelledDataset
+import src.schemas as schemas
+from src._utils import _class_wise_dataset_size, visualise_samples, save_model
+import matplotlib.pyplot as plt
+import hydra
+import tensorkrowch as tk
+import torch
+import numpy as np
+from omegaconf import OmegaConf
+import logging
+from collections import defaultdict
 
 
 
@@ -69,18 +70,18 @@ def main(cfg: schemas.Config):
     # Pretraining the MPS as classifier
     if cfg.wandb.isWatch:
         run.watch(models=mps, **cfg.wandb.watch)
-    (_, mps_pretrain_tensors, 
+    (_, mps_pretrain_tensors,
      mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
-                                                               cfg=cfg.pretrain.mps,
-                                                               device=device,
-                                                               title=dataset_name,
-                                                               stage="pre")
+                                            cfg=cfg.pretrain.mps,
+                                            device=device,
+                                            title=dataset_name,
+                                            stage="pre")
     generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
-    path_pre_mps = save_model(model=generator, run_name=run.name, model_type="pre_mps")
+    path_pre_mps = save_model(
+        model=generator, run_name=run.name, model_type="pre_mps")
     run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
     logger.info("MPS pretraining done.")
-
 
     # Preparing dataset for discriminator pretraining
     X_synth = {}
@@ -88,27 +89,34 @@ def main(cfg: schemas.Config):
     n_spc = {}
     for split in ["train", "valid", "test"]:
         # Sampling fake examples
-        n_spc[split] = max(_class_wise_dataset_size(t=t[split], num_cls=num_cls))
+        n_spc[split] = max(_class_wise_dataset_size(
+            t=t[split], num_cls=num_cls))
         logger.info(f"Amount of samples per class generated = {n_spc}.")
-        X_synth[split] = sampling.batched(
-            mps=generator, embedding=cfg.model.mps.embedding,
-            cls_pos=cls_pos,
-            num_spc=n_spc[split],
-            num_bins=cfg.gantrain.num_bins,
-            batch_spc=cfg.gantrain.n_real,
-            device=device).detach()
+        with torch.no_grad():
+            X_synth[split] = (
+                sampling.batched(
+                    mps=generator, embedding=cfg.model.mps.embedding,
+                    cls_pos=cls_pos,
+                    num_spc=n_spc[split],
+                    num_bins=cfg.gantrain.num_bins,
+                    batch_spc=cfg.gantrain.n_real,
+                    device=device
+                )
+                .cpu()
+            )
+        torch.cuda.empty_cache()
+
         # Wrapping in the loader
         dis_loaders[split] = discr.pretrain_loader(X_real=X[split],
-                                                 c_real=t[split],
-                                                 X_synth=X_synth[split],
-                                                 mode=cfg.model.dis.mode,
-                                                 batch_size=cfg.pretrain.dis.batch_size,
-                                                 split=split)
-        
+                                                   c_real=t[split],
+                                                   X_synth=X_synth[split],
+                                                   mode=cfg.model.dis.mode,
+                                                   batch_size=cfg.pretrain.dis.batch_size,
+                                                   split=split)
+
     # Initialising discriminator(s)
     d = discr.init_discriminator(
         cfg=cfg.model.dis, input_dim=data_dim, num_classes=num_cls, device=device)
-
 
     # Swapping dictionary nesting to fit logic below
     d_loaders = defaultdict(dict)
@@ -117,9 +125,11 @@ def main(cfg: schemas.Config):
             d_loaders[i][split] = loader
     logger.info("Data for pretraining of discriminator loaded.")
 
-    # Vizualising generative capabilities after pretraining     
-    to_visualise = X_synth.get("train").cpu()
-    ax = visualise_samples(samples=to_visualise, labels=None, gen_viz=cfg.wandb.gen_viz)
+    # Vizualising generative capabilities after pretraining
+    to_visualise = X_synth.get("train")
+    np.save("pretrain_samples.pt", to_visualise.numpy())
+    ax = visualise_samples(samples=to_visualise,
+                           labels=None, gen_viz=cfg.wandb.gen_viz)
     wandb.log({"samples/pretraining": wandb.Image(ax.figure)})
     plt.close(ax.figure)
 
@@ -132,7 +142,8 @@ def main(cfg: schemas.Config):
             key=i,
             device=device
         )
-        path_pre_dis = save_model(model=d[i], run_name=f"{i}_{run.name}", model_type="pre_dis")
+        path_pre_dis = save_model(
+            model=d[i], run_name=f"{i}_{run.name}", model_type="pre_dis")
         run.log_model(path=path_pre_dis, name=f"pre_dis_{i}_{run.name}")
         logger.info(f"Pretraining of discriminator {i} completed.")
     logger.info("Pretraining completed.")
@@ -158,30 +169,35 @@ def main(cfg: schemas.Config):
         device=device
     )
     for i in dis.keys():
-        path_gan_dis = save_model(model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
+        path_gan_dis = save_model(
+            model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
         run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")
-    path_gan_mps = save_model(model=generator, run_name=run.name, model_type="gan_mps")
+    path_gan_mps = save_model(
+        model=generator, run_name=run.name, model_type="gan_mps")
     run.log_model(path=path_gan_mps, name=f"gan_mps_{run.name}")
     logger.info("GAN-style training completed.")
 
     # Visualizing generative capabilities after GAN-style training
     if data_dim == 2:
         n = n_spc["train"]
-    else: 
+    else:
         n = cfg.wandb.gen_viz
-    synths = sampling.batched(
-            mps=generator, embedding=cfg.model.mps.embedding,
-            cls_pos=cls_pos,
-            num_spc=n,
+
+    with torch.no_grad():
+        synths = sampling.batched(
+            mps=generator, 
+            embedding=cfg.model.mps.embedding,
+            cls_pos=cls_pos, num_spc=n,
             num_bins=cfg.gantrain.num_bins,
             batch_spc=cfg.gantrain.n_real,
-            device=device).detach().cpu()
+            device=device).cpu()
+    
     ax = visualise_samples(samples=synths)
     wandb.log({"samples/gantraining": wandb.Image(ax.figure)})
     plt.close(ax.figure)
 
-
     run.finish()
+
 
 if __name__ == "__main__":
     main()
