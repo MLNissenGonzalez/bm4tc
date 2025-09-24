@@ -319,6 +319,10 @@ def pretraining(dis: nn.Module,
             best_model_state = dis.state_dict()
         else:
             patience_counter += 1
+
+        if ((epoch+1)%10) == 0:
+            logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
+            
         # Early stopping
         if patience_counter > cfg.patience:
             logger.info(f"Early stopping at epoch {epoch+1}")
