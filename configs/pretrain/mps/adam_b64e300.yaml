@@ -1,0 +1,16 @@
+criterion: 
+  name: "negative log-likelihood"
+  kwargs:
+    eps: 1e-8
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+max_epoch: 150
+batch_size: 32 # samples loaded per categorisation step for all classes involved
+patience: 35
+auto_stack: True
+auto_unbind: False
+print_early_stop: True
+print_updates: True

@@ -34,7 +34,7 @@ class MPSConfig:
 
 @dataclass
 class DisConfig:
-    hidden_dims: List[int]
+    hidden_multipliers: List[float]
     mode: str
     nonlinearity: str = "relu"  # could also use Literal if you want stricter typing
     negative_slope: Optional[float] = None # for leaky relu

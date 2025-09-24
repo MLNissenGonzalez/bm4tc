@@ -41,4 +41,4 @@ experiments/debug.py
 experiments/wandb_test.py
 
 # scratchpad
-scratchpad.py
+maxBond_2d.py

@@ -41,5 +41,3 @@ retrain_cfg:
   auto_unbind: False
   print_early_stop: True
   print_updates: True
-
-  
