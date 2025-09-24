@@ -124,6 +124,7 @@ class WandbConfig:
     setup: WandbSetupConfig
     watch: Dict[str, Any]
     gen_viz: int
+    isWatch: bool
 
 #--- Top-level config ---
 
@@ -153,7 +154,7 @@ cs.store(group="pretrain/dis", name="schema", node=PretrainDisConfig)
 cs.store(group="ad_train", name="schema", node=GANStyleConfig)
 cs.store(group="wandb", name="schema", node=WandbConfig)
 
-
+# TODO: Move this to src._utils
 def init_wandb(cfg: Config):
     # Convert only loggable types
     wandb_cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)

@@ -272,5 +272,7 @@ def train(mps: tk.models.MPSLayer,
         f"{stage}_mps/test/acc": test_accuracy,
         f"{stage}_mps/best/acc": best_acc
     })
+    mps.reset()
+    best_state_dict = mps.state_dict()
 
-    return best_tensors, best_acc
+    return best_state_dict, best_tensors, best_acc

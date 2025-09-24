@@ -245,7 +245,7 @@ def _step(mps: tk.models.MPS,
         g_optimizer.zero_grad()
         g_logit = d(X_synth[c])
         g_prob = torch.sigmoid(g_logit.squeeze())
-        g_target = torch.ones(X_synth[c].shape[0]).to(
+        g_target = torch.ones_like(g_prob).to(
             device=device, dtype=torch.float32)
         g_loss = g_criterion(g_prob, g_target)
         g_loss.backward()
@@ -256,7 +256,7 @@ def _step(mps: tk.models.MPS,
             f"gan_mps/loss": g_loss.detach().unsqueeze(0)})
 
 
-def check_and_retrain(mps: tk.models.MPS,
+def check_and_retrain(generator: tk.models.MPS,
                       loaders: Dict[str, DataLoader],
                       cfg: schemas.PretrainMPSConfig,
                       cls_pos: int,
@@ -295,14 +295,15 @@ def check_and_retrain(mps: tk.models.MPS,
     loss : list of float
         Validation losses before and after retraining.
     """
-    mps = tk.models.MPSLayer(
-        tensors=mps.tensors, out_position=cls_pos, device=device)
-    mps.trace(torch.zeros(0, len(mps.in_features), mps.in_dim[0]).to(device))
-    mps.to(device)
+    generator.reset()
+    classifier = tk.models.MPSLayer(
+        tensors=generator.tensors, out_position=cls_pos, device=device)
+    classifier.trace(torch.zeros(0, len(classifier.in_features), classifier.in_dim[0]).to(device))
+    classifier.to(device)
 
     criterion = get_criterion(cfg.criterion)
 
-    acc, avg_loss = mps_cat.eval(mps=mps, loader=loaders["valid"],
+    acc, avg_loss = mps_cat.eval(mps=classifier, loader=loaders["valid"],
                                  criterion=criterion, device=device)
 
     wandb.log({
@@ -313,25 +314,22 @@ def check_and_retrain(mps: tk.models.MPS,
     if acc < trigger_accuracy:
         # retrain
         logger.info(f'Retraining after epoch {epoch+1}')
-        # not interested in training dynamics
-        best_tensors, best_acc = mps_cat.train(
-            mps=mps,
+        # TODO: training dynamics? Maybe track. best_acc?
+        best_state_dict, _, best_acc = mps_cat.train(
+            mps=classifier,
             loaders=loaders,
             cfg=cfg,
             device=device,
             stage="gan"
         )
+        generator.load_state_dict(best_state_dict)
 
-        mps = tk.models.MPS(tensors=best_tensors, device=device)
-
-    mps = tk.models.MPS(tensors=mps.tensors, device=device)
-
-    return mps
+    return generator.state_dict()
 
 
 # TODO: Implement gradient flow metric: wandb.watch
 # TODO: Add safety saves
-def loop(mps: tk.models.MPS,
+def loop(generator: tk.models.MPS,
          dis: Dict[Any, nn.Module],
          real_loaders: Dict[str, DataLoader],
          cfg: schemas.GANStyleConfig,
@@ -385,15 +383,16 @@ def loop(mps: tk.models.MPS,
     """
 
     trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0.0)
-    mps.unset_data_nodes()
-    mps.reset()
-    mps.to(device)
+
+    generator.unset_data_nodes()
+    generator.reset()
+    generator.to(device)
 
     # Initialize gantraining specific objects
     d_optimizer = {}
     for c in dis.keys():
         d_optimizer[c] = get_optimizer(dis[c].parameters(), cfg.d_optimizer)
-    g_optimizer = get_optimizer(mps.parameters(), cfg.g_optimizer)
+    g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
     d_criterion = get_criterion(cfg.d_criterion)
     g_criterion = get_criterion(cfg.g_criterion)
 
@@ -402,7 +401,7 @@ def loop(mps: tk.models.MPS,
     input_space = torch.linspace(input_space[0], input_space[1], cfg.num_bins)
     input_space = input_space.to(device, dtype=torch.float32)
     embedding = get_embedding(embedding)
-    in_dim, num_cls = _get_indim_and_ncls(mps)
+    in_dim, num_cls = _get_indim_and_ncls(generator)
     cls_embs = []
     for c in range(num_cls):
         cls_emb = tk.embeddings.basis(torch.tensor(c), num_cls)
@@ -415,7 +414,7 @@ def loop(mps: tk.models.MPS,
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
-            _step(mps=mps, dis=dis, X_real=X_real, c_real=c_real,
+            _step(mps=generator, dis=dis, X_real=X_real, c_real=c_real,
                   r_synth=cfg.r_synth, cls_pos=cls_pos,
                   num_bins=cfg.num_bins, in_dim=in_dim,
                   num_cls=num_cls, embedding=embedding,
@@ -426,11 +425,14 @@ def loop(mps: tk.models.MPS,
 
         # Checking classification accuracy and retraining if necessary
         if (epoch+1) % cfg.check_step == 0:
-            mps = check_and_retrain(mps=mps, loaders=cat_loaders,
+            best_state_dict = check_and_retrain(generator=generator, loaders=cat_loaders,
                                     cfg=cfg.retrain_cfg, cls_pos=cls_pos,
                                     epoch=epoch, device=device,
                                     trigger_accuracy=trigger_accuracy)
 
+            generator.load_state_dict(best_state_dict)
             # Reinitialize MPS optimizer after retraining
-            g_optimizer = get_optimizer(mps.parameters(), cfg.g_optimizer)
-    return mps, dis
+            g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
+    
+    
+    return generator, dis

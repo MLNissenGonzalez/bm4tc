@@ -67,14 +67,17 @@ def main(cfg: schemas.Config):
         logging.debug(f"{size_per_class[split]=}")
 
     # Pretraining the MPS as classifier
-    mps_pretrain_tensors, mps_pretrain_best_acc = mps_cat.train(mps=mps, loaders=loaders,
+    if cfg.wandb.isWatch:
+        run.watch(models=mps, **cfg.wandb.watch)
+    (_, mps_pretrain_tensors, 
+     mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
                                                                cfg=cfg.pretrain.mps,
                                                                device=device,
                                                                title=dataset_name,
                                                                stage="pre")
-    mps = tk.models.MPS(
+    generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
-    path_pre_mps = save_model(model=mps, run_name=run.name, model_type="pre_mps")
+    path_pre_mps = save_model(model=generator, run_name=run.name, model_type="pre_mps")
     run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
     logger.info("MPS pretraining done.")
 
@@ -88,12 +91,12 @@ def main(cfg: schemas.Config):
         n_spc[split] = max(_class_wise_dataset_size(t=t[split], num_cls=num_cls))
         logger.info(f"Amount of samples per class generated = {n_spc}.")
         X_synth[split] = sampling.batched(
-            mps=mps, embedding=cfg.model.mps.embedding,
+            mps=generator, embedding=cfg.model.mps.embedding,
             cls_pos=cls_pos,
             num_spc=n_spc[split],
             num_bins=cfg.gantrain.num_bins,
             batch_spc=cfg.gantrain.n_real,
-            device=device).detach() 
+            device=device).detach()
         # Wrapping in the loader
         dis_loaders[split] = discr.pretrain_loader(X_real=X[split],
                                                  c_real=t[split],
@@ -145,8 +148,10 @@ def main(cfg: schemas.Config):
     # GAN style training
     logger.info("GAN-style training begins.")
     best_acc = mps_pretrain_best_acc
-    mps, dis = gantrain.loop(
-        mps=mps, dis=d, real_loaders=real_loaders,
+    if cfg.wandb.isWatch:
+        run.watch(models=generator, **cfg.wandb.watch)
+    generator, dis = gantrain.loop(
+        generator=generator, dis=d, real_loaders=real_loaders,
         cfg=cfg.gantrain, cls_pos=cls_pos,
         embedding=cfg.model.mps.embedding,
         best_acc=best_acc, cat_loaders=loaders,
@@ -155,7 +160,7 @@ def main(cfg: schemas.Config):
     for i in dis.keys():
         path_gan_dis = save_model(model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
         run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")
-    path_gan_mps = save_model(model=mps, run_name=run.name, model_type="gan_mps")
+    path_gan_mps = save_model(model=generator, run_name=run.name, model_type="gan_mps")
     run.log_model(path=path_gan_mps, name=f"gan_mps_{run.name}")
     logger.info("GAN-style training completed.")
 
@@ -165,7 +170,7 @@ def main(cfg: schemas.Config):
     else: 
         n = cfg.wandb.gen_viz
     synths = sampling.batched(
-            mps=mps, embedding=cfg.model.mps.embedding,
+            mps=generator, embedding=cfg.model.mps.embedding,
             cls_pos=cls_pos,
             num_spc=n,
             num_bins=cfg.gantrain.num_bins,
