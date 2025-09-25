@@ -12,6 +12,7 @@ notebooks/
 
 # This folder contains the results of experiment runs, the logging, images, and model parameters.
 outputs/
+multirun/
 
 # PyTorch
 *.pt
