@@ -7,6 +7,7 @@ from schemas import DisConfig, PretrainDisConfig
 from _utils import get_criterion, get_optimizer, _class_wise_dataset_size
 import wandb
 from math import ceil
+import copy
 
 import logging
 logger = logging.getLogger(__name__)
@@ -316,7 +317,7 @@ def pretraining(dis: nn.Module,
         if avg_valid_loss < best_loss:
             best_loss = avg_valid_loss
             patience_counter = 0
-            best_model_state = dis.state_dict()
+            best_model_state = copy.deepcopy(dis.state_dict())
         else:
             patience_counter += 1
 
@@ -333,6 +334,6 @@ def pretraining(dis: nn.Module,
     dis.to(device)
     test_accuracy, _ = eval(dis, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
-    wandb.log({f"pre_dis/{key}/test/acc": test_accuracy})
+    wandb.summary[f"pre_dis/{key}/test/acc"] = test_accuracy
 
     return dis

@@ -6,6 +6,7 @@ from schemas import PretrainMPSConfig
 from _utils import get_optimizer, get_criterion
 from mps.utils import get_embedding, born_parallel
 import wandb
+import copy
 
 import logging
 logger = logging.getLogger(__name__)
@@ -236,7 +237,7 @@ def train(mps: tk.models.MPSLayer,
         if acc > best_acc:
             best_acc = acc
             patience_counter = 0
-            best_tensors = mps.tensors
+            best_tensors = [t.clone().detach() for t in mps.tensors]
         else:
             patience_counter += 1
 
@@ -267,10 +268,8 @@ def train(mps: tk.models.MPSLayer,
 
     test_accuracy, _ = eval(mps, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
-    wandb.log({
-        f"{stage}_mps/test/acc": test_accuracy,
-        f"{stage}_mps/best/acc": best_acc
-    })
+    wandb.summary[f"{stage}_mps/test/acc"] = test_accuracy
+    wandb.summary[f"{stage}_mps/best/acc"] = best_acc
     mps.reset()
     best_state_dict = mps.state_dict()
 
