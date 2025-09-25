@@ -1,10 +1,10 @@
 defaults:
-  - gantrain: adam2_bce2_b16_e50_l500
+  - gantrain: test
   - dataset: moons_2k
-  - model/mps: D3d10_secant
-  - model/dis: wide_leaky_ens
-  - pretrain/mps: adam_b64e300
-  - pretrain/dis: adam_b64e300
+  - model/mps: test
+  - model/dis: test
+  - pretrain/mps: test
+  - pretrain/dis: test
   - wandb: defaults
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none

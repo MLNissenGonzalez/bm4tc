@@ -15,13 +15,13 @@ d_optimizer:
 g_optimizer:
   name: "adam"
   kwargs:
-    lr: 1e-4
+    lr: 1e-3
     weight_decay: 0.00
-max_epoch: 50
+max_epoch: 300
 retrain_crit: "loss"
 stopping_crit: "acc"
 acc_drop_tol: 0.01
-check_step: 1
+check_freq: 5
 patience: 5
 smoothing: 0.0
 retrain_cfg: 
@@ -34,7 +34,7 @@ retrain_cfg:
     kwargs:
       lr: 1e-4
       weight_decay: 0.00
-  max_epoch: 40
+  max_epoch: 100
   batch_size: 64 # samples loaded per categorisation step for all classes involved
   patience: 5
   auto_stack: True

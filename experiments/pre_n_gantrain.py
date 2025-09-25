@@ -195,6 +195,7 @@ def main(cfg: schemas.Config):
             num_bins=cfg.gantrain.num_bins,
             batch_spc=cfg.gantrain.n_real,
             device=device).cpu()
+    torch.cuda.empty_cache()
     
     ax = visualise_samples(samples=synths)
     wandb.log({"samples/gantraining": wandb.Image(ax.figure)})
