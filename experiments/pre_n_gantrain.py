@@ -11,7 +11,7 @@ import src.mps.categorisation as mps_cat
 from src.datasets.preprocess import preprocess_pipeline
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 import src.schemas as schemas
-from src._utils import _class_wise_dataset_size, visualise_samples, save_model
+from src._utils import _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
 import matplotlib.pyplot as plt
 import hydra
 import tensorkrowch as tk
@@ -70,14 +70,18 @@ def main(cfg: schemas.Config):
     # Pretraining the MPS as classifier
     if cfg.wandb.isWatch:
         run.watch(models=mps, **cfg.wandb.watch)
+    # TODO: Bug could originate here after the training 
+    # (which seems to work fine)
     (_, mps_pretrain_tensors,
      mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
                                             cfg=cfg.pretrain.mps,
                                             device=device,
                                             title=dataset_name,
                                             stage="pre")
+    # TODO: Bug could be from here
     generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
+    verify_tensors(mps, generator, "MPS", "Generator")
     path_pre_mps = save_model(
         model=generator, run_name=run.name, model_type="pre_mps")
     run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
@@ -126,8 +130,8 @@ def main(cfg: schemas.Config):
     logger.info("Data for pretraining of discriminator loaded.")
 
     # Vizualising generative capabilities after pretraining
+    # TODO: Fix bug. X_synth seems to be random
     to_visualise = X_synth.get("train")
-    np.save("pretrain_samples.pt", to_visualise.numpy())
     ax = visualise_samples(samples=to_visualise,
                            labels=None, gen_viz=cfg.wandb.gen_viz)
     wandb.log({"samples/pretraining": wandb.Image(ax.figure)})

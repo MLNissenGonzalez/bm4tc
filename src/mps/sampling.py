@@ -328,6 +328,7 @@ def _batch(mps: tk.models.MPS,
     return samples
 
 
+# TODO: Bug could come from here.
 # TODO: Vectorize across batches/classes
 # TODO: After batch of samples is generated, move it to CPU.
 def batched(mps: tk.models.MPS,

@@ -36,6 +36,15 @@ def save_model(model: torch.nn.Module, run_name: str, model_type: str):
 
     return str(save_path)
 
+# Verification of model transfer
+def verify_tensors(model1, model2, name1="Original", name2="Copy"):
+    logger.info("Verifying tensor transfer...")
+    for i, (t1, t2) in enumerate(zip(model1.tensors, model2.tensors)):
+        if not torch.allclose(t1, t2):
+            logger.error(f"Tensor {i} mismatch between {name1} and {name2}")
+            logger.error(f"Max difference: {(t1 - t2).abs().max().item()}")
+        else:
+            logger.info(f"Tensor {i} successfully transferred")
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
