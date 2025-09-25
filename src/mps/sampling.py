@@ -191,7 +191,7 @@ def _single_class(mps: tk.models.MPS,
     """
     if num_spc == 0:
     # Return empty tensor with correct feature dimension
-        logger.debug(f"No real examples of class {cls_emb.argmax()} in this batch.")
+        logger.info(f"No real examples of class {cls_emb.argmax()} in this batch.")
         return torch.empty((0, mps.n_features - 1), device=device)
     
     samples = []
@@ -210,6 +210,8 @@ def _single_class(mps: tk.models.MPS,
         if site == cls_pos:
             continue
 
+        embs[site] = in_emb
+        
         # This reset has to be performed as born_sequential assigns new in features everytime new embedding is added
         mps.unset_data_nodes()
         mps.reset()
