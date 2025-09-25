@@ -258,8 +258,7 @@ def train(mps: tk.models.MPSLayer,
         elif cfg.print_updates and ((epoch+1) % 10 == 0):
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
 
-    mps = tk.models.MPSLayer(tensors=best_tensors)
-    mps.to(device)
+    mps = tk.models.MPSLayer(tensors=best_tensors, device=device)
     mps.auto_stack = cfg.auto_stack
     mps.auto_unbind = cfg.auto_unbind
     mps.unset_data_nodes()
