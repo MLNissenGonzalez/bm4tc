@@ -1,0 +1,11 @@
+batch_size: 64
+criterion:
+  name: "BCE"
+  kwargs: null
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+max_epoch: 400
+patience: 50
