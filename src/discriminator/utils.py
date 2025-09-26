@@ -285,8 +285,10 @@ def pretraining(dis: nn.Module,
       call this function separately per member.
     """
 
+    # Early stopping quantities
     patience_counter = 0
-    best_loss = float('inf')
+    best_loss = float("inf")
+    best_acc = 0.0
 
     optimizer = get_optimizer(dis.parameters(), cfg.optimizer)
     criterion = get_criterion(cfg.criterion)
@@ -313,16 +315,23 @@ def pretraining(dis: nn.Module,
             f"pre_dis/{key}/valid/loss": avg_valid_loss
         })
 
-        # Progress tracking and best model update
-        if avg_valid_loss < best_loss:
-            best_loss = avg_valid_loss
-            patience_counter = 0
-            best_model_state = copy.deepcopy(dis.state_dict())
-        else:
-            patience_counter += 1
-
+        # Info
         if ((epoch+1)%cfg.info_freq) == 0:
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
+
+        # Model update and early stopping
+        if cfg.stop_crit=="acc":
+            if acc > best_acc:
+                best_acc = acc
+                patience_counter = 0
+                best_model_state = copy.deepcopy(dis.state_dict())
+            else: patience_counter += 1
+        elif cfg.stop_crit=="loss":
+            if avg_valid_loss < best_loss:
+                best_loss = avg_valid_loss
+                patience_counter = 0
+                best_model_state = copy.deepcopy(dis.state_dict())
+            else: patience_counter += 1
             
         # Early stopping
         if patience_counter > cfg.patience:

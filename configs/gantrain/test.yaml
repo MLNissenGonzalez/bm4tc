@@ -23,6 +23,7 @@ stopping_crit: "acc"
 acc_drop_tol: 0.01
 check_freq: 1
 info_freq: 1
+test_freq: 20
 patience: 5
 smoothing: 0.0
 retrain_cfg: 
@@ -36,9 +37,9 @@ retrain_cfg:
       lr: 1e-4
       weight_decay: 0.00
   max_epoch: 40
-  batch_size: 32 # samples loaded per categorisation step for all classes involved
+  batch_size: 64 # samples loaded per categorisation step for all classes involved
   patience: 5
   auto_stack: True
   auto_unbind: False
-  print_early_stop: True
-  print_updates: True
+  update_freq: 20
+  watch_freq: 1000

@@ -10,3 +10,4 @@ optimizer:
 max_epoch: 600
 patience: 90
 info_freq: 50
+stop_crit: "loss"

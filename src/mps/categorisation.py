@@ -4,7 +4,7 @@ from typing import Callable, Dict, Tuple, List
 from torch.utils.data import TensorDataset, DataLoader
 from schemas import PretrainMPSConfig
 from _utils import get_optimizer, get_criterion
-from mps.utils import get_embedding, born_parallel
+from mps.utils import get_embedding, born_parallel, log_mps_grads
 import wandb
 import copy
 
@@ -102,7 +102,8 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
                 optimizer: torch.optim.Optimizer,
                 # expects score, not probs. switch for str parameter
                 loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
-                stage: str
+                stage: str,
+                watch_freq: int
                 ) -> None:
     """
     Single epoch classification training. Returns minibatch-wise train_loss.
@@ -132,6 +133,7 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
         # Backpropagate and update parameters
         optimizer.zero_grad()
         loss.backward()
+        log_mps_grads(mps=mps, watch_freq=watch_freq, stage="pre")
         optimizer.step()
 
         wandb.log({f"{stage}_mps/train/loss": loss})
@@ -203,6 +205,8 @@ def train(mps: tk.models.MPSLayer,
     """
     logger.info("Categorisation training begins.")
     best_acc = 0.0
+    best_loss = float("inf")
+    patience_counter = 0
     best_tensors = []  # Container for best model parameters
 
     # Prepare MPS for training
@@ -218,12 +222,12 @@ def train(mps: tk.models.MPSLayer,
     criterion = get_criterion(cfg.criterion)
     optimizer = get_optimizer(mps.parameters(), cfg.optimizer)
 
-    patience_counter = 0
     for epoch in range(cfg.max_epoch):
         # Training step
         _train_step(
             mps=mps, loader=loaders['train'], device=device,
-            optimizer=optimizer, loss_fn=criterion, stage=stage
+            optimizer=optimizer, loss_fn=criterion, stage=stage,
+            watch_freq=cfg.watch_freq
         )
 
         # Validation step
@@ -233,31 +237,32 @@ def train(mps: tk.models.MPSLayer,
             f"{stage}_mps/valid/loss": val_loss
         })
 
-        # Progress tracking and best model update
-        if acc > best_acc:
-            best_acc = acc
-            patience_counter = 0
-            best_tensors = [t.clone().detach() for t in mps.tensors]
-        else:
-            patience_counter += 1
-
-        # Early stopping via patience
+        # Model update and early stopping
+        if cfg.stop_crit == "acc":
+            if acc > best_acc:
+                best_acc, patience_counter = acc, 0
+                best_tensors = [t.clone().detach() for t in mps.tensors]
+            else: patience_counter += 1
+        elif cfg.stop_crit == "loss":
+            if val_loss < best_loss:
+                best_loss, patience_counter = val_loss, 0
+            else: patience_counter += 1
         if patience_counter > cfg.patience:
             if cfg.print_early_stop:
                 logger.info(f"Early stopping via patience at epoch {epoch}")
             break
+
         # Optional early stopping via goal accuracy
         if (goal_acc is not None):
             if goal_acc < best_acc:
-                if cfg.print_early_stop:
-                    logger.info(
-                        f"Early stopping via goal acc at epoch {epoch}")
+                logger.info(f"Early stopping via goal acc at epoch {epoch}")
             break
         # Update report
-        if (epoch == 0) and (title is not None):
-            logger.info(f'\nTraining of {title} dataset:\n')
-        elif cfg.print_updates and ((epoch+1) % 10 == 0):
+        if (epoch+1) % cfg.update_freq == 0:
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
+        elif (epoch == 0) and (title is not None):
+            logger.info(f'\nTraining of {title} dataset:\n')
+        
 
     # mps = tk.models.MPSLayer(tensors=best_tensors, device=device)
     mps.reset()

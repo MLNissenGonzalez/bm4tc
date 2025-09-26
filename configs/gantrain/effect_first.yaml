@@ -23,6 +23,7 @@ stopping_crit: "acc"
 acc_drop_tol: 0.4
 check_freq: 5
 info_freq: 10
+watch_freq: 100
 patience: 5
 smoothing: 0.0
 retrain_cfg: 
@@ -40,5 +41,5 @@ retrain_cfg:
   patience: 5
   auto_stack: True
   auto_unbind: False
-  print_early_stop: True
-  print_updates: True
+  watch_freq: 1000
+  update_freq: 50

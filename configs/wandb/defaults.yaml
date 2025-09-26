@@ -2,8 +2,4 @@ setup:
     project: gan_train
     entity: martin-nissen-gonzalez-heidelberg-university
     mode: online
-isWatch: True
-watch:
-    log: gradients
-    log_freq: 100
 gen_viz: 10

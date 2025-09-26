@@ -10,4 +10,5 @@ optimizer:
 max_epoch: 200
 patience: 35
 info_freq: 20
+stop_crit: "acc"
 # maybe add what to log and what not?

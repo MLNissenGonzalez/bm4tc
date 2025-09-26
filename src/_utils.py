@@ -9,6 +9,7 @@ from schemas import CriterionConfig
 from pathlib import Path
 import hydra
 import logging
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def verify_tensors(model1, model2, name1="Original", name2="Copy"):
             logger.error(f"Max difference: {(t1 - t2).abs().max().item()}")
         else:
             logger.info(f"Tensor {i} successfully transferred")
+
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

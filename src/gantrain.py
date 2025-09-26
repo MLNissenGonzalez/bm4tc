@@ -4,7 +4,7 @@ import tensorkrowch as tk
 from typing import Callable, Dict, List, Any, Tuple
 import mps.categorisation as mps_cat
 import mps.sampling as sampling
-from mps.utils import get_embedding, _embedding_to_range, _get_indim_and_ncls
+from mps.utils import get_embedding, _embedding_to_range, _get_indim_and_ncls, log_mps_grads
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
 import schemas
@@ -51,7 +51,7 @@ def real_loader(X: torch.FloatTensor,
     return loader
 
 
-def _batch_constructor(mps: tk. models.MPS,
+def _batch_constructor(generator: tk. models.MPS,
                        # Input from iteratable
                        X_real: torch.FloatTensor,
                        c_real: torch.LongTensor,
@@ -116,7 +116,7 @@ def _batch_constructor(mps: tk. models.MPS,
         # Creation of dataset for discriminator
         X_real_c = X_real[c_real == c]
         n_synth_c = math.ceil(r_synth * n_npc[c])
-        X_synth_c = sampling._single_class(mps=mps,
+        X_synth_c = sampling._single_class(mps=generator,
                                            embedding=embedding,
                                            cls_pos=cls_pos,
                                            cls_emb=cls_emb,
@@ -140,7 +140,7 @@ def _batch_constructor(mps: tk. models.MPS,
     return X, t, X_synth
 
 
-def _step(mps: tk.models.MPS,
+def _step(generator: tk.models.MPS,
           dis: Dict[int, nn.Module],
 
           # Input to the loop
@@ -162,7 +162,7 @@ def _step(mps: tk.models.MPS,
           g_optimizer: torch.optim.Optimizer,
           d_criterion: Callable[[torch.FloatTensor, torch.Tensor], torch.FloatTensor],
           g_criterion: Callable[[torch.FloatTensor, torch.Tensor], torch.FloatTensor],
-
+          watch_freq: int,
           device: torch.device
           ) -> None:
     """
@@ -216,7 +216,7 @@ def _step(mps: tk.models.MPS,
     """
 
     X, t, X_synth = _batch_constructor(
-        mps=mps, X_real=X_real, c_real=c_real,
+        generator=generator, X_real=X_real, c_real=c_real,
         cls_pos=cls_pos, num_bins=num_bins, r_synth=r_synth,
         in_dim=in_dim, num_cls=num_cls, cls_embs=cls_embs,
         embedding=embedding, input_space=input_space, device=device)
@@ -253,6 +253,7 @@ def _step(mps: tk.models.MPS,
             device=device, dtype=torch.float32)
         g_loss = g_criterion(g_prob, g_target)
         g_loss.backward()
+        log_mps_grads(generator, watch_freq=watch_freq, stage="gan")
         g_optimizer.step()
 
         wandb.log({
@@ -264,6 +265,7 @@ def _step(mps: tk.models.MPS,
 
 def check_and_retrain(generator: tk.models.MPS,
                       loaders: Dict[str, DataLoader],
+                      g_optimizer: torch.optim.Optimizer,
                       cfg: schemas.PretrainMPSConfig,
                       cls_pos: int,
                       epoch: int,
@@ -328,11 +330,11 @@ def check_and_retrain(generator: tk.models.MPS,
             stage="gan"
         )
         generator.load_state_dict(best_state_dict)
+        g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
 
-    return generator.state_dict()
+    return generator.state_dict(), g_optimizer
 
 
-# TODO: Implement gradient flow metric: wandb.watch
 # TODO: Add safety saves
 def loop(generator: tk.models.MPS,
          dis: Dict[Any, nn.Module],
@@ -346,7 +348,7 @@ def loop(generator: tk.models.MPS,
          cat_loaders: Dict[str, DataLoader],
 
          device: torch.device
-         ) -> tk.models.MPS:
+         ) -> None:
     """
     Main training loop for GAN-style training with MPS generator and discriminators.
 
@@ -417,6 +419,7 @@ def loop(generator: tk.models.MPS,
     for epoch in range(cfg.max_epoch):
         if (epoch+1) % cfg.info_freq == 0:
             logger.info(f"GAN training at epoch={epoch+1}")
+
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
@@ -427,18 +430,13 @@ def loop(generator: tk.models.MPS,
                   cls_embs=cls_embs, input_space=input_space,
                   d_optimizer=d_optimizer, g_optimizer=g_optimizer,
                   d_criterion=d_criterion, g_criterion=g_criterion,
-                  device=device)
+                  watch_freq=cfg.watch_freq, device=device)
 
         # Checking classification accuracy and retraining if necessary
         if (epoch+1) % cfg.check_freq == 0:
             best_state_dict = check_and_retrain(generator=generator, loaders=cat_loaders,
                                     cfg=cfg.retrain_cfg, cls_pos=cls_pos,
-                                    epoch=epoch, device=device,
+                                    g_optimizer=g_optimizer, epoch=epoch, device=device,
                                     trigger_accuracy=trigger_accuracy)
 
             generator.load_state_dict(best_state_dict)
-            # Reinitialize MPS optimizer after retraining
-            g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
-    
-    
-    return generator, dis
