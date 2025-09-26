@@ -321,7 +321,7 @@ def pretraining(dis: nn.Module,
         else:
             patience_counter += 1
 
-        if ((epoch+1)%10) == 0:
+        if ((epoch+1)%cfg.info_freq) == 0:
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
             
         # Early stopping

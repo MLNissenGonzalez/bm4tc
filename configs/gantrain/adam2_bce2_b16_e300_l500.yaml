@@ -22,6 +22,7 @@ retrain_crit: "loss"
 stopping_crit: "acc"
 acc_drop_tol: 0.01
 check_freq: 5
+info_freq: 10
 patience: 5
 smoothing: 0.0
 retrain_cfg: 

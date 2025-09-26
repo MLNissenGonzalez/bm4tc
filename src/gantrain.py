@@ -320,7 +320,6 @@ def check_and_retrain(generator: tk.models.MPS,
     if acc < trigger_accuracy:
         # retrain
         logger.info(f'Retraining after epoch {epoch+1}')
-        # TODO: training dynamics? Maybe track. best_acc?
         best_state_dict, _, best_acc = mps_cat.train(
             mps=classifier,
             loaders=loaders,
@@ -416,7 +415,8 @@ def loop(generator: tk.models.MPS,
 
     # Epoch loop
     for epoch in range(cfg.max_epoch):
-        logger.info(f"GAN training at epoch={epoch+1}")
+        if (epoch+1) % cfg.info_freq == 0:
+            logger.info(f"GAN training at epoch={epoch+1}")
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
@@ -430,7 +430,7 @@ def loop(generator: tk.models.MPS,
                   device=device)
 
         # Checking classification accuracy and retraining if necessary
-        if (epoch+1) % cfg.check_step == 0:
+        if (epoch+1) % cfg.check_freq == 0:
             best_state_dict = check_and_retrain(generator=generator, loaders=cat_loaders,
                                     cfg=cfg.retrain_cfg, cls_pos=cls_pos,
                                     epoch=epoch, device=device,

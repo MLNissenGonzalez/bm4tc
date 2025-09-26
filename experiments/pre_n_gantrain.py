@@ -48,6 +48,10 @@ def main(cfg: schemas.Config):
                              **init_cfg)
     cls_pos = mps.out_features[0]  # important global variable
 
+    info = f"MPS initalised with:\nbond dim = {cfg.model.mps.init_kwargs.bond_dim} and\nphysical dim = {cfg.model.mps.init_kwargs.in_dim}"
+    info_lines = info.split("\n")
+    logger.info("\n".join(info_lines))
+
     # Preprocessing data to be ready for embedding
     X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
                                        split=cfg.dataset.split,
@@ -95,7 +99,7 @@ def main(cfg: schemas.Config):
         # Sampling fake examples
         n_spc[split] = max(_class_wise_dataset_size(
             t=t[split], num_cls=num_cls))
-        logger.info(f"Amount of samples per class generated = {n_spc}.")
+        logger.debug(f"Amount of samples per class generated = {n_spc}.")
         with torch.no_grad():
             X_synth[split] = (
                 sampling.batched(
@@ -121,6 +125,9 @@ def main(cfg: schemas.Config):
     # Initialising discriminator(s)
     d = discr.init_discriminator(
         cfg=cfg.model.dis, input_dim=data_dim, num_classes=num_cls, device=device)
+    info = f"Discriminator initalised with:\nhidden multipliers = {cfg.model.dis.hidden_multipliers} and\nactivation = {cfg.model.dis.nonlinearity}"
+    info_lines = info.split("\n")
+    logger.info("\n".join(info_lines))
 
     # Swapping dictionary nesting to fit logic below
     d_loaders = defaultdict(dict)

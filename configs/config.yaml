@@ -1,14 +1,22 @@
 defaults:
-  - gantrain: test
+  - gantrain: adam2_bce2_b16_e300_l500
   - dataset: moons_2k
   - model/mps: test
   - model/dis: test
-  - pretrain/mps: test
-  - pretrain/dis: test
+  - pretrain/mps: adam_b64e300
+  - pretrain/dis: adam_b64e400lr3
   - wandb: defaults
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
   - _self_
+
+# Copy from sweeps
+hydra:
+  sweeper:
+    params:
+      model/mps: d4D3_secant, d10D3_secant, d10D4_secant, d10D6_secant, d30D4_secant, d30D10_secant, d30D18_secant
+      model/dis: wide_leaky_ens, medium_leaky_ens
+
 
   # to turn off hydra logging: set the overrides above to null and add https://stackoverflow.com/questions/65104134/disable-file-output-of-hydra?rq=3:
 # hydra:
