@@ -75,7 +75,7 @@ _LOSS_MAP = {
     "vanilla": nn.BCELoss # TODO: Has to be adapted to the swapped logarithm
 }
 
-def get_criterion(cfg: CriterionConfig):
+def get_criterion(cfg: CriterionConfig) -> nn.Module:
     key = cfg.name.replace(" ", "").replace("-", "").lower()
     if key not in _LOSS_MAP:
         raise ValueError(f"Loss '{cfg.name}' not recognised")

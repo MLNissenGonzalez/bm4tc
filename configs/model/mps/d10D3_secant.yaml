@@ -7,3 +7,5 @@ init_kwargs:
 design: True # if True: central tensor design; if False ensemble design
 embedding: "fourier"
 sampler: "secant"
+
+# TODO: Think about deleting this if necessary
