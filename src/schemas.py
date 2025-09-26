@@ -65,6 +65,7 @@ class PretrainMPSConfig:
 class PretrainDisConfig:
     optimizer: OptimizerConfig
     criterion: CriterionConfig
+    info_freq: int
     max_epoch: int
     batch_size: int
     patience: int
@@ -112,7 +113,8 @@ class GANStyleConfig:
     g_optimizer: OptimizerConfig
     max_epoch: int
     stopping_crit: str
-    check_step: int
+    check_freq: int
+    info_freq: int
     retrain_crit: str
     acc_drop_tol: float
     retrain_cfg: PretrainMPSConfig
@@ -171,5 +173,6 @@ def init_wandb(cfg: Config):
         config=wandb_cfg,
         group=group_key,
         name=run_name,
+        reinit="finish_previous"
     )
     return run
