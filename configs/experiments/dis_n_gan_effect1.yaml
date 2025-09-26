@@ -1,0 +1,15 @@
+defaults:
+  - override /dataset: moons_4k
+  - override /gantrain: effect_first
+  - override /model/mps: d30D10_secant
+  - override /pretrain/mps: adam_b64e300
+  - override /pretrain/dis: adam_b64e1000lr3
+
+
+hydra:
+  sweeper:
+    params:
+      model/dis: op_4_2d_leaky_ens, p_4_2d_leaky_ens
+
+
+# also sweep over gantrain.g_optimizer.kwargs.lr = 1.0, 1e-1, 1e-2
