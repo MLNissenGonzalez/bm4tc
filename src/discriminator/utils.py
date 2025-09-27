@@ -322,14 +322,12 @@ def pretraining(dis: nn.Module,
         # Model update and early stopping
         if cfg.stop_crit=="acc":
             if acc > best_acc:
-                best_acc = acc
-                patience_counter = 0
+                best_acc, patience_counter = acc, 0
                 best_model_state = copy.deepcopy(dis.state_dict())
             else: patience_counter += 1
         elif cfg.stop_crit=="loss":
             if avg_valid_loss < best_loss:
-                best_loss = avg_valid_loss
-                patience_counter = 0
+                best_loss, patience_counter = avg_valid_loss, 0
                 best_model_state = copy.deepcopy(dis.state_dict())
             else: patience_counter += 1
             
