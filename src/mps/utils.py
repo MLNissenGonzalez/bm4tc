@@ -208,16 +208,17 @@ def batch_normalize(p: torch.Tensor,
 
 import wandb
 # Gradient tracking
-def log_mps_grads(mps: tk.models.MPS, watch_freq: int, stage: str):
+def log_mps_grads(mps: tk.models.MPS, step: int, watch_freq: int, stage: str):
     """Log gradients of tensors in a dict {name: tensor} to W&B."""
     log_grads= {}
-    for i, t in enumerate(mps.tensors):
-        if t.requires_grad:
-            g = t.grad.detach().cpu().numpy()
-            g = np.histogram(g.flatten(), bins=64)
-            log_grads[f"{stage}_mps/gradients/{i}"] = wandb.Histogram(np_histogram=g)
-    if log_grads:
-        wandb.log(log_grads, step=watch_freq) 
+    if step % watch_freq == 0:
+        for n in mps.mats_env: # also tried mps.tensors with the same error
+            if n.grad is not None:
+                log_grads[f"{stage}_mps/gradients/{n.name}"] = +1
+            else:
+                log_grads[f"{stage}_mps/gradients/{n.name}"] = -1
+        if log_grads:
+            wandb.log(log_grads) 
 
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------

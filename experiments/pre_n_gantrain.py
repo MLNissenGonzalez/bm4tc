@@ -72,7 +72,7 @@ def main(cfg: schemas.Config):
         logging.debug(f"{size_per_class[split]=}")
 
     # Pretraining the MPS as classifier
-    (_, mps_pretrain_tensors,
+    (mps_pretrain_tensors,
      mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
                                             cfg=cfg.pretrain.mps,
                                             device=device,
@@ -135,7 +135,6 @@ def main(cfg: schemas.Config):
     logger.info("Data for pretraining of discriminator loaded.")
 
     # Vizualising generative capabilities after pretraining
-    # TODO: Fix bug. X_synth seems to be random
     to_visualise = X_synth.get("train")
     ax = visualise_samples(samples=to_visualise,
                            labels=None, gen_viz=cfg.wandb.gen_viz)

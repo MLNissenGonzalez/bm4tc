@@ -13,5 +13,5 @@ patience: 40
 auto_stack: True
 auto_unbind: False
 stop_crit: "loss"
-watch_freq: 300
+watch_freq: 100
 update_freq: 20

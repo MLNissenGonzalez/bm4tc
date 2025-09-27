@@ -163,6 +163,7 @@ def _step(generator: tk.models.MPS,
           d_criterion: Callable[[torch.FloatTensor, torch.Tensor], torch.FloatTensor],
           g_criterion: Callable[[torch.FloatTensor, torch.Tensor], torch.FloatTensor],
           watch_freq: int,
+          step: int,
           device: torch.device
           ) -> None:
     """
@@ -253,7 +254,7 @@ def _step(generator: tk.models.MPS,
             device=device, dtype=torch.float32)
         g_loss = g_criterion(g_prob, g_target)
         g_loss.backward()
-        log_mps_grads(generator, watch_freq=watch_freq, stage="gan")
+        log_mps_grads(generator, step=step, watch_freq=watch_freq, stage="gan")
         g_optimizer.step()
 
         wandb.log({
@@ -322,17 +323,17 @@ def check_and_retrain(generator: tk.models.MPS,
     if acc < trigger_accuracy:
         # retrain
         logger.info(f'Retraining after epoch {epoch+1}')
-        best_state_dict, _, best_acc = mps_cat.train(
+        best_tensors, best_acc = mps_cat.train(
             mps=classifier,
             loaders=loaders,
             cfg=cfg,
             device=device,
             stage="gan"
         )
-        generator.load_state_dict(best_state_dict)
+        generator.initialize(tensors=best_tensors)
         g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
 
-    return generator.state_dict(), g_optimizer
+    return g_optimizer
 
 
 # TODO: Add safety saves
@@ -388,8 +389,9 @@ def loop(generator: tk.models.MPS,
         Validation losses at retraining checkpoints
         (same convention as `valid_acc`).
     """
-
+    
     trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0.0)
+    step = 0
 
     generator.unset_data_nodes()
     generator.reset()
@@ -414,17 +416,17 @@ def loop(generator: tk.models.MPS,
         cls_emb = tk.embeddings.basis(torch.tensor(c), num_cls)
         cls_emb = cls_emb.to(device=device, dtype=torch.float32)
         cls_embs.append(cls_emb)
-
     # Epoch loop
     for epoch in range(cfg.max_epoch):
-        if (epoch+1) % cfg.info_freq == 0:
+        if ((epoch+1) % cfg.info_freq) == 0:
             logger.info(f"GAN training at epoch={epoch+1}")
 
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
+            step += 1
             X_real, c_real = X_real.to(device), c_real.to(device)
-            _step(mps=generator, dis=dis, X_real=X_real, c_real=c_real,
-                  r_synth=cfg.r_synth, cls_pos=cls_pos,
+            _step(generator=generator, dis=dis, X_real=X_real, c_real=c_real,
+                  r_synth=cfg.r_synth, cls_pos=cls_pos, step=step,
                   num_bins=cfg.num_bins, in_dim=in_dim,
                   num_cls=num_cls, embedding=embedding,
                   cls_embs=cls_embs, input_space=input_space,
@@ -434,9 +436,7 @@ def loop(generator: tk.models.MPS,
 
         # Checking classification accuracy and retraining if necessary
         if (epoch+1) % cfg.check_freq == 0:
-            best_state_dict = check_and_retrain(generator=generator, loaders=cat_loaders,
+            g_optimizer = check_and_retrain(generator=generator, loaders=cat_loaders,
                                     cfg=cfg.retrain_cfg, cls_pos=cls_pos,
                                     g_optimizer=g_optimizer, epoch=epoch, device=device,
                                     trigger_accuracy=trigger_accuracy)
-
-            generator.load_state_dict(best_state_dict)

@@ -1,0 +1,15 @@
+# @package _global_
+defaults:
+  - override /gantrain: test
+  - override /dataset: moons_4k
+  - override /model/mps: d30D18_secant
+  - override /model/dis: wide_leaky_ens
+  - override /pretrain/mps: test
+  - override /pretrain/dis: test
+  
+# Copy from sweeps
+hydra:
+  sweeper:
+    params:
+      model/dis: op_4_2d_leaky_ens,p_4_2d_leaky_ens
+      gantrain: test

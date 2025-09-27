@@ -103,8 +103,9 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
                 # expects score, not probs. switch for str parameter
                 loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
                 stage: str,
-                watch_freq: int
-                ) -> None:
+                watch_freq: int,
+                step: int
+                ) -> int:
     """
     Single epoch classification training. Returns minibatch-wise train_loss.
 
@@ -125,7 +126,7 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
     mps.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
-
+        step += 1
         # Compute probs and loss
         p = born_parallel(mps, X)
         loss = loss_fn(p, t)
@@ -133,10 +134,11 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
         # Backpropagate and update parameters
         optimizer.zero_grad()
         loss.backward()
-        log_mps_grads(mps=mps, watch_freq=watch_freq, stage="pre")
+        log_mps_grads(mps=mps, watch_freq=watch_freq, step=step, stage="pre")
         optimizer.step()
 
         wandb.log({f"{stage}_mps/train/loss": loss})
+        return step
 
 
 # TODO: Think about logging different or more quantities
@@ -208,6 +210,7 @@ def train(mps: tk.models.MPSLayer,
     best_loss = float("inf")
     patience_counter = 0
     best_tensors = []  # Container for best model parameters
+    step = 0
 
     # Prepare MPS for training
     mps.to(device)
@@ -224,10 +227,10 @@ def train(mps: tk.models.MPSLayer,
 
     for epoch in range(cfg.max_epoch):
         # Training step
-        _train_step(
+        step = _train_step(
             mps=mps, loader=loaders['train'], device=device,
             optimizer=optimizer, loss_fn=criterion, stage=stage,
-            watch_freq=cfg.watch_freq
+            watch_freq=cfg.watch_freq, step=step
         )
 
         # Validation step
@@ -246,10 +249,10 @@ def train(mps: tk.models.MPSLayer,
         elif cfg.stop_crit == "loss":
             if val_loss < best_loss:
                 best_loss, patience_counter = val_loss, 0
+                best_tensors = [t.clone().detach() for t in mps.tensors]
             else: patience_counter += 1
         if patience_counter > cfg.patience:
-            if cfg.print_early_stop:
-                logger.info(f"Early stopping via patience at epoch {epoch}")
+            logger.info(f"Early stopping via patience at epoch {epoch}")
             break
 
         # Optional early stopping via goal accuracy
@@ -278,6 +281,5 @@ def train(mps: tk.models.MPSLayer,
     wandb.summary[f"{stage}_mps/test/acc"] = test_accuracy
     wandb.summary[f"{stage}_mps/best/acc"] = best_acc
     mps.reset()
-    best_state_dict = mps.state_dict()
 
-    return best_state_dict, best_tensors, best_acc
+    return best_tensors, best_acc
