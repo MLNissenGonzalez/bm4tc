@@ -9,6 +9,7 @@ from schemas import CriterionConfig
 from pathlib import Path
 import hydra
 import logging
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ def verify_tensors(model1, model2, name1="Original", name2="Copy"):
         else:
             logger.info(f"Tensor {i} successfully transferred")
 
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -75,7 +77,7 @@ _LOSS_MAP = {
     "vanilla": nn.BCELoss # TODO: Has to be adapted to the swapped logarithm
 }
 
-def get_criterion(cfg: CriterionConfig):
+def get_criterion(cfg: CriterionConfig) -> nn.Module:
     key = cfg.name.replace(" ", "").replace("-", "").lower()
     if key not in _LOSS_MAP:
         raise ValueError(f"Loss '{cfg.name}' not recognised")

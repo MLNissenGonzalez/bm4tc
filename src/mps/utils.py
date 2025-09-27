@@ -206,7 +206,18 @@ def batch_normalize(p: torch.Tensor,
 
     return p / p.sum(dim=-1, keepdim=True)
 
-
+import wandb
+# Gradient tracking
+def log_mps_grads(mps: tk.models.MPS, watch_freq: int, stage: str):
+    """Log gradients of tensors in a dict {name: tensor} to W&B."""
+    log_grads= {}
+    for i, t in enumerate(mps.tensors):
+        if t.requires_grad:
+            g = t.grad.detach().cpu().numpy()
+            g = np.histogram(g.flatten(), bins=64)
+            log_grads[f"{stage}_mps/gradients/{i}"] = wandb.Histogram(np_histogram=g)
+    if log_grads:
+        wandb.log(log_grads, step=watch_freq) 
 
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------

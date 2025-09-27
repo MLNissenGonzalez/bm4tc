@@ -12,5 +12,6 @@ batch_size: 32 # samples loaded per categorisation step for all classes involved
 patience: 35
 auto_stack: True
 auto_unbind: False
-print_early_stop: True
-print_updates: True
+stop_crit: "acc"
+watch_freq: 300
+update_freq: 20

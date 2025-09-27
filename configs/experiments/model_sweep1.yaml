@@ -3,4 +3,4 @@ hydra:
     params:
       model/mps: d4D3_secant, d10D3_secant, d10D4_secant, d10D6_secant, d30D4_secant, d30D10_secant, d30D18_secant
       model/dis: wide_leaky_ens, medium_leaky_ens
-      
+    

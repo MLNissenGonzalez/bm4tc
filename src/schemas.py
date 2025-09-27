@@ -56,10 +56,11 @@ class PretrainMPSConfig:
     max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     patience: int
+    watch_freq: int
+    update_freq: int
+    stop_crit: str # loss / acc 
     auto_stack: bool = True
     auto_unbind: bool = False
-    print_early_stop: bool = True
-    print_updates: bool = True
 
 @dataclass
 class PretrainDisConfig:
@@ -69,6 +70,7 @@ class PretrainDisConfig:
     max_epoch: int
     batch_size: int
     patience: int
+    stop_crit: str # loss / acc 
 
 @dataclass
 class WandbSetupConfig:
@@ -112,9 +114,10 @@ class GANStyleConfig:
     d_optimizer: OptimizerConfig
     g_optimizer: OptimizerConfig
     max_epoch: int
-    stopping_crit: str
+    stop_crit: str
     check_freq: int
     info_freq: int
+    watch_freq: int
     retrain_crit: str
     acc_drop_tol: float
     retrain_cfg: PretrainMPSConfig
@@ -124,7 +127,6 @@ class GANStyleConfig:
 @dataclass
 class WandbConfig:
     setup: WandbSetupConfig
-    watch: Dict[str, Any]
     gen_viz: int
     isWatch: bool
 

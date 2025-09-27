@@ -72,24 +72,22 @@ def main(cfg: schemas.Config):
         logging.debug(f"{size_per_class[split]=}")
 
     # Pretraining the MPS as classifier
-    if cfg.wandb.isWatch:
-        run.watch(models=mps, **cfg.wandb.watch)
-    # TODO: Bug could originate here after the training 
-    # (which seems to work fine)
     (_, mps_pretrain_tensors,
      mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
                                             cfg=cfg.pretrain.mps,
                                             device=device,
                                             title=dataset_name,
                                             stage="pre")
-    # TODO: Bug could be from here
+    
+    logger.info("MPS pretraining done.")
+    
+    # From here on, MPS as generator in the foreground
     generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
     verify_tensors(mps, generator, "MPS", "Generator")
     path_pre_mps = save_model(
         model=generator, run_name=run.name, model_type="pre_mps")
     run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
-    logger.info("MPS pretraining done.")
 
     # Preparing dataset for discriminator pretraining
     X_synth = {}
@@ -166,20 +164,19 @@ def main(cfg: schemas.Config):
             X=X[split], c=t[split],
             n_real=cfg.gantrain.n_real, split=split
         )
-
+ 
     # GAN style training
+    # TODO: Debug to find out whether gradients flow or not to central (and other tensors)
     logger.info("GAN-style training begins.")
     best_acc = mps_pretrain_best_acc
-    if cfg.wandb.isWatch:
-        run.watch(models=generator, **cfg.wandb.watch)
-    generator, dis = gantrain.loop(
+    gantrain.loop(
         generator=generator, dis=d, real_loaders=real_loaders,
         cfg=cfg.gantrain, cls_pos=cls_pos,
         embedding=cfg.model.mps.embedding,
         best_acc=best_acc, cat_loaders=loaders,
         device=device
     )
-    for i in dis.keys():
+    for i in d.keys():
         path_gan_dis = save_model(
             model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
         run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")

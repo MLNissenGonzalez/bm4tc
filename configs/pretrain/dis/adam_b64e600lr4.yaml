@@ -7,6 +7,7 @@ optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-max_epoch: 400
-patience: 50
+max_epoch: 600
+patience: 90
 info_freq: 50
+stop_crit: "loss"
