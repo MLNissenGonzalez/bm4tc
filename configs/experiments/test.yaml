@@ -8,8 +8,8 @@ defaults:
   - override /pretrain/dis: test
   
 # Copy from sweeps
-hydra:
-  sweeper:
-    params:
-      model/dis: op_4_2d_leaky_ens,p_4_2d_leaky_ens
-      gantrain: test
+# hydra:
+#   sweeper:
+#     params:
+#       model/dis: op_4_2d_leaky_ens,p_4_2d_leaky_ens
+#       gantrain: test

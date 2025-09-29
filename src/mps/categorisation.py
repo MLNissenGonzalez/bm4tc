@@ -4,9 +4,8 @@ from typing import Callable, Dict, Tuple, List
 from torch.utils.data import TensorDataset, DataLoader
 from schemas import PretrainMPSConfig
 from _utils import get_optimizer, get_criterion
-from mps.utils import get_embedding, born_parallel, log_mps_grads
+import mps.utils as mps
 import wandb
-import copy
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,7 +38,7 @@ def loader_creator(X: torch.Tensor,
     DataLoader
         Dataloader for supervised classification.
     """
-    embedding = get_embedding(embedding)
+    embedding = mps.get_embedding(embedding)
     X = embedding(X, phys_dim)
     dataset = TensorDataset(X, t)
     loader = DataLoader(
@@ -54,7 +53,7 @@ def loader_creator(X: torch.Tensor,
 # TODO: Add tensor shape description
 
 
-def eval(mps: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
+def eval(classifier: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
          loader: DataLoader,
          criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
          device: torch.device) -> Tuple[float, float]:
@@ -72,14 +71,14 @@ def eval(mps: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
     float
         prediction accuracy
     """
-    mps.eval()
+    classifier.eval()
     correct = 0
     total_loss = 0.0
     total = 0
     with torch.no_grad():
         for X, t in loader:
             X, t = X.to(device), t.to(device)
-            p = born_parallel(mps, X)
+            p = mps.born_parallel(classifier, X)
 
             # Batchwise loss and predictions
             total_loss += criterion(p, t).item() * t.size(0)
@@ -96,7 +95,7 @@ def eval(mps: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
 # TODO: Add tensor shape description
 
 
-def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
+def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
                 loader: DataLoader,
                 device: torch.device,
                 optimizer: torch.optim.Optimizer,
@@ -123,18 +122,19 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
         minibatch-wise trainloss 
     """
 
-    mps.train()
+    classifier.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
         step += 1
         # Compute probs and loss
-        p = born_parallel(mps, X)
+        p = mps.born_parallel(classifier, X)
         loss = loss_fn(p, t)
 
         # Backpropagate and update parameters
         optimizer.zero_grad()
         loss.backward()
-        log_mps_grads(mps=mps, watch_freq=watch_freq, step=step, stage="pre")
+        mps.log_grads(mps=classifier, watch_freq=watch_freq,
+                      step=step, stage="pre")
         optimizer.step()
 
         wandb.log({f"{stage}_mps/train/loss": loss})
@@ -145,7 +145,7 @@ def _train_step(mps: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
 # TODO: Consider removing title parameter
 
 
-def train(mps: tk.models.MPSLayer,
+def train(classifier: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
           cfg: PretrainMPSConfig,
           device: torch.device,
@@ -213,28 +213,27 @@ def train(mps: tk.models.MPSLayer,
     step = 0
 
     # Prepare MPS for training
-    mps.to(device)
-    mps.auto_stack = cfg.auto_stack
-    mps.auto_unbind = cfg.auto_unbind
-    mps.unset_data_nodes()
-    mps.reset()
-    mps.trace(torch.zeros(1, len(mps.in_features), mps.in_dim[0]).to(device))
-    logger.debug("MPS resetted and ready.")
+    classifier.to(device)
+    classifier.auto_stack, classifier._auto_unbind = cfg.auto_stack, cfg.auto_unbind
+    classifier.unset_data_nodes()
+    classifier.reset()
+    classifier.trace(torch.zeros(1, len(classifier.in_features),
+                     classifier.in_dim[0]).to(device))
 
     # Instantiate criterion and optimizer
     criterion = get_criterion(cfg.criterion)
-    optimizer = get_optimizer(mps.parameters(), cfg.optimizer)
+    optimizer = get_optimizer(classifier.parameters(), cfg.optimizer)
 
     for epoch in range(cfg.max_epoch):
         # Training step
         step = _train_step(
-            mps=mps, loader=loaders['train'], device=device,
+            classifier=classifier, loader=loaders['train'], device=device,
             optimizer=optimizer, loss_fn=criterion, stage=stage,
             watch_freq=cfg.watch_freq, step=step
         )
 
         # Validation step
-        acc, val_loss = eval(mps, loaders['valid'], criterion, device)
+        acc, val_loss = eval(classifier, loaders['valid'], criterion, device)
         wandb.log({
             f"{stage}_mps/valid/acc": acc,
             f"{stage}_mps/valid/loss": val_loss
@@ -244,13 +243,15 @@ def train(mps: tk.models.MPSLayer,
         if cfg.stop_crit == "acc":
             if acc > best_acc:
                 best_acc, patience_counter = acc, 0
-                best_tensors = [t.clone().detach() for t in mps.tensors]
-            else: patience_counter += 1
+                best_tensors = [t.clone().detach() for t in classifier.tensors]
+            else:
+                patience_counter += 1
         elif cfg.stop_crit == "loss":
             if val_loss < best_loss:
                 best_loss, patience_counter = val_loss, 0
-                best_tensors = [t.clone().detach() for t in mps.tensors]
-            else: patience_counter += 1
+                best_tensors = [t.clone().detach() for t in classifier.tensors]
+            else:
+                patience_counter += 1
         if patience_counter > cfg.patience:
             logger.info(f"Early stopping via patience at epoch {epoch}")
             break
@@ -265,21 +266,19 @@ def train(mps: tk.models.MPSLayer,
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
         elif (epoch == 0) and (title is not None):
             logger.info(f'\nTraining of {title} dataset:\n')
-        
 
-    # mps = tk.models.MPSLayer(tensors=best_tensors, device=device)
-    mps.reset()
-    mps.initialize(tensors=best_tensors)
-    mps.auto_stack = cfg.auto_stack
-    mps.auto_unbind = cfg.auto_unbind
-    mps.unset_data_nodes()
-    mps.reset()
-    mps.trace(torch.zeros(1, len(mps.in_features), mps.in_dim[0]).to(device))
-
-    test_accuracy, _ = eval(mps, loaders["test"], criterion, device)
+    # Finish with evaluation on test set
+    classifier.reset()
+    classifier.initialize(tensors=best_tensors)
+    classifier.auto_stack, classifier.auto_unbind = cfg.auto_stack, cfg.auto_unbind
+    classifier.trace(torch.zeros(1, len(classifier.in_features),
+                     classifier.in_dim[0]).to(device))
+    test_accuracy, _ = eval(classifier, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
+
+    # Summarise training
     wandb.summary[f"{stage}_mps/test/acc"] = test_accuracy
     wandb.summary[f"{stage}_mps/best/acc"] = best_acc
-    mps.reset()
+    classifier.reset()
 
     return best_tensors, best_acc
