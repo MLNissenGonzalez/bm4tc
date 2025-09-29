@@ -2,7 +2,7 @@ import torch
 import tensorkrowch as tk
 from typing import Dict, Tuple
 import torch.nn as nn
-
+import wandb
 import numpy as np
 
 
@@ -82,6 +82,48 @@ def _get_indim_and_ncls(mps: tk.models.MPS)-> Tuple[int, int]:
         n_cls = in_dim
     return int(in_dim), int(n_cls)
 
+
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#---------------Logger functions MPS-----------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------------------------
+# TODO: Change this function such that it counts the number of times gradients have not been none (not important)
+def count_mps_grads(mps: tk.models.MPS, step: int, watch_freq: int, stage: str):
+    """Log gradients of tensors in a dict {name: tensor} to W&B."""
+    log_grads= {}
+    if step % watch_freq == 0:
+        for n in mps.mats_env: # also tried mps.tensors with the same error
+            if n.grad is not None:
+                log_grads[f"{stage}_mps/gradients/{n.name}"] = +1
+            else:
+                log_grads[f"{stage}_mps/gradients/{n.name}"] = -1
+        if log_grads:
+            wandb.log(log_grads) 
+
+# TODO: Use this only for debugging
+def logged_optimizer_step(optimizer: torch.optim.Optimizer, mps: tk.models.MPS):
+    p_before = {}
+    t_before = {}
+    for name, param in mps.named_parameters():
+        p_before[name] = param.clone().detach()
+    for node in mps.mats_env:
+        t_before[f"{node.name}"] = node.tensor.clone().detach()
+    
+    optimizer.step()
+
+    for name, param in mps.named_parameters():
+        after = param.clone().detach()
+        diff = (after - p_before[name]).abs().max()
+        wandb.log({f"gan_mps/optim_diff/{name}": diff})
+    for node in mps.mats_env:
+        after = node.tensor.clone().detach()
+        diff = (after - t_before[f"{node.name}"]).abs().max()
+        wandb.log({f"gan_mps/optim_diff/{name}": diff})
+
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------
@@ -129,10 +171,12 @@ def born_sequential(mps: tk.models.MPS,
     
     # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
     if len(in_tensors) < mps.n_features:
-        p = torch.diagonal(mps(in_tensors, marginalize_output=True))
+        rho = mps.forward(in_tensors, marginalize_output=True, inline_input=True, inline_mats=True) # density matrix
+        p = torch.diagonal(rho) 
     # Case 2: All variables appear.
     else:
-        p = torch.square(mps.forward(data=in_tensors))
+        amplitude = mps.forward(data=in_tensors, inline_input=True, inline_mats=True) # prob. amplitude
+        p = torch.square(amplitude)
         
     # logger.debug(f"born_sequential output {p.shape=}")
     return p
@@ -191,7 +235,8 @@ def batch_normalize(p: torch.Tensor,
     ----------
     p: tensor
         batch of unnormalized probability distributions stored in a single tensor of shape (batch_size, num_bins) or (batch_size x num_bins).
-    batch_size: int
+    batch_size: intsamples.append(diff_sampling.os_secant(
+            p, input_space))  # shape (num_spc,)
         number of unnormalized probability distributions stored in the tensor p
     num_bins: int
         number of discretization points for every single unnormalized probability distribution p[i, :].
@@ -205,20 +250,6 @@ def batch_normalize(p: torch.Tensor,
         p = p.reshape(batch_size, num_bins)
 
     return p / p.sum(dim=-1, keepdim=True)
-
-import wandb
-# Gradient tracking
-def log_mps_grads(mps: tk.models.MPS, step: int, watch_freq: int, stage: str):
-    """Log gradients of tensors in a dict {name: tensor} to W&B."""
-    log_grads= {}
-    if step % watch_freq == 0:
-        for n in mps.mats_env: # also tried mps.tensors with the same error
-            if n.grad is not None:
-                log_grads[f"{stage}_mps/gradients/{n.name}"] = +1
-            else:
-                log_grads[f"{stage}_mps/gradients/{n.name}"] = -1
-        if log_grads:
-            wandb.log(log_grads) 
 
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------

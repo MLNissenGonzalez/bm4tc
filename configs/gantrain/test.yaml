@@ -1,5 +1,5 @@
 num_bins: 200
-n_real: 8
+n_real: 16
 r_synth: 1.0 # ratio n_synth / n_real
 d_criterion:
   name: "bce"
@@ -17,14 +17,14 @@ g_optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-max_epoch: 10
+max_epoch: 2
 retrain_crit: "loss"
 stopping_crit: "acc"
-acc_drop_tol: 0.01
+acc_drop_tol: 0.1
 check_freq: 1
 info_freq: 1
-test_freq: 20
-patience: 5
+watch_freq: 1
+patience: 30
 smoothing: 0.0
 retrain_cfg: 
   criterion: 
