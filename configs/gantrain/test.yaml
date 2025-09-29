@@ -18,8 +18,6 @@ g_optimizer:
     lr: 1e-4
     weight_decay: 0.00
 max_epoch: 2
-retrain_crit: "loss"
-stopping_crit: "acc"
 acc_drop_tol: 0.1
 check_freq: 1
 info_freq: 1

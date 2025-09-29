@@ -114,11 +114,9 @@ class GANStyleConfig:
     d_optimizer: OptimizerConfig
     g_optimizer: OptimizerConfig
     max_epoch: int
-    stop_crit: str
     check_freq: int
     info_freq: int
     watch_freq: int
-    retrain_crit: str
     acc_drop_tol: float
     retrain_cfg: PretrainMPSConfig
     patience: Optional[int]
@@ -130,6 +128,13 @@ class WandbConfig:
     gen_viz: int
     isWatch: bool
 
+@dataclass
+class SaveConfig:
+    pre_mps: bool
+    pre_dis: bool
+    gan_dis: bool
+    gan_mps: bool
+
 #--- Top-level config ---
 
 @dataclass
@@ -139,6 +144,7 @@ class Config:
     pretrain: PretrainConfig
     gantrain: GANStyleConfig
     wandb: WandbConfig
+    save: SaveConfig
 
 
 # --- Register schemas with Hydra ---
@@ -157,6 +163,8 @@ cs.store(group="pretrain/mps", name="schema", node=PretrainMPSConfig)
 cs.store(group="pretrain/dis", name="schema", node=PretrainDisConfig)
 cs.store(group="ad_train", name="schema", node=GANStyleConfig)
 cs.store(group="wandb", name="schema", node=WandbConfig)
+cs.store(group="save", name="schema", node=SaveConfig)
+
 
 # TODO: Move this to src._utils
 def init_wandb(cfg: Config):

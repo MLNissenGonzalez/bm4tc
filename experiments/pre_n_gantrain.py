@@ -3,24 +3,24 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__),
                 "..", "src"))  # make src importable
 
-import wandb
-import src.gantrain as gantrain
-import src.mps.sampling as sampling
-import src.discriminator.utils as discr
-import src.mps.categorisation as mps_cat
-from src.datasets.preprocess import preprocess_pipeline
-from src.datasets.gen_n_load import load_dataset, LabelledDataset
-import src.schemas as schemas
-from src._utils import _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
-import matplotlib.pyplot as plt
-import hydra
-import tensorkrowch as tk
-import torch
-import numpy as np
-from omegaconf import OmegaConf
-import logging
-from collections import defaultdict
 
+from collections import defaultdict
+import logging
+from omegaconf import OmegaConf
+import numpy as np
+import torch
+import tensorkrowch as tk
+import hydra
+import matplotlib.pyplot as plt
+from src._utils import _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
+import src.schemas as schemas
+from src.datasets.gen_n_load import load_dataset, LabelledDataset
+from src.datasets.preprocess import preprocess_pipeline
+import src.mps.categorisation as mps_cat
+import src.discriminator.utils as discr
+import src.mps.sampling as sampling
+import src.gantrain as gantrain
+import wandb
 
 
 logger = logging.getLogger(__name__)
@@ -73,21 +73,24 @@ def main(cfg: schemas.Config):
 
     # Pretraining the MPS as classifier
     (mps_pretrain_tensors,
-     mps_pretrain_best_acc) = mps_cat.train(mps=mps, loaders=loaders,
+     mps_pretrain_best_acc) = mps_cat.train(classifier=mps, loaders=loaders,
                                             cfg=cfg.pretrain.mps,
                                             device=device,
                                             title=dataset_name,
                                             stage="pre")
-    
+
     logger.info("MPS pretraining done.")
-    
+
     # From here on, MPS as generator in the foreground
     generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
     verify_tensors(mps, generator, "MPS", "Generator")
-    path_pre_mps = save_model(
-        model=generator, run_name=run.name, model_type="pre_mps")
-    run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
+
+    # Save locally and as wandb.artifact, if wanted
+    if cfg.save.pre_mps:
+        path_pre_mps = save_model(
+            model=generator, run_name=run.name, model_type="pre_mps")
+        run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
 
     # Preparing dataset for discriminator pretraining
     X_synth = {}
@@ -150,10 +153,13 @@ def main(cfg: schemas.Config):
             key=i,
             device=device
         )
-        path_pre_dis = save_model(
-            model=d[i], run_name=f"{i}_{run.name}", model_type="pre_dis")
-        run.log_model(path=path_pre_dis, name=f"pre_dis_{i}_{run.name}")
+        # Save locally and as wandb.artifact if wanted
+        if cfg.save.pre_dis:
+            path_pre_dis = save_model(
+                model=d[i], run_name=f"{i}_{run.name}", model_type="pre_dis")
+            run.log_model(path=path_pre_dis, name=f"pre_dis_{i}_{run.name}")
         logger.info(f"Pretraining of discriminator {i} completed.")
+    
     logger.info("Pretraining completed.")
 
     # Constructing dataloader of real, unembedded data
@@ -163,9 +169,8 @@ def main(cfg: schemas.Config):
             X=X[split], c=t[split],
             n_real=cfg.gantrain.n_real, split=split
         )
- 
+
     # GAN style training
-    # TODO: Debug to find out whether gradients flow or not to central (and other tensors)
     logger.info("GAN-style training begins.")
     best_acc = mps_pretrain_best_acc
     gantrain.loop(
@@ -175,13 +180,18 @@ def main(cfg: schemas.Config):
         best_acc=best_acc, cat_loaders=loaders,
         device=device
     )
-    for i in d.keys():
-        path_gan_dis = save_model(
-            model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
-        run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")
-    path_gan_mps = save_model(
-        model=generator, run_name=run.name, model_type="gan_mps")
-    run.log_model(path=path_gan_mps, name=f"gan_mps_{run.name}")
+    
+    # Save locally and as wandb.artifact, if wanted
+    if cfg.save.gan_dis:
+        for i in d.keys():
+            path_gan_dis = save_model(
+                model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
+            run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")
+    if cfg.save.gan_mps:
+        path_gan_mps = save_model(
+            model=generator, run_name=run.name, model_type="gan_mps")
+        run.log_model(path=path_gan_mps, name=f"gan_mps_{run.name}")
+    
     logger.info("GAN-style training completed.")
 
     # Visualizing generative capabilities after GAN-style training
@@ -192,14 +202,14 @@ def main(cfg: schemas.Config):
 
     with torch.no_grad():
         synths = sampling.batched(
-            mps=generator, 
+            mps=generator,
             embedding=cfg.model.mps.embedding,
             cls_pos=cls_pos, num_spc=n,
             num_bins=cfg.gantrain.num_bins,
             batch_spc=cfg.gantrain.n_real,
             device=device).cpu()
     torch.cuda.empty_cache()
-    
+
     ax = visualise_samples(samples=synths)
     wandb.log({"samples/gantraining": wandb.Image(ax.figure)})
     plt.close(ax.figure)
