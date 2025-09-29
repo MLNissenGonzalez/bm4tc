@@ -135,8 +135,8 @@ def single_class(mps: tk.models.MPS,
             num_spc, num_bins)  # shape (num_spc, num_bins)
 
         # Draw one bin value per sample and site from p, TODO: Make configable
-        samples.append(diff_sampling.os_secant(
-            p, input_space))  # shape (num_spc,)
+        feature = diff_sampling.os_secant(p, input_space)
+        samples.append(feature)  # shape (num_spc,)
 
         # Embed drawn samples and use for conditioning for the next site.
         embs[site] = embedding(samples[-1], in_dim)[:, None,
@@ -209,7 +209,8 @@ def _single_class(mps: tk.models.MPS,
     for site in range(mps.n_features):
         if site == cls_pos:
             continue
-
+        
+        # This missing caused a silent bug.
         embs[site] = in_emb
         
         # This reset has to be performed as born_sequential assigns new in features everytime new embedding is added
@@ -221,8 +222,8 @@ def _single_class(mps: tk.models.MPS,
             num_spc, num_bins)  # shape (num_spc, num_bins)
 
         # Draw one bin value per sample and site from p, TODO: Make configable
-        samples.append(diff_sampling.os_secant(
-            p, input_space))  # shape (num_spc,)
+        feature = diff_sampling.os_secant(p, input_space)
+        samples.append(feature)  # shape (num_spc,)
 
         # Embed drawn samples and use for conditioning for the next site.
         embs[site] = embedding(samples[-1], in_dim
