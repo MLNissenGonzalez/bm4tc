@@ -5,48 +5,14 @@ import torch.nn as nn
 import numpy as np
 from torch import optim
 from typing import Optional, Dict, Any
-from schemas import CriterionConfig
+import schemas
 from pathlib import Path
+from datetime import datetime
+
 import hydra
 import logging
 import wandb
-
-logger = logging.getLogger(__name__)
-
-def save_model(model: torch.nn.Module, run_name: str, model_type: str):
-    """
-    Save model inside the Hydra run's output directory:
-    ${hydra:run.dir}/models/{model_type}_{run_name}.pt
-    """
-    assert model_type in ["pre_mps", "pre_dis", "gan_mps", "gan_dis"], \
-        f"Invalid model_type {model_type}"
-
-    # Hydra's current run dir
-    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-
-    # Models subfolder inside it
-    folder = run_dir / "models"
-    folder.mkdir(parents=True, exist_ok=True)
-
-    # Save path
-    filename = f"{model_type}_{run_name}.pt"
-    save_path = folder / filename
-
-    # Save state dict
-    torch.save(model.state_dict(), save_path)
-
-    return str(save_path)
-
-# Verification of model transfer
-def verify_tensors(model1, model2, name1="Original", name2="Copy"):
-    logger.info("Verifying tensor transfer...")
-    for i, (t1, t2) in enumerate(zip(model1.tensors, model2.tensors)):
-        if not torch.allclose(t1, t2):
-            logger.error(f"Tensor {i} mismatch between {name1} and {name2}")
-            logger.error(f"Max difference: {(t1 - t2).abs().max().item()}")
-        else:
-            logger.info(f"Tensor {i} successfully transferred")
-
+import omegaconf
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -77,7 +43,7 @@ _LOSS_MAP = {
     "vanilla": nn.BCELoss # TODO: Has to be adapted to the swapped logarithm
 }
 
-def get_criterion(cfg: CriterionConfig) -> nn.Module:
+def get_criterion(cfg: schemas.CriterionConfig) -> nn.Module:
     key = cfg.name.replace(" ", "").replace("-", "").lower()
     if key not in _LOSS_MAP:
         raise ValueError(f"Loss '{cfg.name}' not recognised")
@@ -135,6 +101,90 @@ def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
 def _class_wise_dataset_size(t: torch.LongTensor, num_cls: int) -> list:
     return torch.bincount(input=t, minlength=num_cls).tolist()
 
+logger = logging.getLogger(__name__)
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------wandb tracking setup-----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------
+
+def init_wandb(cfg: schemas.Config):
+    # Convert only loggable types
+    wandb_cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)
+    
+    # Job Info
+    runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
+    job_num = runtime_cfg.job.get("num", 0)
+    total_num = 1
+    params = runtime_cfg.sweeper.params
+    for group in params.values():
+        options = group.split(",") # group is comma seperated str of options
+        total_num *= len(options)
+    
+    # Current date
+    now = datetime.now()
+    # Format as DDMMYY
+    timestamp = now.strftime("%d%m%y")
+
+    if total_num == 1:
+        group_key = f"{cfg.dataset.name}-{cfg.model.dis.mode}"
+    else:
+        group_key = f"{total_num}jobs-{timestamp}"
+
+    run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
+    run = wandb.init(
+        project=cfg.wandb.setup.project,
+        entity=cfg.wandb.setup.entity,
+        config=wandb_cfg,
+        group=group_key,
+        name=run_name,
+        reinit="finish_previous"
+    )
+    return run
+
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Model weights save and transfer-----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+def save_model(model: torch.nn.Module, run_name: str, model_type: str):
+    """
+    Save model inside the Hydra run's output directory:
+    ${hydra:run.dir}/models/{model_type}_{run_name}.pt
+    """
+    assert model_type in ["pre_mps", "pre_dis", "gan_mps", "gan_dis"], \
+        f"Invalid model_type {model_type}"
+
+    # Hydra's current run dir
+    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+
+    # Models subfolder inside it
+    folder = run_dir / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    # Save path
+    filename = f"{model_type}_{run_name}.pt"
+    save_path = folder / filename
+
+    # Save state dict
+    torch.save(model.state_dict(), save_path)
+
+    return str(save_path)
+
+# Verification of model transfer
+def verify_tensors(model1, model2, name1="Original", name2="Copy"):
+    logger.info("Verifying tensor transfer...")
+    for i, (t1, t2) in enumerate(zip(model1.tensors, model2.tensors)):
+        if not torch.allclose(t1, t2):
+            logger.error(f"Tensor {i} mismatch between {name1} and {name2}")
+            logger.error(f"Max difference: {(t1 - t2).abs().max().item()}")
+        else:
+            logger.info(f"Tensor {i} successfully transferred")
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -225,6 +275,13 @@ def create_2d_scatter(
 # plt.tight_layout()
 # plt.show()
 
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Dead and unused code-----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------
 
 # Visiualisation of training
 def _epoch_wise_loss_averaging(train_loss: list, 
