@@ -11,7 +11,6 @@ defaults:
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
 
-
   # to turn off hydra logging: set the overrides above to null and add https://stackoverflow.com/questions/65104134/disable-file-output-of-hydra?rq=3:
 # hydra:
 #   output_subdir: null

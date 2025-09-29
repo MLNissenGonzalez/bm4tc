@@ -231,39 +231,9 @@ def check_and_retrain(generator: tk.models.MPS,
                       cls_pos: int,
                       epoch: int,
                       trigger_accuracy: float,
-                      device: torch.device) -> tk.models.MPS:
-    """
-    Evaluate the generator (MPS) on validation data and optionally retrain it.
+                      device: torch.device) -> torch.optim.Optimizer:
+    # TODO: Add updated docstring
 
-    If validation accuracy falls below the trigger threshold, retraining
-    is performed using the provided retraining configuration.
-
-    Parameters
-    ----------
-    mps : tk.models.MPS
-        Current generator model.
-    loaders : dict[str, DataLoader]
-        Dataloaders for training and validation.
-    cfg : schemas.PretrainMPSConfig
-        Configuration for retraining the MPS.
-    cls_pos : int
-        Position of the class label in the MPS input dimension.
-    epoch : int
-        Current training epoch (for logging).
-    trigger_accuracy : float
-        Accuracy threshold that triggers retraining.
-    device : torch.device
-        Torch device for computation.
-
-    Returns
-    -------
-    mps : tk.models.MPS
-        Updated (possibly retrained) MPS generator.
-    accuracy : list of float
-        Validation accuracies before and after retraining.
-    loss : list of float
-        Validation losses before and after retraining.
-    """
     generator.reset()
     classifier = tk.models.MPSLayer(
         tensors=generator.tensors, out_position=cls_pos, device=device)
@@ -311,45 +281,8 @@ def loop(generator: tk.models.MPS,
 
          device: torch.device
          ) -> None:
-    """
-    Main training loop for GAN-style training with MPS generator and discriminators.
-
-    Alternates between discriminator updates and generator updates, and
-    periodically evaluates/retrains the generator to maintain classification
-    accuracy.
-
-    Parameters
-    ----------
-    mps : tk.models.MPS
-        Generator model (tensor network).
-    dis : dict[Any, nn.Module]
-        Dictionary of discriminators (per-class or single).
-    real_loaders : dict[str, DataLoader]
-        DataLoaders providing real training and validation data.
-    cfg : schemas.GANStyleConfig
-        Configuration object for GAN training (optimizers, loss functions, etc.).
-    cls_pos : int
-        Position of the class label within the MPS input dimension.
-    best_acc : float
-        Best validation accuracy observed before GAN training (used for retraining trigger).
-    cat_loaders : dict[str, DataLoader]
-        DataLoaders used for classification evaluation/retraining.
-    device : torch.device
-        Torch device for training.
-
-    Returns
-    -------
-    d_losses : torch.FloatTensor, shape (N, C) or (N, 1)
-        Discriminator losses per training step across epochs.
-    g_losses : torch.FloatTensor, shape (N, C) or (N, 1)
-        Generator losses per training step across epochs.
-    valid_acc : list of float
-        Validation accuracies at retraining checkpoints
-        (1 element if no retraining occurred at a checkpoint, 2 if retraining occurred).
-    valid_loss : list of float
-        Validation losses at retraining checkpoints
-        (same convention as `valid_acc`).
-    """
+    
+    # TODO: Add updated docstring
 
     trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0.0)
     step = 0

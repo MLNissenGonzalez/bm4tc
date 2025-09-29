@@ -12,7 +12,7 @@ import torch
 import tensorkrowch as tk
 import hydra
 import matplotlib.pyplot as plt
-from src._utils import _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
+from src._utils import init_wandb, _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
 import src.schemas as schemas
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 from src.datasets.preprocess import preprocess_pipeline
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def main(cfg: schemas.Config):
 
     # Initialising wandb and device
-    run = schemas.init_wandb(cfg)
+    run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"{device=}")
 
