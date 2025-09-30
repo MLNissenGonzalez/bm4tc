@@ -10,7 +10,6 @@ The goal is to scale from simple 2D toy datasets to more complex data where adve
 - MPS after adversarial training (MPS as the discriminator)  
 - Benchmark against state-of-the-art neural network-based models
 
----
 
 ## Requirements
 The easiest setup is via a custom conda environment. From the parent folder, run:
@@ -19,8 +18,6 @@ The easiest setup is via a custom conda environment. From the parent folder, run
 conda env create -f environment.yml
 ```
 All required packages are listed in `environment.yml.`
-
----
 
 ## Repository Structure
 The repository is organized as follows:
@@ -47,8 +44,6 @@ Multirun:
 ```bash 
 python -m experiments.<script> --multirun +experiments=<config>
 ```
-
----
 
 ## Tracking and Outputs
 Runs are tracked by [Weights & Biases](https://wandb.ai/).
