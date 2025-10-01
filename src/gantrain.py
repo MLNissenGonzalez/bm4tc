@@ -260,19 +260,16 @@ def check_and_retrain(generator: tk.models.MPS,
 
     if acc < trigger_accuracy:
         # retrain
-        logger.info(f'Retraining after epoch {epoch+1}')
+        logger.info(f'Starting to retrain at epoch {epoch+1}')
         best_tensors, best_acc = mps_cat.train(
             classifier=classifier,
-            loaders=loaders,
-            cfg=cfg,
-            device=device,
-            stage="gan"
-        )
+            loaders=loaders,cfg=cfg,device=device,
+            stage="gan",samp_cfg=samp_cfg)
         if toViz:
             samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
         generator.initialize(tensors=best_tensors)
-        g_optimizer.defaults
         g_optimizer = get_optimizer(generator.parameters(), cfg_g_optimizer)
+        logger.info("Retraining finished.")
 
     return g_optimizer
 
@@ -295,7 +292,8 @@ def loop(generator: tk.models.MPS,
     
     # TODO: Add updated docstring
 
-    trigger_accuracy = min(best_acc-cfg.acc_drop_tol, 0.0)
+    trigger_accuracy = max(best_acc-cfg.acc_drop_tol, 0.0)
+    logger.info(f"{trigger_accuracy=}")
     step = 0
 
     generator.unset_data_nodes()

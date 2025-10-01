@@ -132,7 +132,7 @@ def init_wandb(cfg: schemas.Config):
         now = datetime.now()
         # Format as DDMMYY
         timestamp = now.strftime("%d%m%y")
-        group_key = f"{total_num}jobs-{timestamp}"
+        group_key = f"{total_num}jobs-{cfg.dataset.name}-{timestamp}"
 
     run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
     run = wandb.init(

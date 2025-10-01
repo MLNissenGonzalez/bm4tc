@@ -15,4 +15,4 @@ patience: 40
 stop_crit: "loss"
 watch_freq: 100
 update_freq: 50
-to_Viz: True
+toViz: True

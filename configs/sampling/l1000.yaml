@@ -1,0 +1,3 @@
+num_bins: 1000
+num_spc: 500
+batch_spc: 4

@@ -1,5 +1,5 @@
-max_epoch: 400
-r_real: 1.0 # ratio n_real = n_synth * r_real
+max_epoch: 300
+r_real: 1.0 # n_real = n_synth * r_real
 d_criterion:
   name: "bce"
   kwargs: null
@@ -9,20 +9,20 @@ g_criterion:
 d_optimizer:
   name: "adam"
   kwargs:
-    lr: 1e-3
+    lr: 0.5e-5
     weight_decay: 0.00
 g_optimizer:
   name: "adam"
   kwargs:
-    lr: 1e-1
+    lr: 1e-5
     weight_decay: 0.00
-acc_drop_tol: 0.4
-check_freq: 20
+acc_drop_tol: 0.01
+check_freq: 1 # every epoch, as GAN training seems to be very strong
 toViz: True
 info_freq: 20
 watch_freq: 100
 retrain: 
-  max_epoch: 100
+  max_epoch: 150
   batch_size: 64 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"
@@ -35,9 +35,9 @@ retrain:
       weight_decay: 0.00
   auto_stack: True
   auto_unbind: False
-  stop_crit: "acc"
-  patience: 10
-  watch_freq: 1000
+  stop_crit: "loss"
+  patience: 50
+  watch_freq: 1e15 # I don't want gradients for this
   update_freq: 50
   toViz: False
 smoothing: 0.0
