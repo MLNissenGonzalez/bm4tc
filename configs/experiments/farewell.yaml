@@ -1,16 +1,18 @@
 # @package _global_
 defaults:
-  - override /gantrain: effect_first2
+  - override /gantrain: adam2_bce2_e300_lr4
   - override /dataset: moons_4k
   - override /model/mps: d30D18_secant
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: adam_b64e500
   - override /pretrain/dis: adam_b64e2000lr3
-  - override /sampling: default
+  - override /sampling: l500
   
 # Copy from sweeps
 hydra:
   sweeper:
     params:
-      model/dis: op_4_2d_leaky_ens,p_4_2d_leaky_ens
-      gantrain: effect_first0, effect_first1, effect_first2
+      model/dis: p_4_2d_leaky_ens, op_4_2d_leaky_ens
+      gantrain: adam2_bce2_e300_lr4, adam2_bce2_e500_lr5
+      sampling: l500, l1000
+      model/mps: d10D6_secant, d30D18_secant

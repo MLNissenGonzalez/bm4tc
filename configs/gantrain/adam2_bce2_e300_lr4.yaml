@@ -17,12 +17,12 @@ g_optimizer:
     lr: 1e-4
     weight_decay: 0.00
 acc_drop_tol: 0.01
-check_freq: 20
+check_freq: 1 # every epoch, as GAN training seems to be very strong
 toViz: True
 info_freq: 20
 watch_freq: 100
 retrain: 
-  max_epoch: 100
+  max_epoch: 150
   batch_size: 64 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"
@@ -35,9 +35,9 @@ retrain:
       weight_decay: 0.00
   auto_stack: True
   auto_unbind: False
-  stop_crit: "acc"
-  patience: 5
-  watch_freq: 100000 # I don't want to viz
+  stop_crit: "loss"
+  patience: 50
+  watch_freq: 1e15 # I don't want gradients for this
   update_freq: 50
   toViz: False
 smoothing: 0.0

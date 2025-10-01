@@ -86,6 +86,7 @@ def main(cfg: schemas.Config):
                                             title=dataset_name, stage="pre")
 
     logger.info("MPS pretraining done.")
+    logger.info(f"{mps_pretrain_best_acc=}")
 
     # From here on, MPS as generator in the foreground
     generator = tk.models.MPS(
@@ -202,7 +203,7 @@ def main(cfg: schemas.Config):
 
     # Visualizing generative capabilities after GAN-style training
     if data_dim == 2:
-        n = cfg.sampling.num_spc
+        n = n_spc["train"]
     else:
         n = cfg.sampling.batch_spc # maybe change this
     with torch.no_grad():

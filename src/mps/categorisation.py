@@ -270,13 +270,13 @@ def train(classifier: tk.models.MPSLayer,
         # Model update and early stopping
         if cfg.stop_crit == "acc":
             if acc > best_acc:
-                best_acc, patience_counter = acc, 0
+                best_loss, best_acc, patience_counter = val_loss, acc, 0
                 best_tensors = [t.clone().detach() for t in classifier.tensors]
             else:
                 patience_counter += 1
         elif cfg.stop_crit == "loss":
             if val_loss < best_loss:
-                best_loss, patience_counter = val_loss, 0
+                best_loss, best_acc, patience_counter = val_loss, acc, 0
                 best_tensors = [t.clone().detach() for t in classifier.tensors]
             else:
                 patience_counter += 1

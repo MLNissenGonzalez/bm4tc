@@ -6,11 +6,11 @@ defaults:
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: adam_b64e300
   - override /pretrain/dis: test2
-  - override /sampling: default
+  - override /sampling: l500
 
 # Add --multirun +experiments=test2
 hydra:
   sweeper:
     params:
       model/dis: wide_leaky_ens, p_4_2d_leaky_ens
-      model/mps: d4D3_secant, d10D6_secant
+      model/mps: d10D6_secant, d30D10_secant

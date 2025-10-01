@@ -16,13 +16,13 @@ g_optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-acc_drop_tol: 0.1
-check_freq: 4
+acc_drop_tol: 0.02
+check_freq: 1
 toViz: True
 info_freq: 2
-watch_freq: 1
+watch_freq: 10
 retrain: 
-  max_epoch: 40
+  max_epoch: 100
   batch_size: 64 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"
@@ -34,8 +34,8 @@ retrain:
       lr: 1e-4
       weight_decay: 0.00
   patience: 10
-  stop_crit: "acc"
-  update_freq: 20
+  stop_crit: "loss"
+  update_freq: 25
   toViz: False
   watch_freq: 1000
   auto_stack: True
