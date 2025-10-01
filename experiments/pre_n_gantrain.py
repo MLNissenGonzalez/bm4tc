@@ -12,7 +12,7 @@ import torch
 import tensorkrowch as tk
 import hydra
 import matplotlib.pyplot as plt
-from src._utils import init_wandb, _class_wise_dataset_size, visualise_samples, save_model, verify_tensors
+from src._utils import init_wandb, _class_wise_dataset_size, visualise_samples, save_model, verify_tensors, set_seed
 import src.schemas as schemas
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 from src.datasets.preprocess import preprocess_pipeline
@@ -32,6 +32,7 @@ def main(cfg: schemas.Config):
     # Initialising wandb and device
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(cfg.reproduce.random.seed)
     logger.info(f"{device=}")
 
     # Loading dataset for classification
@@ -42,21 +43,27 @@ def main(cfg: schemas.Config):
 
     # Initialising MPS
     init_cfg = OmegaConf.to_object(cfg.model.mps.init_kwargs)
-    mps = tk.models.MPSLayer(n_features=data_dim+1,
+    classifier = tk.models.MPSLayer(n_features=data_dim+1,
                              out_dim=num_cls,
                              device=device,
                              **init_cfg)
-    cls_pos = mps.out_features[0]  # important global variable
+    cls_pos = classifier.out_features[0]  # important global variable
+    classifier.embedding = cfg.model.mps.embedding
 
-    info = f"MPS initalised with:\nbond dim = {cfg.model.mps.init_kwargs.bond_dim} and\nphysical dim = {cfg.model.mps.init_kwargs.in_dim}"
+    info = f"MPS initalised with:\n {classifier.bond_dim=} and\n{classifier.in_dim=}"
     info_lines = info.split("\n")
     logger.info("\n".join(info_lines))
 
     # Preprocessing data to be ready for embedding
-    X, t, scaler = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
+    X, t, _ = preprocess_pipeline(X_raw=dataset.X, t_raw=dataset.t,
                                        split=cfg.dataset.split,
-                                       random_state=cfg.dataset.split_seed,
-                                       embedding=cfg.model.mps.embedding)
+                                       random_state=cfg.reproduce.random.random_state,
+                                       embedding=classifier.embedding)
+
+    # Visualising the data
+    ax = visualise_samples(samples=X["train"], labels=t["train"], gen_viz=cfg.sampling.num_spc)
+    wandb.log({"samples/dataset": wandb.Image(ax.figure)})
+    plt.close(ax.figure)
 
     # Preparing dataloader for classification via MPS
     loaders = {}
@@ -73,21 +80,21 @@ def main(cfg: schemas.Config):
 
     # Pretraining the MPS as classifier
     (mps_pretrain_tensors,
-     mps_pretrain_best_acc) = mps_cat.train(classifier=mps, loaders=loaders,
+     mps_pretrain_best_acc) = mps_cat.train(classifier=classifier, loaders=loaders,
                                             cfg=cfg.pretrain.mps,
-                                            device=device,
-                                            title=dataset_name,
-                                            stage="pre")
+                                            device=device, samp_cfg=cfg.sampling,
+                                            title=dataset_name, stage="pre")
 
     logger.info("MPS pretraining done.")
 
     # From here on, MPS as generator in the foreground
     generator = tk.models.MPS(
         tensors=mps_pretrain_tensors, device=device)
-    verify_tensors(mps, generator, "MPS", "Generator")
+    verify_tensors(classifier, generator, "Classifier", "Generator")
+    generator.embedding = classifier.embedding
 
     # Save locally and as wandb.artifact, if wanted
-    if cfg.save.pre_mps:
+    if cfg.reproduce.save.pre_mps:
         path_pre_mps = save_model(
             model=generator, run_name=run.name, model_type="pre_mps")
         run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
@@ -104,11 +111,11 @@ def main(cfg: schemas.Config):
         with torch.no_grad():
             X_synth[split] = (
                 sampling.batched(
-                    mps=generator, embedding=cfg.model.mps.embedding,
+                    mps=generator, embedding=generator.embedding,
                     cls_pos=cls_pos,
                     num_spc=n_spc[split],
-                    num_bins=cfg.gantrain.num_bins,
-                    batch_spc=cfg.gantrain.n_real,
+                    num_bins=cfg.sampling.batch_spc,
+                    batch_spc=cfg.sampling.batch_spc,
                     device=device
                 )
                 .cpu()
@@ -139,9 +146,8 @@ def main(cfg: schemas.Config):
 
     # Vizualising generative capabilities after pretraining
     to_visualise = X_synth.get("train")
-    ax = visualise_samples(samples=to_visualise,
-                           labels=None, gen_viz=cfg.wandb.gen_viz)
-    wandb.log({"samples/pretraining": wandb.Image(ax.figure)})
+    ax = visualise_samples(samples=to_visualise, labels=None, gen_viz=cfg.sampling.batch_spc)
+    wandb.log({"samples/pre": wandb.Image(ax.figure)})
     plt.close(ax.figure)
 
     # Discriminator pretraining
@@ -154,7 +160,7 @@ def main(cfg: schemas.Config):
             device=device
         )
         # Save locally and as wandb.artifact if wanted
-        if cfg.save.pre_dis:
+        if cfg.reproduce.save.pre_dis:
             path_pre_dis = save_model(
                 model=d[i], run_name=f"{i}_{run.name}", model_type="pre_dis")
             run.log_model(path=path_pre_dis, name=f"pre_dis_{i}_{run.name}")
@@ -164,10 +170,11 @@ def main(cfg: schemas.Config):
 
     # Constructing dataloader of real, unembedded data
     real_loaders = {}
+    n_real = num_cls * cfg.sampling.batch_spc
     for split in ["train", "valid", "test"]:
         real_loaders[split] = gantrain.real_loader(
             X=X[split], c=t[split],
-            n_real=cfg.gantrain.n_real, split=split
+            n_real=n_real, split=split
         )
 
     # GAN style training
@@ -175,19 +182,18 @@ def main(cfg: schemas.Config):
     best_acc = mps_pretrain_best_acc
     gantrain.loop(
         generator=generator, dis=d, real_loaders=real_loaders,
-        cfg=cfg.gantrain, cls_pos=cls_pos,
-        embedding=cfg.model.mps.embedding,
-        best_acc=best_acc, cat_loaders=loaders,
-        device=device
+        cfg=cfg.gantrain, cls_pos=cls_pos, samp_cfg=cfg.sampling,
+        embedding=cfg.model.mps.embedding,best_acc=best_acc, 
+        cat_loaders=loaders, device=device
     )
     
     # Save locally and as wandb.artifact, if wanted
-    if cfg.save.gan_dis:
+    if cfg.reproduce.save.gan_dis:
         for i in d.keys():
             path_gan_dis = save_model(
                 model=d[i], run_name=f"{i}_{run.name}", model_type="gan_dis")
             run.log_model(path=path_gan_dis, name=f"gan_dis_{i}_{run.name}")
-    if cfg.save.gan_mps:
+    if cfg.reproduce.save.gan_mps:
         path_gan_mps = save_model(
             model=generator, run_name=run.name, model_type="gan_mps")
         run.log_model(path=path_gan_mps, name=f"gan_mps_{run.name}")
@@ -196,24 +202,23 @@ def main(cfg: schemas.Config):
 
     # Visualizing generative capabilities after GAN-style training
     if data_dim == 2:
-        n = n_spc["train"]
+        n = cfg.sampling.num_spc
     else:
-        n = cfg.wandb.gen_viz
-
+        n = cfg.sampling.batch_spc # maybe change this
     with torch.no_grad():
         synths = sampling.batched(
             mps=generator,
             embedding=cfg.model.mps.embedding,
             cls_pos=cls_pos, num_spc=n,
-            num_bins=cfg.gantrain.num_bins,
-            batch_spc=cfg.gantrain.n_real,
+            num_bins=cfg.sampling.num_bins,
+            batch_spc=cfg.sampling.batch_spc,
             device=device).cpu()
     torch.cuda.empty_cache()
-
     ax = visualise_samples(samples=synths)
-    wandb.log({"samples/gantraining": wandb.Image(ax.figure)})
+    wandb.log({"samples/gan": wandb.Image(ax.figure)})
     plt.close(ax.figure)
 
+    # Closing the run
     run.finish()
 
 

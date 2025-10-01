@@ -1,5 +1,6 @@
 defaults:
   - _self_ # has to be here such that overrides work
+  - sampling: default
   - gantrain: effect_first2
   - dataset: moons_4k
   - model/mps: d30D18_secant
@@ -7,7 +8,8 @@ defaults:
   - pretrain/mps: adam_b64e500
   - pretrain/dis: adam_b64e1000lr3
   - wandb: defaults
-  - save: none
+  - reproduce/save: none
+  - reproduce/random: "2811"
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
 

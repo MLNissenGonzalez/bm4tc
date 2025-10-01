@@ -6,6 +6,7 @@ defaults:
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: adam_b64e500
   - override /pretrain/dis: adam_b64e2000lr3
+  - override /sampling: default
   
 # Copy from sweeps
 hydra:

@@ -6,6 +6,7 @@ import wandb
 import numpy as np
 
 
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -233,8 +234,6 @@ def logged_optimizer_step(optimizer: torch.optim.Optimizer, mps: tk.models.MPS):
         after = node.tensor.clone().detach()
         diff = (after - t_before[f"{node.name}"]).abs().max()
         wandb.log({f"gan_mps/optim_diff/{name}": diff})
-
-
 
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------

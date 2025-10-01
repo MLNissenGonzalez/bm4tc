@@ -51,31 +51,51 @@ class CriterionConfig:
 
 @dataclass
 class PretrainMPSConfig:
-    optimizer: OptimizerConfig
-    criterion: CriterionConfig
     max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig
+    stop_crit: str # loss / acc 
     patience: int
     watch_freq: int
     update_freq: int
-    stop_crit: str # loss / acc 
+    toViz: bool
     auto_stack: bool = True
     auto_unbind: bool = False
 
 @dataclass
 class PretrainDisConfig:
+    max_epoch: int
+    batch_size: int
     optimizer: OptimizerConfig
     criterion: CriterionConfig
     info_freq: int
-    max_epoch: int
-    batch_size: int
     patience: int
     stop_crit: str # loss / acc 
 
 @dataclass
-class WandbSetupConfig:
+class WandbConfig:
     entity: str
     project: str
+    mode: str
+
+@dataclass
+class SaveConfig:
+    pre_mps: bool
+    pre_dis: bool
+    gan_dis: bool
+    gan_mps: bool
+
+@dataclass
+class RandomConfig:
+    seed: int
+    random_state: int
+
+@dataclass
+class SamplingConfig:
+    num_spc: int # total number of samples to be sampled
+    num_bins: int # machine accuracy per feature
+    batch_spc: int # number of samples to be sampled per batch (important for memory management)
 
 # --- Mid-level config ---
 @dataclass
@@ -92,7 +112,7 @@ class DatasetConfig:
     name: str
     gen_dow_kwargs: DataGenDowConfig
     split: Tuple[float, float, float]
-    split_seed: int
+    split_seed: int # unused / replaced in reproducibilty group
 
 @dataclass
 class ModelConfig:
@@ -106,34 +126,24 @@ class PretrainConfig:
 
 @dataclass
 class GANStyleConfig:
-    num_bins: int
-    n_real: int
-    r_synth: float # in (0.0, infty). n_synth = n_real * r_synth
+    max_epoch: int
+    r_real: float # in (0.0, infty). n_real = n_synth * r_synth
     d_criterion: CriterionConfig
     g_criterion: CriterionConfig
     d_optimizer: OptimizerConfig
     g_optimizer: OptimizerConfig
-    max_epoch: int
     check_freq: int
+    toViz: bool
     info_freq: int
     watch_freq: int
     acc_drop_tol: float
-    retrain_cfg: PretrainMPSConfig
-    patience: Optional[int]
+    retrain: PretrainMPSConfig
     smoothing: float = 0.0
 
 @dataclass
-class WandbConfig:
-    setup: WandbSetupConfig
-    gen_viz: int
-    isWatch: bool
-
-@dataclass
-class SaveConfig:
-    pre_mps: bool
-    pre_dis: bool
-    gan_dis: bool
-    gan_mps: bool
+class ReproducibilityConfig:
+    save: SaveConfig
+    random: RandomConfig
 
 #--- Top-level config ---
 
@@ -141,10 +151,11 @@ class SaveConfig:
 class Config:
     dataset: DatasetConfig
     model: ModelConfig
+    sampling: SamplingConfig
     pretrain: PretrainConfig
     gantrain: GANStyleConfig
     wandb: WandbConfig
-    save: SaveConfig
+    reproduce: ReproducibilityConfig
 
 # --- Register schemas with Hydra ---
 
@@ -162,6 +173,8 @@ cs.store(group="pretrain/mps", name="schema", node=PretrainMPSConfig)
 cs.store(group="pretrain/dis", name="schema", node=PretrainDisConfig)
 cs.store(group="ad_train", name="schema", node=GANStyleConfig)
 cs.store(group="wandb", name="schema", node=WandbConfig)
-cs.store(group="save", name="schema", node=SaveConfig)
-
+cs.store(group="reproduce", name="schema", node=ReproducibilityConfig)
+cs.store(group="reproduce/save", name="schema", node=SaveConfig)
+cs.store(group="reproduce/random", name="schema", node=RandomConfig)
+cs.store(group="sampling", name="schema", node=SamplingConfig)
 

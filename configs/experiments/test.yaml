@@ -6,5 +6,6 @@ defaults:
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: test
   - override /pretrain/dis: test
+  - override /sampling: test
   
   

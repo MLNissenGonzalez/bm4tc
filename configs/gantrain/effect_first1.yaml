@@ -1,6 +1,5 @@
-num_bins: 500
-n_real: 16
-r_synth: 1.0 # ratio n_synth / n_real
+max_epoch: 400
+r_real: 1.0 # ratio n_real = n_synth * r_real
 d_criterion:
   name: "bce"
   kwargs: null
@@ -17,14 +16,14 @@ g_optimizer:
   kwargs:
     lr: 1e-1
     weight_decay: 0.00
-max_epoch: 400
 acc_drop_tol: 0.4
-check_freq: 5
-info_freq: 10
+check_freq: 20
+toViz: True
+info_freq: 20
 watch_freq: 100
-patience: 5
-smoothing: 0.0
-retrain_cfg: 
+retrain: 
+  max_epoch: 100
+  batch_size: 64 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"
     kwargs:
@@ -34,10 +33,11 @@ retrain_cfg:
     kwargs:
       lr: 1e-4
       weight_decay: 0.00
-  max_epoch: 100
-  batch_size: 64 # samples loaded per categorisation step for all classes involved
-  patience: 5
   auto_stack: True
   auto_unbind: False
+  stop_crit: "acc"
+  patience: 10
   watch_freq: 1000
   update_freq: 50
+  toViz: False
+smoothing: 0.0

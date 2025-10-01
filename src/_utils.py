@@ -8,7 +8,8 @@ from typing import Optional, Dict, Any
 import schemas
 from pathlib import Path
 from datetime import datetime
-
+import random 
+import os
 import hydra
 import logging
 import wandb
@@ -116,30 +117,31 @@ def init_wandb(cfg: schemas.Config):
     
     # Job Info
     runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
-    job_num = runtime_cfg.job.get("num", 0)
+    job_num = int(runtime_cfg.job.get("num", 0)) + 1
+    mode = runtime_cfg.mode.value
     total_num = 1
-    params = runtime_cfg.sweeper.params
-    for group in params.values():
-        options = group.split(",") # group is comma seperated str of options
-        total_num *= len(options)
-    
-    # Current date
-    now = datetime.now()
-    # Format as DDMMYY
-    timestamp = now.strftime("%d%m%y")
-
-    if total_num == 1:
+    if mode == 1: # single run
         group_key = f"{cfg.dataset.name}-{cfg.model.dis.mode}"
-    else:
+    else: # multirun
+        params = runtime_cfg.sweeper.params
+        for group in params.values():
+            options = group.split(",") # group is comma seperated str of options
+            total_num *= len(options)
+        
+        # Current date
+        now = datetime.now()
+        # Format as DDMMYY
+        timestamp = now.strftime("%d%m%y")
         group_key = f"{total_num}jobs-{timestamp}"
 
     run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
     run = wandb.init(
-        project=cfg.wandb.setup.project,
-        entity=cfg.wandb.setup.entity,
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
         config=wandb_cfg,
         group=group_key,
         name=run_name,
+        mode=cfg.wandb.mode,
         reinit="finish_previous"
     )
     return run
@@ -193,6 +195,7 @@ def verify_tensors(model1, model2, name1="Original", name2="Copy"):
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+
 # TODO: Implement this also for other visualisable datatypes
 def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTensor] = None, gen_viz: Optional[int]=None):
     """
@@ -207,9 +210,7 @@ def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTen
     ax
         axis object of matplotlib (either image or scatter plot)
     """
-    # I expected that something goes wrong here
     if labels is None:
-        logger.info(f"Assuming shape (n, num_classes, data_dim): {samples.shape}")
         n, num_classes, data_dim = samples.shape
         samples = samples.reshape(n*num_classes, data_dim)                # (n*num_classes, data_dim)
         labels = torch.arange(num_classes).repeat(n)    # (n*num_classes,)
@@ -275,6 +276,26 @@ def create_2d_scatter(
 # plt.tight_layout()
 # plt.show()
 
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Random Seed -----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # for multi-GPU setups
+
+    # Ensure deterministic behavior in cuDNN (can slow things down!)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Set PYTHONHASHSEED environment variable
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

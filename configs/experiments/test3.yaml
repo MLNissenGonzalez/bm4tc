@@ -1,15 +1,16 @@
 # @package _global_
 defaults:
   - override /dataset: moons_2k
-  - override /gantrain: test
+  - override /gantrain: test2
   - override /model/mps: d4D3_secant
   - override /model/dis: wide_leaky_ens
-  - override /pretrain/mps: test
-  - override /pretrain/dis: test
+  - override /pretrain/mps: adam_b64e300
+  - override /pretrain/dis: test2
+  - override /sampling: default
 
 # Add --multirun +experiments=test2
 hydra:
   sweeper:
     params:
       model/dis: wide_leaky_ens, p_4_2d_leaky_ens
-      model/mps: d4D3_secant, test
+      model/mps: d4D3_secant, d10D6_secant
