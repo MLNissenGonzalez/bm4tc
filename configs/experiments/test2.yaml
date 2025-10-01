@@ -6,6 +6,7 @@ defaults:
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: test2
   - override /pretrain/dis: test2
+  - override /sampling: default
 
 # Add --multirun +experiments=test2
 hydra:

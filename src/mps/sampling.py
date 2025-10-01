@@ -4,6 +4,7 @@ from typing import Sequence, Callable
 import src.diff_sampling as diff_sampling
 import tensorkrowch as tk
 import torch
+import schemas
 
 import logging
 logger = logging.getLogger(__name__)

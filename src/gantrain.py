@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def real_loader(X: torch.FloatTensor,
                 c: torch.LongTensor,
-                n_real: int,
+                n_real: int, # corresponds roughly to num_cls * batch_spc
                 split: str) -> DataLoader:
     """
     Construct a DataLoader for real, unembedded data samples.
@@ -58,7 +58,7 @@ def _batch_constructor(generator: tk. models.MPS,
                        # Hyperparameters
                        cls_pos: int,
                        num_bins: int,
-                       r_synth: int,
+                       r_real: int,
                        # Initialized in outer loop
                        in_dim: int,
                        num_cls: int,
@@ -109,13 +109,13 @@ def _batch_constructor(generator: tk. models.MPS,
     X_synth : list of torch.FloatTensor
         Per-class synthetic-only samples generated for generator updates.
     """
-    n_npc = _class_wise_dataset_size(c_real, num_cls)
+    n_real_pc = _class_wise_dataset_size(c_real, num_cls)
     X, t, X_synth = [], [], []
     # maybe replace this with dis.keys() and make this mode universal
     for c, cls_emb in enumerate(cls_embs):
         # Creation of dataset for discriminator
         X_real_c = X_real[c_real == c]
-        n_synth_c = math.ceil(r_synth * n_npc[c])
+        n_synth_c = math.ceil(n_real_pc[c] / r_real)
         X_synth_c = sampling._single_class(mps=generator,
                                            embedding=embedding,
                                            cls_pos=cls_pos,
@@ -148,7 +148,7 @@ def _step(generator: tk.models.MPS,
           c_real: torch.LongTensor,
 
           # Hyperparameters
-          r_synth: float,
+          r_real: float,
           cls_pos: int,
           num_bins: int,
 
@@ -170,7 +170,7 @@ def _step(generator: tk.models.MPS,
     
     X, t, X_synth = _batch_constructor(
         generator=generator, X_real=X_real, c_real=c_real,
-        cls_pos=cls_pos, num_bins=num_bins, r_synth=r_synth,
+        cls_pos=cls_pos, num_bins=num_bins, r_real=r_real,
         in_dim=in_dim, num_cls=num_cls, cls_embs=cls_embs,
         embedding=embedding, input_space=input_space, device=device)
 
@@ -223,23 +223,30 @@ def _step(generator: tk.models.MPS,
     wandb.log(log)
     return step
 
+from mps.categorisation import samples_visualisation
 
 def check_and_retrain(generator: tk.models.MPS,
                       loaders: Dict[str, DataLoader],
                       g_optimizer: torch.optim.Optimizer,
                       cfg: schemas.PretrainMPSConfig,
-                      cls_pos: int,
-                      epoch: int,
+                      cls_pos: int, epoch: int, toViz: bool,
+                      samp_cfg: schemas.SamplingConfig,
                       trigger_accuracy: float,
-                      device: torch.device) -> torch.optim.Optimizer:
+                      device: torch.device,
+                      cfg_g_optimizer: schemas.OptimizerConfig
+                      ) -> torch.optim.Optimizer:
     # TODO: Add updated docstring
 
     generator.reset()
     classifier = tk.models.MPSLayer(
         tensors=generator.tensors, out_position=cls_pos, device=device)
+    classifier.embedding = generator.embedding
     classifier.trace(torch.zeros(0, len(classifier.in_features),
                      classifier.in_dim[0]).to(device))
-    classifier.to(device)
+    classifier.to(device), 
+
+    if toViz:
+        samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
 
     criterion = get_criterion(cfg.criterion)
 
@@ -261,8 +268,11 @@ def check_and_retrain(generator: tk.models.MPS,
             device=device,
             stage="gan"
         )
+        if toViz:
+            samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
         generator.initialize(tensors=best_tensors)
-        g_optimizer = get_optimizer(generator.parameters(), cfg.g_optimizer)
+        g_optimizer.defaults
+        g_optimizer = get_optimizer(generator.parameters(), cfg_g_optimizer)
 
     return g_optimizer
 
@@ -272,6 +282,7 @@ def loop(generator: tk.models.MPS,
          dis: Dict[Any, nn.Module],
          real_loaders: Dict[str, DataLoader],
          cfg: schemas.GANStyleConfig,
+         samp_cfg: schemas.SamplingConfig,
          cls_pos: int,
          embedding: str,
 
@@ -301,7 +312,7 @@ def loop(generator: tk.models.MPS,
 
     # Initialize other objects needed for sampling
     input_space = mps._embedding_to_range(embedding)
-    input_space = torch.linspace(input_space[0], input_space[1], cfg.num_bins)
+    input_space = torch.linspace(input_space[0], input_space[1], samp_cfg.num_bins)
     input_space = input_space.to(device, dtype=torch.float32)
     embedding = mps.get_embedding(embedding)
     in_dim, num_cls = mps._get_indim_and_ncls(generator)
@@ -319,8 +330,8 @@ def loop(generator: tk.models.MPS,
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
             step = _step(generator=generator, dis=dis, X_real=X_real, c_real=c_real,
-                         r_synth=cfg.r_synth, cls_pos=cls_pos, step=step,
-                         num_bins=cfg.num_bins, in_dim=in_dim,
+                         r_real=cfg.r_real, cls_pos=cls_pos, step=step,
+                         num_bins=samp_cfg.num_bins, in_dim=in_dim,
                          num_cls=num_cls, embedding=embedding,
                          cls_embs=cls_embs, input_space=input_space,
                          d_optimizer=d_optimizer, g_optimizer=g_optimizer,
@@ -330,6 +341,7 @@ def loop(generator: tk.models.MPS,
         # Checking classification accuracy and retraining if necessary
         if (epoch+1) % cfg.check_freq == 0:
             g_optimizer = check_and_retrain(generator=generator, loaders=cat_loaders,
-                                            cfg=cfg.retrain_cfg, cls_pos=cls_pos,
+                                            cfg=cfg.retrain, cls_pos=cls_pos, samp_cfg=samp_cfg,
                                             g_optimizer=g_optimizer, epoch=epoch, device=device,
-                                            trigger_accuracy=trigger_accuracy)
+                                            trigger_accuracy=trigger_accuracy, toViz=cfg.toViz,
+                                            cfg_g_optimizer=cfg.g_optimizer)

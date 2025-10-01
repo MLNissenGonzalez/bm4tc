@@ -2,7 +2,7 @@ import torch
 import tensorkrowch as tk
 from typing import Callable, Dict, Tuple, List
 from torch.utils.data import TensorDataset, DataLoader
-from schemas import PretrainMPSConfig
+import schemas
 from _utils import get_optimizer, get_criterion
 import mps.utils as mps
 import wandb
@@ -138,16 +138,45 @@ def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cl
         optimizer.step()
 
         wandb.log({f"{stage}_mps/train/loss": loss})
-        return step
+    return step
 
 
 # TODO: Think about logging different or more quantities
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#--------viz function---------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+from src._utils import visualise_samples
+import mps.sampling as sampling
+import matplotlib.pyplot as plt
+
+def samples_visualisation(classifier: tk.models.MPSLayer, 
+                        device: torch.device,
+                        cfg: schemas.SamplingConfig, stage: str
+                        ):
+    generator = tk.models.MPS(tensors=classifier.tensors, device=device)
+    cls_pos = classifier.out_position
+    with torch.no_grad():
+        synths = sampling.batched(
+            mps=generator,
+            embedding=classifier.embedding,
+            cls_pos=cls_pos, num_spc=cfg.num_spc,
+            num_bins=cfg.num_bins,
+            batch_spc=cfg.batch_spc,
+            device=device).cpu()
+    torch.cuda.empty_cache()
+
+    ax = visualise_samples(samples=synths)
+    wandb.log({f"samples/{stage}": wandb.Image(ax.figure)})
+    plt.close(ax.figure)
 # TODO: Consider removing title parameter
 
 
 def train(classifier: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
-          cfg: PretrainMPSConfig,
+          cfg: schemas.PretrainMPSConfig,
+          samp_cfg: schemas.SamplingConfig,
           device: torch.device,
           stage: str,
           title: str | None = None,
@@ -215,8 +244,7 @@ def train(classifier: tk.models.MPSLayer,
     # Prepare MPS for training
     classifier.to(device)
     classifier.auto_stack, classifier._auto_unbind = cfg.auto_stack, cfg.auto_unbind
-    classifier.unset_data_nodes()
-    classifier.reset()
+    classifier.unset_data_nodes(), classifier.reset()
     classifier.trace(torch.zeros(1, len(classifier.in_features),
                      classifier.in_dim[0]).to(device))
 
@@ -264,6 +292,9 @@ def train(classifier: tk.models.MPSLayer,
         # Update report
         if (epoch+1) % cfg.update_freq == 0:
             logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
+            if cfg.toViz:
+                samples_visualisation(classifier=classifier, stage="pre",
+                                      device=device, cfg=samp_cfg)
         elif (epoch == 0) and (title is not None):
             logger.info(f'\nTraining of {title} dataset:\n')
 
