@@ -9,7 +9,7 @@ g_criterion:
 d_optimizer:
   name: "adam"
   kwargs:
-    lr: 0.5e-5
+    lr: 1e-5
     weight_decay: 0.00
 g_optimizer:
   name: "adam"
