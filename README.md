@@ -47,8 +47,6 @@ python -m experiments.<script> --multirun +experiments=<config>
 
 ## Tracking and Outputs
 Runs are tracked by [Weights & Biases](https://wandb.ai/).
-Local folders created during experiments (not tracked by Git) include:
+Local folders created during experiments (not tracked by Git) are:
 - `.datasets/`: Downloaded/generated datasets,
-- `outputs/`: Single run config logs and model weights
-- `multirun/`: Multirun congig logs and model weights
-- `wandb/`: Run history and figures.
+- `outputs/`: Experiment logs (`wandb`), model weights (`models`), config (`.hydra/`).
