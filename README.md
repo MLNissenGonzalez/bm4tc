@@ -28,25 +28,22 @@ Implements:
     - Training steps for different models and paradigms
 
 ### 2. Experiment scripts (`experiments/`)
-Run experiments as modules from the parent folder: 
-```bash 
-python -m experiments.<script>
-```
+Complete experiment are scripts in the form `experiments/<script>.py`. Run experiments as modules from the parent folder with experiment config chosen, see 3.
 
 ### 3. Configuration files (`configs/`)
 Experiment configurations are modular and managed with [Hydra](https://hydra.cc/). 
-Configs for individual runs or multiruns are stored in `configs/experiments`. 
+Configs for individual runs or multiruns are stored in `configs/experiments` as `<experiment>.yaml`.
 Single run:
 ```bash 
-python -m experiments.<script> +experiments=<config>
+python -m experiments.<script> +experiments=<experiment>
 ```
 Multirun:
 ```bash 
-python -m experiments.<script> --multirun +experiments=<config>
+python -m experiments.<script> --multirun +experiments=<experiment>
 ```
 
 ## Tracking and Outputs
 Runs are tracked by [Weights & Biases](https://wandb.ai/).
 Local folders created during experiments (not tracked by Git) are:
 - `.datasets/`: Downloaded/generated datasets,
-- `outputs/`: Experiment logs (`wandb`), model weights (`models`), config (`.hydra/`).
+- `outputs/`: Experiment logs (`wandb/`), model weights (`models/`), config (`.hydra/`).

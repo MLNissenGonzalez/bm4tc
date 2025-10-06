@@ -14,6 +14,8 @@ import hydra
 import logging
 import wandb
 import omegaconf
+from torch.autograd import Function
+import scipy.linalg
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -50,6 +52,7 @@ def get_criterion(cfg: schemas.CriterionConfig) -> nn.Module:
         raise ValueError(f"Loss '{cfg.name}' not recognised")
     # use empty dict if kwargs is None
     return _LOSS_MAP[key](**(cfg.kwargs or {}))
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -300,6 +303,73 @@ def set_seed(seed: int):
 
     # Set PYTHONHASHSEED environment variable
     os.environ["PYTHONHASHSEED"] = str(seed)
+
+
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Random Seed -----------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# --- differentiable Matrix square root operator, 
+# from https://github.com/steveli/pytorch-sqrtm/blob/master/sqrtm.py ---
+
+class MatrixSquareRoot(Function):
+    @staticmethod
+    def forward(ctx, input):
+        m = input.detach().cpu().numpy().astype(np.float64)
+        sqrtm = torch.from_numpy(scipy.linalg.sqrtm(m).real).to(input)
+        ctx.save_for_backward(sqrtm)
+        return sqrtm
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = None
+        if ctx.needs_input_grad[0]:
+            sqrtm, = ctx.saved_tensors
+            sqrtm = sqrtm.detach().cpu().numpy().astype(np.float64)
+            gm = grad_output.detach().cpu().numpy().astype(np.float64)
+            grad_sqrtm = scipy.linalg.solve_sylvester(sqrtm, sqrtm, gm)
+            grad_input = torch.from_numpy(grad_sqrtm).to(grad_output)
+        return grad_input
+
+
+sqrtm = MatrixSquareRoot.apply
+
+
+# --- differentiable FID-like metric ---
+class FIDLike(nn.Module):
+    def __init__(self, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, real, generated):
+        mu_r = real.mean(dim=0)
+        mu_g = generated.mean(dim=0)
+
+        # Covariances: remember to transpose (samples -> columns)
+        cov_r = torch.cov(real.T)
+        cov_g = torch.cov(generated.T)
+
+        # Regularize for numerical stability
+        eye = torch.eye(cov_r.shape[0], device=cov_r.device)
+        cov_r = cov_r + self.eps * eye
+        cov_g = cov_g + self.eps * eye
+
+        # Mean difference
+        diff_mu = torch.sum((mu_r - mu_g) ** 2)
+
+        # Matrix square root term using custom function
+        covmean = sqrtm(cov_r @ cov_g)
+
+        # Ensure real part (numerical precision can introduce tiny imaginary parts)
+        if torch.is_complex(covmean):
+            covmean = covmean.real
+
+        diff_cov = torch.trace(cov_r + cov_g - 2 * covmean)
+
+        return diff_mu + diff_cov
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
