@@ -156,6 +156,7 @@ class Config:
     gantrain: GANStyleConfig
     wandb: WandbConfig
     reproduce: ReproducibilityConfig
+    experiment: str = "default"
 
 # --- Register schemas with Hydra ---
 

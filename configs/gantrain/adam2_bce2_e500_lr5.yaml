@@ -1,4 +1,4 @@
-max_epoch: 300
+max_epoch: 500
 r_real: 1.0 # n_real = n_synth * r_real
 d_criterion:
   name: "bce"

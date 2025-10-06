@@ -1,4 +1,6 @@
 # @package _global_
+experiment: farewell
+
 defaults:
   - override /gantrain: adam2_bce2_e300_lr4
   - override /dataset: moons_4k

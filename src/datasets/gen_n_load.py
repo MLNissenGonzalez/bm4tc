@@ -104,7 +104,6 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]: 
                                              factor=cfg.circ_factor)
         return X, t
     
-    # TODO: Set seeds
     elif canonical == "spirals":
         theta = np.sqrt(np.random.rand(cfg.size))*2*np.pi 
 

@@ -3,6 +3,5 @@ gen_dow_kwargs:
   name: "spirals_4k"
   size: 4000
   seed: 25
-  noise: 0.1
+  noise: 0.5
 split: [0.5, 0.25, 0.25] # train, val, test
-# I also made changes here, that are not tracked

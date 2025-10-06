@@ -1,4 +1,6 @@
 # @package _global_
+experiment: test3
+
 defaults:
   - override /dataset: moons_2k
   - override /gantrain: test2

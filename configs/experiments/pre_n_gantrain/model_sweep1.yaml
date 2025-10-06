@@ -1,3 +1,6 @@
+# @package _global_
+experiment: model_sweep1
+
 hydra:
   sweeper:
     params:

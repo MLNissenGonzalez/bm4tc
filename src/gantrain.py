@@ -207,14 +207,16 @@ def _step(generator: tk.models.MPS,
         # Generator performance against discriminator
         g_logit = d(X_synth[c])
         g_prob = torch.sigmoid(g_logit.squeeze())
+        # TODO: Target kind of determines what loss is below
         g_target = torch.ones_like(g_prob).to(
             device=device, dtype=torch.float32)
         g_loss[c] = g_criterion(g_prob, g_target)
 
         # Update step and gradient tracking of generator
         g_optimizer.zero_grad()
-        g_loss[c].backward()
+        g_loss[c].backward() #
         mps.log_grads(generator, step=step, watch_freq=watch_freq, stage="gan")
+        # TODO: This optimizer step is only minimising currently
         g_optimizer.step()
 
         # Log generator performance
@@ -267,7 +269,7 @@ def check_and_retrain(generator: tk.models.MPS,
             stage="gan",samp_cfg=samp_cfg)
         if toViz:
             samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
-        generator.initialize(tensors=best_tensors)
+        generator.initialize(tensors=best_tensors, device=device)
         g_optimizer = get_optimizer(generator.parameters(), cfg_g_optimizer)
         logger.info("Retraining finished.")
 

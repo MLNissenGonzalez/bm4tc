@@ -117,27 +117,30 @@ def init_wandb(cfg: schemas.Config):
     
     # Job Info
     runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
+    run_dir = Path(runtime_cfg.runtime.output_dir)
     job_num = int(runtime_cfg.job.get("num", 0)) + 1
+
+    # Job Mode
     mode = runtime_cfg.mode.value
     total_num = 1
     if mode == 1: # single run
-        group_key = f"{cfg.dataset.name}-{cfg.model.dis.mode}"
+        now = datetime.now().strftime("%d%b%y_%I%p%M")
     else: # multirun
+        now = datetime.now().strftime("%d%b%y")
         params = runtime_cfg.sweeper.params
         for group in params.values():
             options = group.split(",") # group is comma seperated str of options
             total_num *= len(options)
-        
-        # Current date
-        now = datetime.now()
-        # Format as DDMMYY
-        timestamp = now.strftime("%d%m%y")
-        group_key = f"{total_num}jobs-{cfg.dataset.name}-{timestamp}"
 
+    # Group (folder) and run name 
+    group_key = f"{cfg.experiment}_{cfg.dataset.name}_{now}"
     run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
+    
+    # Initializing the wandb object
     run = wandb.init(
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,
+        dir=str(run_dir),
         config=wandb_cfg,
         group=group_key,
         name=run_name,
@@ -154,6 +157,7 @@ def init_wandb(cfg: schemas.Config):
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# TODO: MPS pretraining models should be saved carefully. 
 def save_model(model: torch.nn.Module, run_name: str, model_type: str):
     """
     Save model inside the Hydra run's output directory:
