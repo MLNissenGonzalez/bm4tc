@@ -226,7 +226,7 @@ def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTen
         return create_2d_scatter(X=samples, t=labels)
     else:
         if gen_viz is None:
-            gen_viz = samples.shape[0]
+            gen_viz = samples.shape[0] # Can be used to visualise only a limited amount of examples
         raise ValueError("Higher data dimension not yet implemented.")
  
     
@@ -308,11 +308,11 @@ def set_seed(seed: int):
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Random Seed -----------------------------------------------------------------------------------------------------------------------------------------------------
+#---------------Metrics for generative capabilities -----------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# --- differentiable Matrix square root operator, 
+# --- Matrix square root implementation for pytorch, 
 # from https://github.com/steveli/pytorch-sqrtm/blob/master/sqrtm.py ---
 
 class MatrixSquareRoot(Function):
@@ -337,21 +337,23 @@ class MatrixSquareRoot(Function):
 
 sqrtm = MatrixSquareRoot.apply
 
+def mean_n_cov(data: torch.FloatTensor):
+    """
+    data: shape (N, d)
+    """
+    mu = data.mean(dim=0)
+    cov = torch.cov(data.T)
+    return mu, cov
 
-# --- differentiable FID-like metric ---
+# --- FID-like metric ---
 class FIDLike(nn.Module):
     def __init__(self, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
 
-    def forward(self, real, generated):
-        mu_r = real.mean(dim=0)
-        mu_g = generated.mean(dim=0)
-
-        # Covariances: remember to transpose (samples -> columns)
-        cov_r = torch.cov(real.T)
-        cov_g = torch.cov(generated.T)
-
+    def lazy_forward(self, mu_r, cov_r, generated):
+        mu_g, cov_g = mean_n_cov(generated)
+        
         # Regularize for numerical stability
         eye = torch.eye(cov_r.shape[0], device=cov_r.device)
         cov_r = cov_r + self.eps * eye
@@ -370,6 +372,33 @@ class FIDLike(nn.Module):
         diff_cov = torch.trace(cov_r + cov_g - 2 * covmean)
 
         return diff_mu + diff_cov
+    
+    def forward(self, real, generated):
+        mu_r, cov_r = mean_n_cov(real)
+        return self.lazy_forward(mu_r, cov_r, generated)
+        
+
+def sample_quality_control(synths: torch.FloatTensor, 
+                           upper: float, lower: float):
+    
+    bad_idx = (
+        (synths.abs() > upper) | (synths < lower)
+        ).nonzero(as_tuple=False)  # (sample_idx, class_idx, feat_idx)
+    logger.info(f"bad positions count = {bad_idx.shape[0]}")
+    if bad_idx.shape[0] > 0:
+        # show first few offending indices and their values
+        for i in range(min(200, bad_idx.shape[0])):
+            s,c,f = bad_idx[i].tolist()
+            val = synths[s, c, f].item()
+            logger.info(f"BAD value at sample={s}, class={c}, feat={f}: {val}")
+        # show global per-dim & per-class stats
+        logger.info("per-class-per-dim max abs:")
+        for c in range(synths.shape[1]):
+            for f in range(synths.shape[2]):
+                m = synths[:, c, f].abs().max().item()
+                logger.info(f" class={c}, feat={f}, max_abs={m:.4g}, mean={synths[:,c,f].mean().item():.4g}")
+    else:
+        logger.info("No values above threshold found.")
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------

@@ -39,8 +39,9 @@ def loader_creator(X: torch.Tensor,
         Dataloader for supervised classification.
     """
     embedding = mps.get_embedding(embedding)
-    X = embedding(X, phys_dim)
-    dataset = TensorDataset(X, t)
+    X_embedded = embedding(X, phys_dim)
+    dataset = TensorDataset(X_embedded, t)
+    dataset.dim = X.shape[1]
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -122,6 +123,7 @@ def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cl
         minibatch-wise trainloss 
     """
 
+    log = []
     classifier.train()
     for X, t in loader:
         X, t = X.to(device), t.to(device)
@@ -136,8 +138,10 @@ def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cl
         mps.log_grads(mps=classifier, watch_freq=watch_freq,
                       step=step, stage="pre")
         optimizer.step()
-
-        wandb.log({f"{stage}_mps/train/loss": loss})
+        log.append(loss.detach().cpu().item())
+    
+    wandb.log({f"{stage}_mps/train/loss": 
+               sum(log)/len(log)})
     return step
 
 
@@ -151,10 +155,9 @@ from src._utils import visualise_samples
 import mps.sampling as sampling
 import matplotlib.pyplot as plt
 
-def samples_visualisation(classifier: tk.models.MPSLayer, 
-                        device: torch.device,
-                        cfg: schemas.SamplingConfig, stage: str
-                        ):
+def sample_from_classifier(classifier: tk.models.MPSLayer,
+                           device: torch.device,
+                           cfg: schemas.SamplingConfig):
     generator = tk.models.MPS(tensors=classifier.tensors, device=device)
     cls_pos = classifier.out_position
     with torch.no_grad():
@@ -166,12 +169,45 @@ def samples_visualisation(classifier: tk.models.MPSLayer,
             batch_spc=cfg.batch_spc,
             device=device).cpu()
     torch.cuda.empty_cache()
+    return synths
 
-    ax = visualise_samples(samples=synths)
-    wandb.log({f"samples/{stage}": wandb.Image(ax.figure)})
-    plt.close(ax.figure)
-# TODO: Consider removing title parameter
+from _utils import FIDLike, mean_n_cov
+fid_like = FIDLike()
 
+_METRICS = ["loss", "acc", "fid"]
+
+def _performance_check(crit: str, 
+                   current: Dict[str, float],
+                   best: Dict[str, float]):
+    isBetter = False
+    isBetter = (
+        ((crit=="acc") and (current[crit]>best[crit])) or
+        ((crit=="loss") and (current[crit]<best[crit]))
+        )
+    if crit == "fid" and current["fid"] is not None:
+        isBetter = (current[crit]<best[crit])
+
+    return isBetter
+
+def _update(crit: str, 
+            current: Dict[str, float], 
+            best: Dict[str, float],
+            patience_counter: int):
+    
+    # Condition check
+    isBetter = _performance_check(crit=crit, 
+                                  current=current, 
+                                  best=best)
+
+    # Update step
+    if isBetter:
+        for crit in _METRICS:
+            best[crit] = current[crit]
+        patience_counter = 0
+    else:
+        patience_counter += 1
+    
+    return isBetter     
 
 def train(classifier: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
@@ -179,8 +215,8 @@ def train(classifier: tk.models.MPSLayer,
           samp_cfg: schemas.SamplingConfig,
           device: torch.device,
           stage: str,
-          title: str | None = None,
-          goal_acc: float | None = None
+          goal_acc: float | None = None,
+          stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
           ) -> Tuple[dict, List[torch.FloatTensor], float]:
     """
     Full classification loop for MPS with early stopping based on validation accuracy.
@@ -234,9 +270,19 @@ def train(classifier: tk.models.MPSLayer,
     test_accuracy : float
         Final test accuracy.
     """
+
     logger.info("Categorisation training begins.")
-    best_acc = 0.0
-    best_loss = float("inf")
+    best = {}
+    for crit in _METRICS:
+        if crit=="acc": best[crit]=0.0
+        else: best[crit]=float("inf")
+    
+    # TODO: Implement something more general and configable
+    if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
+        mu_r, cov_r = {}, {}
+        for c in stat_r.keys():
+            mu_r[c], cov_r[c] = stat_r[c]
+
     patience_counter = 0
     best_tensors = []  # Container for best model parameters
     step = 0
@@ -255,48 +301,66 @@ def train(classifier: tk.models.MPSLayer,
     for epoch in range(cfg.max_epoch):
         # Training step
         step = _train_step(
-            classifier=classifier, loader=loaders['train'], device=device,
+            classifier=classifier, loader=loaders["train"], device=device,
             optimizer=optimizer, loss_fn=criterion, stage=stage,
-            watch_freq=cfg.watch_freq, step=step
-        )
+            watch_freq=cfg.watch_freq, step=step)
 
-        # Validation step
-        acc, val_loss = eval(classifier, loaders['valid'], criterion, device)
-        wandb.log({
-            f"{stage}_mps/valid/acc": acc,
-            f"{stage}_mps/valid/loss": val_loss
-        })
+        # Performance evaluation
+        current = {}
+        current["acc"], current["loss"] = eval(classifier, 
+                                               loaders["valid"], 
+                                               criterion, device)
+        if cfg.stop_crit == "fid":
+            fid_values = []
+            synths = sample_from_classifier(classifier=classifier, 
+                                            cfg=samp_cfg, device=device)
+            for c in range(synths.shape[1]):
+                gen = synths[:, c, :]
+                fid_val = fid_like.lazy_forward(mu_r[c], cov_r[c], gen)
+                fid_values.append(fid_val)
+            current["fid"] = torch.mean(torch.stack(fid_values)).item()
+        else:
+            current["fid"] = None
 
-        # Model update and early stopping
-        if cfg.stop_crit == "acc":
-            if acc > best_acc:
-                best_loss, best_acc, patience_counter = val_loss, acc, 0
-                best_tensors = [t.clone().detach() for t in classifier.tensors]
-            else:
-                patience_counter += 1
-        elif cfg.stop_crit == "loss":
-            if val_loss < best_loss:
-                best_loss, best_acc, patience_counter = val_loss, acc, 0
-                best_tensors = [t.clone().detach() for t in classifier.tensors]
-            else:
-                patience_counter += 1
+        # Report to stream
+        if (epoch+1) % cfg.update_freq == 0:
+            logger.info(f"Epoch {epoch+1}: valid acc = {current['acc']}")
+            
+            # Reporting generative capabilities
+            if cfg.toViz or loaders["train"].dataset.dim < 1000:
+                synths = sample_from_classifier(classifier=classifier, 
+                                                cfg=samp_cfg, device=device)
+                if loaders["train"].dataset.dim < 1000:
+                    for c in range(synths.shape[1]):
+                        gen = synths[:, c, :]
+                        current[f"fid/{c}"] = fid_like.lazy_forward(mu_r[c], cov_r[c], gen)
+                if cfg.toViz:
+                    ax = visualise_samples(samples=synths, gen_viz=samp_cfg.batch_spc)
+                    wandb.log({f"samples/{stage}": wandb.Image(ax.figure)})
+                    plt.close(ax.figure)
+                
+
+        # Log performance
+        performance_log = {}
+        for crit in _METRICS:
+            performance_log[f"{stage}_mps/valid/{crit}"] = current[crit]
+        wandb.log(performance_log)
+
+        # Update
+        isBetter = _update(crit=cfg.stop_crit, current=current, best=best, 
+                            patience_counter=patience_counter)
+        if isBetter:
+            best_tensors = [t.clone().detach() for t in classifier.tensors]
+
+        # Early stopping via patience
         if patience_counter > cfg.patience:
             logger.info(f"Early stopping via patience at epoch {epoch}")
             break
-
         # Optional early stopping via goal accuracy
         if (goal_acc is not None):
-            if goal_acc < best_acc:
+            if goal_acc < best["acc"]:
                 logger.info(f"Early stopping via goal acc at epoch {epoch}")
             break
-        # Update report
-        if (epoch+1) % cfg.update_freq == 0:
-            logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
-            if cfg.toViz:
-                samples_visualisation(classifier=classifier, stage="pre",
-                                      device=device, cfg=samp_cfg)
-        elif (epoch == 0) and (title is not None):
-            logger.info(f'\nTraining of {title} dataset:\n')
 
     # Finish with evaluation on test set
     classifier.reset()
@@ -309,7 +373,7 @@ def train(classifier: tk.models.MPSLayer,
 
     # Summarise training
     wandb.summary[f"{stage}_mps/test/acc"] = test_accuracy
-    wandb.summary[f"{stage}_mps/best/acc"] = best_acc
+    wandb.summary[f"{stage}_mps/best/acc"] = best["acc"]
     classifier.reset()
 
-    return best_tensors, best_acc
+    return best_tensors, best["acc"]

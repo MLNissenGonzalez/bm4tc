@@ -1,0 +1,17 @@
+# @package _global_
+experiment: test4
+
+defaults:
+  - override /dataset: moons_2k
+  - override /gantrain: test2
+  - override /model/mps: d4D3_secant
+  - override /model/dis: wide_leaky_ens
+  - override /pretrain/mps: test3
+  - override /pretrain/dis: test2
+  - override /sampling: l500
+
+# Add --multirun +experiments=test4
+hydra:
+  sweeper:
+    params:
+      model/mps: d4D3_secant, d10D4_secant

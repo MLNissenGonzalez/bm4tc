@@ -13,6 +13,6 @@ auto_stack: True
 auto_unbind: False
 patience: 40
 stop_crit: "loss"
-watch_freq: 100
+watch_freq: 1000
 update_freq: 30
 toViz: True

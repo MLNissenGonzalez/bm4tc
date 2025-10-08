@@ -165,7 +165,7 @@ def _step(generator: tk.models.MPS,
           watch_freq: int,
           step: int,
           device: torch.device
-          ) -> int:
+          ) -> Tuple[Dict[str, float], int]:
     # TODO: Add docstring
     
     X, t, X_synth = _batch_constructor(
@@ -200,9 +200,9 @@ def _step(generator: tk.models.MPS,
         d_loss[c].backward()
         d_optimizer[c].step()
 
-        # Log discriminator performance
-        log[f"gan_dis/{c}/loss"] = d_loss[c].detach()
-        log[f"gan_dis/{c}/acc"] = d_acc[c].detach()
+        # Log discriminator performance, to expensive, not informative
+        log[f"gan_dis/{c}/loss"] = d_loss[c].detach().cpu().item()
+        log[f"gan_dis/{c}/acc"] = d_acc[c].detach().cpu().item()
 
         # Generator performance against discriminator
         g_logit = d(X_synth[c])
@@ -220,12 +220,14 @@ def _step(generator: tk.models.MPS,
         g_optimizer.step()
 
         # Log generator performance
-        log[f"gan_mps/{c}/loss"] = g_loss[c].detach()
+        log[f"gan_mps/{c}/loss"] = g_loss[c].detach().cpu().item()
 
-    wandb.log(log)
-    return step
+    return log, step
 
-from mps.categorisation import samples_visualisation
+from mps.categorisation import sample_from_classifier
+from _utils import mean_n_cov, FIDLike, visualise_samples
+import matplotlib.pyplot as plt
+fid_like = FIDLike()
 
 def check_and_retrain(generator: tk.models.MPS,
                       loaders: Dict[str, DataLoader],
@@ -235,10 +237,11 @@ def check_and_retrain(generator: tk.models.MPS,
                       samp_cfg: schemas.SamplingConfig,
                       trigger_accuracy: float,
                       device: torch.device,
-                      cfg_g_optimizer: schemas.OptimizerConfig
+                      cfg_g_optimizer: schemas.OptimizerConfig,
+                      stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
                       ) -> torch.optim.Optimizer:
     # TODO: Add updated docstring
-
+    log = {}
     generator.reset()
     classifier = tk.models.MPSLayer(
         tensors=generator.tensors, out_position=cls_pos, device=device)
@@ -246,35 +249,75 @@ def check_and_retrain(generator: tk.models.MPS,
     classifier.trace(torch.zeros(0, len(classifier.in_features),
                      classifier.in_dim[0]).to(device))
     classifier.to(device), 
+    
+    # Log generative capabilities, if wanted
+    if loaders["train"].dataset.dim < 1e3 or toViz:
+        synths = sample_from_classifier(classifier=classifier, device=device, 
+                                        cfg=samp_cfg)
+        # TODO: Implement something more general and configable
+        if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
+            fid_values = []
+            for c in stat_r.keys():
+                mu_r, cov_r = stat_r[c]
+                gen = synths[:, c, :]
+                fid_val = fid_like.lazy_forward(mu_r, cov_r, gen)
+                fid_values.append(fid_val)
+            log[f"gan_mps/fid"] = torch.mean(torch.stack(fid_values)).item()
+        if toViz:
+            ax = visualise_samples(synths, gen_viz=samp_cfg.batch_spc)
+            log[f"samples/gan"] = wandb.Image(ax.figure)
+            plt.close(ax.figure)
 
-    if toViz:
-        samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
-
+    # Evaluate classification performance on validation set
     criterion = get_criterion(cfg.criterion)
-
     acc, avg_loss = mps_cat.eval(classifier=classifier, loader=loaders["valid"],
                                  criterion=criterion, device=device)
+    log["gan_mps/valid/acc"] = acc
+    log["gan_mps/valid/loss"] = avg_loss
 
-    wandb.log({
-        "gan_mps/valid/acc": acc,
-        "gan_mps/valid/loss": avg_loss
-    })
+    wandb.log(log)
+    log.clear()
 
     if acc < trigger_accuracy:
-        # retrain
+        # Retrain mps as a classifier
         logger.info(f'Starting to retrain at epoch {epoch+1}')
         best_tensors, best_acc = mps_cat.train(
-            classifier=classifier,
+            classifier=classifier, stat_r=stat_r,
             loaders=loaders,cfg=cfg,device=device,
             stage="gan",samp_cfg=samp_cfg)
-        if toViz:
-            samples_visualisation(classifier=classifier, device=device, cfg=samp_cfg, stage="gan")
+        
+        # Log generative capabilities again, if wanted
+        if loaders["train"].dataset.dim < 1e3 or toViz:
+            synths = sample_from_classifier(classifier=classifier, device=device, 
+                                            cfg=samp_cfg)
+            if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
+                fid_values = []
+                for c in stat_r.keys():
+                    mu_r, cov_r = stat_r[c]
+                    gen = synths[:, c, :]
+                    fid_val = fid_like.lazy_forward(mu_r, cov_r, gen)
+                    fid_values.append(fid_val)
+                log[f"gan_mps/fid"] = torch.mean(torch.stack(fid_values)).item()
+            if toViz:
+                ax = visualise_samples(synths, gen_viz=samp_cfg.batch_spc)
+                log[f"samples/gan"] = wandb.Image(ax.figure)
+                plt.close(ax.figure)
+            wandb.log(log)
+
+        # Update generator and g_optimizer (new params)
         generator.initialize(tensors=best_tensors, device=device)
         g_optimizer = get_optimizer(generator.parameters(), cfg_g_optimizer)
         logger.info("Retraining finished.")
-
+    # g_optimizer could be a new object
     return g_optimizer
 
+def _init_logs(dis: Dict[Any, nn.Module]) -> Dict[str, list]:
+    logs = {}
+    for c in dis.keys():
+        logs[f"gan_mps/{c}/loss"] = []
+        logs[f"gan_dis/{c}/loss"] = []
+        logs[f"gan_dis/{c}/acc"] = []
+    return logs
 
 # TODO: Add checkpoints
 def loop(generator: tk.models.MPS,
@@ -289,7 +332,10 @@ def loop(generator: tk.models.MPS,
          best_acc: float,
          cat_loaders: Dict[str, DataLoader],
 
-         device: torch.device
+         device: torch.device,
+
+         # Optional kwargs
+         stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
          ) -> None:
     
     # TODO: Add updated docstring
@@ -323,13 +369,14 @@ def loop(generator: tk.models.MPS,
         cls_embs.append(cls_emb)
     # Epoch loop
     for epoch in range(cfg.max_epoch):
+        logs = _init_logs(dis)
         if ((epoch+1) % cfg.info_freq) == 0:
             logger.info(f"GAN training at epoch={epoch+1}")
 
         # Actual GAN-style training
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
-            step = _step(generator=generator, dis=dis, X_real=X_real, c_real=c_real,
+            log, step = _step(generator=generator, dis=dis, X_real=X_real, c_real=c_real,
                          r_real=cfg.r_real, cls_pos=cls_pos, step=step,
                          num_bins=samp_cfg.num_bins, in_dim=in_dim,
                          num_cls=num_cls, embedding=embedding,
@@ -337,6 +384,14 @@ def loop(generator: tk.models.MPS,
                          d_optimizer=d_optimizer, g_optimizer=g_optimizer,
                          d_criterion=d_criterion, g_criterion=g_criterion,
                          watch_freq=cfg.watch_freq, device=device)
+            # Saving batchwise training performance as list
+            for k in logs.keys():
+                logs[k].append(log[k])
+        # Logging the epoch-wise train loss average
+        for k in logs.keys():
+            logs[k] = sum(logs[k]) / len(logs[k])
+        logs[f"gan_mps/epoch"] = epoch
+        wandb.log(logs)
 
         # Checking classification accuracy and retraining if necessary
         if (epoch+1) % cfg.check_freq == 0:
@@ -344,4 +399,4 @@ def loop(generator: tk.models.MPS,
                                             cfg=cfg.retrain, cls_pos=cls_pos, samp_cfg=samp_cfg,
                                             g_optimizer=g_optimizer, epoch=epoch, device=device,
                                             trigger_accuracy=trigger_accuracy, toViz=cfg.toViz,
-                                            cfg_g_optimizer=cfg.g_optimizer)
+                                            cfg_g_optimizer=cfg.g_optimizer, stat_r=stat_r)

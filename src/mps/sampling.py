@@ -277,7 +277,7 @@ def batch(mps: tk.models.MPS,
         samples.append(cls_samples)
 
     # shape: (n_spc, num_cls, data_dim)
-    samples = torch.stack(tensors=samples, dim=1)
+    samples = torch.stack(tensors=samples, dim=1).cpu()
     return samples
 
 # TODO: Vectorize across classes ?
@@ -332,9 +332,7 @@ def _batch(mps: tk.models.MPS,
     return samples
 
 
-# TODO: Bug could come from here.
 # TODO: Vectorize across batches/classes
-# TODO: After batch of samples is generated, move it to CPU.
 def batched(mps: tk.models.MPS,
             embedding: str,
             cls_pos: int,
@@ -383,7 +381,7 @@ def batched(mps: tk.models.MPS,
         cls_embs.append(cls_emb)
 
     num_batches = (num_spc + batch_spc - 1) // batch_spc
-    samples = []
+    batches = []
     for _ in range(num_batches):  # could compute these batches in parallel, not to bad
         batch = _batch(
             mps=mps, embedding=embedding, cls_embs=cls_embs,
@@ -391,10 +389,12 @@ def batched(mps: tk.models.MPS,
             num_bins=num_bins, input_space=input_space,
             num_spc=batch_spc, device=device
         )  # (batch_size, num_cls, data.dim) samples
-        samples.append(batch)
+        batch = batch.cpu()
+        batches.append(batch)
 
     # (batch_size x num_batches, num_cls, data.dim)
-    samples = torch.concat(tensors=samples, dim=0)
+    samples = torch.concat(tensors=batches, dim=0)
+    batches.clear()
     samples = samples[:num_spc, :, :]  # slice to (num_spc, num_cls, data.dim)
 
     return samples

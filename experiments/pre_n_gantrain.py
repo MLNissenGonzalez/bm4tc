@@ -12,7 +12,7 @@ import torch
 import tensorkrowch as tk
 import hydra
 import matplotlib.pyplot as plt
-from src._utils import init_wandb, _class_wise_dataset_size, visualise_samples, save_model, verify_tensors, set_seed
+from src._utils import init_wandb, sample_quality_control, FIDLike, mean_n_cov,_class_wise_dataset_size, visualise_samples, save_model, verify_tensors, set_seed
 import src.schemas as schemas
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 from src.datasets.preprocess import preprocess_pipeline
@@ -37,9 +37,10 @@ def main(cfg: schemas.Config):
 
     # Loading dataset for classification
     dataset: LabelledDataset = load_dataset(cfg=cfg.dataset)
-    dataset_name = dataset.name
     data_dim = dataset.num_feat
     num_cls = dataset.num_cls
+    logger.info(f"Using the '{dataset.name}' dataset.")
+
 
     # Initialising MPS
     init_cfg = OmegaConf.to_object(cfg.model.mps.init_kwargs)
@@ -60,8 +61,15 @@ def main(cfg: schemas.Config):
                                        random_state=cfg.reproduce.random.random_state,
                                        embedding=classifier.embedding)
 
+    # Dataset statistics. TODO: Implement something more general and configable
+    if data_dim < 1e3: # native computation of covariance matrix very expensive
+        stat_r = {}
+        for c in range(num_cls):
+            stat_r[c] = mean_n_cov(X["train"][t["train"]==c])
+
     # Visualising the data
-    ax = visualise_samples(samples=X["train"], labels=t["train"], gen_viz=cfg.sampling.num_spc)
+    ax = visualise_samples(samples=X["train"], labels=t["train"], 
+                           gen_viz=cfg.sampling.num_spc)
     wandb.log({"samples/dataset": wandb.Image(ax.figure)})
     plt.close(ax.figure)
 
@@ -69,21 +77,25 @@ def main(cfg: schemas.Config):
     loaders = {}
     size_per_class = {}
     for split in ["train", "valid", "test"]:
-        loaders[split] = mps_cat.loader_creator(X=X[split],
-                                                t=t[split],
-                                                batch_size=cfg.pretrain.mps.batch_size,
-                                                embedding=cfg.model.mps.embedding,
-                                                phys_dim=cfg.model.mps.init_kwargs.in_dim,
-                                                split=split)
+        loaders[split] = mps_cat.loader_creator(
+                        X=X[split],
+                        t=t[split],
+                        batch_size=cfg.pretrain.mps.batch_size,
+                        embedding=cfg.model.mps.embedding,
+                        phys_dim=cfg.model.mps.init_kwargs.in_dim,
+                        split=split
+                        )
         size_per_class[split] = _class_wise_dataset_size(t[split], num_cls)
         logging.debug(f"{size_per_class[split]=}")
 
     # Pretraining the MPS as classifier
     (mps_pretrain_tensors,
-     mps_pretrain_best_acc) = mps_cat.train(classifier=classifier, loaders=loaders,
-                                            cfg=cfg.pretrain.mps,
-                                            device=device, samp_cfg=cfg.sampling,
-                                            title=dataset_name, stage="pre")
+     mps_pretrain_best_acc) = mps_cat.train(
+                                classifier=classifier, 
+                                loaders=loaders, stat_r=stat_r,
+                                cfg=cfg.pretrain.mps, stage="pre",
+                                device=device, samp_cfg=cfg.sampling
+                                )
 
     logger.info("MPS pretraining done.")
     logger.info(f"{mps_pretrain_best_acc=}")
@@ -105,35 +117,38 @@ def main(cfg: schemas.Config):
     dis_loaders = {}
     n_spc = {}
     for split in ["train", "valid", "test"]:
-        # Sampling fake examples
+        # max amount of samples per split
         n_spc[split] = max(_class_wise_dataset_size(
             t=t[split], num_cls=num_cls))
-        logger.debug(f"Amount of samples per class generated = {n_spc}.")
-        with torch.no_grad():
-            X_synth[split] = (
-                sampling.batched(
-                    mps=generator, embedding=generator.embedding,
-                    cls_pos=cls_pos,
-                    num_spc=n_spc[split],
-                    num_bins=cfg.sampling.batch_spc,
-                    batch_spc=cfg.sampling.batch_spc,
-                    device=device
-                )
-                .cpu()
-            )
-        torch.cuda.empty_cache()
+        
+        # define sampling config
+        pre_samp_cfg = schemas.SamplingConfig(
+                        num_spc=n_spc[split],        # number of samples per class
+                        num_bins=cfg.sampling.num_bins,  # inherit bin resolution from global config
+                        batch_spc=cfg.sampling.batch_spc # per-batch sampling size
+                        )
+        
+        # Sample from dist learned by classifier
+        X_synth[split] = mps_cat.sample_from_classifier(classifier, 
+                                                        device,
+                                                        pre_samp_cfg)
+
 
         # Wrapping in the loader
-        dis_loaders[split] = discr.pretrain_loader(X_real=X[split],
-                                                   c_real=t[split],
-                                                   X_synth=X_synth[split],
-                                                   mode=cfg.model.dis.mode,
-                                                   batch_size=cfg.pretrain.dis.batch_size,
-                                                   split=split)
+        dis_loaders[split] = discr.pretrain_loader(
+                                X_real=X[split],
+                                c_real=t[split],
+                                X_synth=X_synth[split],
+                                mode=cfg.model.dis.mode,
+                                batch_size=cfg.pretrain.dis.batch_size,
+                                split=split
+                                )
 
     # Initialising discriminator(s)
     d = discr.init_discriminator(
-        cfg=cfg.model.dis, input_dim=data_dim, num_classes=num_cls, device=device)
+        cfg=cfg.model.dis, input_dim=data_dim, 
+        num_classes=num_cls, device=device
+        )
     info = f"Discriminator initalised with:\nhidden multipliers = {cfg.model.dis.hidden_multipliers} and\nactivation = {cfg.model.dis.nonlinearity}"
     info_lines = info.split("\n")
     logger.info("\n".join(info_lines))
@@ -145,11 +160,25 @@ def main(cfg: schemas.Config):
             d_loaders[i][split] = loader
     logger.info("Data for pretraining of discriminator loaded.")
 
-    # Vizualising generative capabilities after pretraining
-    to_visualise = X_synth.get("train")
-    ax = visualise_samples(samples=to_visualise, labels=None, gen_viz=cfg.sampling.batch_spc)
-    wandb.log({"samples/pre": wandb.Image(ax.figure)})
+    # Reporting generative capabilities after pretraining.  
+    synths = X_synth["train"]
+    # sampling_quality_control(synths, 1.05, -0.05)
+    log = {}
+    if data_dim < 1e3:
+        fid_like = FIDLike()
+        fid_values = []
+        for c in range(num_cls):
+            gen = synths[:, c, :]
+            mu_r, cov_r = stat_r[c]
+            fid_val = fid_like.lazy_forward(mu_r, cov_r, gen)
+            fid_values.append(fid_val)
+        log["pre_mps/valid/fid"] = torch.mean(torch.stack(fid_values)).item()
+    ax = visualise_samples(samples=synths, labels=None, 
+                           gen_viz=cfg.sampling.batch_spc)
+    log["samples/pre"] = wandb.Image(ax.figure)
     plt.close(ax.figure)
+    wandb.log(log)
+    log.clear()
 
     # Discriminator pretraining
     for i in d.keys():
@@ -185,7 +214,7 @@ def main(cfg: schemas.Config):
         generator=generator, dis=d, real_loaders=real_loaders,
         cfg=cfg.gantrain, cls_pos=cls_pos, samp_cfg=cfg.sampling,
         embedding=cfg.model.mps.embedding,best_acc=best_acc, 
-        cat_loaders=loaders, device=device
+        cat_loaders=loaders, device=device, stat_r=stat_r
     )
     
     # Save locally and as wandb.artifact, if wanted
@@ -201,11 +230,12 @@ def main(cfg: schemas.Config):
     
     logger.info("GAN-style training completed.")
 
-    # Visualizing generative capabilities after GAN-style training
+    # Reporting generative capabilities after GAN-style training.
     if data_dim == 2:
         n = n_spc["train"]
     else:
         n = cfg.sampling.batch_spc # maybe change this
+    # Sampling
     with torch.no_grad():
         synths = sampling.batched(
             mps=generator,
@@ -215,9 +245,23 @@ def main(cfg: schemas.Config):
             batch_spc=cfg.sampling.batch_spc,
             device=device).cpu()
     torch.cuda.empty_cache()
-    ax = visualise_samples(samples=synths)
-    wandb.log({"samples/gan": wandb.Image(ax.figure)})
+    log = {}
+    # FID-like score
+    if data_dim < 1e3:
+        fid_like = FIDLike()
+        fid_values = []
+        for c in range(num_cls):
+            gen = synths[:, c, :]
+            mu_r, cov_r = stat_r[c]
+            fid_val = fid_like.lazy_forward(mu_r, cov_r, gen)
+            fid_values.append(fid_val)
+        log["gan_mps/fid"] = torch.mean(torch.stack(fid_values)).item()
+    # Vizualisation
+    ax = visualise_samples(samples=synths, labels=None, 
+                           gen_viz=cfg.sampling.batch_spc)
+    log["samples/gan"] = wandb.Image(ax.figure)
     plt.close(ax.figure)
+    wandb.log(log), log.clear(), fid_values.clear()
 
     # Closing the run
     run.finish()

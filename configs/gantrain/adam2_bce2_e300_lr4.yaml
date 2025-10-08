@@ -20,7 +20,7 @@ acc_drop_tol: 0.01
 check_freq: 1 # every epoch, as GAN training seems to be very strong
 toViz: True
 info_freq: 20
-watch_freq: 100
+watch_freq: 1000
 retrain: 
   max_epoch: 150
   batch_size: 64 # samples loaded per categorisation step for all classes involved

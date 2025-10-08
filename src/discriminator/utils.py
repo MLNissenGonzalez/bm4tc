@@ -127,15 +127,15 @@ def pretrain_dataset(X_real: torch.FloatTensor,
             X_synth_c = X_synth[:num_spc[c], c, :]
             synths.append(X_synth_c)
 
-        X_synth = torch.concat(synths, dim=0)
-        t_synth = torch.zeros(len(X_synth), dtype=torch.long)  # fake
+        X_fake = torch.concat(synths, dim=0)
+        t_fake = torch.zeros(len(X_fake), dtype=torch.long)  # fake
         t_real = torch.ones(len(X_real), dtype=torch.long)      # real
 
         logger.debug(f"{_class_wise_dataset_size(t_real, num_cls)=}")
-        logger.debug(f"{_class_wise_dataset_size(t_synth, num_cls)=}")
+        logger.debug(f"{_class_wise_dataset_size(t_fake, num_cls)=}")
 
-        X = torch.cat([X_real, X_synth.cpu()], dim=0)
-        t = torch.cat([t_real, t_synth], dim=0)
+        X = torch.cat([X_real, X_fake.cpu()], dim=0)
+        t = torch.cat([t_real, t_fake], dim=0)
         return TensorDataset(X, t)
 
     elif mode == "ensemble":
@@ -251,39 +251,7 @@ def pretraining(dis: nn.Module,
                 key: Any,
                 device: torch.device
                 ):
-    """
-    Pretrain a single discriminator in a binary classification setting.
-    Real samples are labeled 1, synthetic samples are labeled 0.
-    Synthesised samples are assumed to be precomputed.
-
-    Parameters
-    ----------
-    dis : nn.Module
-        The discriminator model to pretrain.
-    cfg : PretrainDisConfig
-        Configuration containing optimizer, criterion, max_epoch, and patience.
-    loaders : Dict[str, DataLoader]
-        Dictionary of DataLoaders with keys:
-        - "train": DataLoader for training data.
-        - "valid": DataLoader for validation data.
-        - "test": DataLoader for test data.
-
-    Returns
-    -------
-    result : dict
-        A dictionary containing:
-        - "model": the best-performing discriminator (nn.Module).
-        - "train loss": list of floats, minibatch-wise training loss.
-        - "valid loss": list of floats, epoch-wise validation loss.
-        - "valid accuracy": list of floats, epoch-wise validation accuracy.
-        - "test accuracy": float, final accuracy on the test set.
-
-    Notes
-    -----
-    - Early stopping is applied based on validation loss with patience `cfg.patience`.
-    - Only supports pretraining of a *single* discriminator. For ensembles,
-      call this function separately per member.
-    """
+    # TODO: Provide updated docstring
 
     # Early stopping quantities
     patience_counter = 0
@@ -296,21 +264,31 @@ def pretraining(dis: nn.Module,
     dis.to(device)
     optimizer.zero_grad()
     for epoch in range(cfg.max_epoch):
+        losses = []
         dis.train()
         for X, t in loaders["train"]:
+            # Prediction
             X, t = X.to(device), t.to(device)
             logit = dis(X)
             prob = torch.sigmoid(logit.squeeze())
             loss = criterion(prob, t.float())
-            wandb.log({f"pre_dis/{key}/train/loss": loss.item()})
-
+            
             # Backpropagation
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
 
+            # Save losses
+            losses.append(loss.detach().cpu().item())
+
+        # Evaluate epoch-wise performance
+        train_loss = sum(losses) / len(losses)
+        losses.clear()
         acc, avg_valid_loss = eval(dis, loaders["valid"], criterion, device)
+
+        # Log epoch-wise performance
         wandb.log({
+            f"pre_dis/{key}/train/loss": train_loss,
             f"pre_dis/{key}/valid/acc": acc,
             f"pre_dis/{key}/valid/loss": avg_valid_loss
         })
