@@ -122,9 +122,20 @@ def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer 
 #------------------------------------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------------------------------------
 
-# TODO: Rewrite this to fit papers definition
-def legendre_embedding(x: torch.Tensor, dim: int):
-    return tk.embeddings.poly
+def legendre_embedding(data: torch.Tensor, degree: int = 2, axis: int = -1):
+    """
+    Legendre embedding. Analog to implementation of tk.embeddings.poly.     
+    """
+
+    if not isinstance(data, torch.Tensor):
+        raise TypeError('`data` should be torch.Tensor type')
+    
+    polies = [1, data]
+    for i in range(2, degree + 1):
+        p_i = ((2*i-1) * data * polies[-1] - (i-1)*polies[-2]) / i
+        polies.append(p_i)
+    return torch.stack(polies, dim=axis)
+
 
 _EMBEDDING_MAP = {
     "fourier": tk.embeddings.fourier,
