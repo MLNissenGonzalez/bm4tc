@@ -1,0 +1,18 @@
+# @package _global_
+experiment: mpspre_net
+
+defaults:
+  - override /dataset: moons_4k
+  - override /model/mps: d30D18_secant # using only the most powerful
+  - override /pretrain/mps: adam_b64e500
+  - override /sampling: l500
+  - override /reproduce/save: all
+  
+# Copy from sweeps
+hydra:
+  sweeper:
+    params:
+      pretrain.mps.optimizer.kwargs.lr: 1e-4, 1e-3, 1e-2
+      pretrain.mps.optimizer.kwargs.weight_decay: 1e-4, 1e-3, 0.0
+      pretrain.mps.stop_crit: loss, acc, fid
+      pretrain.mps.patience: 10, 100

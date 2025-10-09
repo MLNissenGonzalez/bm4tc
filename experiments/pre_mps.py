@@ -4,10 +4,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
                 "..", "src"))  # make src importable
 
 
-from collections import defaultdict
 import logging
 from omegaconf import OmegaConf
-import numpy as np
 import torch
 import tensorkrowch as tk
 import hydra
@@ -17,9 +15,6 @@ import src.schemas as schemas
 from src.datasets.gen_n_load import load_dataset, LabelledDataset
 from src.datasets.preprocess import preprocess_pipeline
 import src.mps.categorisation as mps_cat
-import src.discriminator.utils as discr
-import src.mps.sampling as sampling
-import src.gantrain as gantrain
 import wandb
 
 
@@ -48,7 +43,6 @@ def main(cfg: schemas.Config):
                              out_dim=num_cls,
                              device=device,
                              **init_cfg)
-    cls_pos = classifier.out_features[0]  # important global variable
     classifier.embedding = cfg.model.mps.embedding
 
     info = f"MPS initalised with:\n {classifier.bond_dim=} and\n{classifier.in_dim=}"
@@ -89,7 +83,7 @@ def main(cfg: schemas.Config):
         logging.debug(f"{size_per_class[split]=}")
 
     # Pretraining the MPS as classifier
-    (mps_pretrain_tensors,
+    (_,
      mps_pretrain_best_acc) = mps_cat.train(
                                 classifier=classifier, 
                                 loaders=loaders, stat_r=stat_r,
@@ -100,18 +94,10 @@ def main(cfg: schemas.Config):
     logger.info("MPS pretraining done.")
     logger.info(f"{mps_pretrain_best_acc=}")
 
-    # From here on, MPS as generator in the foreground
-    generator = tk.models.MPS(
-        tensors=mps_pretrain_tensors, device=device)
-    verify_tensors(classifier, generator, "Classifier", "Generator")
-    generator.embedding = classifier.embedding
-
-    # Save locally and as wandb.artifact, if wanted
-    # TODO: Maybe work on how models are saved (pre_mps_{pretraining details})
+    # Save pretrained MPS
     if cfg.reproduce.save.pre_mps:
-        path_pre_mps = save_model(
-            model=generator, run_name=run.name, model_type="pre_mps")
-        run.log_model(path=path_pre_mps, name=f"pre_mps_{run.name}")
+        filename, path_pre_mps = mps_cat.save(classifier, cfg)
+        run.log_model(path=path_pre_mps, name=filename)
 
     # Sampling from pretrained MPS
     synths = mps_cat.sample_from_classifier(classifier,

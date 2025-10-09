@@ -8,8 +8,6 @@ import hydra
 # --- Low-level-configs ---
 
 # TODO: Make compatible with ensemble design
-# TODO: Implement the below in the scripts
-
 # Initialize MPSLayer either with hyperparams or tensors, MPS only with tensors.
 @dataclass
 class MPSInitConfig:
