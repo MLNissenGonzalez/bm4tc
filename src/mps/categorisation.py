@@ -377,3 +377,41 @@ def train(classifier: tk.models.MPSLayer,
     classifier.reset()
 
     return best_tensors, best["acc"]
+
+from pathlib import Path
+import hydra
+# Saving MPS after pretrainin -> save data set, architecture, embedding, weight decay, stopping criterion, max epoch
+def save(model: tk.models.MPSLayer, cfg: schemas.Config):
+    model.reset()
+
+    # Hydra's current run dir
+    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+
+    # Models subfolder inside it
+    folder = run_dir / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+
+    # File name
+    (dataset, bond_dim, in_dim, 
+     embedding, optimizer, 
+     stopping_criterion, max_epoch) = (cfg.dataset.name, model.bond_dim[0], 
+                                       model.in_dim[0],
+                                       cfg.model.mps.embedding,
+                                       cfg.pretrain.mps.optimizer.name,
+                                       cfg.pretrain.mps.stop_crit, 
+                                       cfg.pretrain.mps.max_epoch)
+    if "weight_decay" in cfg.pretrain.mps.optimizer.kwargs.keys():
+        weight_decay = cfg.pretrain.mps.optimizer.kwargs.weight_decay
+    else:
+        weight_decay = 0
+    filename_components = [
+        dataset, f"bd{bond_dim}", f"in{in_dim}", embedding, optimizer, 
+        stopping_criterion, f"wd{weight_decay}", f"ep{max_epoch}"
+    ]    
+    filename = "_".join(filename_components)
+
+    # Saving
+    save_path = folder / filename
+    torch.save(model.state_dict(), save_path)
+
+    return filename, str(save_path)

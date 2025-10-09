@@ -132,7 +132,13 @@ def init_wandb(cfg: schemas.Config):
         now = datetime.now().strftime("%d%b%y")
         params = runtime_cfg.sweeper.params
         for group in params.values():
-            options = group.split(",") # group is comma seperated str of options
+            # handle both list and string forms
+            if isinstance(group, (list, tuple, omegaconf.ListConfig)):
+                options = group
+            elif isinstance(group, str):
+                options = group.split(",")
+            else:
+                raise TypeError(f"Unexpected sweeper param type: {type(group)} ({group})")
             total_num *= len(options)
 
     # Group (folder) and run name 
@@ -153,6 +159,7 @@ def init_wandb(cfg: schemas.Config):
     return run
 
 
+
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -160,7 +167,9 @@ def init_wandb(cfg: schemas.Config):
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# TODO: MPS pretraining models should be saved carefully. 
+# TODO: MPS pretraining models should be saved carefully.
+
+# General saving function
 def save_model(model: torch.nn.Module, run_name: str, model_type: str):
     """
     Save model inside the Hydra run's output directory:
