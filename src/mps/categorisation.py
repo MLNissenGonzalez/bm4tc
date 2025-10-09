@@ -39,7 +39,7 @@ def loader_creator(X: torch.Tensor,
         Dataloader for supervised classification.
     """
     embedding = mps.get_embedding(embedding)
-    X_embedded = embedding(X, phys_dim)
+    X_embedded = embedding(X, phys_dim) # shape (batch_size, n_feat, phys_dim)
     dataset = TensorDataset(X_embedded, t)
     dataset.dim = X.shape[1]
     loader = DataLoader(
@@ -201,13 +201,13 @@ def _update(crit: str,
 
     # Update step
     if isBetter:
-        for crit in _METRICS:
-            best[crit] = current[crit]
+        for metric in _METRICS:
+            best[metric] = current[metric]
         patience_counter = 0
     else:
         patience_counter += 1
     
-    return isBetter     
+    return patience_counter, isBetter     
 
 def train(classifier: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
@@ -217,7 +217,7 @@ def train(classifier: tk.models.MPSLayer,
           stage: str,
           goal_acc: float | None = None,
           stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
-          ) -> Tuple[dict, List[torch.FloatTensor], float]:
+          ) -> Tuple[List[torch.Tensor], float]:
     """
     Full classification loop for MPS with early stopping based on validation accuracy.
 
@@ -277,14 +277,15 @@ def train(classifier: tk.models.MPSLayer,
         if crit=="acc": best[crit]=0.0
         else: best[crit]=float("inf")
     
-    # TODO: Implement something more general and configable
+    # TODO: Implement something more general and configurable
     if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
         mu_r, cov_r = {}, {}
         for c in stat_r.keys():
             mu_r[c], cov_r[c] = stat_r[c]
 
     patience_counter = 0
-    best_tensors = []  # Container for best model parameters
+    best_tensors = [t.clone().detach() for t in classifier.tensors]
+
     step = 0
 
     # Prepare MPS for training
@@ -347,7 +348,7 @@ def train(classifier: tk.models.MPSLayer,
         wandb.log(performance_log)
 
         # Update
-        isBetter = _update(crit=cfg.stop_crit, current=current, best=best, 
+        patience_counter, isBetter = _update(crit=cfg.stop_crit, current=current, best=best, 
                             patience_counter=patience_counter)
         if isBetter:
             best_tensors = [t.clone().detach() for t in classifier.tensors]
@@ -360,7 +361,7 @@ def train(classifier: tk.models.MPSLayer,
         if (goal_acc is not None):
             if goal_acc < best["acc"]:
                 logger.info(f"Early stopping via goal acc at epoch {epoch}")
-            break
+                break
 
     # Finish with evaluation on test set
     classifier.reset()
