@@ -319,6 +319,13 @@ def _init_logs(dis: Dict[Any, nn.Module]) -> Dict[str, list]:
         logs[f"gan_dis/{c}/acc"] = []
     return logs
 
+def _define_metrics(dis: Dict[Any, nn.Module]):
+    for c in dis.keys():
+        wandb.define_metric(f"gan_mps/{c}/loss", summary="none")
+        wandb.define_metric(f"gan_dis/{c}/loss", summary="none")
+        wandb.define_metric(f"gan_dis/{c}/acc")
+    wandb.define_metric("gan_mps/valid/loss", summary="none")
+
 # TODO: Add checkpoints
 def loop(generator: tk.models.MPS,
          dis: Dict[Any, nn.Module],
@@ -343,6 +350,7 @@ def loop(generator: tk.models.MPS,
     trigger_accuracy = max(best_acc-cfg.acc_drop_tol, 0.0)
     logger.info(f"{trigger_accuracy=}")
     step = 0
+    _define_metrics(dis)
 
     generator.unset_data_nodes()
     generator.reset()

@@ -1,5 +1,5 @@
 # @package _global_
-experiment: mpspre_net
+experiment: net
 
 defaults:
   - override /dataset: moons_4k

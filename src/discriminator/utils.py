@@ -57,8 +57,11 @@ class MLP(nn.Module):
     def forward(self, x):
         return self.stack(x)
 
-
+# ADDED AS ISSUE.
 # TODO: Add other discriminator types, e.g. MPS with MLP module
+# TODO: Add the discriminator class taking an MPS as input
+#       and returning a pytorch module that is the MPS with an
+#       MLP at the end to discriminate real from fake inputs to the MPS
 
 
 def init_discriminator(cfg: DisConfig,
@@ -71,10 +74,6 @@ def init_discriminator(cfg: DisConfig,
         return {c: MLP(cfg, input_dim).to(device) for c in range(num_classes)}
     else:
         raise KeyError(f"{cfg.mode} not recognised.")
-
-# TODO: Add the discriminator class taking an MPS as input
-#       and returning a pytorch module that is the MPS with an
-#       MLP at the end to discriminate real from fake inputs to the MPS
 
 # ------------------------------------------------------------------------------------------------´
 # ------------------------------------------------------------------------------------------------
@@ -244,6 +243,19 @@ def eval(dis: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch
         acc = correct / total
     return acc, avg_loss
 
+def _define_metric(key: str | int):
+    wandb.define_metric(f"pre_dis/{key}/train/loss", summary="none")
+    wandb.define_metric(f"pre_dis/{key}/valid/loss", summary="none")
+
+def _log(key: int | str, 
+         train_loss: float,
+         valid_acc: float,
+         valid_loss: float):
+    wandb.log({
+            f"pre_dis/{key}/train/loss": train_loss,
+            f"pre_dis/{key}/valid/acc": valid_acc,
+            f"pre_dis/{key}/valid/loss": valid_loss
+        })
 
 def pretraining(dis: nn.Module,
                 cfg: PretrainDisConfig,
@@ -251,21 +263,23 @@ def pretraining(dis: nn.Module,
                 key: Any,
                 device: torch.device
                 ):
-    # TODO: Provide updated docstring
+    # TODO: Provide updated docstring (ADDED AS ISSUE)
 
     # Early stopping quantities
-    patience_counter = 0
-    best_loss = float("inf")
-    best_acc = 0.0
+    best_loss, best_acc, patience_counter = float("inf"), 0.0, 0
+    best_model_state = copy.deepcopy(dis.state_dict())
+    _define_metric(key)
 
+    # Initialize optimizer and loss function
     optimizer = get_optimizer(dis.parameters(), cfg.optimizer)
     criterion = get_criterion(cfg.criterion)
-
     dis.to(device)
-    optimizer.zero_grad()
+    
+    # Loop over epochs
     for epoch in range(cfg.max_epoch):
         losses = []
         dis.train()
+        # Loop over batches
         for X, t in loaders["train"]:
             # Prediction
             X, t = X.to(device), t.to(device)
@@ -284,28 +298,24 @@ def pretraining(dis: nn.Module,
         # Evaluate epoch-wise performance
         train_loss = sum(losses) / len(losses)
         losses.clear()
-        acc, avg_valid_loss = eval(dis, loaders["valid"], criterion, device)
+        valid_acc, valid_loss = eval(dis, loaders["valid"], criterion, device)
 
         # Log epoch-wise performance
-        wandb.log({
-            f"pre_dis/{key}/train/loss": train_loss,
-            f"pre_dis/{key}/valid/acc": acc,
-            f"pre_dis/{key}/valid/loss": avg_valid_loss
-        })
+        _log(key, train_loss, valid_acc, valid_loss)
 
         # Info
         if ((epoch+1)%cfg.info_freq) == 0:
-            logger.info(f"Epoch {epoch+1}: val_accuracy={acc:.4f}")
+            logger.info(f"Epoch {epoch+1}: val_accuracy={valid_acc:.4f}")
 
         # Model update and early stopping
         if cfg.stop_crit=="acc":
-            if acc > best_acc:
-                best_acc, patience_counter = acc, 0
+            if valid_acc > best_acc:
+                best_acc, patience_counter = valid_acc, 0
                 best_model_state = copy.deepcopy(dis.state_dict())
             else: patience_counter += 1
         elif cfg.stop_crit=="loss":
-            if avg_valid_loss < best_loss:
-                best_loss, patience_counter = avg_valid_loss, 0
+            if valid_loss < best_loss:
+                best_loss, patience_counter = valid_loss, 0
                 best_model_state = copy.deepcopy(dis.state_dict())
             else: patience_counter += 1
             
@@ -316,9 +326,11 @@ def pretraining(dis: nn.Module,
 
     # If mode == ensemble, then this would be only one member
     dis.load_state_dict(best_model_state)
-    dis.to(device)
+
+    # Final evaluation of discriminator performance after pretraining
     test_accuracy, _ = eval(dis, loaders["test"], criterion, device)
     logger.info(f"{test_accuracy=}")
     wandb.summary[f"pre_dis/{key}/test/acc"] = test_accuracy
+    wandb.summary[f"pre_dis/{key}/valid/acc"] = best_acc
 
     return dis
