@@ -37,6 +37,7 @@ def loader_creator(X: torch.Tensor,
     -------
     DataLoader
         Dataloader for supervised classification.
+        Input embedded using embedding, X_embedded.size()=(batch_size, n_feat, phys_dim)
     """
     embedding = mps.get_embedding(embedding)
     X_embedded = embedding(X, phys_dim) # shape (batch_size, n_feat, phys_dim)
@@ -51,27 +52,18 @@ def loader_creator(X: torch.Tensor,
     logger.debug("DataLoader for categorisation intialized.")
     return loader
 
-# TODO: Add tensor shape description
+
 
 
 def eval(classifier: tk.models.MPSLayer,  # relies on mps.out_features = [cls_pos]
          loader: DataLoader,
          criterion: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
          device: torch.device) -> Tuple[float, float]:
-    """
-    Computes the prediction accuracy of a MPS Born machine on a dataset.
+    
+    # TODO: Update docstring (ADDED AS ISSUE)
+    # TODO: Add tensor shape description (ADDED AS ISSUE)
 
-    Parameters
-    ----------
-    mps: MPS model with central tensor
-    loader: DataLoader
-    device: torch.device
 
-    Returns
-    -------
-    float
-        prediction accuracy
-    """
     classifier.eval()
     correct = 0
     total_loss = 0.0
@@ -93,7 +85,6 @@ def eval(classifier: tk.models.MPSLayer,  # relies on mps.out_features = [cls_po
     avg_loss = total_loss / total
     return acc, avg_loss
 
-# TODO: Add tensor shape description
 
 
 def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cls_pos]
@@ -106,22 +97,9 @@ def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cl
                 watch_freq: int,
                 step: int
                 ) -> int:
-    """
-    Single epoch classification training. Returns minibatch-wise train_loss.
-
-    Parameters
-    ----------
-    mps: MPS model with central tensor
-    loader: DataLoader
-    optimizer: Optimizer
-    loss_fn: LossFunction
-        takes probabilities and class labels and returns float
-
-    Returns
-    -------
-    list of floats
-        minibatch-wise trainloss 
-    """
+    
+    # TODO: Add tensor shape description (ADDED AS ISSUE)
+    # TODO: Update docstring (ADDED AS ISSUE)
 
     log = []
     classifier.train()
@@ -145,19 +123,19 @@ def _train_step(classifier: tk.models.MPSLayer,  # expect mps.out_features = [cl
     return step
 
 
-# TODO: Think about logging different or more quantities
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------
-#--------viz function---------------------------------------------------------------------------------------------
+#--------GEN CAPABILITIES---------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------
-from src._utils import visualise_samples
+from src._utils import visualise_samples, FIDLike, mean_n_cov
 import mps.sampling as sampling
 import matplotlib.pyplot as plt
 
 def sample_from_classifier(classifier: tk.models.MPSLayer,
                            device: torch.device,
                            cfg: schemas.SamplingConfig):
+    # TODO: Add docstring (ADDED AS ISSUE)
     generator = tk.models.MPS(tensors=classifier.tensors, device=device)
     cls_pos = classifier.out_position
     with torch.no_grad():
@@ -171,8 +149,13 @@ def sample_from_classifier(classifier: tk.models.MPSLayer,
     torch.cuda.empty_cache()
     return synths
 
-from _utils import FIDLike, mean_n_cov
 fid_like = FIDLike()
+
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#--------SECONDARY TRAINING PERFORMANCE METRICS---------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
 
 _METRICS = ["loss", "acc", "fid"]
 
@@ -209,6 +192,12 @@ def _update(crit: str,
     
     return patience_counter, isBetter     
 
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#--------TRAINING LOOP---------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+
 def train(classifier: tk.models.MPSLayer,
           loaders: Dict[str, DataLoader],  # loads embedded inputs and labels
           cfg: schemas.PretrainMPSConfig,
@@ -218,61 +207,11 @@ def train(classifier: tk.models.MPSLayer,
           goal_acc: float | None = None,
           stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
           ) -> Tuple[List[torch.Tensor], float]:
-    """
-    Full classification loop for MPS with early stopping based on validation accuracy.
-
-    The training loop uses patience stopping and optional goal accuracy stopping. 
-    Loss and optimizer are instantiated from the provided config objects. 
-    Model-specific flags (`auto_stack`, `auto_unbind`) and device placement are set automatically.
-
-    Parameters
-    ----------
-    mps : tk.models.MPS or tk.models.MPSLayer
-        The MPS model to train.
-    loaders : dict[str, DataLoader]
-        Dictionary containing 'train' and 'valid' DataLoaders with embedded inputs and labels.
-    cfg : PretrainMPSConfig
-        Configuration object containing all training hyperparameters and sub-configs:
-
-        Fields:
-        check_counter = 0
-
-        - optimizer_cfg : OptimizerConfig
-            Name and kwargs for optimizer, e.g., {"name": "adam", "optimizer_kwargs": {"lr": 1e-4}}
-        - criterion_cfg : CriterionConfig
-            Name and kwargs for loss function, e.g., {"name": "nlll", "kwargs": {"eps": 1e-12}}
-        - max_epochs : int
-            Maximum number of training epochs.
-        - patience : int
-            Number of epochs without improvement on validation accuracy before stopping.
-        - auto_stack : bool
-        - auto_unbind : bool
-        - print_early_stop : bool
-            If True, prints early stopping information.
-        - print_updates : bool
-            If True, prints epoch-wise validation accuracy.
-    cls_pos : int
-        Position of the central/output tensor in the MPS.
-    device : torch.device
-        Device to place model and inputs on (CPU or GPU).
-    title : str, optional
-        Optional title for printing progress messages.
-    goal_acc: float, optional
-
-    Returns
-    -------
-    best_tensors : list[torch.Tensor]
-        The tensors of the MPS corresponding to the best validation accuracy.
-    train_loss : list[float]
-        Mini-batch-wise training loss collected during training.
-    val_accuracy : list[float]
-        Epoch-wise validation accuracy.
-    test_accuracy : float
-        Final test accuracy.
-    """
+    # TODO: Update docstring (ADDED AS ISSUE)
 
     logger.info("Categorisation training begins.")
     best = {}
+    wandb.define_metric(f"{stage}_mps/train/loss", summary="none")
     for crit in _METRICS:
         if crit=="acc": best[crit]=0.0
         else: best[crit]=float("inf")
@@ -283,10 +222,8 @@ def train(classifier: tk.models.MPSLayer,
         for c in stat_r.keys():
             mu_r[c], cov_r[c] = stat_r[c]
 
-    patience_counter = 0
+    best_epoch, step, patience_counter = 0, 0, 0
     best_tensors = [t.clone().detach() for t in classifier.tensors]
-
-    step = 0
 
     # Prepare MPS for training
     classifier.to(device)
@@ -351,6 +288,7 @@ def train(classifier: tk.models.MPSLayer,
         patience_counter, isBetter = _update(crit=cfg.stop_crit, current=current, best=best, 
                             patience_counter=patience_counter)
         if isBetter:
+            best_epoch = epoch + 1
             best_tensors = [t.clone().detach() for t in classifier.tensors]
 
         # Early stopping via patience
@@ -374,10 +312,20 @@ def train(classifier: tk.models.MPSLayer,
 
     # Summarise training
     wandb.summary[f"{stage}_mps/test/acc"] = test_accuracy
-    wandb.summary[f"{stage}_mps/best/acc"] = best["acc"]
+    for metric in _METRICS:
+        wandb.summary[f"{stage}_mps/valid/{metric}"] = best[metric]
+    wandb.summary[f"{stage}_mps/epoch/best"] = best_epoch
+    wandb.summary[f"{stage}_mps/epoch/last"] = epoch + 1
     classifier.reset()
 
     return best_tensors, best["acc"]
+
+
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
+#--------SAVING MODEL WEIGHTS AFTER PRETRAINING---------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------
 
 from pathlib import Path
 import hydra
