@@ -1,3 +1,8 @@
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__),
+                "..", "src"))  # make src importable
+
 from src._utils import init_wandb, sample_quality_control, FIDLike, mean_n_cov, _class_wise_dataset_size, visualise_samples, save_model, verify_tensors, set_seed
 import wandb
 import src.mps.categorisation as mps_cat
@@ -10,10 +15,6 @@ import tensorkrowch as tk
 import torch
 from omegaconf import OmegaConf
 import logging
-import os
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__),
-                "..", "src"))  # make src importable
 
 
 logger = logging.getLogger(__name__)
