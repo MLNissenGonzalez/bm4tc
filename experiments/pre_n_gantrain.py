@@ -125,7 +125,8 @@ def main(cfg: schemas.Config):
         pre_samp_cfg = schemas.SamplingConfig(
                         num_spc=n_spc[split],        # number of samples per class
                         num_bins=cfg.sampling.num_bins,  # inherit bin resolution from global config
-                        batch_spc=cfg.sampling.batch_spc # per-batch sampling size
+                        batch_spc=cfg.sampling.batch_spc, # per-batch sampling size
+                        method=cfg.sampling.method
                         )
         
         # Sample from dist learned by classifier
@@ -243,6 +244,7 @@ def main(cfg: schemas.Config):
             cls_pos=cls_pos, num_spc=n,
             num_bins=cfg.sampling.num_bins,
             batch_spc=cfg.sampling.batch_spc,
+            method=cfg.sampling.method,
             device=device).cpu()
     torch.cuda.empty_cache()
     log = {}

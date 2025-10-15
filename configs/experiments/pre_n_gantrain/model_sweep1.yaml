@@ -4,6 +4,6 @@ experiment: model_sweep1
 hydra:
   sweeper:
     params:
-      model/mps: d4D3_secant, d10D3_secant, d10D4_secant, d10D6_secant, d30D4_secant, d30D10_secant, d30D18_secant
+      model/mps: d4D3, d10D3, d10D4, d10D6, d30D4, d30D10, d30D18
       model/dis: wide_leaky_ens, medium_leaky_ens
     

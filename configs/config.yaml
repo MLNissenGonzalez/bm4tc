@@ -1,9 +1,9 @@
 defaults:
   - _self_ # has to be here such that overrides work
-  - sampling: default
+  - sampling: test
   - gantrain: test2
   - dataset: moons_4k
-  - model/mps: d30D18_secant
+  - model/mps: d30D18
   - model/dis: wide_leaky_ens
   - pretrain/mps: adam_b64e500
   - pretrain/dis: adam_b64e1000lr3

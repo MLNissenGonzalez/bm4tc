@@ -4,7 +4,7 @@ experiment: test
 defaults:
   - override /gantrain: test
   - override /dataset: test
-  - override /model/mps: d4D3_secant
+  - override /model/mps: d4D3
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: test
   - override /pretrain/dis: test

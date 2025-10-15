@@ -107,11 +107,13 @@ def main(cfg: schemas.Config):
         with torch.no_grad():
             X_synth[split] = (
                 sampling.batched(
-                    mps=generator, embedding=generator.embedding,
+                    mps=generator, 
+                    embedding=generator.embedding,
                     cls_pos=cls_pos,
                     num_spc=n_spc[split],
                     num_bins=cfg.sampling.batch_spc,
                     batch_spc=cfg.sampling.batch_spc,
+                    method=cfg.sampling.method,
                     device=device
                 )
                 .cpu()
@@ -179,7 +181,7 @@ def main(cfg: schemas.Config):
     gantrain.loop(
         generator=generator, dis=d, real_loaders=real_loaders,
         cfg=cfg.gantrain, cls_pos=cls_pos, samp_cfg=cfg.sampling,
-        embedding=cfg.model.mps.embedding,best_acc=best_acc, 
+        embedding=cfg.model.mps.embedding, best_acc=best_acc, 
         cat_loaders=loaders, device=device
     )
     
@@ -205,6 +207,7 @@ def main(cfg: schemas.Config):
         synths = sampling.batched(
             mps=generator,
             embedding=cfg.model.mps.embedding,
+            method=cfg.sampling.method,
             cls_pos=cls_pos, num_spc=n,
             num_bins=cfg.sampling.num_bins,
             batch_spc=cfg.sampling.batch_spc,

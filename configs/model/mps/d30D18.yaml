@@ -1,9 +1,8 @@
 init_kwargs:
-  in_dim: 10 # physical dimension
-  bond_dim: 6
+  in_dim: 30 # physical dimension
+  bond_dim: 18
   boundary: "obc"
   init_method: "randn_eye"
   std: 1e-9
 design: True # if True: central tensor design; if False ensemble design
 embedding: "fourier"
-sampler: "secant"

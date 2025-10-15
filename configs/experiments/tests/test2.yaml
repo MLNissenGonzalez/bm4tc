@@ -4,7 +4,7 @@ experiment: test2
 defaults:
   - override /dataset: moons_2k
   - override /gantrain: test2
-  - override /model/mps: d4D3_secant
+  - override /model/mps: d4D3
   - override /model/dis: wide_leaky_ens
   - override /pretrain/mps: test2
   - override /pretrain/dis: test2

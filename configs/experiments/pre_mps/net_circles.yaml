@@ -3,9 +3,9 @@ experiment: net_circles
 
 defaults:
   - override /dataset: circles_4k
-  - override /model/mps: d30D18_secant # using only the most powerful
+  - override /model/mps: d30D18 # using only the most powerful
   - override /pretrain/mps: adam_b64e500
-  - override /sampling: l500num2000
+  - override /sampling: secant_l500num2000
   - override /reproduce/save: all
   
 # Copy from sweeps
