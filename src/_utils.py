@@ -1,4 +1,5 @@
 # utils that are practical for experiments
+from schemas import OptimizerConfig
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -8,7 +9,7 @@ from typing import Optional, Dict, Any
 import schemas
 from pathlib import Path
 from datetime import datetime
-import random 
+import random
 import os
 import hydra
 import logging
@@ -17,17 +18,40 @@ import omegaconf
 from torch.autograd import Function
 import scipy.linalg
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Criterion-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Criterion-----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
 
-# TODO: Add documentation
 
 class MPSNLLL(nn.Module):
+    """
+    Negative Log-Likelihood Loss (custom implementation for MPS models).
+
+    This loss computes the mean negative log-likelihood of the true class probabilities
+    predicted by an MPS classifier. It is equivalent to the categorical cross-entropy
+    loss for one-hot targets, but implemented explicitly to ensure numerical stability
+    and control over small-value clamping.
+
+    Parameters
+    ----------
+    eps : float, optional
+        Small positive constant used to clamp probabilities from below before
+        applying the logarithm to prevent numerical underflow. Default is 1e-12.
+
+    Forward Pass
+    -------------
+    Given predicted probabilities `p` of shape (batch_size, num_classes) and integer
+    targets `t` of shape (batch_size,), the loss is computed as:
+
+        L = -mean( log( p[i, t[i]] ) )
+
+    Returns a scalar tensor representing the average NLL across the batch.
+    """
+
     def __init__(self, eps: float = 1e-12):
         super().__init__()
         self.eps = eps
@@ -36,33 +60,64 @@ class MPSNLLL(nn.Module):
         p = p.clamp(min=self.eps)
         return -torch.log(p[torch.arange(p.size(0)), t]).mean()
 
+
 _LOSS_MAP = {
     "nll": MPSNLLL,
     "nlll": MPSNLLL,
     "negativeloglikelihood": MPSNLLL,
     "negloglikelihood": MPSNLLL,
-    "bce": nn.BCELoss, # BCE loss expects probabilities and target is float between 0 and 1
+    "bce": nn.BCELoss,  # BCE loss expects probabilities and target is float between 0 and 1
     "binarycrossentropy": nn.BCELoss,
-    "vanilla": nn.BCELoss # TODO: Has to be adapted to the swapped logarithm
+    # TODO: Has to be adapted to the swapped logarithm (ADDED AS ISSUE)
+    "vanilla": nn.BCELoss
 }
 
+
 def get_criterion(cfg: schemas.CriterionConfig) -> nn.Module:
+    """
+    Instantiates a loss function based on the configuration specification.
+
+    The function looks up a registered loss in `_LOSS_MAP` using a normalized
+    version of the name provided in `cfg.name`. It supports flexible name
+    variants (case- and delimiter-insensitive) and automatically handles
+    optional keyword arguments.
+
+    Parameters
+    ----------
+    cfg : schemas.CriterionConfig
+        Configuration object specifying:
+        - `name`: name or alias of the desired loss function (e.g. "nll", "bce").
+        - `kwargs`: optional dictionary of keyword arguments for initialization.
+
+    Returns
+    -------
+    nn.Module
+        A PyTorch loss module ready to be used for training.
+
+    Raises
+    ------
+    ValueError
+        If the specified loss name does not match any entry in `_LOSS_MAP`.
+
+    Notes
+    -----
+    - The `MPSNLLL` loss is tailored for MPS-based classifiers with discrete labels.
+    - The `BCELoss` is included for binary tasks with probabilistic outputs.
+    - Unrecognized loss names will raise an explicit error.
+    """
     key = cfg.name.replace(" ", "").replace("-", "").lower()
     if key not in _LOSS_MAP:
         raise ValueError(f"Loss '{cfg.name}' not recognised")
     # use empty dict if kwargs is None
     return _LOSS_MAP[key](**(cfg.kwargs or {}))
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Optimizer-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Optimizer-----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# TODO: Add documentation
-
-from schemas import OptimizerConfig
 
 _OPTIMIZER_MAP = {
     "sgd": optim.SGD,
@@ -73,6 +128,7 @@ _OPTIMIZER_MAP = {
     "adamax": optim.Adamax,
     "nadam": optim.NAdam,
 }
+
 
 def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
     """
@@ -105,19 +161,60 @@ def get_optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
 def _class_wise_dataset_size(t: torch.LongTensor, num_cls: int) -> list:
     return torch.bincount(input=t, minlength=num_cls).tolist()
 
+
 logger = logging.getLogger(__name__)
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------wandb tracking setup-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------wandb tracking setup-----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------
 
-def init_wandb(cfg: schemas.Config):
+
+def init_wandb(cfg: schemas.Config) -> wandb.Run:
+    """
+    Initialize a Weights & Biases (wandb) run with configuration and runtime context.
+
+    This function prepares a structured and reproducible WandB logging environment
+    by converting the Hydra/OmegaConf configuration into a flat dict, determining
+    runtime information (e.g. run directory, mode, job index), and generating a
+    descriptive group and run name for both single and multi-run jobs.
+
+    Behavior
+    --------
+    - Supports both single and multirun Hydra modes.
+    - Constructs descriptive `group` and `name` fields that encode dataset,
+      experiment name, date, and key model hyperparameters.
+    - Ensures that runs are properly reinitialized when multiple jobs are spawned
+      in the same process (via `reinit="finish_previous"`).
+
+    Parameters
+    ----------
+    cfg : schemas.Config
+        Full experiment configuration object (Hydra/OmegaConf structured config).
+        Must include the following nested sections:
+        - `cfg.experiment` (experiment identifier)
+        - `cfg.dataset.name`
+        - `cfg.model.mps.init_kwargs` (contains `bond_dim`, `in_dim`)
+        - `cfg.pretrain.mps.max_epoch`
+        - `cfg.gantrain.max_epoch`
+        - `cfg.wandb` (contains `project`, `entity`, `mode`)
+
+    Returns
+    -------
+    wandb.Run
+        The active wandb run instance.
+
+    Raises
+    ------
+    TypeError
+        If any Hydra sweeper parameter group has an unexpected type.
+    """
+
     # Convert only loggable types
     wandb_cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)
-    
+
     # Job Info
     runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
     run_dir = Path(runtime_cfg.runtime.output_dir)
@@ -126,9 +223,9 @@ def init_wandb(cfg: schemas.Config):
     # Job Mode
     mode = runtime_cfg.mode.value
     total_num = 1
-    if mode == 1: # single run
+    if mode == 1:  # single run
         now = datetime.now().strftime("%d%b%y_%I%p%M")
-    else: # multirun
+    else:  # multirun
         now = datetime.now().strftime("%d%b%y")
         params = runtime_cfg.sweeper.params
         for group in params.values():
@@ -138,13 +235,14 @@ def init_wandb(cfg: schemas.Config):
             elif isinstance(group, str):
                 options = group.split(",")
             else:
-                raise TypeError(f"Unexpected sweeper param type: {type(group)} ({group})")
+                raise TypeError(
+                    f"Unexpected sweeper param type: {type(group)} ({group})")
             total_num *= len(options)
 
-    # Group (folder) and run name 
+    # Group (folder) and run name
     group_key = f"{cfg.experiment}_{cfg.dataset.name}_{now}"
     run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
-    
+
     # Initializing the wandb object
     run = wandb.init(
         project=cfg.wandb.project,
@@ -159,15 +257,12 @@ def init_wandb(cfg: schemas.Config):
     return run
 
 
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Model weights save and transfer-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-# TODO: MPS pretraining models should be saved carefully.
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Model weights save and transfer-----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # General saving function
 def save_model(model: torch.nn.Module, run_name: str, model_type: str):
@@ -179,7 +274,8 @@ def save_model(model: torch.nn.Module, run_name: str, model_type: str):
         f"Invalid model_type {model_type}"
 
     # Hydra's current run dir
-    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+    run_dir = Path(
+        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
 
     # Models subfolder inside it
     folder = run_dir / "models"
@@ -195,7 +291,44 @@ def save_model(model: torch.nn.Module, run_name: str, model_type: str):
     return str(save_path)
 
 # Verification of model transfer
+
+
 def verify_tensors(model1, model2, name1="Original", name2="Copy"):
+    """
+    Verify correct transfer of tensor parameters between two MPS models.
+
+    This utility compares the internal tensors of two `tk.models.MPS` objects
+    element-wise to ensure they are numerically identical (within floating-point
+    tolerance). It logs detailed information about mismatches for debugging
+    purposes, and reports successful transfers otherwise.
+
+    Parameters
+    ----------
+    model1 : tk.models.MPS
+        Reference (source) model whose tensors serve as the ground truth.
+    model2 : tk.models.MPS
+        Target (copied) model whose tensors are checked for equality.
+    name1 : str, optional
+        Display name for the first model in log output (default: "Original").
+    name2 : str, optional
+        Display name for the second model in log output (default: "Copy").
+
+    Logging
+    -------
+    - Logs `"Verifying tensor transfer..."` at the start.
+    - Logs an `ERROR` for each tensor that differs between the two models,
+      including the index and maximum absolute difference.
+    - Logs an `INFO` message for each successfully transferred tensor.
+
+    Notes
+    -----
+    - Uses `torch.allclose` for element-wise comparison with default tolerances.
+    - Intended primarily for post-checks after weight transfer or checkpoint reload.
+
+    Returns
+    -------
+    None
+    """
     logger.info("Verifying tensor transfer...")
     for i, (t1, t2) in enumerate(zip(model1.tensors, model2.tensors)):
         if not torch.allclose(t1, t2):
@@ -204,16 +337,16 @@ def verify_tensors(model1, model2, name1="Original", name2="Copy"):
         else:
             logger.info(f"Tensor {i} successfully transferred")
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------VISUALISATIONS-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------VISUALISATIONS-----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-# TODO: Implement this also for other visualisable datatypes
-def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTensor] = None, gen_viz: Optional[int]=None):
+# TODO: Implement this also for other visualisable datatypes (ADDED AS ISSUE)
+def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTensor] = None, gen_viz: Optional[int] = None):
     """
     Visualise real or synthetised samples. 
     If t==None, then samples are synthesised and 
@@ -228,22 +361,24 @@ def visualise_samples(samples: torch.FloatTensor, labels: Optional[torch.LongTen
     """
     if labels is None:
         n, num_classes, data_dim = samples.shape
-        samples = samples.reshape(n*num_classes, data_dim)                # (n*num_classes, data_dim)
+        # (n*num_classes, data_dim)
+        samples = samples.reshape(n*num_classes, data_dim)
         labels = torch.arange(num_classes).repeat(n)    # (n*num_classes,)
 
-    if samples.shape[1]==2:
+    if samples.shape[1] == 2:
         return create_2d_scatter(X=samples, t=labels)
     else:
         if gen_viz is None:
-            gen_viz = samples.shape[0] # Can be used to visualise only a limited amount of examples
+            # Can be used to visualise only a limited amount of examples
+            gen_viz = samples.shape[0]
         raise ValueError("Higher data dimension not yet implemented.")
- 
-    
+
+
 def create_2d_scatter(
-    X: torch.FloatTensor, 
-    t: torch.LongTensor, 
-    title=None, 
-    ax=None, 
+    X: torch.FloatTensor,
+    t: torch.LongTensor,
+    title=None,
+    ax=None,
     show_legend=True
 ):
     """
@@ -275,31 +410,39 @@ def create_2d_scatter(
         ax.legend(title="Class")
     return ax
 
-
-
-
-
-# TODO: Learn how to document examples
-# example usage
-# fig, axes = plt.subplots(1, 3, figsize=(15,19))
-
-# for i, title in enumerate(samples_train.keys()):
-#     create_2d_scatter(samples_train[title],
-#                       labels_train[title],
-#                       title=title,
-#                       ax=axes[i],
-#                       show_legend=True)
-# plt.tight_layout()
-# plt.show()
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Random Seed -----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Random Seed -----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def set_seed(seed: int):
+    """
+    Set random seeds across Python, NumPy, and PyTorch for reproducible results.
+
+    This function ensures that experiments are deterministic to the extent
+    possible, including behavior on GPU and multi-GPU setups.
+
+    Parameters
+    ----------
+    seed : int
+        Integer value used to seed all random number generators.
+
+    Notes
+    -----
+    - Seeds Python's `random` module, NumPy, and PyTorch (CPU and GPU).
+    - For PyTorch, also sets `torch.backends.cudnn.deterministic=True` to
+      enforce deterministic algorithms in cuDNN.
+    - Disables `torch.backends.cudnn.benchmark` to avoid non-deterministic
+      optimizations.
+    - Sets the `PYTHONHASHSEED` environment variable for hash-based operations.
+    - May reduce performance due to disabling some GPU optimizations.
+
+    Examples
+    --------
+    >>> set_seed(42)
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -314,17 +457,35 @@ def set_seed(seed: int):
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Metrics for generative capabilities -----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Metrics for generative capabilities -----------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# --- Matrix square root implementation for pytorch, 
+# --- Matrix square root implementation for pytorch,
 # from https://github.com/steveli/pytorch-sqrtm/blob/master/sqrtm.py ---
 
 class MatrixSquareRoot(Function):
+    """
+    Custom PyTorch autograd function to compute the matrix square root.
+
+    Computes X = sqrt(A) such that X @ X ≈ A. Backpropagation uses the
+    Sylvester equation to compute the gradient w.r.t. the input matrix.
+
+    Notes
+    -----
+    - Forward pass uses `scipy.linalg.sqrtm`.
+    - Backward pass solves the Sylvester equation: sqrtm @ dX + dX @ sqrtm = d(sqrtm).
+    - Inputs are assumed to be square matrices.
+    - Input and output tensors are on the same device and dtype as the input.
+
+    Usage
+    -----
+    >>> X = torch.randn(3, 3)
+    >>> sqrtX = MatrixSquareRoot.apply(X)
+    """
     @staticmethod
     def forward(ctx, input):
         m = input.detach().cpu().numpy().astype(np.float64)
@@ -346,23 +507,59 @@ class MatrixSquareRoot(Function):
 
 sqrtm = MatrixSquareRoot.apply
 
+
 def mean_n_cov(data: torch.FloatTensor):
     """
-    data: shape (N, d)
+    Compute the mean vector and covariance matrix of a dataset.
+
+    Parameters
+    ----------
+    data : torch.FloatTensor
+        Tensor of shape (N, d) where N is the number of samples and d the feature dimension.
+
+    Returns
+    -------
+    mu : torch.Tensor
+        Mean vector of shape (d,).
+    cov : torch.Tensor
+        Covariance matrix of shape (d, d), computed as torch.cov(data.T).
     """
     mu = data.mean(dim=0)
     cov = torch.cov(data.T)
     return mu, cov
 
 # --- FID-like metric ---
+
+
 class FIDLike(nn.Module):
+    """
+    FID-like metric for evaluating the quality of generated samples.
+
+    Measures the similarity between the distributions of real and generated samples
+    using a Gaussian approximation: differences in mean and covariance, including
+    a matrix square root term. Similar to the Fréchet Inception Distance (FID) in spirit.
+
+    Parameters
+    ----------
+    eps : float
+        Small regularization constant added to the diagonal of covariance matrices
+        for numerical stability.
+
+    Methods
+    -------
+    lazy_forward(mu_r, cov_r, generated)
+        Computes the FID-like score given precomputed real mean/covariance and generated samples.
+    forward(real, generated)
+        Computes the FID-like score given raw real and generated samples.
+    """
+
     def __init__(self, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
 
     def lazy_forward(self, mu_r, cov_r, generated):
         mu_g, cov_g = mean_n_cov(generated)
-        
+
         # Regularize for numerical stability
         eye = torch.eye(cov_r.shape[0], device=cov_r.device)
         cov_r = cov_r + self.eps * eye
@@ -381,23 +578,41 @@ class FIDLike(nn.Module):
         diff_cov = torch.trace(cov_r + cov_g - 2 * covmean)
 
         return diff_mu + diff_cov
-    
+
     def forward(self, real, generated):
         mu_r, cov_r = mean_n_cov(real)
         return self.lazy_forward(mu_r, cov_r, generated)
-        
 
-def sample_quality_control(synths: torch.FloatTensor, 
+
+def sample_quality_control(synths: torch.FloatTensor,
                            upper: float, lower: float):
-    
+    """
+    Inspect generated samples for out-of-bound values.
+
+    Parameters
+    ----------
+    synths : torch.FloatTensor
+        Tensor of generated samples, shape (num_samples, num_classes, num_features).
+    upper : float
+        Upper bound for acceptable sample values.
+    lower : float
+        Lower bound for acceptable sample values.
+
+    Notes
+    -----
+    - Logs the number of "bad" positions where values exceed bounds.
+    - Reports the first 200 offending indices and values.
+    - Logs per-class and per-feature maximum absolute value and mean.
+    - Useful for debugging numerical instabilities in generative models.
+    """
     bad_idx = (
         (synths.abs() > upper) | (synths < lower)
-        ).nonzero(as_tuple=False)  # (sample_idx, class_idx, feat_idx)
+    ).nonzero(as_tuple=False)  # (sample_idx, class_idx, feat_idx)
     logger.info(f"bad positions count = {bad_idx.shape[0]}")
     if bad_idx.shape[0] > 0:
         # show first few offending indices and their values
         for i in range(min(200, bad_idx.shape[0])):
-            s,c,f = bad_idx[i].tolist()
+            s, c, f = bad_idx[i].tolist()
             val = synths[s, c, f].item()
             logger.info(f"BAD value at sample={s}, class={c}, feat={f}: {val}")
         # show global per-dim & per-class stats
@@ -405,138 +620,7 @@ def sample_quality_control(synths: torch.FloatTensor,
         for c in range(synths.shape[1]):
             for f in range(synths.shape[2]):
                 m = synths[:, c, f].abs().max().item()
-                logger.info(f" class={c}, feat={f}, max_abs={m:.4g}, mean={synths[:,c,f].mean().item():.4g}")
+                logger.info(
+                    f" class={c}, feat={f}, max_abs={m:.4g}, mean={synths[:,c,f].mean().item():.4g}")
     else:
         logger.info("No values above threshold found.")
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#---------------Dead and unused code-----------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------
-
-# Visiualisation of training
-def _epoch_wise_loss_averaging(train_loss: list, 
-                               epochs: int) -> list:
-    """
-    Running average over epoch of minbatch-wise loss
-
-    Parameters
-    ----------
-    train_loss: list of floats
-        minibatch-wise training loss
-    epochs: int
-        number of epochs of the training
-
-    Returns
-    -------
-    list of floats
-    """
-    mini = len(train_loss) // epochs
-    train_loss_average = [sum(train_loss[(i*mini) : ((i+1)*mini)]) / mini for i in range(epochs)]
-    return train_loss_average
-
-# TODO: Add option to plot other loss curves and accuracies. 
-# MAYBE TODO: Add highlighter for chosen epoch
-
-def plot_train_test_curves(
-    train_loss: list,
-    test_accuracy: list,
-    epochs: int,
-    ax: tuple | None = None,
-    title: str  | None = None
-):
-    """
-    Plot averaged train loss and test accuracy.
-
-    Parameters
-    ----------
-    train_loss: list of floats
-        list of loss values (flattened over batches and classes)
-    test_accuracy: list of floats 
-        val accuracy values per epoch
-    num_batches: int 
-        number of batches per epoch per class
-    ax: tuple of matplotlib axes, optional
-    title: str, optional 
-        title for plots, names of datasets
-
-    Returns
-    -------
-    axes: tuple of matplotlib axes
-    """
-    averaged_loss = _epoch_wise_loss_averaging(train_loss, epochs)
-
-    if ax is None:
-        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-
-    assert ax is not None
-    # Plot loss
-    ax[0].plot(range(1, epochs + 1), averaged_loss)
-    ax[0].set_xlabel("Epoch")
-    ax[0].set_ylabel("Loss")
-    ax[0].set_title(f"Train Loss Curve{f' ({title})' if title else ''}")
-
-    # Plot accuracy
-    ax[1].plot(range(1, len(test_accuracy) + 1), test_accuracy)
-    ax[1].set_xlabel("Epoch")
-    ax[1].set_ylabel("Accuracy (%)")
-    ax[1].set_title(f"Test Accuracy Curve{f' ({title})' if title else ''}")
-
-    plt.tight_layout()
-    return ax
-
-# TODO: Maybe use other curves like loss on validation set
-# TODO: Also instead of component plot nothing or gradient plot
-# TODO: Think about doing something like a multiplot option like above
-# TODO: And using running average instead of raw loss plots.
-def ad_train_results(cat_acc: list,
-                     d_losses: list,
-                     l_t_comps: list):
-    """
-    Plotting function of logged adversarial training.
-
-    Parameters
-    ----------
-    cat_acc: list of floats
-        epoch-wise categorisation accuracy
-    d_losses: list of floats
-        minibatch-wise loss of discriminator
-    gradient_flow_metric
-
-    Returns
-    -------
-    Figure with three subplots to judge adversarial training. 
-    """
-    # X-axis for accuracy: one point per epoch (or per accuracy check)
-    epochs = range(len(cat_acc))
-
-    # X-axis for losses and tensor values: one point per batch
-    batches = range(len(d_losses))  # assuming l_t_comps is same length
-
-    # Create figure with 3 subplots
-    fig, axs = plt.subplots(3, 1, figsize=(10, 12))
-
-    # Plot 1: Classification Accuracy
-    axs[0].plot(epochs, cat_acc, marker='o', color='green')
-    axs[0].set_title("Cat. Accuracy on Validation")
-    axs[0].set_xlabel("Epochs")
-    axs[0].set_ylabel("Accuracy")
-    axs[0].set_ylim(0, 1.05)
-
-    # Plot 2: Discriminator Loss
-    axs[1].plot(batches, d_losses, color='blue')
-    axs[1].set_title("BCE Loss DNet")
-    axs[1].set_xlabel("Batches")
-    axs[1].set_ylabel("Loss")
-
-    # Plot 3: L-Tensor (0, 0) Component
-    axs[2].plot(batches, l_t_comps, color='red')
-    axs[2].set_title("(0,0) Component of L-Tensor")
-    axs[2].set_xlabel("Batches")
-    axs[2].set_ylabel("Value")
-
-    # Improve spacing
-    plt.tight_layout()
-    plt.show()

@@ -1,135 +1,184 @@
 import torch
 import tensorkrowch as tk
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Callable
 import torch.nn as nn
 import wandb
 import numpy as np
-
 
 
 import logging
 logger = logging.getLogger(__name__)
 
 
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ------Born rule. Sequential and parallel code.------------------------------------------------------------------------------------------------------------------
+# ------Could add this maybe as method in a custom MPS class.--------------------------------------------------------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------------------------torch.optim.Optimizer------------------------------------------------------------
 
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------------------------------------------------------------------
-#------Born rule. Sequential and parallel code.------------------------------------------------------------------------------------------------------------------
-#------Could add this maybe as method in a custom MPS class.--------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------------------------torch.optim.Optimizer------------------------------------------------------------
-
-# TODO: batch_size could be a confusing misnomer in the documentation. batch_size could be the product of num_bins and num_dist one want so compute.
-# TODO: Add tensor shapes
-
-def born_sequential(mps: tk.models.MPS, 
-                    embs: Dict[int, torch.Tensor] | torch.Tensor)-> torch.Tensor: # very flexible, not parallizable
-    """ 
-    Sequential contraction of MPS with embedded input and computation of probabilities using the Born rule. Mainly used for sampling.
-
-    Cases
-    -----
-    - Not all variables (including class index) appear in p({x_i}_I|{x_j}_J), i.e. in embs. 
-        In that case, one has to marginalize over the missing variables resulting in
-        a density matrix whose diagonal contrains the unnormalized distribution(s) (batch_size x num_bins values). 
-    - All variables appear in embs, one has to square the output of the mps to obtain the unnormalized distribution(s). 
-    
-    Parameters
-    ----------
-    mps:    tk.models.MPS
-        instance defining the prob amplitude
-    embs:   dict
-        embedded input as dict of batch_size x phys_dim tensors  with keys indicating input position.
-    
-    Returns
-    -------
-    tensor
-        probability distribution(s)
+def born_sequential(mps: tk.models.MPS,
+                    embs: Dict[int, torch.Tensor] | torch.Tensor) -> torch.Tensor:  # very flexible, not parallizable
     """
-    
-    # TODO: Maybe remove this check, as it might slow the code down.
-    if not isinstance(embs, dict):
-        raise TypeError("embs input needs to be dictionary with keys indicating input position and values embedded input feature.")
-    
-    # Advantage of dictionaries is that one can use the keys to save which legs are input and which are not. 
-    mps.in_features = [i for i in embs.keys()]
-    # tensorkrowch processes lists of inputs sequentially.
-    in_tensors = [embs[i] for i in mps.in_features]
-    
-    # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
-    if len(in_tensors) < mps.n_features:
-        rho = mps.forward(in_tensors, marginalize_output=True, inline_input=True, inline_mats=True) # density matrix
-        p = torch.diagonal(rho) 
-    # Case 2: All variables appear.
-    else:
-        amplitude = mps.forward(data=in_tensors, inline_input=True, inline_mats=True) # prob. amplitude
-        p = torch.square(amplitude)
-        
-    # logger.debug(f"born_sequential output {p.shape=}")
-    return p
-    
-def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS, # could use MPSLayer class for this one actually
-                  embs: torch.Tensor)-> torch.Tensor:
-    """ 
-    Parallel contraction of MPS with embedded input and computation of probabilities using the Born rule. Mainy used for classification.
+    Sequential contraction of an MPS with embedded input and computation of probabilities
+    using the Born rule. Used primarily for **sampling**, since it supports marginalization
+    over unobserved variables.
 
-    Cases
-    -----
-    - If mps has n_features = D (only input sites):
-        Returns joint Born probabilities p(x₁,…,x_D) ∝ |ψ(x)|².
-        Shape: (batch_size, 1)
+    Behavior
+    --------
+    - **Partial inputs (marginalized case):**
+      When not all sites are included in `embs`, i.e. p({x_i}_I | {x_j}_J),
+      the function marginalizes over missing sites by computing a reduced density
+      matrix ρ. The diagonal entries of ρ represent unnormalized marginal probabilities.
 
-    - If mps has n_features = D+1 (input sites + output site):
-        Returns conditional class probabilities p(c|x₁,…,x_D).
-        Shape: (batch_size, num_cls)
+    - **Complete inputs (full contraction):**
+      When all sites are present, the function computes the amplitude ψ(x₁,…,x_D)
+      and returns its squared magnitude |ψ|² as the unnormalized joint distribution.
 
     Parameters
     ----------
-    mps : tk.models.MPSLayer | tk.models.MPS
-        MPS model defining the probability amplitude.
-    embs : torch.Tensor
-        Embedded input of shape (batch_size, D, phys_dim).
+    mps : tk.models.MPS
+        The tensor network representing the probability amplitude ψ(x).
+    embs : dict[int, torch.Tensor]
+        A mapping from site index → embedded tensor of shape (batch_size, phys_dim).
+        The keys specify which input sites are provided. Must be a dict, not a tensor.
 
     Returns
     -------
     torch.Tensor
-        Probabilities with shape (batch_size, num_cls).
+        The unnormalized probability distribution(s):
+        - (batch_size, num_bins) if marginalized,
+        - (batch_size, 1) if all variables included.
+
+    Raises
+    ------
+    TypeError
+        If `embs` is not a dictionary.
     """
-    
-    # TODO: Think about removing this check for efficiency. 
-    if not isinstance(embs, torch.Tensor): # embs=tensor (parallizable), assume mps.out_feature = [cls_pos] globally??
-        raise TypeError("embs input needs to be tensor of shape: (batch_size, D, phys_dim)")
-    
-    is_joint = isinstance(mps, tk.models.MPS) and (mps.n_features == embs.shape[1])
-    # Case: p(c|x_1,..., x_D), since n_features = D+1 (with output site)
-    if not is_joint:
-        p = torch.square(mps.forward(data=embs)) 
-        p = p / p.sum(dim=-1, keepdim=True) 
-    # Case: p(x_1,...,x_D), since n_features = D (no central tensor).
+
+    if not isinstance(embs, dict):
+        raise TypeError(
+            "embs input must be a dictionary with site indices as keys and "
+            "embedded tensors as values."
+        )
+
+    # Identify which features are fed into the MPS.
+    mps.in_features = [i for i in embs.keys()]
+    in_tensors = [embs[i] for i in mps.in_features]
+
+    # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
+    if len(in_tensors) < mps.n_features:
+        rho = mps.forward(in_tensors, marginalize_output=True,
+                          inline_input=True, inline_mats=True)  # density matrix
+        p = torch.diagonal(rho)
+    # Case 2: All variables appear.
     else:
-        p = torch.square(mps.forward(data=embs)).unsqueeze(1) # Z x p(x_1,..., x_D) # shape (batch_size, 1)
+        amplitude = mps.forward(
+            data=in_tensors, inline_input=True, inline_mats=True)  # prob. amplitude
+        p = torch.square(amplitude)
+
+    # logger.debug(f"born_sequential output {p.shape=}")
+    return p
+
+
+def born_parallel(mps: tk.models.MPSLayer | tk.models.MPS,  # could use MPSLayer class for this one actually
+                  embs: torch.Tensor) -> torch.Tensor:
+    """
+    Parallel contraction of an MPS with embedded input and computation of Born probabilities.
+    Used primarily for **classification** or **joint probability estimation** over all inputs.
+
+    Behavior
+    --------
+    - **Classification:**  
+      When `mps.n_features = D + 1`, the last site corresponds to the class index.
+      The function computes unnormalized conditional probabilities p(c | x₁,…,x_D) and normalizes
+      them across classes.
+
+    - **Joint distribution:**  
+      When `mps.n_features = D`, the network has no output site, and the function
+      returns the unnormalized joint Born probability p(x₁,…,x_D) ∝ |ψ(x)|².
+
+    Parameters
+    ----------
+    mps : tk.models.MPSLayer | tk.models.MPS
+        The MPS model defining the quantum-like probability amplitude ψ(x).
+    embs : torch.Tensor
+        Embedded inputs with shape (batch_size, D, phys_dim).
+
+    Returns
+    -------
+    torch.Tensor
+        - (batch_size, num_cls): Unnormalized conditional probabilities p(c | x)
+        - (batch_size, 1): Unnormalized joint probabilities p(x)
+
+    Raises
+    ------
+    TypeError
+        If `embs` is not a `torch.Tensor`.
+    """
+
+    # embs=tensor (parallizable), assume mps.out_feature = [cls_pos] globally??
+    if not isinstance(embs, torch.Tensor):
+        raise TypeError(
+            "embs input must be a tensor of shape (batch_size, D, phys_dim).")
+
+    is_joint = isinstance(mps, tk.models.MPS) and (
+        mps.n_features == embs.shape[1])
+    # Case 1: p(c | x₁,…,x_D), since n_features = D+1 (with output site)
+    if not is_joint:
+        p = torch.square(mps.forward(data=embs))
+        p = p / p.sum(dim=-1, keepdim=True)
+    # Case 2: p(x₁,…,x_D)
+    else:
+        p = torch.square(mps.forward(data=embs)).unsqueeze(
+            1)  # Z x p(x_1,..., x_D) # shape (batch_size, 1)
     # logger.debug(f"born_parallel output: {p.shape=}")
     return p
 
 
-
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#---------------Getter functions for MPS-----------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Getter functions for MPS-----------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
 
 def legendre_embedding(data: torch.Tensor, degree: int = 2, axis: int = -1):
     """
-    Legendre embedding. Analog to implementation of tk.embeddings.poly.     
+    Compute Legendre polynomial embedding of input data.
+
+    Generates Legendre polynomials up to the specified degree for each
+    element along the given axis, stacking them along the same axis.
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        Input tensor of arbitrary shape, e.g., (batch_size, n_features).
+        Each element is a scalar value in [-1, 1] (typical for Legendre polynomials).
+    degree : int, default=2
+        Maximum degree of Legendre polynomials.
+    axis : int, default=-1
+        Axis along which to stack polynomial values. Can be negative.
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor of shape `(degree+1, ...)` where polynomials are stacked along
+        `axis`. Output dtype matches input `data.dtype`.
+
+    Notes
+    -----
+    Uses the standard recursive formula:
+        P_0(x) = 1
+        P_1(x) = x
+        P_n(x) = ((2n-1) x P_{n-1}(x) - (n-1) P_{n-2}(x)) / n
     """
 
     if not isinstance(data, torch.Tensor):
         raise TypeError('`data` should be torch.Tensor type')
-    
+
     polies = [1, data]
     for i in range(2, degree + 1):
         p_i = ((2*i-1) * data * polies[-1] - (i-1)*polies[-2]) / i
@@ -144,10 +193,34 @@ _EMBEDDING_MAP = {
     "legendre": legendre_embedding
 }
 
-def get_embedding(name: str):
+
+def get_embedding(name: str) -> Callable[[torch.FloatTensor, int], torch.FloatTensor]:
     """
-    Given embedding identifier, return the associated embedding function
-    using the `_EMBEDDING_TO_RANGE` dictionary.
+    Retrieve embedding function by name.
+
+    Parameters
+    ----------
+    name : str
+        Embedding identifier (case-insensitive). Valid options:
+        - "fourier"
+        - "poly" or "polynomial"
+        - "legendre"
+
+    Returns
+    -------
+    callable
+        Embedding function that maps a tensor to its embedding.
+        Signature: `tensor -> tensor`. E.g., `legendre_embedding`.
+
+    Raises
+    ------
+    ValueError
+        If the embedding name is not recognized.
+
+    Notes
+    -----
+    The returned function may expect inputs within specific ranges,
+    defined in `_EMBEDDING_TO_RANGE`.
     """
     key = name.lower()
     try:
@@ -163,6 +236,7 @@ _EMBEDDING_TO_RANGE = {
     "legendre": (-1., 1.)
 }
 
+
 def _embedding_to_range(embedding: str):
     """
     Given embedding identifier, return the associated domain of that embedding
@@ -176,7 +250,8 @@ def _embedding_to_range(embedding: str):
                          f"Available: {list(_EMBEDDING_TO_RANGE.keys())}")
     return rang
 
-def _get_indim_and_ncls(mps: tk.models.MPS)-> Tuple[int, int]:
+
+def _get_indim_and_ncls(mps: tk.models.MPS) -> Tuple[int, int]:
     """
     Extracts `in_dim`, the input embedding dimension, and `n_cls`, the number of classes assuming same input embedding dimension.
 
@@ -188,27 +263,57 @@ def _get_indim_and_ncls(mps: tk.models.MPS)-> Tuple[int, int]:
     phys = np.array(mps.phys_dim)
     val, counts = np.unique(ar=phys, return_counts=True)
     if np.max(counts) < phys.size-1:
-        raise ValueError("Can only handle same dimensional input embedding dimensions.")
+        raise ValueError(
+            "Can only handle same dimensional input embedding dimensions.")
     in_dim = val[np.argmax(counts)]
     if len(val) == 2:
-        n_cls = val[val!=in_dim][0]
+        n_cls = val[val != in_dim][0]
     else:
         n_cls = in_dim
     return int(in_dim), int(n_cls)
 
 
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#---------------Logger functions MPS-----------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
-#------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ---------------Logger functions MPS-----------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------------------------------
 
 def log_grads(mps: tk.models.MPS, step: int, watch_freq: int, stage: str):
+    """
+    Logs gradient statistics of all MPS parameters to Weights & Biases (wandb).
+
+    The function periodically records absolute gradient histograms for each trainable
+    tensor in the MPS. This is useful for monitoring training stability, detecting
+    vanishing or exploding gradients, and diagnosing optimizer behavior.
+
+    Logging occurs only every `watch_freq` steps.
+
+    Parameters
+    ----------
+    mps : tk.models.MPS
+        The MPS model whose gradients are logged.
+    step : int
+        Current global training step.
+    watch_freq : int
+        Frequency (in steps) at which gradient statistics are recorded.
+    stage : str
+        Label for the current training phase (e.g., "pre", "gan").
+        Used as a prefix in the wandb metric names.
+
+    Notes
+    -----
+    - Gradients are detached and moved to CPU before histogram computation.
+    - Parameters without gradients at the current step are marked with
+      `{stage}_mps_abs_grad/{name}/has_grad = 0`.
+    - To reduce logging overhead, scalar summaries (mean/std/max) are currently disabled
+      but can be re-enabled by uncommenting the respective lines.
+    """
     if step % watch_freq != 0:
         return
-    
+
     log_grads = {}
     for name, tensor in mps.named_parameters():
         if tensor.grad is not None:
@@ -222,7 +327,7 @@ def log_grads(mps: tk.models.MPS, step: int, watch_freq: int, stage: str):
             # log_grads[f"{stage}_mps_abs_grad/{name}/has_grad"] = 1
         else:
             log_grads[f"{stage}_mps_abs_grad/{name}/has_grad"] = 0
-    
+
     wandb.log(log_grads)
 
 
@@ -234,7 +339,7 @@ def logged_optimizer_step(optimizer: torch.optim.Optimizer, mps: tk.models.MPS):
         p_before[name] = param.clone().detach()
     for node in mps.mats_env:
         t_before[f"{node.name}"] = node.tensor.clone().detach()
-    
+
     optimizer.step()
 
     for name, param in mps.named_parameters():
@@ -246,127 +351,17 @@ def logged_optimizer_step(optimizer: torch.optim.Optimizer, mps: tk.models.MPS):
         diff = (after - t_before[f"{node.name}"]).abs().max()
         wandb.log({f"gan_mps/optim_diff/{name}": diff})
 
-#-----------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
-#--------DEAD UNUSED CODE---------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
 
-# TODO: Think of deleting this function as it may never be used.
-def batch_normalize(p: torch.Tensor,
-                    num_bins: int,
-                    batch_size: int):
-    """
-    Normalize a batch of unnormalized discretized (univariate) probability distributions stored in a single tensor.
-    
-    Parameters
-    ----------
-    p: tensor
-        batch of unnormalized probability distributions stored in a single tensor of shape (batch_size, num_bins) or (batch_size x num_bins).
-    batch_size: intsamples.append(diff_sampling.os_secant(
-            p, input_space))  # shape (num_spc,)
-        number of unnormalized probability distributions stored in the tensor p
-    num_bins: int
-        number of discretization points for every single unnormalized probability distribution p[i, :].
-
-    Returns
-    -------
-    tensor
-        single tensor storing batch_size many normalized univariate discrete probability distributions of num_bins bins.
-    """
-    if p.shape == (batch_size*num_bins,):
-        p = p.reshape(batch_size, num_bins)
-
-    return p / p.sum(dim=-1, keepdim=True)
-
-
-# TODO: Add documentation
-
-# The only case where the class below runs with gradients flowing to R_tensor and
-# Cls_tensor is if parametrize=False and inline_input=True for every forward call
-
-class CC_MPS(tk.models.MPS):
-    def __init__(self, mps: tk.models.MPS, 
-                 cls_pos: int,
-                 parametrize: bool):
-        # Number of features of the new MPS is reduced by one
-        n_feat_new = mps.n_features - 1
-        phys_dim = mps.phys_dim[0]
-        bond_dim = mps.bond_dim[0]
-        self.num_cls = mps.phys_dim[cls_pos]
-
-        # Initialize model with right properties
-        super().__init__(n_features=n_feat_new, 
-                         phys_dim=phys_dim, 
-                         bond_dim=bond_dim, 
-                         boundary='obc')
-
-        # Extract and save special tensors as parameters
-        assert all(isinstance(mps.mats_env[i].tensor, torch.Tensor) 
-                   for i in [cls_pos, cls_pos + 1])
-
-        cls_tensor = mps.mats_env[cls_pos].tensor
-        R_tensor = mps.mats_env[cls_pos + 1].tensor
-
-        assert cls_tensor is not None
-        assert R_tensor is not None
-        self.cls_tensor = nn.Parameter(cls_tensor.clone())
-        self.R_tensor = nn.Parameter(R_tensor.clone())
-
-        # Copy all tensors into new mps except special tensor. 
-        # Empy node is initialised randomly which is not important
-        for old_idx in range(mps.n_features):
-            if old_idx == cls_pos or old_idx == cls_pos + 1:
-                continue  # skip special cls and R tensors
-
-            # Compute correct new index in the reduced model
-            new_idx = old_idx if (old_idx < cls_pos) else (old_idx - 1)
-            old_ts = mps.mats_env[old_idx].tensor
-            assert old_ts is not None
-            self.mats_env[new_idx].set_tensor(old_ts.clone())
-
-        # Store cls_pos for convenience
-        self.cls_pos = cls_pos
-
-        # TODO: Add possibility for different embeddings for multi-label
-        basis_embs = torch.stack([
-            tk.embeddings.basis(torch.tensor(i), dim=self.num_cls).to(dtype=torch.float)
-            for i in range(self.num_cls)
-        ])
-
-        # Register as buffer (not a Parameter, not trainable)
-        self.register_buffer("cls_embs", basis_embs)
-
-        # ParamNode -> Node, doesn't work with stacking
-        self.mats_env[self.cls_pos] = self.mats_env[self.cls_pos].parameterize(parametrize)
-        
-
-    def forward(self, data, cls, *args, **kwargs):
-        assert cls in range(self.num_cls), "not that many classes"
-        assert data.shape[1] == self.n_features, "Input feature count mismatch"
-
-        cls_emb = self.cls_embs[cls] # type: ignore
-        aux_tensor = torch.einsum("c, lcr, rim -> lim", 
-                                  cls_emb, 
-                                  self.cls_tensor, 
-                                  self.R_tensor)
-
-             
-        self.mats_env[self.cls_pos].tensor = aux_tensor
-
-        return super().forward(data=data, *args, **kwargs)
-    
-
-#-----------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
-#--------ENSEMBLE MPS METHOD---------------------------------------------------------------------------------------------
-#--------I MAY SWITCH TO THIS METHOD IF IT IS BETTER---------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
+# --------ENSEMBLE MPS METHOD---------------------------------------------------------------------------------------------
+# --------I MAY SWITCH TO THIS METHOD IF IT IS BETTER---------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
 
 # Instead of a single MPS with a central cls tensor, one could train an ensemble of tensors
 # interacting with each other only through the (classification) loss
 # Conditioning implies what?
 
 
-# TODO: Implement ensemble method
+# TODO: Implement ensemble method (ADDED AS ISSUE)

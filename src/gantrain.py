@@ -1,3 +1,6 @@
+from mps.categorisation import sample_from_classifier
+import matplotlib.pyplot as plt
+from _utils import FIDLike, visualise_samples
 import torch
 import math
 import tensorkrowch as tk
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def real_loader(X: torch.FloatTensor,
                 c: torch.LongTensor,
-                n_real: int, # corresponds roughly to num_cls * batch_spc
+                n_real: int,  # corresponds roughly to num_cls * batch_spc
                 split: str) -> DataLoader:
     """
     Construct a DataLoader for real, unembedded data samples.
@@ -59,6 +62,7 @@ def _batch_constructor(generator: tk. models.MPS,
                        cls_pos: int,
                        num_bins: int,
                        r_real: int,
+                       method: str,
                        # Initialized in outer loop
                        in_dim: int,
                        num_cls: int,
@@ -118,6 +122,7 @@ def _batch_constructor(generator: tk. models.MPS,
         n_synth_c = math.ceil(n_real_pc[c] / r_real)
         X_synth_c = sampling._single_class(mps=generator,
                                            embedding=embedding,
+                                           method=method,
                                            cls_pos=cls_pos,
                                            cls_emb=cls_emb,
                                            in_dim=in_dim,
@@ -151,6 +156,7 @@ def _step(generator: tk.models.MPS,
           r_real: float,
           cls_pos: int,
           num_bins: int,
+          method: str,
 
           # Initialized in outer loop
           in_dim: int,
@@ -166,13 +172,75 @@ def _step(generator: tk.models.MPS,
           step: int,
           device: torch.device
           ) -> Tuple[Dict[str, float], int]:
-    # TODO: Add docstring
-    
+    """
+    Perform a single training step for a conditional MPS-GAN.
+
+    This function executes one iteration of the adversarial training loop:
+    1. Constructs a batch of real and generated samples.
+    2. Updates one or more discriminators.
+    3. Updates the generator (MPS) using feedback from the discriminators.
+    4. Logs gradients and performance metrics.
+
+    Parameters
+    ----------
+    generator : tk.models.MPS
+        Generator model (MPS) used to produce synthetic samples.
+    dis : dict[int, nn.Module]
+        Dictionary of discriminators, keyed by class index or identifier.
+    X_real : torch.FloatTensor
+        Real samples from the dataset (batch of feature vectors).
+    c_real : torch.LongTensor
+        Class labels corresponding to `X_real`.
+    r_real : float
+        Ratio of real samples used per batch.
+    cls_pos : int
+        Index of the class site in the MPS.
+    num_bins : int
+        Number of discrete bins for each input feature.
+    method : str
+        Sampling method used to draw from the generator (passed to `diff_sampling`).
+    in_dim : int
+        Physical dimension of the input embedding (number of features after embedding).
+    num_cls : int
+        Number of classes in the dataset.
+    embedding : Callable
+        Callable embedding function converting real-valued inputs to tensors for the MPS.
+    cls_embs : List[torch.FloatTensor]
+        Precomputed class embeddings for all classes.
+    input_space : torch.FloatTensor
+        1D tensor defining the discretized candidate input values.
+    d_optimizer : dict[Any, torch.optim.Optimizer]
+        Optimizers for each discriminator.
+    g_optimizer : torch.optim.Optimizer
+        Optimizer for the generator (MPS).
+    d_criterion : Callable
+        Loss function for the discriminators.
+    g_criterion : Callable
+        Loss function for the generator.
+    watch_freq : int
+        Frequency (in steps) to log gradients for generator monitoring.
+    step : int
+        Current global training step.
+    device : torch.device
+        Device on which tensors are allocated (CPU or GPU).
+
+    Returns
+    -------
+    log : dict[str, float]
+        Dictionary containing per-class GAN metrics:
+        - 'gan_dis/{class}/loss': discriminator loss
+        - 'gan_dis/{class}/acc': discriminator accuracy
+        - 'gan_mps/{class}/loss': generator loss
+    step : int
+        Updated global training step (incremented for each discriminator update).
+    """
+
     X, t, X_synth = _batch_constructor(
         generator=generator, X_real=X_real, c_real=c_real,
         cls_pos=cls_pos, num_bins=num_bins, r_real=r_real,
         in_dim=in_dim, num_cls=num_cls, cls_embs=cls_embs,
-        embedding=embedding, input_space=input_space, device=device)
+        embedding=embedding, input_space=input_space,
+        method=method, device=device)
 
     if len(dis.keys()) == 1:  # i.e. single discriminator instead ensemble of discriminators
         X = torch.concatenate(X, dim=0)
@@ -194,7 +262,7 @@ def _step(generator: tk.models.MPS,
         d_loss[c] = d_criterion(d_prob, d_target)
         d_pred = (d_prob >= 0.5).float()
         d_acc[c] = (d_pred == d_target).float().mean()
-        
+
         # Discriminator update step
         d_optimizer[c].zero_grad()
         d_loss[c].backward()
@@ -214,7 +282,7 @@ def _step(generator: tk.models.MPS,
 
         # Update step and gradient tracking of generator
         g_optimizer.zero_grad()
-        g_loss[c].backward() #
+        g_loss[c].backward()
         mps.log_grads(generator, step=step, watch_freq=watch_freq, stage="gan")
         # TODO: This optimizer step is only minimising currently
         g_optimizer.step()
@@ -224,10 +292,9 @@ def _step(generator: tk.models.MPS,
 
     return log, step
 
-from mps.categorisation import sample_from_classifier
-from _utils import mean_n_cov, FIDLike, visualise_samples
-import matplotlib.pyplot as plt
+
 fid_like = FIDLike()
+
 
 def check_and_retrain(generator: tk.models.MPS,
                       loaders: Dict[str, DataLoader],
@@ -238,9 +305,58 @@ def check_and_retrain(generator: tk.models.MPS,
                       trigger_accuracy: float,
                       device: torch.device,
                       cfg_g_optimizer: schemas.OptimizerConfig,
-                      stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
+                      stat_r: Dict[int, Tuple[torch.FloatTensor,
+                                              torch.FloatTensor]] | None = None
                       ) -> torch.optim.Optimizer:
-    # TODO: Add updated docstring
+    """
+    Verify the performance of an MPS generator as a classifier and optionally retrain it if accuracy is below a threshold.
+
+    This function performs the following steps:
+    1. Converts the generator into a temporary classifier (`MPSLayer`) for evaluation.
+    2. Samples from the classifier and logs FID-like metrics and visualizations if requested.
+    3. Evaluates classifier accuracy on a validation dataset.
+    4. If accuracy is below `trigger_accuracy`, retrains the generator as a classifier using `mps_cat.train`.
+    5. Updates the generator's tensors and returns a new optimizer if retraining occurred.
+
+    Parameters
+    ----------
+    generator : tk.models.MPS
+        Generator model to evaluate and potentially retrain.
+    loaders : dict[str, DataLoader]
+        Dictionary containing 'train' and 'valid' dataloaders.
+    g_optimizer : torch.optim.Optimizer
+        Current optimizer for the generator.
+    cfg : schemas.PretrainMPSConfig
+        Configuration for pretraining the MPS (e.g., learning rate, criterion).
+    cls_pos : int
+        Index of the class site in the MPS.
+    epoch : int
+        Current epoch number (used for logging).
+    toViz : bool
+        Whether to generate visualizations of synthetic samples.
+    samp_cfg : schemas.SamplingConfig
+        Configuration for sampling synthetic data (e.g., batch size, sampling method).
+    trigger_accuracy : float
+        Minimum acceptable validation accuracy; retraining occurs if accuracy falls below this threshold.
+    device : torch.device
+        Device on which to perform computations.
+    cfg_g_optimizer : schemas.OptimizerConfig
+        Configuration for creating a new optimizer in case retraining occurs.
+    stat_r : dict[int, tuple(torch.FloatTensor, torch.FloatTensor)], optional
+        Precomputed class statistics (mean and covariance) for computing FID-like metrics. Default is None.
+
+    Returns
+    -------
+    g_optimizer : torch.optim.Optimizer
+        The generator optimizer, which may be the same as the input or a new one if retraining occurred.
+
+    Notes
+    -----
+    - For low-dimensional data (dataset dim < 1000) or when `toViz=True`, synthetic samples are visualized and FID-like metrics are computed.
+    - The function uses a temporary `MPSLayer` to evaluate the generator in classification mode without modifying the generator itself.
+    - Retraining replaces the generator's tensors with the best tensors from `mps_cat.train`.
+    - Logging is done via `wandb` for both metrics and visualizations.
+    """
     log = {}
     generator.reset()
     classifier = tk.models.MPSLayer(
@@ -248,14 +364,15 @@ def check_and_retrain(generator: tk.models.MPS,
     classifier.embedding = generator.embedding
     classifier.trace(torch.zeros(0, len(classifier.in_features),
                      classifier.in_dim[0]).to(device))
-    classifier.to(device), 
-    
+    classifier.to(device),
+
     # Log generative capabilities, if wanted
     if loaders["train"].dataset.dim < 1e3 or toViz:
-        synths = sample_from_classifier(classifier=classifier, device=device, 
+        synths = sample_from_classifier(classifier=classifier, device=device,
                                         cfg=samp_cfg)
         # TODO: Implement something more general and configable
-        if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
+        # fid_like metric too expensive higher dim data, in the current implementation
+        if loaders["train"].dataset.dim < 1e3:
             fid_values = []
             for c in stat_r.keys():
                 mu_r, cov_r = stat_r[c]
@@ -283,21 +400,23 @@ def check_and_retrain(generator: tk.models.MPS,
         logger.info(f'Starting to retrain at epoch {epoch+1}')
         best_tensors, best_acc = mps_cat.train(
             classifier=classifier, stat_r=stat_r,
-            loaders=loaders,cfg=cfg,device=device,
-            stage="gan",samp_cfg=samp_cfg)
-        
+            loaders=loaders, cfg=cfg, device=device,
+            stage="gan", samp_cfg=samp_cfg)
+
         # Log generative capabilities again, if wanted
         if loaders["train"].dataset.dim < 1e3 or toViz:
-            synths = sample_from_classifier(classifier=classifier, device=device, 
+            synths = sample_from_classifier(classifier=classifier, device=device,
                                             cfg=samp_cfg)
-            if loaders["train"].dataset.dim < 1e3: # fid_like metric too expensive higher dim data, in the current implementation
+            # fid_like metric too expensive higher dim data, in the current implementation
+            if loaders["train"].dataset.dim < 1e3:
                 fid_values = []
                 for c in stat_r.keys():
                     mu_r, cov_r = stat_r[c]
                     gen = synths[:, c, :]
                     fid_val = fid_like.lazy_forward(mu_r, cov_r, gen)
                     fid_values.append(fid_val)
-                log[f"gan_mps/fid"] = torch.mean(torch.stack(fid_values)).item()
+                log[f"gan_mps/fid"] = torch.mean(
+                    torch.stack(fid_values)).item()
             if toViz:
                 ax = visualise_samples(synths, gen_viz=samp_cfg.batch_spc)
                 log[f"samples/gan"] = wandb.Image(ax.figure)
@@ -311,7 +430,26 @@ def check_and_retrain(generator: tk.models.MPS,
     # g_optimizer could be a new object
     return g_optimizer
 
+
 def _init_logs(dis: Dict[Any, nn.Module]) -> Dict[str, list]:
+    """
+    Initialize empty logging containers for a GAN setup with multiple discriminators.
+
+    Creates dictionaries of lists for storing generator and discriminator losses
+    and discriminator accuracy for each class or discriminator key.
+
+    Parameters
+    ----------
+    dis : dict[Any, nn.Module]
+        Dictionary of discriminator modules keyed by class or identifier.
+
+    Returns
+    -------
+    logs : dict[str, list]
+        Dictionary where each key corresponds to a metric name (e.g.,
+        'gan_mps/{c}/loss', 'gan_dis/{c}/loss', 'gan_dis/{c}/acc') and each value
+        is an empty list ready to store metric values during training.
+    """
     logs = {}
     for c in dis.keys():
         logs[f"gan_mps/{c}/loss"] = []
@@ -319,14 +457,35 @@ def _init_logs(dis: Dict[Any, nn.Module]) -> Dict[str, list]:
         logs[f"gan_dis/{c}/acc"] = []
     return logs
 
+
 def _define_metrics(dis: Dict[Any, nn.Module]):
+    """
+    Define custom metrics in Weights & Biases (wandb) for logging during GAN training.
+
+    Sets up per-class generator and discriminator loss metrics and discriminator accuracy.
+    By default, loss metrics have no aggregation summary, while accuracy is summarized by wandb.
+
+    Parameters
+    ----------
+    dis : dict[Any, nn.Module]
+        Dictionary of discriminator modules keyed by class or identifier.
+
+    Notes
+    -----
+    - Generator loss metrics are defined as 'gan_mps/{c}/loss'.
+    - Discriminator loss metrics are defined as 'gan_dis/{c}/loss'.
+    - Discriminator accuracy metrics are defined as 'gan_dis/{c}/acc'.
+    - A global classification loss metric 'gan_mps/valid/loss' is also defined.
+    """
     for c in dis.keys():
         wandb.define_metric(f"gan_mps/{c}/loss", summary="none")
         wandb.define_metric(f"gan_dis/{c}/loss", summary="none")
         wandb.define_metric(f"gan_dis/{c}/acc")
     wandb.define_metric("gan_mps/valid/loss", summary="none")
 
-# TODO: Add checkpoints
+# TODO: Add checkpoints (ADDED AS ISSUE)
+
+
 def loop(generator: tk.models.MPS,
          dis: Dict[Any, nn.Module],
          real_loaders: Dict[str, DataLoader],
@@ -342,11 +501,56 @@ def loop(generator: tk.models.MPS,
          device: torch.device,
 
          # Optional kwargs
-         stat_r: Dict[int, Tuple[torch.FloatTensor, torch.FloatTensor]] | None = None
+         stat_r: Dict[int, Tuple[torch.FloatTensor,
+                                 torch.FloatTensor]] | None = None
          ) -> None:
-    
-    # TODO: Add updated docstring
+    """
+    Main training loop for a GAN-style MPS generator with one or multiple discriminators.
 
+    This function performs epoch-wise GAN training, including:
+    - Batch-wise discriminator and generator updates
+    - Logging of losses and discriminator accuracies
+    - Optional retraining of the generator as a classifier if performance drops
+    - Optional visualization and FID-like evaluation
+
+    Parameters
+    ----------
+    generator : tk.models.MPS
+        The MPS generator model to be trained.
+    dis : dict[Any, nn.Module]
+        Dictionary of discriminator modules keyed by class or identifier.
+    real_loaders : dict[str, DataLoader]
+        DataLoaders providing real training data batches.
+    cfg : schemas.GANStyleConfig
+        Configuration containing GAN hyperparameters (learning rates, max_epoch, info/check frequencies, etc.).
+    samp_cfg : schemas.SamplingConfig
+        Configuration for the sampling method (num_bins, method, batch size, etc.).
+    cls_pos : int
+        Index of the class site in the MPS generator.
+    embedding : str
+        Identifier for the embedding to use (converted to callable via get_embedding).
+    best_acc : float
+        Best classification accuracy achieved so far; used to define retraining trigger.
+    cat_loaders : dict[str, DataLoader]
+        DataLoaders used for evaluating and retraining the generator as a classifier.
+    device : torch.device
+        Device on which to run the computation (CPU or CUDA).
+    stat_r : dict[int, tuple[torch.FloatTensor, torch.FloatTensor]], optional
+        Precomputed statistics (mean and covariance) of each class for FID-like evaluation.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - The generator and discriminators are updated in-place.
+    - Logging is done via Weights & Biases (wandb), including per-class losses and discriminator accuracy.
+    - The generator is periodically evaluated as a classifier; if accuracy drops below a threshold
+      (best_acc - cfg.acc_drop_tol), the generator is retrained using `_check_and_retrain`.
+    - Sampling input grids and embeddings are precomputed outside the batch loop for efficiency.
+    - Batch-wise and epoch-wise metrics are averaged before logging.
+    """
     trigger_accuracy = max(best_acc-cfg.acc_drop_tol, 0.0)
     logger.info(f"{trigger_accuracy=}")
     step = 0
@@ -366,7 +570,8 @@ def loop(generator: tk.models.MPS,
 
     # Initialize other objects needed for sampling
     input_space = mps._embedding_to_range(embedding)
-    input_space = torch.linspace(input_space[0], input_space[1], samp_cfg.num_bins)
+    input_space = torch.linspace(
+        input_space[0], input_space[1], samp_cfg.num_bins)
     input_space = input_space.to(device, dtype=torch.float32)
     embedding = mps.get_embedding(embedding)
     in_dim, num_cls = mps._get_indim_and_ncls(generator)
@@ -385,13 +590,13 @@ def loop(generator: tk.models.MPS,
         for X_real, c_real in real_loaders["train"]:
             X_real, c_real = X_real.to(device), c_real.to(device)
             log, step = _step(generator=generator, dis=dis, X_real=X_real, c_real=c_real,
-                         r_real=cfg.r_real, cls_pos=cls_pos, step=step,
-                         num_bins=samp_cfg.num_bins, in_dim=in_dim,
-                         num_cls=num_cls, embedding=embedding,
-                         cls_embs=cls_embs, input_space=input_space,
-                         d_optimizer=d_optimizer, g_optimizer=g_optimizer,
-                         d_criterion=d_criterion, g_criterion=g_criterion,
-                         watch_freq=cfg.watch_freq, device=device)
+                              r_real=cfg.r_real, cls_pos=cls_pos, step=step,
+                              num_bins=samp_cfg.num_bins, in_dim=in_dim,
+                              num_cls=num_cls, embedding=embedding, method=samp_cfg.method,
+                              cls_embs=cls_embs, input_space=input_space,
+                              d_optimizer=d_optimizer, g_optimizer=g_optimizer,
+                              d_criterion=d_criterion, g_criterion=g_criterion,
+                              watch_freq=cfg.watch_freq, device=device)
             # Saving batchwise training performance as list
             for k in logs.keys():
                 logs[k].append(log[k])

@@ -3,9 +3,9 @@ experiment: net_spirals
 
 defaults:
   - override /dataset: spirals_4k
-  - override /model/mps: d30D18_secant # using only the most powerful
+  - override /model/mps: d30D18
   - override /pretrain/mps: adam_b64e500
-  - override /sampling: l500num2000
+  - override /sampling: secant_l500num2000
   - override /reproduce/save: all
   
 # Copy from sweeps
@@ -13,6 +13,6 @@ hydra:
   sweeper:
     params:
       pretrain.mps.optimizer.kwargs.lr: 1e-3, 5e-4, 1e-4
-      pretrain.mps.optimizer.kwargs.weight_decay: 1e-3. 5e-4, 1e-4, 5e-5
+      pretrain.mps.optimizer.kwargs.weight_decay: 1e-3, 5e-4, 1e-4, 5e-5
       pretrain.mps.stop_crit: loss
       pretrain.mps.patience: 250
