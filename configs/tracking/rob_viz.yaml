@@ -1,0 +1,4 @@
+project: gan_train # choose your own project name if you like
+entity: martin-nissen-gonzalez-heidelberg-university # add here your wandb entity
+mode: online
+metrics: {"loss": 1, "acc": 1, "rob": 20, "fid": 20, "viz": 20}

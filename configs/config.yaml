@@ -7,7 +7,7 @@ defaults:
   - model/dis: wide_leaky_ens
   - pretrain/mps: adam_b64e500
   - pretrain/dis: adam_b64e1000lr3
-  - wandb: defaults
+  - track: rob_viz
   - reproduce/save: none
   - reproduce/random: "2811"
   - override hydra/job_logging: stream_only

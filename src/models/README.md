@@ -1,0 +1,3 @@
+In this module the different networks, tensor and neural, are implemented. First and foremost, the `BornMachine` is a facade for two `tk.models.TensorNetworks`, the classifier and generator, that is the probabilistic model behind both the classifier and generator:
+$$\mathrm{bornmachine}(x,c)=p(x.c)=\frac{1}{Z}\mathrm{tensornetwork}(x,c)^{2}.$$
+Training of the Born machine is not handled here, but in its own module, `trainer`. There, also GAN-style training of the Born machine is implemented, which requires an estimator of the different divergences or distances on the space of probability distributions, called discriminator or critic, and is implemented as the `Discriminator` class here in this module.

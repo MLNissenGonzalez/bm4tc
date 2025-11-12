@@ -1,4 +1,0 @@
-num_bins: 500
-num_spc: 2000
-batch_spc: 8
-method: secant

@@ -43,3 +43,6 @@ experiments/wandb_test.py
 
 # scratchpad
 maxBond_2d.py
+
+# archive (old version of of the code (pre refactoring in object oriented coding))
+archive/

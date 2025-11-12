@@ -1,0 +1,8 @@
+# n_features: ${dataset.n_feat} + 1. (Do this in the experiment script itself)
+init_kwargs:
+  in_dim: 3 # physical dimension
+  bond_dim: 2
+  boundary: "obc"
+  init_method: "randn_eye"
+  std: 1e-9
+embedding: "fourier"
