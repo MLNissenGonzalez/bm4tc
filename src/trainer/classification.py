@@ -52,7 +52,7 @@ class Trainer:
     def _train_epoch(self,):
         losses = []
         self.bornmachine.classifier.train()
-        for data, labels in self.datahandler.loaders["train"]:
+        for data, labels in self.datahandler.classification["train"]:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
@@ -166,7 +166,7 @@ class Trainer:
     ):
         if stage == "pre":
             self.train_cfg = self.cfg.trainer.classification
-        elif stage == "gan":
+        elif stage == "re":
             self.train_cfg = self.cfg.trainer.ganstyle.retrain
         else:
             raise ValueError(f"Unknown stage '{stage}' for Trainer.")
@@ -178,7 +178,7 @@ class Trainer:
 
         # Prepare classifier, then instantiate criterion and optimizer.
         self.bornmachine.classifier.prepare(device=self.device, train_cfg=self.train_cfg)
-        self.criterion = get.criterion(self.train_cfg.criterion)
+        self.criterion = get.criterion("classification", self.train_cfg.criterion)
         self.optimizer = get.optimizer(self.bornmachine.classifier.parameters(), self.train_cfg.optimizer)
         
 

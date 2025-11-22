@@ -16,7 +16,7 @@ class BornMachine:
     Handles shared tensors, device movement, checkpointing, and parameter access.
     """
 
-    def __init__(self, cfg: schemas.MPSConfig, 
+    def __init__(self, cfg: schemas.BornMachineConfig, 
                  data_dim: int | None = None, num_classes: int | None = None,
                  device: torch.device | None = None, 
                  tensors: List[torch.Tensor] | None = None):
@@ -74,7 +74,7 @@ class BornMachine:
     def sample(self, cfg: schemas.SamplingConfig, cls: Optional[int] = None) -> torch.Tensor:
         """Sample x ~ p(x|c) using generator."""
         if cls is None:
-            return self.generator.sample(cfg)
+            return self.generator.sample_all_classes(cfg)
         else:
             return self.generator.sample_single_class(cls, cfg)
 
@@ -133,7 +133,7 @@ class BornMachine:
     @classmethod
     def load(cls, path: str):
         checkpoint = torch.load(path)
-        cfg : schemas.MPSConfig = OmegaConf.create(checkpoint["config"])
+        cfg : schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
         logger.info(f"[BornMachine] Loaded from {path}")
         return born_machine
@@ -141,3 +141,5 @@ class BornMachine:
     def reset(self):
         self.classifier.reset()
         self.generator.reset()
+
+    

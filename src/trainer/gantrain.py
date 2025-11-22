@@ -1,19 +1,77 @@
 import matplotlib.pyplot as plt
 import torch
 import math
-import tensorkrowch as tk
-from typing import Callable, Dict, List, Any, Tuple
+from typing import *
 import src.trainer.classification as mps_cat
-import src.archive.utils as mps
-from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
 import src.utils.schemas as schemas
-import wandb
-
 import logging
+from classification import Trainer as ClassificationTrainer
+from src.tracking import *
+from data.handler import DataHandler
+from models import Critic, BornMachine
+import utils.getters as get
 logger = logging.getLogger(__name__)
 
 # TODO: Use DataHandler, BornMachine and discriminator/ module.
+class Trainer:
+    def __init__(self, bornmachine: BornMachine, cfg: schemas.Config, datahandler: DataHandler, critic: Critic, device: torch.device): 
+        self.cfg = cfg
+        self.train_cfg = self.cfg.trainer.ganstyle
+
+        self.datahandler = datahandler
+        num_spc_nat = int(round(self.train_cfg.r_real * self.train_cfg.sampling.num_spc))
+        for split in ["train", "valid", "test"]:
+            self.datahandler.discrimination[split].batch_size = num_spc_nat
+
+        self.bornmachine = bornmachine
+        self.bornmachine.reset()
+
+        self.critic = critic
+        if not self.critic.pretrained:
+            self.critic.ganstyle_pretrain(datahandler, bornmachine, device)
+
+        self.optimizer = get.optimizer(self.bornmachine.parameters(), config=self.train_cfg.optimizer)
+
+        self.evaluator = PerformanceEvaluator(cfg, datahandler, "gan", device)
+
+    def train(self, classification_trainer: ClassificationTrainer):
+        max_epoch = self.train_cfg.max_epoch
+        sampling_cfg = self.train_cfg.sampling
+        for epoch in range(max_epoch):
+            g_losses, d_losses = [], []
+            for naturals in self.datahandler.discrimination["train"]:
+
+                sampling_cfg.num_spc = naturals.shape[0]
+
+                # Inner training loop for discriminator / critic
+                with torch.no_grad():
+                    generated = self.bornmachine.sample(sampling_cfg)
+                for mini_epoch in range(self.train_cfg.discrimination.max_epoch_gan):
+                    d_losses.append(self.critic.train_step(naturals, generated))
+
+                # Training step for generator
+                generated = self.bornmachine.sample(sampling_cfg)
+                self.optimizer.zero_grad()
+                loss = self.critic.generator_loss(generated)
+                loss.backward()
+                self.optimizer.step()
+                g_losses.append(loss.cpu().detach().item())
+
+            g_loss = sum(g_losses) / len(g_losses)
+            d_loss = sum(d_losses) / len(d_losses)
+            # TODO: Record training metrics, especially d_loss is interesting
+
+            self.bornmachine.sync_tensors(after="gan")
+            validation_metrics = self.evaluator.evaluate(self.bornmachine, "valid", epoch) # evaluation of gan training vs retraining
+            record(validation_metrics, "gan", "valid")
+            if validation_metrics["acc"] < self.threshhold_acc:
+                classification_trainer.train("gan", self.goal_acc)
+        self._summarise_training() # result on test set of metrics, number of retrainings (maybe epoch number aswell)
+
+
+
+
 
 def real_loader(X: torch.FloatTensor,
                 c: torch.LongTensor,
@@ -57,7 +115,7 @@ def _batch_constructor(generator: tk. models.MPS,
                        c_real: torch.LongTensor,
                        # Hyperparameters
                        cls_pos: int,
-                       num_bins: int,
+                       num_bins: int,# TODO: I am using train_cfg only here. think about maybe have early stopping only for classification
                        r_real: int,
                        method: str,
                        # Initialized in outer loop

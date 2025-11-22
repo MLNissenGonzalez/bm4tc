@@ -4,7 +4,7 @@ from typing import *
 import numpy as np
 import src.utils.schemas as schemas
 import torch.optim as optim
-import torch.nn as nn
+from torch import nn
 
 #-----------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------
@@ -231,21 +231,33 @@ class MPSNLLL(nn.Module):
     def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         p = p.clamp(min=self.eps)
         return -torch.log(p[torch.arange(p.size(0)), t]).mean()
+    
 
-
-_LOSS_MAP = {
+_CLASSIFICATION_LOSSES = {
     "nll": MPSNLLL,
     "nlll": MPSNLLL,
     "negativeloglikelihood": MPSNLLL,
     "negloglikelihood": MPSNLLL,
-    "bce": nn.BCELoss,  # BCE loss expects probabilities and target is float between 0 and 1
-    "binarycrossentropy": nn.BCELoss,
-    # TODO: Has to be adapted to the swapped logarithm (ADDED AS ISSUE)
-    "vanilla": nn.BCELoss
 }
 
+_GENERATOR_LOSSES = {
+    "vanilla": VanillaLoss,
+    "bce": VanillaLoss,
+    "saturated": FlippedLoss,
+    "flipped": FlippedLoss,
+    "wgan": WGANGeneratorLoss,
+    "wgangp": WGANGeneratorLoss,
+    "wasserstein": WGANGeneratorLoss
+}
 
-def criterion(cfg: schemas.CriterionConfig) -> nn.Module:
+_LOSS_MAP = {
+    "classification": _CLASSIFICATION_LOSSES,
+    "classifiy": _CLASSIFICATION_LOSSES,
+    "generator": _GENERATOR_LOSSES,
+    "generation": _GENERATOR_LOSSES
+}
+
+def criterion(mode: str, cfg: schemas.CriterionConfig) -> nn.Module:
     """
     Instantiates a loss function based on the configuration specification.
 
@@ -277,8 +289,12 @@ def criterion(cfg: schemas.CriterionConfig) -> nn.Module:
     - The `BCELoss` is included for binary tasks with probabilistic outputs.
     - Unrecognized loss names will raise an explicit error.
     """
-    key = cfg.name.replace(" ", "").replace("-", "").lower()
-    if key not in _LOSS_MAP:
+    mode_key = mode.lower().replace(" ", "").replace("-", "")
+    if mode_key not in _LOSS_MAP:
+        raise KeyError(f"Training mode {mode} not recognised.")
+    OPTIONS = _LOSS_MAP[mode_key]
+    loss_key = cfg.name.replace(" ", "").replace("-", "").lower()
+    if loss_key not in OPTIONS:
         raise ValueError(f"Loss '{cfg.name}' not recognised")
     # use empty dict if kwargs is None
-    return _LOSS_MAP[key](**(cfg.kwargs or {}))
+    return OPTIONS[loss_key](**(cfg.kwargs or {}))

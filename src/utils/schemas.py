@@ -33,8 +33,8 @@ class CriterionConfig:
     kwargs : Optional[Dict[str, Any]]
         Keyword arguments for the loss constructor, e.g., `{"eps": 1e-12}` for numerical stability.
     """
-    name: str  # e.g nlll
-    kwargs: Optional[Dict[str, Any]]  # e.g. {"eps": 1e-12}
+    name: str  # e.g nlll, wgan
+    kwargs: Optional[Dict[str, Any]]  # e.g. {"eps": 1e-12, "lamb": 10.0, "swapped": False}
 
 
 @dataclass
@@ -152,66 +152,26 @@ class BornMachineConfig:
 cs.store(group="model/born", name="schema", node=BornMachineConfig)
 
 @dataclass
-class CriticConfig:
-    """
-    Configuration for a discriminator neural network.
-
-    Parameters
-    ----------
-    hidden_multipliers : List[float]
-        List of multipliers defining the hidden layer sizes relative to the input dimension.
-        For example, `[1.0, 2.0, 1.0]` will scale the input size to determine hidden layers.
-    mode : str
-        Type of discriminator architecture, e.g., 'mlp', 'cnn', or custom modes.
-    nonlinearity : str, default='relu'
-        Nonlinear activation function to use between hi
-    gantrain: GANStyleConfigdden layers.
-        Common options: 'relu', 'leaky_relu', 'tanh', etc.
-    negative_slope : Optional[float], default=None
-        Slope parameter for leaky ReLU (ignored if nonlinearity is not 'leaky_relu').
-    """
-    architecture: str
-    mode: str
-    hidden_multipliers: List[float] | None = None
+class MLPModelKwargs:
+    hidden_multipliers: List[float] 
     nonlinearity: str = "relu"  # could also use Literal if you want stricter typing
     negative_slope: Optional[float] = None  # for leaky relu
-    criterion: CriterionConfig
-
-cs.store(group="model/crit", name="schema", node=CriticConfig)
 
 @dataclass
-class ModelsConfig:
-    """
-    Configuration for model components.
+class ConvModelKwargs:
+    placeholder: str
 
-    Parameters
-    ----------
-    mps : MPSConfig
-        Configuration for the MPS.
-    dis : DisConfig
-        Configuration for the discriminator network.
-    """
-    born: BornMachineConfig
-    crit: CriticConfig
-
-cs.store(group="models", name="wrapper", node=ModelsConfig)
-
-# --- Trainer configs ---  
+# maybe try also autoencoder and other feature extraction things.
+@dataclass 
+class BackBoneConfig:
+    architecture: str # see above for examples
+    model_kwargs: dict = {}
 
 @dataclass 
-class ClassificationConfig:
-    max_epoch: int
-    batch_size: int  # samples loaded per categorisation step for all classes involved
-    optimizer: OptimizerConfig
-    criterion: CriterionConfig
-    stop_crit: str  # loss / acc
-    patience: int
-    watch_freq: int
-    auto_stack: bool = True
-    auto_unbind: bool = False
-    save: bool
-
-cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
+class HeadConfig:
+    class_aware: bool # of the classes
+    architecture: str # see above for examples
+    model_kwargs: dict = {}
 
 # Inner optimization of DisTrainer with two phases (pretrain and in contest with generator orchestrated by GAN style training config)
 @dataclass
@@ -241,7 +201,62 @@ class DiscriminationConfig:
     batch_size: int
     optimizer: OptimizerConfig
     patience: int
+
+@dataclass
+class CriticConfig:
+    """
+    Contains architectual design of the backbone and class heads. 
+
+    Parameters
+    ----------
+    architecture: str
+        name of the architecture
+    model_kwargs: dict
+        dictionary of model kwargs. see above for some examples
+    criterion: Criterion
+        the type of criterion/loss function used, which implies which distance is minimised implicetly
+    """
+    backbone: BackBoneConfig
+    head: HeadConfig
+    feature_dim: int
+    discrimination: DiscriminationConfig
+    criterion: CriterionConfig # wgan, bce
+
+cs.store(group="model/crit", name="schema", node=CriticConfig)
+
+@dataclass
+class ModelsConfig:
+    """
+    Configuration for model components.
+
+    Parameters
+    ----------
+    mps : MPSConfig
+        Configuration for the MPS.
+    dis : DisConfig
+        Configuration for the discriminator network.
+    """
+    born: BornMachineConfig
+    crit: CriticConfig
+
+cs.store(group="models", name="wrapper", node=ModelsConfig)
+
+# --- Trainer configs ---  
+
+@dataclass 
+class ClassificationConfig:
+    max_epoch: int
+    batch_size: int  # samples loaded per categorisation step for all classes involved
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig 
     stop_crit: str  # loss / acc
+    patience: int
+    watch_freq: int
+    auto_stack: bool = True
+    auto_unbind: bool = False
+    save: bool
+
+cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
      
 @dataclass
 class GANStyleConfig:
@@ -279,8 +294,6 @@ class GANStyleConfig:
     """
     max_epoch: int
     critic: CriticConfig
-    discrimination: DiscriminationConfig
-    criterion: CriterionConfig # Kind of interacts with Discriminator, doesn't it.
     sampling: SamplingConfig
     r_real: float  # in (0.0, infty). n_real = n_synth * r_synth
     optimizer: OptimizerConfig
@@ -318,7 +331,9 @@ class TrackingConfig:
     mode: str
     seed: int
     random_state: int
-    metrics: Dict[str, int]
+    pre_metrics: Dict[str, int]
+    gan_metrics: Dict[str, int]
+    re_metrics: Dict[str, int]
     sampling: SamplingConfig | None = None
     evasion: EvasionConfig | None = None
 

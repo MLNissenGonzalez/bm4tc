@@ -34,7 +34,7 @@ class BaseMetric:
         if "labels_n_probs" not in context:
             context["labels_n_probs"] = []
             with torch.no_grad():
-                for data, labels in self.datahandler.loaders[split]:
+                for data, labels in self.datahandler.c_loaders[split]:
                     data = data.to(self.device)
                     probs = bornmachine.class_probabilities(data).cpu()
                     context["labels_n_probs"].append((labels, probs))
@@ -72,7 +72,7 @@ class BaseMetric:
 class LossMetric(BaseMetric):
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
-        self.criterion = get.criterion(cfg=cfg.trainer.classification.criterion)
+        self.criterion = get.criterion(mode="classification", cfg=cfg.trainer.classification.criterion)
 
     def evaluate(self, bornmachine, split, context):
         bornmachine.classifier.eval()
@@ -153,7 +153,7 @@ class VisualizationMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # Classifier based
-from src.evasion.minimal import RobustnessEvaluation
+from src.utils.evasion.minimal import RobustnessEvaluation
 
 class RobustnessMetric(BaseMetric):
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
@@ -207,22 +207,27 @@ class PerformanceEvaluator:
             stage: str,
             device: torch.device
             ):
-        if stage == "pre":
+        if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
             train_cfg = cfg.trainer.classification
-        elif stage == "gan":
+            metrics = cfg.tracking.pre_metrics
+        elif stage == "re":
             train_cfg = cfg.trainer.ganstyle.retrain
+            metrics = cfg.tracking.re_metrics
+        elif stage == "gan":
+            train_cfg = cfg.trainer.ganstyle
+            metrics = cfg.tracking.gan_metrics
         else:
             raise ValueError(f"Unknown stage '{stage}' for Trainer.")
 
         self.metrics = {}
         # Only metrics in the config get initialized.
-        for metric_name, freq in cfg.tracking.metrics.items():
+        for metric_name, freq in metrics.items():
             metric : BaseMetric = MetricFactory.create(
                 metric_name=metric_name, freq=freq,
                 cfg=cfg, datahandler=datahandler, device=device
             )
             self.metrics[metric_name] = metric
-            if metric_name == train_cfg.stop_crit:
+            if metric_name == train_cfg.stop_crit: 
                 metric.freq = 1
             
 
@@ -234,7 +239,11 @@ class PerformanceEvaluator:
                  bornmachine: BornMachine, 
                  split: str,
                  step: int):
-        
+        """
+        Evaluates the bornmachine on a collection of metrics that are given in the tracking config of the experiment.
+        Returns a dictionary of those metrics with keys in ['loss', 'acc', 'fid', 'rob', 'viz'].
+        Metric carry `freq` attribute how often per `evaluate` call they are evaluated.
+        """
         results, context = {}, {}
         
         for name, metric in self.metrics.items():

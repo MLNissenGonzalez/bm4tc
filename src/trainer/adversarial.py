@@ -3,21 +3,18 @@
 import torch
 import torch.nn as nn
 import tensorkrowch as tk
-from src.evasion.minimal import RobustnessEvaluation
+from src.utils.evasion.minimal import RobustnessEvaluation
 from dataclasses import dataclass
 from src.models import BornMachine
+import src.utils.schemas as schemas
 
 # TODO: Implement one or more protocolls.
 
-@dataclass
-class AdTrainConfig:
-    epochs: int = 200
-    batch_size: int = 128
-    relative_strength: float = 0.1 # strength = diam_norm(dataspace) * relative_strength
-    norm: int | str = 2
-
-def train(
+class Trainer:
+    def __init__(self):
+        pass
+    def train(
         bornmachine: BornMachine,
-        cfg: AdTrainConfig
-):
-    return "not implemented"
+        cfg: schemas.AdversarialConfig
+        ):
+        return NotImplementedError

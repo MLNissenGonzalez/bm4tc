@@ -6,22 +6,25 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from typing import *
 from torch.utils.data import DataLoader, TensorDataset
-from src.utils.getters import range_from_embedding
+import src.utils.getters as get
+from math import ceil
 
 _SCALER_MAP = {
     "minmax": MinMaxScaler
 }
-
-
-# Handles only the original natural dataset.
 class DataHandler:
     def __init__(self, cfg: schemas.DatasetConfig):
         self.cfg = cfg
         self.data = None
         self.labels = None
-        self.means = None
-        self.covs = None
-        self.loaders = None
+        self.means : List[torch.Tensor] = None
+        self.covs : List[torch.Tensor] = None
+        self.classification : Dict[str, DataLoader] = None
+        self.discrimination: Dict[str, DataLoader] = None
+        self.data_dim : int = None 
+        self.num_cls : int = None 
+        self.total_size : int = None
+        self.num_spc: List[int] = None
 
     def load(self):
         lbld_data = load_dataset(self.cfg)
@@ -54,7 +57,7 @@ class DataHandler:
             self.load(self.cfg)
         # Final input range depends on the embedding chosen for the Born-Machine.    
         embedding_name = bornmachine.embedding_name
-        self.input_range = range_from_embedding(embedding_name)
+        self.input_range = get.range_from_embedding(embedding_name)
         # Initalize dictionaries
         data = {}
         labels = {}
@@ -85,25 +88,73 @@ class DataHandler:
         for split in ["train", "valid", "test"]:
             self.data[split] = torch.FloatTensor(data[split])
             self.labels[split] = torch.LongTensor(labels[split])
+
         # If not to expensive, compute dataset statistics
+        all_data = torch.cat([d for d in self.data.values()], dim=0)
+        all_labels = torch.cat([l for l in self.labels.values()])
+        self.classified_data = []
         if self.data_dim < 1e2:
             self.means, self.covs = [], []
-            all_data = torch.cat([d for d in self.data.values()], dim=0)
-            all_labels = torch.cat([l for l in self.labels.values()])
-            for c in range(self.num_cls):
-                class_data = all_data[all_labels == c]
+        for c in range(self.num_cls):
+            class_data = all_data[all_labels == c]
+            self.classified_data.append(class_data)
+            if self.data_dim < 1e2:
                 mean, cov = self._compute_mean_and_covariance(class_data)
                 self.means.append(mean), self.covs.append(cov)
-            
-    def generate_loaders(self) -> Dict[str, DataLoader]:
+        self.classified_data = torch.stack(self.classified_data, dim=1) # already more or less sorted into splits
+        del all_data
+        del all_labels
+
+    def get_classification_loaders(self):
         if not isinstance(self.data, dict):
             raise AttributeError(f"Call split_and_rescale first.")
         
-        self.loaders = {}
+        self.classification = {}
         for split, split_data in self.data.items():
             split_labels = self.labels[split]
             lbd_data = TensorDataset(split_data, split_labels)
-            self.loaders[split] = DataLoader(lbd_data, 
+            self.classification[split] = DataLoader(lbd_data, 
                                              batch_size=64, 
                                              drop_last=(split=="train"),
                                              shuffle=(split=="train"))
+            
+    def get_discrimination_loaders(self):
+
+        num_spc = self.classified_data.shape[0]
+
+        # Convert ratios to cumulative boundaries
+        ratios = self.cfg.split
+        assert abs(sum(ratios) - 1.0) < 1e-6, "split ratios must sum to 1"
+
+        boundaries = [
+            int(round(ratios[0] * num_spc)),
+            int(round((ratios[0] + ratios[1]) * num_spc)),
+            num_spc
+        ]
+
+        splits = {
+            "train": (0, boundaries[0]),
+            "valid": (boundaries[0], boundaries[1]),
+            "test":  (boundaries[1], boundaries[2]),
+        }
+
+        self.discrimination = {}
+
+        for split, (a, b) in splits.items():
+            split_tensor = self.classified_data[a:b]  # shape: (num_spc, num_classes, data_dim)
+
+            dataset = TensorDataset(split_tensor)
+
+            self.discrimination[split] = DataLoader(
+                dataset,
+                batch_size=16,
+                drop_last=(split == "train"),
+                shuffle=(split == "train"),
+            )
+
+        del self.classified_data
+        self.num_spc = [
+            int(round(ratios[0] * num_spc)),
+            int(round(ratios[1] * num_spc)),
+            int(round(ratios[2] * num_spc))
+        ]

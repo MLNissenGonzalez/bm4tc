@@ -37,7 +37,7 @@ class BornClassifier(tk.models.MPSLayer):
     def prepare(self, 
                 tensors: List[torch.Tensor] | None = None, 
                 device: torch.device | None = None,
-                train_cfg: schemas.PretrainMPSConfig | None = None):
+                train_cfg: schemas.ClassificationConfig | None = None):
         """
         Preperation of tensor network for classification as implemented in `tensorkrowch` tutorials.
         """
