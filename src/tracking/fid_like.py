@@ -101,7 +101,7 @@ class FIDLike(nn.Module):
         super().__init__()
         self.eps = eps
 
-    def lazy_forward(self, mu_r, cov_r, generated):
+    def lazy_forward(self, mu_r: torch.Tensor, cov_r: torch.Tensor, generated: torch.Tensor):
         mu_g, cov_g = mean_n_cov(generated)
 
         # Regularize for numerical stability
@@ -124,7 +124,7 @@ class FIDLike(nn.Module):
         return diff_mu + diff_cov
 
     def forward(self, real, generated):
-        mu_r, cov_r = self.mean_n_cov(real)
+        mu_r, cov_r = mean_n_cov(real)
         return self.lazy_forward(mu_r, cov_r, generated)
     
 from src.data.handler import DataHandler
@@ -137,7 +137,7 @@ class FIDEvaluation:
             device: torch.device,
     ):
         self.toEval = False
-        self.samp_cfg = cfg.sampling
+        self.samp_cfg = cfg.trainer.ganstyle.sampling
         self.device = device
 
         # Threshold condition: small data_dim => feasible to compute full covariance

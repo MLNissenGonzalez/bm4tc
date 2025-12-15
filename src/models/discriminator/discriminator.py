@@ -211,8 +211,8 @@ class Critic(nn.Module):
 
         # Configuring experiment 
         max_epoch = self.train_cfg.max_epoch_pre
-        wandb.define_metric("pre_dis/train/loss", summary=None)
-        wandb.define_metric("pre_dis/valid/loss", summary=None)
+        wandb.define_metric("gan/dis_train/loss", summary=None)
+        wandb.define_metric("gan/dis_valid/loss", summary=None)
         patience_counter, best_loss = 0, float("inf")
         
         # Creating or loading a dataset to pretrain the discriminator
@@ -227,8 +227,8 @@ class Critic(nn.Module):
             stop, best_loss, patience_counter = self._check(patience_counter, best_loss, valid_loss)
             wandb.log(
                 {
-                    "pre_dis/train/loss": train_loss,
-                    "pre_dis/valid/loss": valid_loss
+                    "gan/dis_train/loss": train_loss,
+                    "gan/dis_valid/loss": valid_loss
                 }
             )
             if stop:

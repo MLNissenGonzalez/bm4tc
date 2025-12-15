@@ -108,7 +108,7 @@ def record(results: Dict[str, Any], stage: str, set: str, step: Optional[int] = 
             upload_dict[f"samples/{stage}"] = wandb.Image(fig)
 
         elif isinstance(result, (float, int)):
-            upload_dict[f"{stage}_mps/{set}/{metric_name}"] = float(result)
+            upload_dict[f"{stage}/{set}/{metric_name}"] = float(result)
 
         else:
             logger.warning(f"Skipping metric '{metric_name}' — unsupported type: {type(result)}")

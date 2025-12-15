@@ -298,7 +298,8 @@ class GANStyleConfig:
     r_real: float  # in (0.0, infty). n_real = n_synth * r_synth
     optimizer: OptimizerConfig
     watch_freq: int
-    acc_drop_tol: float
+    retrain_crit: str # "acc" or "loss"
+    tolerance: float # retrain for acc, if: tolerance < (goal_acc - current_acc), retrain for loss, if: tolerance < (current_loss - goal_loss) / goal_loss     
     retrain: ClassificationConfig
     save: bool = False
 

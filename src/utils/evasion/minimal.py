@@ -3,7 +3,7 @@
 import torch
 from torch.utils.data import DataLoader
 from typing import List
-from src.utils.getters import get_criterion
+import src.utils.getters as get
 from src.models import *
 
 # TODO: Implement the below (maybe) with the BornMachine class
@@ -38,7 +38,7 @@ class FastGradientMethod:
         Initialize FGM with chosen norm and loss function.
         """
         self.norm = norm
-        self.criterion = get_criterion(criterion)
+        self.criterion = get.criterion(criterion)
 
     def generate(
             self,

@@ -240,21 +240,10 @@ _CLASSIFICATION_LOSSES = {
     "negloglikelihood": MPSNLLL,
 }
 
-_GENERATOR_LOSSES = {
-    "vanilla": VanillaLoss,
-    "bce": VanillaLoss,
-    "saturated": FlippedLoss,
-    "flipped": FlippedLoss,
-    "wgan": WGANGeneratorLoss,
-    "wgangp": WGANGeneratorLoss,
-    "wasserstein": WGANGeneratorLoss
-}
 
 _LOSS_MAP = {
     "classification": _CLASSIFICATION_LOSSES,
     "classifiy": _CLASSIFICATION_LOSSES,
-    "generator": _GENERATOR_LOSSES,
-    "generation": _GENERATOR_LOSSES
 }
 
 def criterion(mode: str, cfg: schemas.CriterionConfig) -> nn.Module:

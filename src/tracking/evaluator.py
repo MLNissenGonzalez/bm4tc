@@ -34,7 +34,7 @@ class BaseMetric:
         if "labels_n_probs" not in context:
             context["labels_n_probs"] = []
             with torch.no_grad():
-                for data, labels in self.datahandler.c_loaders[split]:
+                for data, labels in self.datahandler.classification[split]:
                     data = data.to(self.device)
                     probs = bornmachine.class_probabilities(data).cpu()
                     context["labels_n_probs"].append((labels, probs))
@@ -168,7 +168,7 @@ class RobustnessMetric(BaseMetric):
         """
         Returns list of post attack accuracies, one for each strength provided.
         """
-        robust_acc = self.evasion.evaluate(bornmachine, self.datahandler.loaders[split], self.device)
+        robust_acc = self.evasion.evaluate(bornmachine, self.datahandler.classification[split], self.device)
         logger.info(f"Robust accuracy at strength={self.evasion.strengths[0]} is {robust_acc[0]:.3f}.")
         return robust_acc
         
@@ -204,20 +204,11 @@ class PerformanceEvaluator:
             self, 
             cfg: schemas.Config, 
             datahandler: DataHandler,
-            stage: str,
+            train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig,
+            metrics: Dict[str, int],
             device: torch.device
             ):
-        if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
-            train_cfg = cfg.trainer.classification
-            metrics = cfg.tracking.pre_metrics
-        elif stage == "re":
-            train_cfg = cfg.trainer.ganstyle.retrain
-            metrics = cfg.tracking.re_metrics
-        elif stage == "gan":
-            train_cfg = cfg.trainer.ganstyle
-            metrics = cfg.tracking.gan_metrics
-        else:
-            raise ValueError(f"Unknown stage '{stage}' for Trainer.")
+        
 
         self.metrics = {}
         # Only metrics in the config get initialized.

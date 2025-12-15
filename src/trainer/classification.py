@@ -17,6 +17,7 @@ class Trainer:
             self,
             bornmachine: BornMachine,
             cfg: schemas.Config,
+            stage: str,
             datahandler: DataHandler,
             device: torch.device
                  ):
@@ -28,19 +29,29 @@ class Trainer:
         loaders: train, valid, and test loaders, loading preprocessed, but unembedded data. 
         device: torch.device
         """
-        self.cfg = cfg
         self.datahandler = datahandler
         self.device = device
+        self.cfg, self.stage = cfg, stage # needed in summary of training
     
-        self._best_perf_factory()
+        if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
+            self.train_cfg = cfg.trainer.classification
+            metrics = cfg.tracking.pre_metrics
+        elif stage == "re":
+            self.train_cfg = cfg.trainer.ganstyle.retrain
+            metrics = cfg.tracking.re_metrics
+        else: raise f"{stage} not recognised."
+
+        wandb.define_metric(f"{stage}/train/loss", summary="none")
+        self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, metrics, self.device)
+        self._best_perf_factory(metrics)
 
         # Trainer modifies weights of classifier. 
         self.bornmachine = bornmachine
         self.best_tensors = [t.cpu().clone().detach() for t in self.bornmachine.classifier.tensors]
 
-    def _best_perf_factory(self):
+    def _best_perf_factory(self, metrics: Dict[str, int]):
         self.best = {}
-        self.best.keys() = self.cfg.tracking.metrics.keys()
+        self.best.keys() = metrics.keys()
         for metric_name in self.best.keys():
             if metric_name in ["acc", "rob"]:
                 self.best[metric_name] = 0.0
@@ -67,7 +78,7 @@ class Trainer:
 
             losses.append(loss.detach().cpu().item())
         
-            wandb.log({f"{self.stage}_mps/train/loss":
+            wandb.log({f"{self.stage}/train/loss":
                sum(losses)/len(losses)})
         
     def _update(self):
@@ -88,11 +99,15 @@ class Trainer:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
         # Check if we reached target accuracy (optional shortcut)
-        reached_goal = (
-            self.goal_acc is not None
-            and "acc" in self.valid_perf
-            and self.valid_perf["acc"] >= self.goal_acc
-    )
+        if self.goal is None or self.goal.keys()[0] not in self.valid_perf:
+            reached_goal = False
+
+        else:
+            if self.goal.keys()[0] == "acc":
+                reached_goal = (self.valid_perf["acc"]>self.goal["acc"])
+            elif self.goal.keys()[0] == "loss":
+                reached_goal = (self.valid_perf["loss"]<self.goal["loss"])
+            else: raise KeyError(f"{self.goal.keys()=} not recognised")
 
         isBetter = improved or reached_goal
 
@@ -102,14 +117,13 @@ class Trainer:
             self.best_epoch = self.epoch
             self.patience_counter = 0
 
-            if reached_goal:
-                # Bump up goal_acc. 
-                self.goal_acc = self.valid_perf["acc"]
-            
+            if reached_goal: # do I want to train after reaching the goal acc? No!
+                self.patience_counter = self.train_cfg.patience + 1
+                logger.info("Goal acc reached.")
         else:
             self.patience_counter += 1
 
-    def _summarise_training(self):
+    def _summarise_training(self): 
         """
         1. Override classifier tensors to best tensors. 
         2. Evaluate this best model on the test set.
@@ -125,10 +139,10 @@ class Trainer:
         # Summarise training for wandb
         for metric_name in ["acc", "rob"]:
             if metric_name in test_results.keys():
-                wandb.summary[f"{self.stage}_mps/test/{metric_name}"] = test_results[metric_name]
-                wandb.summary[f"{self.stage}_mps/valid/{metric_name}"] = self.best[metric_name]
-        wandb.summary[f"{self.stage}_mps/epoch/best"] = self.best_epoch
-        wandb.summary[f"{self.stage}_mps/epoch/last"] = self.epoch
+                wandb.summary[f"{self.stage}/test/{metric_name}"] = test_results[metric_name]
+                wandb.summary[f"{self.stage}/valid/{metric_name}"] = self.best[metric_name]
+        wandb.summary[f"{self.stage}/epoch/best"] = self.best_epoch
+        wandb.summary[f"{self.stage}/epoch/last"] = self.epoch
         
         self.bornmachine.reset()
         del self.valid_perf
@@ -162,19 +176,10 @@ class Trainer:
             wandb.log_model(str(save_path))
 
     def train(
-            self, stage : str, goal_acc: float | None = None
+            self, goal: Dict[str, float] | None = None
     ):
-        if stage == "pre":
-            self.train_cfg = self.cfg.trainer.classification
-        elif stage == "re":
-            self.train_cfg = self.cfg.trainer.ganstyle.retrain
-        else:
-            raise ValueError(f"Unknown stage '{stage}' for Trainer.")
-
-        self.evaluator = PerformanceEvaluator(self.cfg, self.datahandler, stage, self.device)
-        wandb.define_metric(f"{stage}_mps/train/loss", summary="none")
-        self.step, self.patience_counter = 0, 0
-        self.goal_acc, self.stage = goal_acc, stage
+     
+        self.step, self.patience_counter, self.goal = 0, 0, goal
 
         # Prepare classifier, then instantiate criterion and optimizer.
         self.bornmachine.classifier.prepare(device=self.device, train_cfg=self.train_cfg)
@@ -187,11 +192,11 @@ class Trainer:
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
-            self.valid_perf = self.evaluator.evaluate(self.bornmachine.classifier, "valid", epoch)
+            self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
             record(self.valid_perf)
 
             # Updating and early stopping.
-            self._update()
+            self._update() # self.best is updated here
             if self.patience_counter > self.train_cfg.patience:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break
