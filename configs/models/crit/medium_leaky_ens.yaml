@@ -1,5 +1,0 @@
-hidden_multipliers: [1.0, 0.75, 0.5, 0.25]
-nonlinearity: LeakyReLU
-negative_slope: 0.01
-mode: "ensemble"
-architecture: "MLP"

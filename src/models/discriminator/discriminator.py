@@ -3,9 +3,9 @@ import torch
 from torch import autograd, nn
 from typing import *
 import src.utils.schemas as schemas
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from src.data.handler import DataHandler
-import src.utils.getters as get
+import src.utils.get as get
 from src.models.born import BornMachine
 from backbones import BackBone
 import wandb
@@ -31,21 +31,20 @@ class Critic(nn.Module):
         self.num_cls, self.data_dim = datahandler.num_cls, datahandler.data_dim
         self.model_cfg = cfg.critic
         self.sampling_cfg = cfg.sampling
-        self.feature_dim = cfg.critic.feature_dim
 
         # backbone maps (N, D) -> (N, F), could also be the bornmachine
         if backbone is None:
-            self.backbone = get_backbone(cfg.critic.backbone.architecture, self.num_cls, 
-                                         self.data_dim, self.feature_dim,
-                                         **cfg.critic.backbone.model_kwargs)
+            self.backbone = get_backbone(cfg.critic.backbone.architecture, self.data_dim,
+                                         False, **cfg.critic.backbone.model_kwargs)
         else:
             self.backbone = backbone
         
+        self.bottleneck_dim = self.backbone.out_dim
         # heads as separate params, either class aware (GAN-style training only) or class agnostic (necessary for Adv.Train)
         self.checkpoint()
         self.class_aware = cfg.critic.head.class_aware
         self.head = get_head(cfg.critic.head.class_aware, cfg.critic.head.architecture, cfg.critic.head.model_kwargs,
-                             self.feature_dim, self.num_cls)
+                             self.bottleneck_dim, self.num_cls)
         
         if self.class_aware:
             self._forward_impl: Callable[[torch.FloatTensor], torch.FloatTensor] = self.aware_forward

@@ -8,7 +8,7 @@ from classification import Trainer as ClassificationTrainer
 from src.tracking import *
 from data.handler import DataHandler
 from models import Critic, BornMachine
-import utils.getters as get
+import src.utils.get as get
 import wandb
 logger = logging.getLogger(__name__)
 
@@ -18,27 +18,34 @@ class Trainer:
                  datahandler: DataHandler, critic: Critic, device: torch.device, 
                  best: Dict[str, float] = {"acc": 1.0, "loss": 0.0} # do not retrain by default
                  ):
+        # Save some attributes
         self.cfg = cfg
         self.train_cfg = self.cfg.trainer.ganstyle
         self.metrics = self.cfg.tracking.gan_metrics
-
         self.goal = {
             self.train_cfg.retrain_crit: best[self.train_cfg.retrain_crit]}
 
-        # Adapt shape of dataloader of natural data to fit sampling cfg
+        # Assign datahandler
         self.datahandler = datahandler
+        if self.datahandler.discrimination == None:
+            self.datahandler.get_discrimination_loaders()
+
+        # Adapt shape of dataloader of natural data to fit sampling cfg
         num_spc_nat = int(round(self.train_cfg.r_real *
                           self.train_cfg.sampling.num_spc))
         for split in ["train", "valid", "test"]:
             self.datahandler.discrimination[split].batch_size = num_spc_nat
 
+        # Assign bornmachine
         self.bornmachine = bornmachine
         self.bornmachine.reset()
 
+        # Assign critic
         self.critic = critic
         if not self.critic.pretrained:
             self.critic.ganstyle_pretrain(datahandler, bornmachine, device)
 
+        # Initialize optimizer, evaluator, and retrainer
         self.optimizer = get.optimizer(
             self.bornmachine.parameters(), config=self.train_cfg.optimizer)
         self.evaluator = PerformanceEvaluator(
@@ -47,6 +54,11 @@ class Trainer:
             bornmachine, cfg, "re", datahandler, device)
 
     def _toRetrain(self, validation_metrics):
+        """
+        Checks whether bornmachine should be retrained given goal metric and tolerance. Returns boolean. 
+        
+        :param validation_metrics: Accuracy and loss of BornClassifier evaluated on validation set.
+        """
         toRetrain = (
             (self.goal.keys()[0] == "acc" and
              ((self.goal["acc"]-validation_metrics["acc"]) > self.train_cfg.tolerance))
@@ -57,6 +69,9 @@ class Trainer:
 
 
     def _summarise_training(self):
+        """
+        Evaluate BornMachine on test set and save it if wanted. 
+        """
         test_results = self.evaluator.evaluate(self.bornmachine, "test", self.epoch)
         # Summarise training for wandb
         for metric_name in ["acc", "rob"]:

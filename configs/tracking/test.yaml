@@ -1,0 +1,17 @@
+project: gan_train # choose your own project name if you like
+entity: martin-nissen-gonzalez-heidelberg-university # add here your wandb entity
+mode: disabled # set to "online" to enable logging to wandb
+seed: 42
+random_state: 42
+sampling:
+  num_bins: 200
+  num_spc: 64
+  batch_spc: 8
+  method: secant
+evasion: 
+  method: "FGM"
+  norm: "inf"
+  criterion: "crossentropy"
+  strengths: [0.1, 0.3] # not relative, default for dataspaces [0,1]^n
+
+

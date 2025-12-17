@@ -1,28 +1,41 @@
 max_epoch: 5
+critic:
+  backbone:
+    architecture: mlp # see above for examples
+    model_kwargs: {hidden_multipliers: [3.0, 3.0, 3.0], nonlinearity: LeakyReLU, negative_slope: 0.01}
+  head:
+    class_aware: True # of the classes
+    architecture: linear # see above for examples
+    model_kwargs: {}
+  discrimination: 
+    max_epoch_pre: 100
+    max_epoch_gan: 10
+    batch_size: 32
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4
+        weight_decay: 0.00
+    patience: 25
+  criterion:
+    name: "BCE"
+    kwargs: null
+sampling:
+  num_bins: 200
+  num_spc: 64
+  batch_spc: 8
+  method: secant
 r_real: 1.0 # ratio n_real = n_synth * r_real
-d_criterion:
-  name: "bce"
-  kwargs: null
-g_criterion: 
-  name: "bce"
-  kwargs: null
-d_optimizer:
+optimizer:
   name: "adam"
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-g_optimizer:
-  name: "adam"
-  kwargs:
-    lr: 1e-4
-    weight_decay: 0.00
-acc_drop_tol: 0.1
-check_freq: 1
-toViz: True
-info_freq: 1
 watch_freq: 1
-retrain: 
-  max_epoch: 40
+retrain_crit: "acc"
+tolerance: 0.05
+retrain:
+  max_epoch: 4
   batch_size: 64 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"
@@ -35,9 +48,9 @@ retrain:
       weight_decay: 0.00
   auto_stack: True
   auto_unbind: False
-  patience: 5
+  patience: 50
   stop_crit: "acc"
-  update_freq: 20
-  toViz: False
-  watch_freq: 1000
-smoothing: 0.0
+  watch_freq: 1
+  metrics: {"loss": 1, "acc": 1}
+  save: False
+save: False

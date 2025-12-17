@@ -2,7 +2,7 @@ import src.utils.schemas as schemas
 import wandb
 import omegaconf
 import hydra
-import datetime
+from datetime import datetime
 from pathlib import Path
 from typing import *
 import logging
@@ -77,17 +77,27 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
 
     # Group (folder) and run name
     group_key = f"{cfg.experiment}_{cfg.dataset.name}_{now}"
-    run_name = f"job{job_num}/{total_num}_D{cfg.model.mps.init_kwargs.bond_dim}-d{cfg.model.mps.init_kwargs.in_dim}-pre{cfg.pretrain.mps.max_epoch}-gan{cfg.gantrain.max_epoch}"
+    job_num_name = f"job{job_num}/{total_num}"
+    born_name = f"_D{cfg.born.init_kwargs.bond_dim}-d{cfg.born.init_kwargs.in_dim}"
+    trainer_name = ""
+    if cfg.trainer.classification is not None:
+        trainer_name = trainer_name + f"pre{cfg.trainer.classification.max_epoch}"
+    if cfg.trainer.ganstyle is not None:
+        trainer_name = trainer_name + f"gan{cfg.trainer.ganstyle.max_epoch}"
+    if cfg.trainer.adversarial is not None:
+        trainer_name = trainer_name + f"adv{cfg.trainer.adversarial.max_epoch}"
+
+    run_name = job_num_name + born_name + trainer_name
 
     # Initializing the wandb object
     run = wandb.init(
-        project=cfg.track.project,
-        entity=cfg.track.entity,
+        project=cfg.tracking.project,
+        entity=cfg.tracking.entity,
         dir=str(run_dir),
         config=wandb_cfg,
         group=group_key,
         name=run_name,
-        mode=cfg.track.mode,
+        mode=cfg.tracking.mode,
         reinit="finish_previous"
     )
     return run

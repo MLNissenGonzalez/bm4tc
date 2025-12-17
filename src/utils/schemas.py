@@ -216,31 +216,12 @@ class CriticConfig:
     criterion: Criterion
         the type of criterion/loss function used, which implies which distance is minimised implicetly
     """
-    backbone: BackBoneConfig
-    head: HeadConfig
-    feature_dim: int
+    backbone: BackBoneConfig # encoder
+    head: HeadConfig # decoder
     discrimination: DiscriminationConfig
     criterion: CriterionConfig # wgan, bce
 
 cs.store(group="model/crit", name="schema", node=CriticConfig)
-
-@dataclass
-class ModelsConfig:
-    """
-    Configuration for model components.
-
-    Parameters
-    ----------
-    mps : MPSConfig
-        Configuration for the MPS.
-    dis : DisConfig
-        Configuration for the discriminator network.
-    """
-    born: BornMachineConfig
-    crit: CriticConfig
-
-cs.store(group="models", name="wrapper", node=ModelsConfig)
-
 # --- Trainer configs ---  
 
 @dataclass 
@@ -252,6 +233,7 @@ class ClassificationConfig:
     stop_crit: str  # loss / acc
     patience: int
     watch_freq: int
+    metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
     auto_stack: bool = True
     auto_unbind: bool = False
     save: bool
@@ -298,18 +280,20 @@ class GANStyleConfig:
     r_real: float  # in (0.0, infty). n_real = n_synth * r_synth
     optimizer: OptimizerConfig
     watch_freq: int
+    metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
     retrain_crit: str # "acc" or "loss"
     tolerance: float # retrain for acc, if: tolerance < (goal_acc - current_acc), retrain for loss, if: tolerance < (current_loss - goal_loss) / goal_loss     
     retrain: ClassificationConfig
     save: bool = False
 
-cs.store(group="trainer/ganstyle", name="schema", node=GANStyleConfig)
+cs.store(group="trainer/gantrain", name="schema", node=GANStyleConfig)
 
 @dataclass
 class AdversarialConfig:
     max_epoch: int
     batch_size: int
     evasion: EvasionConfig
+    metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
     save: bool
     # and more.
 
@@ -317,9 +301,9 @@ cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
 @dataclass 
 class TrainerConfig:
-    classification: ClassificationConfig
-    ganstyle: GANStyleConfig
-    adversarial: AdversarialConfig
+    classification: ClassificationConfig | None = None
+    ganstyle: GANStyleConfig | None = None
+    adversarial: AdversarialConfig | None = None
 
 cs.store(group="trainer", name="wrapper", node=TrainerConfig)
 
@@ -329,14 +313,11 @@ cs.store(group="trainer", name="wrapper", node=TrainerConfig)
 class TrackingConfig:
     project: str
     entity: str
-    mode: str
+    mode: str # Literal['online', 'offline', 'disabled', 'shared'] | None
     seed: int
     random_state: int
-    pre_metrics: Dict[str, int]
-    gan_metrics: Dict[str, int]
-    re_metrics: Dict[str, int]
-    sampling: SamplingConfig | None = None
-    evasion: EvasionConfig | None = None
+    sampling: SamplingConfig
+    evasion: EvasionConfig
 
 cs.store(group="tracking", name="schema", node=TrackingConfig)
 
@@ -365,7 +346,7 @@ class Config:
         Name of the experiment.
     """
     dataset: DatasetConfig
-    models: ModelsConfig
+    born: BornMachineConfig
     trainer: TrainerConfig
     tracking: TrackingConfig
     experiment: str = "default"

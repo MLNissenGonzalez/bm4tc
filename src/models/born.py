@@ -4,7 +4,7 @@ from .classifier import BornClassifier
 from .generator import BornGenerator
 import src.utils.schemas as schemas
 from omegaconf import OmegaConf
-import src.utils.getters as get
+import src.utils.get as get
 import logging
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ class BornMachine:
                                        device=device)
 
         # Save machine specific attributes, like embedding, physical dimension, input range,...
-        (self.in_dim, 
-         self.bond_dim, self.out_position) = (cfg.init_kwargs.in_dim, 
+        (self.in_dim, self.out_dim,
+         self.bond_dim, self.out_position) = (cfg.init_kwargs.in_dim, cfg.init_kwargs.out_dim,
                            cfg.init_kwargs.bond_dim, self.classifier.out_position)
         
         self.cfg = cfg

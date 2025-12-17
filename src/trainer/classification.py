@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from typing import *
 import src.utils.schemas as schemas
-import src.utils.getters as get
+import src.utils.get as get
 import wandb
 from src.tracking import *
 from src.data.handler import DataHandler
@@ -30,6 +30,9 @@ class Trainer:
         device: torch.device
         """
         self.datahandler = datahandler
+        if self.datahandler.classification == None:
+            self.datahandler.get_classification_loaders()
+            
         self.device = device
         self.cfg, self.stage = cfg, stage # needed in summary of training
     

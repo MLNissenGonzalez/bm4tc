@@ -14,5 +14,5 @@ auto_unbind: False
 patience: 50
 stop_crit: "acc"
 watch_freq: 1
-update_freq: 2
-toViz: True
+metrics: {"loss": 1, "acc": 1} # metrics: {"loss": 1, "acc": 1, "rob": 20, "fid": 20, "viz": 20}
+save: False

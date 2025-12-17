@@ -4,7 +4,7 @@ from typing import *
 import logging
 from src.models.born import BornMachine
 from src.data.handler import DataHandler
-import src.utils.getters as get
+import src.utils.get as get
 
 logger = logging.getLogger(__name__)
 

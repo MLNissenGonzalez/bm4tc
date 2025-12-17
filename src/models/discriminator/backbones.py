@@ -4,13 +4,15 @@ from typing import *
 from math import ceil
 
 # TODO: Fit pretrained Bornmachine in this.
+
+# TODO: Number of classes not needed. feature dim kind of ugly. 
+
 # Backbone could be MLP of some type or BornMachine. Abstract class below
 class BackBone(nn.Module):
-    def __init__(self, num_cls: int, data_dim: int, feature_dim: int, pretrained: bool, **model_kwargs):
+    def __init__(self, data_dim: int, pretrained: bool):
         super().__init__()
-        self.num_cls = num_cls # C
         self.data_dim = data_dim # D
-        self.feature_dim = feature_dim # F
+        self.out_dim = None # F, assigned by the specific architecture
         self.pretrained = pretrained
 
     def reset(self):
@@ -43,10 +45,10 @@ class BackBone(nn.Module):
 
 
 class MLP(BackBone):
-    def __init__(self, num_cls: int, data_dim: int, feature_dim: int,
+    def __init__(self, data_dim: int,
                  hidden_multipliers: List[float], nonlinearity: str, 
                  negative_slope: float | None = None):
-        super().__init__(num_cls, data_dim, feature_dim, False)
+        super().__init__(data_dim, False)
 
         # Determine activation
         act = nonlinearity.replace(" ", "").lower()
@@ -68,15 +70,13 @@ class MLP(BackBone):
 
         hidden_dims = [max(1, ceil(mult * self.data_dim))
                        for mult in hidden_multipliers]
+        self.out_dim = hidden_dims[-1]
 
-        # Build layers: (N, D) -> (N, F)
+        # Build layers: (N, D) -> (N, F), # F = self.out_dim
         layers = [nn.Linear(self.data_dim, hidden_dims[0])]
         for i in range(len(hidden_dims) - 1):
             layers.append(get_activation())
             layers.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
-        layers.append(get_activation())
-        layers.append(nn.Linear(hidden_dims[-1], self.feature_dim))  
-
         self.stack = nn.Sequential(*layers)
 
     def reset(self):
@@ -93,7 +93,7 @@ _ARCHITECTURE_MAPPING = {
     # "born": BornMachineBackbone initialize from trained bornmachine
 }
 
-def get_backbone(name: str, num_cls: int, data_dim: int, 
-                 feature_dim: int, pretrained: bool, model_kwargs: dict) -> BackBone:
+def get_backbone(name: str, data_dim: int, 
+                 pretrained: bool, model_kwargs: dict) -> BackBone:
     name=name.lower().replace("-", "").replace(" ", "")
-    return _ARCHITECTURE_MAPPING[name](num_cls, data_dim, feature_dim, pretrained, **model_kwargs)
+    return _ARCHITECTURE_MAPPING[name](data_dim, pretrained, **model_kwargs)

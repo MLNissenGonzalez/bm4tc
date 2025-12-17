@@ -1,0 +1,9 @@
+max_epoch: 20
+batch_size: 16
+evasion:
+  method: "FGM"
+  norm: "inf"
+  criterion: "crossentropy"
+  strengths: [0.1, 0.3] # not relative, default for dataspaces [0,1]^n
+metrics: {"loss": 1, "acc": 1}
+save: False

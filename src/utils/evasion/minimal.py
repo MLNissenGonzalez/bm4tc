@@ -3,7 +3,7 @@
 import torch
 from torch.utils.data import DataLoader
 from typing import List
-import src.utils.getters as get
+import src.utils.get as get
 from src.models import *
 
 # TODO: Implement the below (maybe) with the BornMachine class

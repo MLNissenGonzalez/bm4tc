@@ -6,7 +6,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from typing import *
 from torch.utils.data import DataLoader, TensorDataset
-import src.utils.getters as get
+import src.utils.get as get
 from math import ceil
 
 _SCALER_MAP = {

@@ -14,7 +14,7 @@ class AwareHead(nn.Module):
         super().__init__()
         self.feature_dim, self.num_cls = feature_dim, num_cls
 
-    def forward(self, feat: torch.FloatTensor) -> torch.FloatTensor:
+    def forward(self, features: torch.FloatTensor) -> torch.FloatTensor:
         """
         Class Aware. 
 
@@ -55,7 +55,7 @@ class AgnosticHead(nn.Module):
     def __init__(self, feature_dim: int):
         super().__init__()
         self.feature_dim = feature_dim
-    def forward(self, feat: torch.FloatTensor) -> torch.FloatTensor:
+    def forward(self, features: torch.FloatTensor) -> torch.FloatTensor:
         """
         Unaware of class identity. 
 
@@ -77,9 +77,9 @@ class AgnosticProjectionHead(nn.Module):
         self.weight = nn.Parameter(torch.randn(feature_dim))
         self.bias = nn.Parameter(torch.zeros(1))
 
-    def forward(self, feat: torch.FloatTensor):
+    def forward(self, features: torch.FloatTensor):
         # feat: (N, F)
-        return (feat * self.weight).sum(dim=1) + self.bias # returns: (N,)
+        return (features * self.weight).sum(dim=1) + self.bias # returns: (N,)
     
 class AgnosticMLPHead(AgnosticHead):
     def __init__(self, feature_dim: int, 
@@ -118,8 +118,8 @@ class AgnosticMLPHead(AgnosticHead):
 
         self.stack = nn.Sequential(*layers)
 
-    def forward(self, x: torch.FloatTensor) -> torch.FloatTensor:
-        logits : torch.FloatTensor = self.stack(x) # x: (N, F)
+    def forward(self, features: torch.FloatTensor) -> torch.FloatTensor:
+        logits : torch.FloatTensor = self.stack(features) # x: (N, F)
         return logits.squeeze(-1) # returns: (N,)
     
 _AGNOSTIC_HEADS = {
