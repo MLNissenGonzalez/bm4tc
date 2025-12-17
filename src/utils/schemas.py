@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import *
 from hydra.core.config_store import ConfigStore
 cs = ConfigStore.instance()
@@ -64,7 +64,7 @@ class EvasionConfig:
     method: str = "FGM",
     norm: int | str = "inf",
     criterion: str = "crossentropy",
-    strengths: List[float] = [0.1, 0.3] # not relative, default for dataspaces [0,1]^n
+    strengths: list = field(default_factory=lambda: [0.1, 0.3]) # not relative, default for dataspaces [0,1]^n
 
 
 # --- Data config ---
