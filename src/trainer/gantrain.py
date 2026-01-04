@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import *
 import src.utils.schemas as schemas
 import logging
-from classification import Trainer as ClassificationTrainer
+from .classification import Trainer as ClassificationTrainer
 from src.tracking import *
 from data.handler import DataHandler
 from models import Critic, BornMachine

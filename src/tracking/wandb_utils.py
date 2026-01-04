@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import *
 import logging
+from omegaconf import OmegaConf
 logger = logging.getLogger(__name__)
 
 def init_wandb(cfg: schemas.Config) -> wandb.Run:
@@ -49,7 +50,7 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     """
 
     # Convert only loggable types
-    wandb_cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)
+    wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
 
     # Job Info
     runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
@@ -80,11 +81,12 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     job_num_name = f"job{job_num}/{total_num}"
     born_name = f"_D{cfg.born.init_kwargs.bond_dim}-d{cfg.born.init_kwargs.in_dim}"
     trainer_name = ""
-    if cfg.trainer.classification is not None:
+    
+    if OmegaConf.select(cfg, "trainer.classification") is not None:
         trainer_name = trainer_name + f"pre{cfg.trainer.classification.max_epoch}"
-    if cfg.trainer.ganstyle is not None:
+    if OmegaConf.select(cfg, "trainer.ganstyle") is not None:
         trainer_name = trainer_name + f"gan{cfg.trainer.ganstyle.max_epoch}"
-    if cfg.trainer.adversarial is not None:
+    if OmegaConf.select(cfg, "trainer.adversarial") is not None:
         trainer_name = trainer_name + f"adv{cfg.trainer.adversarial.max_epoch}"
 
     run_name = job_num_name + born_name + trainer_name

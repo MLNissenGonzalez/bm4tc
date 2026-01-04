@@ -21,22 +21,22 @@ class BornMachine:
                  device: torch.device | None = None, 
                  tensors: List[torch.Tensor] | None = None):
         
+        # Edit init_kwargs if not fully instantiated yet.
+        OmegaConf.set_struct(cfg, False) # Temporarily disable struct mode to set dynamic values
         if getattr(cfg.init_kwargs, "n_features", None) is None:
             if data_dim is None:
-                raise ValueError(f"Give data dim explictely or implictly through configuration.")
+                raise ValueError(f"Give data dim explicitly or implicitly through configuration.")
             cfg.init_kwargs.n_features = data_dim + 1
-
         if getattr(cfg.init_kwargs, "out_dim", None) is None:
             if num_classes is None:
-                raise ValueError(f"Give num classes explictely or implictly through configuration.")
+                raise ValueError(f"Give num classes explicitly or implicitly through configuration.")
             cfg.init_kwargs.out_dim = num_classes
-    
+        OmegaConf.set_struct(cfg, True) # Re-enable struct mode for safety
         
         # 1. Initialize embedding 
         self.embedding_name = cfg.embedding
         self.embedding = get.embedding(self.embedding_name)
         self.input_range = get.range_from_embedding(self.embedding_name)
-
 
         # 2. Intialize classifier, either from tensors, or configuration file
         if tensors is not None:
@@ -45,8 +45,12 @@ class BornMachine:
             init_cfg = OmegaConf.to_object(cfg.init_kwargs)
             self.classifier = BornClassifier(embedding=self.embedding, device=device, **init_cfg)
 
-        # 2. Create generator with shared tensors
+        # Save out_position if not done yet.
+        OmegaConf.set_struct(cfg, False)
         cfg.init_kwargs.out_position = self.classifier.out_position
+        OmegaConf.set_struct(cfg, True)
+
+        # 3. Create generator with shared tensors
         self.generator = BornGenerator(tensors=self.classifier.tensors, 
                                        embedding=self.embedding, 
                                        cls_pos=self.classifier.out_position,
@@ -100,7 +104,7 @@ class BornMachine:
         self.generator.reset()
 
         src, dst = (self.classifier, self.generator) if after == "classification" else (self.generator, self.classifier)
-        dst.tensors = src.tensors
+        dst.initialize([t.clone() for t in src.tensors])
 
         if verify:
             for i, (t1, t2) in enumerate(zip(src.tensors, dst.tensors)):
@@ -108,8 +112,6 @@ class BornMachine:
                     logger.error(f"[BornMachine] Tensor {i} mismatch (max diff: {(t1 - t2).abs().max().item():.3e})")
                 else:
                     logger.debug(f"[BornMachine] Tensor {i} synchronized successfully.")
-
-                    
 
     # ==========================================================
     # Device management

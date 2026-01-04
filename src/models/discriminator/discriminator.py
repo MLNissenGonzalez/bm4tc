@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader
 from src.data.handler import DataHandler
 import src.utils.get as get
 from src.models.born import BornMachine
-from backbones import BackBone
 import wandb
-from . import get_backbone, get_head
+from .heads import get_head
+from .backbones import get_backbone, BackBone
 import logging
 from copy import deepcopy
 logger = logging.getLogger(__name__)

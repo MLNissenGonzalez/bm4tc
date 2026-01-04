@@ -40,3 +40,6 @@ def main(cfg: schemas.Config):
 
     # Finish
     run.finish()
+
+if __name__ == "__main__":
+    main()

@@ -38,13 +38,12 @@ class Trainer:
     
         if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
             self.train_cfg = cfg.trainer.classification
-            metrics = cfg.tracking.pre_metrics
         elif stage == "re":
             self.train_cfg = cfg.trainer.ganstyle.retrain
-            metrics = cfg.tracking.re_metrics
         else: raise f"{stage} not recognised."
 
         wandb.define_metric(f"{stage}/train/loss", summary="none")
+        metrics = self.train_cfg.metrics
         self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, metrics, self.device)
         self._best_perf_factory(metrics)
 
@@ -53,8 +52,7 @@ class Trainer:
         self.best_tensors = [t.cpu().clone().detach() for t in self.bornmachine.classifier.tensors]
 
     def _best_perf_factory(self, metrics: Dict[str, int]):
-        self.best = {}
-        self.best.keys() = metrics.keys()
+        self.best = dict.fromkeys(metrics.keys())
         for metric_name in self.best.keys():
             if metric_name in ["acc", "rob"]:
                 self.best[metric_name] = 0.0
@@ -75,7 +73,7 @@ class Trainer:
 
             self.optimizer.zero_grad()
             loss.backward()
-            log_grads(mps=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
+            log_grads(bm_view=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
                       step=self.step, stage=self.stage)
             self.optimizer.step()
 
@@ -137,6 +135,7 @@ class Trainer:
         # Overide classifier to best tensors
         self.bornmachine.classifier.prepare(tensors=self.best_tensors, device=self.device, train_cfg=self.train_cfg)
         self.bornmachine.sync_tensors(after="classification", verify=True)
+        self.bornmachine.to(self.device)
         # Evaluate on test
         test_results = self.evaluator.evaluate(self.bornmachine, "test", self.epoch)
         # Summarise training for wandb
@@ -148,6 +147,7 @@ class Trainer:
         wandb.summary[f"{self.stage}/epoch/last"] = self.epoch
         
         self.bornmachine.reset()
+        self.bornmachine.to("cpu")
         del self.valid_perf
         # Save model
         if self.train_cfg.save:  
@@ -177,6 +177,7 @@ class Trainer:
             save_path = folder / filename
             self.bornmachine.save(path=str(save_path))
             wandb.log_model(str(save_path))
+        logger.info(f"Classification-Trainer for {self.stage}-training finished.")
 
     def train(
             self, goal: Dict[str, float] | None = None
@@ -196,7 +197,7 @@ class Trainer:
             self.epoch = epoch + 1
             self._train_epoch()
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
-            record(self.valid_perf)
+            record(results=self.valid_perf, stage=self.stage, set="valid")
 
             # Updating and early stopping.
             self._update() # self.best is updated here

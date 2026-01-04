@@ -1,1 +1,0 @@
-Currently, this module only implements one differential sampling technique: the one-shot secant sampling method as represented in this [paper](https://arxiv.org/abs/2406.17441).

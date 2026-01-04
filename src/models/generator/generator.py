@@ -1,6 +1,6 @@
 import torch
 import tensorkrowch as tk
-from sampling.differential_sampling import main as diff_sampling
+from src.models.generator.differential_sampling import main as diff_sampling
 from typing import *
 import src.utils.schemas as schemas
 import logging

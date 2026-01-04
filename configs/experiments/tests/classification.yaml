@@ -2,7 +2,5 @@
 experiment: classification_test
 
 defaults:
-  - override trainer/gantrain: null
-  - override trainer/adversarial: null
-  
-  
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null

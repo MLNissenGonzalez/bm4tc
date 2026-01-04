@@ -119,6 +119,7 @@ cs.store(group="dataset", name="schema", node=DatasetConfig)
 # --- Model configs ---
 # TODO: Add more documentation for the Configs (ADDED AS ISSUE)
 # TODO: Make compatible with ensemble design (ADDED AS ISSUE)
+
 @dataclass
 class MPSInitConfig:
     # TODO: Add documentation (ADDED AS ISSUE)
@@ -165,13 +166,13 @@ class ConvModelKwargs:
 @dataclass 
 class BackBoneConfig:
     architecture: str # see above for examples
-    model_kwargs: dict = {}
+    model_kwargs: dict = field(default_factory=lambda: {})
 
 @dataclass 
 class HeadConfig:
     class_aware: bool # of the classes
     architecture: str # see above for examples
-    model_kwargs: dict = {}
+    model_kwargs: dict = field(default_factory=lambda: {})
 
 # Inner optimization of DisTrainer with two phases (pretrain and in contest with generator orchestrated by GAN style training config)
 @dataclass
@@ -234,9 +235,10 @@ class ClassificationConfig:
     patience: int
     watch_freq: int
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
+    save: bool
     auto_stack: bool = True
     auto_unbind: bool = False
-    save: bool
+    
 
 cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
      

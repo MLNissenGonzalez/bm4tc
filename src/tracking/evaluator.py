@@ -111,7 +111,7 @@ class AccuracyMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # generator based
-from fid_like import FIDEvaluation  
+from .fid_like import FIDEvaluation  
 
 class FIDMetric(BaseMetric):
     def __init__(self, freq, cfg, datahandler, device):

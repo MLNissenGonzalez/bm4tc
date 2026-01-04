@@ -1,7 +1,7 @@
 from src.models import BornMachine
 import torch
 import src.utils.schemas as schemas
-from gen_n_load import load_dataset, LabelledDataset
+from src.data.gen_n_load import load_dataset, LabelledDataset
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from typing import *
