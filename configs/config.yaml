@@ -1,3 +1,5 @@
+experiment: default
+
 defaults:
   - _self_ # has to be here such that overrides work
   - dataset: circles_2k

@@ -122,7 +122,6 @@ class FIDMetric(BaseMetric):
         self._generate(bornmachine, context)
         try:
             fid_score = self.fid.evaluate(context["synths"])
-            logger.info(f"FID score is {fid_score:.4f}.")
             return fid_score
         except ValueError as e:
             logger.warning(str(e))
@@ -169,7 +168,6 @@ class RobustnessMetric(BaseMetric):
         Returns list of post attack accuracies, one for each strength provided.
         """
         robust_acc = self.evasion.evaluate(bornmachine, self.datahandler.classification[split], self.device)
-        logger.info(f"Robust accuracy at strength={self.evasion.strengths[0]} is {robust_acc[0]:.3f}.")
         return robust_acc
         
 
@@ -211,6 +209,7 @@ class PerformanceEvaluator:
         
 
         self.metrics = {}
+        self.update_freq = 1
         # Only metrics in the config get initialized.
         for metric_name, freq in metrics.items():
             metric : BaseMetric = MetricFactory.create(
@@ -220,6 +219,7 @@ class PerformanceEvaluator:
             self.metrics[metric_name] = metric
             if metric_name == train_cfg.stop_crit: 
                 metric.freq = 1
+            self.update_freq = max(self.update_freq, freq)
             
 
     def should_evaluate(self, step: int, metric_name: str):
@@ -247,4 +247,13 @@ class PerformanceEvaluator:
                         results[f"{name}/{strength}"] = rob_results[i]
                 else:
                     results[name] = metric.evaluate(bornmachine, split, context)
+
+        if step % self.update_freq == 0:
+            for name, result in results.items():
+                if result is None or name == "viz":
+                    continue
+                elif isinstance(result, (float, int)):
+                    logger.info(f"Evaluation results - {split} - {name}: {result:.3f}")
+                else:
+                    logger.warning(f"Skipping logging for metric '{name}' - unsupported type: {type(result)}")
         return results

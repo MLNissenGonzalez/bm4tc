@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import *
 import logging
 from omegaconf import OmegaConf
+import matplotlib.pyplot as plt
 logger = logging.getLogger(__name__)
 
 def init_wandb(cfg: schemas.Config) -> wandb.Run:
@@ -118,6 +119,7 @@ def record(results: Dict[str, Any], stage: str, set: str, step: Optional[int] = 
             # Handle both Figure and Axes inputs
             fig = result.figure if hasattr(result, "figure") else result
             upload_dict[f"samples/{stage}"] = wandb.Image(fig)
+            plt.close(fig)
 
         elif isinstance(result, (float, int)):
             upload_dict[f"{stage}/{set}/{metric_name}"] = float(result)
@@ -180,31 +182,3 @@ def log_grads(bm_view: BornClassifier | BornGenerator, step: int, watch_freq: in
             log_grads[f"{stage}_mps_abs_grad/{name}/has_grad"] = 0
 
     wandb.log(log_grads)
-
-# TODO: Think about moving this completly to the models.
-import torch
-# General saving function
-def save_model(model: torch.nn.Module, run_name: str, model_type: str):
-    """
-    Save model inside the Hydra run's output directory:
-    ${hydra:run.dir}/models/{model_type}_{run_name}.pt
-    """
-    assert model_type in ["pre_mps", "pre_dis", "gan_mps", "gan_dis"], \
-        f"Invalid model_type {model_type}"
-
-    # Hydra's current run dir
-    run_dir = Path(
-        hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-
-    # Models subfolder inside it
-    folder = run_dir / "models"
-    folder.mkdir(parents=True, exist_ok=True)
-
-    # Save path
-    filename = f"{model_type}_{run_name}.pt"
-    save_path = folder / filename
-
-    # Save state dict
-    torch.save(model.state_dict(), save_path)
-
-    return str(save_path)

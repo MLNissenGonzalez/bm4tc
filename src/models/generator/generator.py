@@ -36,6 +36,7 @@ class BornGenerator(tk.models.MPS):
         )
         self.embedding = embedding
         self.input_range = input_range
+        self.input_space: torch.FloatTensor | None = None
         self.cls_pos, self.in_dim, self.num_cls = cls_pos, in_dim, num_cls
         self.cls_embs = []
         for cls in range(self.num_cls):

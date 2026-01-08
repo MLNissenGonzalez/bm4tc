@@ -11,8 +11,9 @@ optimizer:
     weight_decay: 0.00
 auto_stack: True
 auto_unbind: False
-patience: 40
+patience: 100
 stop_crit: "loss"
 watch_freq: 1000
-update_freq: 50
-toViz: True
+metrics: {"loss": 1, "acc": 1, "viz": 50, "fid": 50, "rob": 50}
+save: True
+

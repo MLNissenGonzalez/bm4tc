@@ -99,7 +99,7 @@ class BornMachine:
 
     def sync_tensors(self, after: str, verify: bool=False):
         """Synchronize tensors between classifier and generator views."""
-        self.to("cpu")  # ensure host memory copy
+        # self.to("cpu")  # ensure host memory copy
         self.classifier.reset()
         self.generator.reset()
 
@@ -137,7 +137,7 @@ class BornMachine:
         checkpoint = torch.load(path)
         cfg : schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
-        logger.info(f"[BornMachine] Loaded from {path}")
+        logger.info(f"[BornMachine] loaded from {path}")
         return born_machine
 
     def reset(self):

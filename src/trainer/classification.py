@@ -165,8 +165,8 @@ class Trainer:
 
             filename_components = [
                 f"{self.cfg.dataset.name}",
-                f"{self.stage}_mps_bd{self.cfg.models.born.init_kwargs.bond_dim}",
-                f"{self.cfg.models.born.embedding}{self.cfg.models.born.init_kwargs.in_dim}",
+                f"{self.stage}_mps_bd{self.cfg.born.init_kwargs.bond_dim}",
+                f"{self.cfg.born.embedding}{self.cfg.born.init_kwargs.in_dim}",
                 f"{self.train_cfg.max_epoch}{optimizer_cfg.name}lr{lr}wd{weight_decay}"
             ]
             
@@ -196,6 +196,8 @@ class Trainer:
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
+            # TODO: Write a prior check if generative eval-metrics are requested. If not, skip sync_tensors here.
+            self.bornmachine.sync_tensors(after="classification", verify=False) # needed for generative-performance eval-metrics
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
             record(results=self.valid_perf, stage=self.stage, set="valid")
 

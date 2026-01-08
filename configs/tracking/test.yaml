@@ -1,6 +1,6 @@
 project: gan_train # choose your own project name if you like
 entity: martin-nissen-gonzalez-heidelberg-university # add here your wandb entity
-mode: online # set to "online" to enable logging to wandb
+mode: disabled # set to "online" to enable logging to wandb
 seed: 42
 random_state: 42
 sampling:
@@ -11,5 +11,8 @@ sampling:
 evasion: 
   method: "FGM"
   norm: "inf"
-  criterion: "crossentropy"
+  criterion: 
+    name: "negative log-likelihood"
+    kwargs:
+      eps: 1e-8
   strengths: [0.1, 0.3] # not relative, default for dataspaces [0,1]^n\

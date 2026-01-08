@@ -1,0 +1,21 @@
+# @package _global_
+experiment: D18_sweep
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: spirals_4k
+  - override /trainer/classification: adam_b64e500
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+trainer:
+  classification:
+    save: False
+  
+
+hydra:
+  sweeper:
+    params:
+      trainer.classification.optimizer.kwargs.lr: 1e-3, 5e-4, 1e-4 # moons: 5e-2, 1e-2, 5e-3, circles: 1e-3, 5e-3, 5e-2, spirals: 1e-3, 5e-4, 1e-4
+      trainer.classification.optimizer.kwargs.weight_decay: 1e-3, 5e-4, 1e-4, 5e-5 # moons: 5e-3, 0.0, circles: 0.0, 1e-3, 5e-3, spirals: 1e-3, 5e-4, 1e-4, 5e-5

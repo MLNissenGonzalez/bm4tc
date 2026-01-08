@@ -91,3 +91,6 @@ class BornClassifier(tk.models.MPSLayer):
         "Returns class probability given unembedded input."
         embs = self.embed(data)
         return self.parallel(embs)
+
+    def eval(self):
+        super().eval()

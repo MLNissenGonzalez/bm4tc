@@ -63,7 +63,7 @@ class SamplingConfig:
 class EvasionConfig:
     method: str = "FGM",
     norm: int | str = "inf",
-    criterion: str = "crossentropy",
+    criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None)
     strengths: list = field(default_factory=lambda: [0.1, 0.3]) # not relative, default for dataspaces [0,1]^n
 
 

@@ -137,7 +137,7 @@ class FIDEvaluation:
             device: torch.device,
     ):
         self.toEval = False
-        self.samp_cfg = cfg.trainer.ganstyle.sampling
+        self.samp_cfg = cfg.tracking.sampling
         self.device = device
 
         # Threshold condition: small data_dim => feasible to compute full covariance
