@@ -1,9 +1,0 @@
-# @package _global_
-experiment: model_sweep1
-
-hydra:
-  sweeper:
-    params:
-      model/mps: d4D3, d10D3, d10D4, d10D6, d30D4, d30D10, d30D18
-      model/dis: wide_leaky_ens, medium_leaky_ens
-    

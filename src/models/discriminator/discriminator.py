@@ -35,7 +35,7 @@ class Critic(nn.Module):
         # backbone maps (N, D) -> (N, F), could also be the bornmachine
         if backbone is None:
             self.backbone = get_backbone(cfg.critic.backbone.architecture, self.data_dim,
-                                         False, **cfg.critic.backbone.model_kwargs)
+                                         False, cfg.critic.backbone.model_kwargs)
         else:
             self.backbone = backbone
         

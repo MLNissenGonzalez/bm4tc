@@ -49,3 +49,5 @@ archive/
 
 # github
 .github/
+.github
+/mathqi/mnissen/adversarial_training_mps/.github

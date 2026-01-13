@@ -6,7 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
-from src.utils import get, schemas, set_seed
+from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine, Critic
 from src.trainer import ClassificationTrainer, GANStyleTrainer
@@ -27,15 +27,22 @@ def main(cfg: schemas.Config):
     datahandler.load()
 
     # BornMachine
-    # TODO: Check if experiments.model_path is not None, then load from there. Otherwise, create and pretrain new BornMachine.
-    bornmachine = BornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
-
-    # Preprocessing
-    datahandler.split_and_rescale(bornmachine)
-
-    # Pretrain
-    pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
-    pre_trainer.train()
+    model_path = getattr(cfg, "model_path", None)
+    if model_path is not None:
+        logger.info(f"Loading BornMachine from {cfg.model_path}")
+        born = BornMachine.load(cfg.model_path)
+        born.to(device)
+        # Preprocessing
+        datahandler.split_and_rescale(born)
+    else:
+        logger.info("Creating and training new BornMachine.")
+        bornmachine = BornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
+        # Preprocessing
+        datahandler.split_and_rescale(bornmachine)
+        # Pretrain
+        pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
+        pre_trainer.train()
+    
 
     # Critic TODO: Think about how to actually use backbone flexibility
     critic = Critic(cfg.trainer.ganstyle, datahandler) 

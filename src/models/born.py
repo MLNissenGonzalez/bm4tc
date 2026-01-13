@@ -55,7 +55,7 @@ class BornMachine:
                                        embedding=self.embedding, 
                                        cls_pos=self.classifier.out_position,
                                        in_dim=self.classifier.in_dim[0],
-                                       num_cls=num_classes,
+                                       num_cls=cfg.init_kwargs.out_dim,
                                        input_range=self.input_range,
                                        device=device)
 

@@ -47,8 +47,8 @@ class BackBone(nn.Module):
 class MLP(BackBone):
     def __init__(self, data_dim: int,
                  hidden_multipliers: List[float], nonlinearity: str, 
-                 negative_slope: float | None = None):
-        super().__init__(data_dim, False)
+                 negative_slope: float | None = None, pretrained: bool = False):
+        super().__init__(data_dim, pretrained)
 
         # Determine activation
         act = nonlinearity.replace(" ", "").lower()
@@ -96,4 +96,4 @@ _ARCHITECTURE_MAPPING = {
 def get_backbone(name: str, data_dim: int, 
                  pretrained: bool, model_kwargs: dict) -> BackBone:
     name=name.lower().replace("-", "").replace(" ", "")
-    return _ARCHITECTURE_MAPPING[name](data_dim, pretrained, **model_kwargs)
+    return _ARCHITECTURE_MAPPING[name](data_dim=data_dim, **model_kwargs, pretrained=pretrained)

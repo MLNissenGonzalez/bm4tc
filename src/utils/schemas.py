@@ -177,26 +177,6 @@ class HeadConfig:
 # Inner optimization of DisTrainer with two phases (pretrain and in contest with generator orchestrated by GAN style training config)
 @dataclass
 class DiscriminationConfig:
-    """
-    Configuration for pretraining a discriminator network.
-
-    Parameters
-    ----------
-    max_epoch : int
-        Maximum number of epochs for pretraining.
-    batch_size : int
-        Number of samples per batch.
-    optimizer : OptimizerConfig
-        Configuration of the optimizer for discriminator pretraining.
-    criterion : CriterionConfig
-        Loss function configuration for the discriminator.
-    info_freq : int
-        Frequency (in epochs) at which to print training information.
-    patience : int
-        Number of epochs without improvement before early stopping.
-    stop_crit : str
-        Criterion for early stopping: 'loss' or 'acc'.
-    """
     max_epoch_pre: int
     max_epoch_gan: int
     batch_size: int
