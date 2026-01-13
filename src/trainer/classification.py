@@ -8,6 +8,7 @@ import wandb
 from src.tracking import *
 from src.data.handler import DataHandler
 from src.models import BornMachine
+from tqdm import tqdm
 
 import logging
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class Trainer:
 
         wandb.define_metric(f"{stage}/train/loss", summary="none")
         metrics = self.train_cfg.metrics
-        self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, metrics, self.device)
+        self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, self.device)
         self._best_perf_factory(metrics)
 
         # Trainer modifies weights of classifier. 
@@ -192,7 +193,7 @@ class Trainer:
         
 
         logger.info("Categorisation training begins.")        
-        for epoch in range(self.train_cfg.max_epoch):
+        for epoch in tqdm(range(self.train_cfg.max_epoch), desc=f"Classification {self.stage} epochs"):
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()

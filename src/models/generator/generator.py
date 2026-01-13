@@ -40,13 +40,20 @@ class BornGenerator(tk.models.MPS):
         self.cls_pos, self.in_dim, self.num_cls = cls_pos, in_dim, num_cls
         self.cls_embs = []
         for cls in range(self.num_cls):
-            self.cls_embs.append(tk.embeddings.basis(
-                torch.tensor(cls), self.num_cls).float())
+            emb = tk.embeddings.basis(torch.tensor(cls), self.num_cls).float()
+            self.cls_embs.append(emb.to(device))
         self.device = device
 
     def prepare(self):
         self.reset()
         self.unset_data_nodes()
+
+    def to(self, device):
+        """Move generator and its embeddings to the specified device."""
+        super().to(device)
+        self.device = device
+        self.cls_embs = [emb.to(device) for emb in self.cls_embs]
+        return self
 
     def sequential(
             self, 

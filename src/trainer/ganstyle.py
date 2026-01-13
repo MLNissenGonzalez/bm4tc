@@ -10,6 +10,7 @@ from data.handler import DataHandler
 from models import Critic, BornMachine
 import src.utils.get as get
 import wandb
+from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
@@ -20,21 +21,18 @@ class Trainer:
                  ):
         # Save some attributes
         self.cfg = cfg
+        self.device= device
         self.train_cfg = self.cfg.trainer.ganstyle
-        self.metrics = self.cfg.tracking.gan_metrics
         self.goal = {
             self.train_cfg.retrain_crit: best[self.train_cfg.retrain_crit]}
 
         # Assign datahandler
         self.datahandler = datahandler
         if self.datahandler.discrimination == None:
-            self.datahandler.get_discrimination_loaders()
-
-        # Adapt shape of dataloader of natural data to fit sampling cfg
-        num_spc_nat = int(round(self.train_cfg.r_real *
-                          self.train_cfg.sampling.num_spc))
-        for split in ["train", "valid", "test"]:
-            self.datahandler.discrimination[split].batch_size = num_spc_nat
+            # Adapt batch size of dataloader of natural data to fit sampling cfg
+            num_spc_nat = int(round(self.train_cfg.r_real *
+                              self.train_cfg.sampling.num_spc))
+            self.datahandler.get_discrimination_loaders(batch_size=num_spc_nat)
 
         # Assign bornmachine
         self.bornmachine = bornmachine
@@ -44,14 +42,6 @@ class Trainer:
         self.critic = critic
         if not self.critic.pretrained:
             self.critic.ganstyle_pretrain(datahandler, bornmachine, device)
-
-        # Initialize optimizer, evaluator, and retrainer
-        self.optimizer = get.optimizer(
-            self.bornmachine.parameters(), config=self.train_cfg.optimizer)
-        self.evaluator = PerformanceEvaluator(
-            cfg, datahandler, self.train_cfg, self.metrics, device)
-        self.retrainer = ClassificationTrainer(
-            bornmachine, cfg, "re", datahandler, device)
 
     def _toRetrain(self, validation_metrics):
         """
@@ -109,24 +99,40 @@ class Trainer:
             wandb.log_model(str(save_path))
     
     def train(self):
+
+        # Initialize optimizer, evaluator, and retrainer
+        self.bornmachine.to(device=self.device)
+        self.optimizer = get.optimizer(
+            self.bornmachine.parameters(), config=self.train_cfg.optimizer)
+        self.evaluator = PerformanceEvaluator(
+            self.cfg, self.datahandler, self.train_cfg, self.device)
+        self.retrainer = ClassificationTrainer(
+            self.bornmachine, self.cfg, "re", self.datahandler, self.device)
+        self.critic.to(device=self.device)
+        print(f"Device {self.device=}")
+        # Other Configs
         max_epoch = self.train_cfg.max_epoch
         sampling_cfg = self.train_cfg.sampling
-        for epoch in range(max_epoch):
+
+        # Outer loop: GANStyle training
+        for epoch in tqdm(range(max_epoch), desc="GANStyle training"):
             self.epoch = epoch + 1
             g_losses, d_losses = [], []
             for naturals in self.datahandler.discrimination["train"]:
                 # Dynamically adapt number of synth sampled generated for varying batch sizes
                 sampling_cfg.num_spc = int(
                     round(naturals.shape[0] / self.train_cfg.r_real))
+                
+                naturals = naturals.to(self.device)
                 # Inner training loop for discriminator / critic
                 with torch.no_grad():
-                    generated = self.bornmachine.sample(sampling_cfg)
+                    generated = self.bornmachine.sample(sampling_cfg).to(self.device)
                 for mini_epoch in range(self.train_cfg.critic.discrimination.max_epoch_gan):
                     d_losses.append(
                         self.critic.train_step(naturals, generated))
 
                 # Training step for generator
-                generated = self.bornmachine.sample(sampling_cfg)
+                generated = self.bornmachine.sample(sampling_cfg).to(self.device)
                 self.optimizer.zero_grad()
                 loss = self.critic.generator_loss(generated)
                 loss.backward()
@@ -139,6 +145,7 @@ class Trainer:
                              "gan/train/d_loss": d_loss}
             wandb.log(train_metrics)
 
+            self.bornmachine.reset()
             self.bornmachine.sync_tensors(after="gan")
 
             # evaluation of gan training vs retraining

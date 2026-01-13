@@ -118,7 +118,7 @@ class DataHandler:
                                              drop_last=(split=="train"),
                                              shuffle=(split=="train"))
             
-    def get_discrimination_loaders(self):
+    def get_discrimination_loaders(self, batch_size: int = 16):
 
         num_spc = self.classified_data.shape[0]
 
@@ -130,7 +130,7 @@ class DataHandler:
             int(round(ratios[0] * num_spc)),
             int(round((ratios[0] + ratios[1]) * num_spc)),
             num_spc
-        ]
+        ] # i.e. the indices indicating where to split the data
 
         splits = {
             "train": (0, boundaries[0]),
@@ -143,11 +143,9 @@ class DataHandler:
         for split, (a, b) in splits.items():
             split_tensor = self.classified_data[a:b]  # shape: (num_spc, num_classes, data_dim)
 
-            dataset = TensorDataset(split_tensor)
-
             self.discrimination[split] = DataLoader(
-                dataset,
-                batch_size=16,
+                split_tensor,
+                batch_size=batch_size,
                 drop_last=(split == "train"),
                 shuffle=(split == "train"),
             )

@@ -9,12 +9,13 @@ from math import ceil
 
 # Backbone could be MLP of some type or BornMachine. Abstract class below
 class BackBone(nn.Module):
-    def __init__(self, data_dim: int, pretrained: bool):
+    def __init__(self, data_dim: int, pretrained: bool, device: torch.device):
         super().__init__()
         self.data_dim = data_dim # D
         self.out_dim = None # F, assigned by the specific architecture
         self.pretrained = pretrained
-
+        self.device = device
+    
     def reset(self):
         """
         For a backbone with virtual state, like a model based on tensorkrowch, the reset method is necessary to save the statedict.
@@ -45,10 +46,10 @@ class BackBone(nn.Module):
 
 
 class MLP(BackBone):
-    def __init__(self, data_dim: int,
+    def __init__(self, data_dim: int, device: torch.device,
                  hidden_multipliers: List[float], nonlinearity: str, 
                  negative_slope: float | None = None, pretrained: bool = False):
-        super().__init__(data_dim, pretrained)
+        super().__init__(data_dim, pretrained, device)
 
         # Determine activation
         act = nonlinearity.replace(" ", "").lower()
@@ -78,9 +79,14 @@ class MLP(BackBone):
             layers.append(get_activation())
             layers.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
         self.stack = nn.Sequential(*layers)
+        self.stack.to(device)
 
     def reset(self):
         pass
+
+    def to(self, device):
+        self.stack.to(device)
+        self.device = device
 
     def forward(self, x: torch.FloatTensor) -> torch.FloatTensor:
         return self.stack(x)
@@ -93,7 +99,7 @@ _ARCHITECTURE_MAPPING = {
     # "born": BornMachineBackbone initialize from trained bornmachine
 }
 
-def get_backbone(name: str, data_dim: int, 
+def get_backbone(name: str, data_dim: int, device: torch.device,
                  pretrained: bool, model_kwargs: dict) -> BackBone:
     name=name.lower().replace("-", "").replace(" ", "")
-    return _ARCHITECTURE_MAPPING[name](data_dim=data_dim, **model_kwargs, pretrained=pretrained)
+    return _ARCHITECTURE_MAPPING[name](data_dim=data_dim, device=device, **model_kwargs, pretrained=pretrained)

@@ -8,7 +8,7 @@ critic:
     architecture: linear # see above for examples
     model_kwargs: {}
   discrimination: 
-    max_epoch_pre: 100
+    max_epoch_pre: 40
     max_epoch_gan: 10
     batch_size: 32
     optimizer:

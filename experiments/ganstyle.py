@@ -10,6 +10,7 @@ from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine, Critic
 from src.trainer import ClassificationTrainer, GANStyleTrainer
+from src.tracking import PerformanceEvaluator
 import torch
 
 logger = logging.getLogger(__name__)
@@ -30,10 +31,11 @@ def main(cfg: schemas.Config):
     model_path = getattr(cfg, "model_path", None)
     if model_path is not None:
         logger.info(f"Loading BornMachine from {cfg.model_path}")
-        born = BornMachine.load(cfg.model_path)
-        born.to(device)
+        bornmachine = BornMachine.load(cfg.model_path)
+        bornmachine.to(device)
         # Preprocessing
-        datahandler.split_and_rescale(born)
+        datahandler.split_and_rescale(bornmachine)
+        pre_trainer = None
     else:
         logger.info("Creating and training new BornMachine.")
         bornmachine = BornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
@@ -45,10 +47,18 @@ def main(cfg: schemas.Config):
     
 
     # Critic TODO: Think about how to actually use backbone flexibility
-    critic = Critic(cfg.trainer.ganstyle, datahandler) 
+    critic = Critic(cfg.trainer.ganstyle, datahandler, device=device) 
+    
     
     # Gantrain
-    gan_trainer = GANStyleTrainer(bornmachine, cfg, datahandler, critic, device, pre_trainer.best)
+    if pre_trainer is None:
+        logger.info("Evaluating former best performance.")
+        evaluator = PerformanceEvaluator(cfg, datahandler, cfg.trainer.ganstyle, device) 
+        former_best = evaluator.evaluate(bornmachine, split="valid", step=0) # evaluator is not needed after this
+    else:
+        former_best = pre_trainer.best
+
+    gan_trainer = GANStyleTrainer(bornmachine, cfg, datahandler, critic, device, former_best)
     gan_trainer.train()
 
     # Finish

@@ -1,0 +1,17 @@
+# @package _global_
+experiment: ganstyle_test
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: spirals_2k
+  - override /trainer/classification: adam_b64e500
+  - override /trainer/ganstyle: test
+  - override /trainer/adversarial: null
+  - override /tracking: test
+
+trainer:
+  classification:
+    save: False
+  
+# provide path or give null
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/spirals_4k_080126_1.001

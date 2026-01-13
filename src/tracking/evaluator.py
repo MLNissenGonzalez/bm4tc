@@ -202,22 +202,24 @@ class PerformanceEvaluator:
             self, 
             cfg: schemas.Config, 
             datahandler: DataHandler,
-            train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig,
-            metrics: Dict[str, int],
+            train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig | schemas.AdversarialConfig,
             device: torch.device
             ):
         
+        if datahandler.classification is None:
+            datahandler.get_classification_loaders()
 
         self.metrics = {}
         self.update_freq = 1
         # Only metrics in the config get initialized.
-        for metric_name, freq in metrics.items():
+        for metric_name, freq in train_cfg.metrics.items():
             metric : BaseMetric = MetricFactory.create(
                 metric_name=metric_name, freq=freq,
                 cfg=cfg, datahandler=datahandler, device=device
             )
             self.metrics[metric_name] = metric
-            if metric_name == train_cfg.stop_crit: 
+            stop_crit = getattr(train_cfg, 'stop_crit', None)
+            if stop_crit and metric_name == stop_crit: 
                 metric.freq = 1
             self.update_freq = max(self.update_freq, freq)
             

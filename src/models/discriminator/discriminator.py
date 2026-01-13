@@ -12,6 +12,7 @@ from .heads import get_head
 from .backbones import get_backbone, BackBone
 import logging
 from copy import deepcopy
+from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class Critic(nn.Module):
     def __init__(self, cfg: schemas.GANStyleConfig, datahandler: DataHandler, 
-                 backbone: BackBone | None = None, device: torch.device | None = None):
+                 backbone: BackBone | None = None, device: torch.device = torch.device("cpu")):
         super().__init__()
         self.num_cls, self.data_dim = datahandler.num_cls, datahandler.data_dim
         self.model_cfg = cfg.critic
@@ -34,8 +35,8 @@ class Critic(nn.Module):
 
         # backbone maps (N, D) -> (N, F), could also be the bornmachine
         if backbone is None:
-            self.backbone = get_backbone(cfg.critic.backbone.architecture, self.data_dim,
-                                         False, cfg.critic.backbone.model_kwargs)
+            self.backbone = get_backbone(name=cfg.critic.backbone.architecture, data_dim=self.data_dim,
+                                         device=device, pretrained=False, model_kwargs=cfg.critic.backbone.model_kwargs)
         else:
             self.backbone = backbone
         
@@ -43,13 +44,17 @@ class Critic(nn.Module):
         # heads as separate params, either class aware (GAN-style training only) or class agnostic (necessary for Adv.Train)
         self.checkpoint()
         self.class_aware = cfg.critic.head.class_aware
-        self.head = get_head(cfg.critic.head.class_aware, cfg.critic.head.architecture, cfg.critic.head.model_kwargs,
-                             self.bottleneck_dim, self.num_cls)
-        
+        self.head = get_head(class_aware=cfg.critic.head.class_aware, name=cfg.critic.head.architecture, 
+                             model_kwargs=cfg.critic.head.model_kwargs,
+                             feature_dim=self.bottleneck_dim, num_cls=self.num_cls, device=device)
+
         if self.class_aware:
             self._forward_impl: Callable[[torch.FloatTensor], torch.FloatTensor] = self.aware_forward
         else:
             self._forward_impl : Callable[[torch.FloatTensor], torch.FloatTensor] = self.agnostic_forward
+
+        # Initialize pretrained flag
+        self.pretrained = False
 
         # Distances / losses
         self.criterion_name = cfg.critic.criterion.name.lower().replace(" ",
@@ -57,13 +62,13 @@ class Critic(nn.Module):
         wasserstein_names = ["wasserstein", "wgangp", "wgan"]
         self.lamb = None
         if self.criterion_name in wasserstein_names:
-            self.lamb: float = self.model_cfg.criterion.kwargs.get(
+            self.lamb: float = (self.model_cfg.criterion.kwargs or {}).get(
                 "lamb", 10.0)
             self._loss = self.wgan
             self._generator_loss = self.gen_wgan  
         else:
             self._loss = self.bce
-            self.swapped = self.model_cfg.criterion.kwargs.get("swapped", True)
+            self.swapped = (self.model_cfg.criterion.kwargs or {}).get("swapped", True)
             if self.swapped:
                 self._generator_loss = self.gen_swapped_bce
             else:
@@ -72,6 +77,7 @@ class Critic(nn.Module):
 
         # Initialize optimizer here, as critic train will be called multiple times.
         self.train_cfg = cfg.critic.discrimination
+        self.device = device if device is not None else torch.device("cpu")
         self.optimizer = get.optimizer(
             self.parameters(), self.train_cfg.optimizer)
 
@@ -81,6 +87,14 @@ class Critic(nn.Module):
     def checkpoint(self):
         self.backbone.reset()
         self.best_state = self.state_dict()
+
+    def to(self, device):
+        """Move critic to device and store device for later use."""
+        super().to(device)
+        self.device = device
+        self.backbone.to(device)
+        self.head.to(device)
+        return self
 
     def aware_forward(self, x: torch.FloatTensor) -> torch.FloatTensor:  
         B, C, D = x.shape # x: (B, C, D)
@@ -220,7 +234,7 @@ class Critic(nn.Module):
         else: synth_loaders = torch.load(loaders_path)
 
         # Epoch loop
-        for epoch in range(max_epoch):
+        for epoch in tqdm(range(max_epoch), desc="Pretraining Critic epochs"):
             train_loss = self.discriminate(datahandler, synth_loaders, "train")
             valid_loss = self.discriminate(datahandler, synth_loaders, "valid")
             stop, best_loss, patience_counter = self._check(patience_counter, best_loss, valid_loss)
@@ -239,6 +253,7 @@ class Critic(nn.Module):
         self.backbone.unfreeze()
         self.backbone.reset()
         self.load_state_dict(self.best_state)
+        self.to(device=device)
         self.optimizer = get.optimizer(self.parameters(), self.train_cfg.optimizer)
         logger.info("Pretraining of critic completed.")
 
