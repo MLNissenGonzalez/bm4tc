@@ -264,7 +264,7 @@ class PerformanceEvaluator:
                 if result is None or name == "viz":
                     continue
                 elif isinstance(result, (float, int)):
-                    logger.info(f"Epoch {step} evaluation: {split} - {name}: {result:.3f}")
+                    logger.info(f"Epoch {step+1} evaluation: {split} - {name}: {result:.3f}")
                 else:
                     logger.warning(f"Skipping logging for metric '{name}' - unsupported type: {type(result)}")
         return results

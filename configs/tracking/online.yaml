@@ -5,8 +5,8 @@ seed: 42
 random_state: 42
 sampling:
   num_bins: 200
-  num_spc: 2048
-  batch_spc: 64
+  num_spc: 1024
+  batch_spc: 16
   method: secant
 evasion: 
   method: "FGM"

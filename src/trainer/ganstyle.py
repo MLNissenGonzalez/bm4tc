@@ -115,7 +115,7 @@ class Trainer:
         self.retrainer = ClassificationTrainer(
             self.bornmachine, self.cfg, "re", self.datahandler, self.device)
         self.critic.to(device=self.device)
-        print(f"Device {self.device=}")
+        
         # Other Configs
         max_epoch = self.train_cfg.max_epoch
         sampling_cfg = self.train_cfg.sampling
@@ -123,6 +123,7 @@ class Trainer:
         self.epoch_times_no_retrain = []
 
         # Outer loop: GANStyle training
+        logger.info("Starting GANStyle training.")
         for epoch in range(max_epoch):
             epoch_start = time.perf_counter()
             self.epoch = epoch + 1
@@ -167,8 +168,10 @@ class Trainer:
                 self.retrainer.train(self.goal)
                 # Move model back to device after retraining (retrainer moves to CPU)
                 self.bornmachine.to(self.device)
+                logger.info("Finished retraining.")
             self.epoch_times_total.append(time.perf_counter() - epoch_start)
             # End of loop
 
         # result on test set of metrics, number of retrainings (maybe epoch number aswell)
         self._summarise_training()
+        logger.info("GANStyle training completed.")
