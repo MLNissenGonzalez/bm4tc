@@ -1,0 +1,387 @@
+# Configuration Guide
+
+This directory contains all Hydra configuration files for experiments.
+
+## Primary Workflow: Experiment Configs
+
+**The recommended way to design and run experiments is via `configs/experiments/` files**, not command-line overrides. This ensures:
+- Reproducibility
+- Clear documentation of experiment settings
+- Easy sharing and version control
+
+**Workflow:**
+1. Create an experiment config in `configs/experiments/`
+2. The config overrides defaults from other config groups
+3. Run with `python -m experiments.<script> +experiments=<path>`
+
+**Example:**
+```yaml
+# configs/experiments/pretraining/my_experiment.yaml
+# @package _global_
+experiment: my_experiment_name
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: moons_4k
+  - override /trainer/classification: adam_b64e300
+  - override /tracking: online
+  - override /trainer/ganstyle: null      # Disable
+  - override /trainer/adversarial: null   # Disable
+```
+
+```bash
+python -m experiments.classification +experiments=pretraining/my_experiment
+```
+
+## Directory Structure
+
+```
+configs/
+├── GUIDE.md                    # This file
+├── config.yaml                 # Main config with defaults
+├── born/                       # BornMachine architecture configs
+│   ├── d4D3.yaml              # in_dim=4, bond_dim=3
+│   ├── d10D3.yaml             # in_dim=10, bond_dim=3
+│   ├── d10D4.yaml             # in_dim=10, bond_dim=4
+│   ├── d10D6.yaml             # in_dim=10, bond_dim=6
+│   ├── d30D4.yaml             # in_dim=30, bond_dim=4
+│   ├── d30D10.yaml            # in_dim=30, bond_dim=10
+│   ├── d30D18.yaml            # in_dim=30, bond_dim=18
+│   └── test.yaml              # Minimal test config
+├── dataset/                    # Dataset configs
+│   ├── circles_2k.yaml        # 2k samples, circles
+│   ├── circles_4k.yaml        # 4k samples, circles
+│   ├── moons_2k.yaml          # 2k samples, moons
+│   ├── moons_4k.yaml          # 4k samples, moons
+│   ├── spirals_2k.yaml        # 2k samples, spirals
+│   ├── spirals_4k.yaml        # 4k samples, spirals
+│   └── test.yaml              # Minimal test config
+├── trainer/
+│   ├── classification/        # Classifier training configs
+│   │   ├── adam_b64e300.yaml # Adam, batch 64, 300 epochs
+│   │   ├── adam_b64e500.yaml # Adam, batch 64, 500 epochs
+│   │   ├── test.yaml         # Minimal test
+│   │   ├── test2.yaml
+│   │   └── test3.yaml
+│   ├── ganstyle/             # GAN training configs
+│   │   ├── test.yaml         # Test config
+│   │   └── test2.yaml
+│   └── adversarial/          # Adversarial training configs
+│       └── test.yaml         # Placeholder
+├── tracking/                  # W&B and evaluation configs
+│   ├── online.yaml           # Online W&B logging
+│   └── test.yaml             # Test config
+├── experiments/              # Full experiment configs
+│   ├── pretraining/          # Classification-only experiments
+│   │   ├── D18.yaml
+│   │   └── D18_sweep.yaml
+│   ├── ganstyle/             # GAN experiments
+│   │   └── default.yaml
+│   └── tests/                # Test experiments
+│       ├── classification.yaml
+│       ├── classifications.yaml
+│       └── ganstyle.yaml
+└── hydra/                    # Hydra-specific configs
+    ├── job_logging/
+    │   ├── debug.yaml        # Verbose logging
+    │   └── stream_only.yaml  # Console-only logging
+    └── hydra_logging/
+        └── none.yaml         # Disable hydra logging
+```
+
+## Main Config (`config.yaml`)
+
+```yaml
+experiment: default
+
+defaults:
+  - _self_                              # Allow overrides
+  - dataset: circles_2k                 # Default dataset
+  - born: d4D3                          # Default model
+  - trainer/classification: test        # Default classifier training
+  - trainer/ganstyle: test              # Default GAN training
+  - trainer/adversarial: test           # Default adversarial training
+  - tracking: test                      # Default tracking
+  - override hydra/job_logging: stream_only
+  - override hydra/hydra_logging: none
+
+hydra:
+  run:
+    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y_%I%p%M}
+  sweep:
+    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y}
+    subdir: ${hydra.job.num}
+  output_subdir: .hydra
+```
+
+## Config Group Reference
+
+### born/ — BornMachine Configs
+
+Naming convention: `d{in_dim}D{bond_dim}`
+
+```yaml
+# born/d10D4.yaml
+init_kwargs:
+  in_dim: 10           # Physical/embedding dimension
+  bond_dim: 4          # Bond dimension (expressivity)
+  boundary: "obc"      # Open boundary conditions
+  init_method: "randn_eye"
+  std: 1e-9
+embedding: "fourier"   # Embedding type
+```
+
+**Parameters:**
+| Parameter | Description | Impact |
+|-----------|-------------|--------|
+| `in_dim` | Embedding dimension | Higher = more expressive but slower |
+| `bond_dim` | Bond dimension | Higher = more expressive but slower |
+| `boundary` | `"obc"` or `"pbc"` | Open vs periodic boundaries |
+| `init_method` | Tensor initialization | `"randn"`, `"randn_eye"`, etc. |
+| `embedding` | `"fourier"` or `"legendre"` | Input mapping type |
+
+### dataset/ — Dataset Configs
+
+```yaml
+# dataset/moons_4k.yaml
+name: "moons_4k"
+gen_dow_kwargs:
+  name: "moons_4k"
+  size: 2000           # Samples per class
+  seed: 42             # Generation seed
+  noise: 0.1           # Noise level
+  circ_factor: null    # Circle factor (circles only)
+  dow_link: null       # Download link (future)
+split: [0.7, 0.15, 0.15]  # Train/valid/test
+split_seed: 42
+```
+
+### trainer/classification/ — Classifier Training
+
+```yaml
+# trainer/classification/adam_b64e300.yaml
+max_epoch: 300
+batch_size: 64
+criterion:
+  name: "negative log-likelihood"
+  kwargs: {eps: 1e-8}
+optimizer:
+  name: "adam"
+  kwargs: {lr: 1e-4, weight_decay: 0.0}
+patience: 40           # Early stopping patience
+stop_crit: "loss"      # Monitored metric
+watch_freq: 1000       # Gradient logging frequency
+metrics: {"loss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
+save: true
+auto_stack: true       # tensorkrowch setting
+auto_unbind: false     # tensorkrowch setting
+```
+
+### trainer/ganstyle/ — GAN Training
+
+```yaml
+# trainer/ganstyle/test.yaml
+max_epoch: 5
+critic:
+  backbone:
+    architecture: mlp
+    model_kwargs:
+      hidden_multipliers: [3.0, 3.0, 3.0]
+      nonlinearity: LeakyReLU
+      negative_slope: 0.01
+  head:
+    class_aware: true
+    architecture: linear
+    model_kwargs: {}
+  discrimination:
+    max_epoch_pre: 40    # Critic pre-training epochs
+    max_epoch_gan: 10    # Critic steps per generator step
+    batch_size: 32
+    optimizer: {...}
+    patience: 25
+  criterion:
+    name: "BCE"          # Or "wgan" for WGAN-GP
+    kwargs: null
+
+sampling:
+  num_bins: 200          # Sampling resolution
+  num_spc: 64            # Samples per class
+  batch_spc: 8           # Sampling batch size
+  method: secant         # Sampling method
+
+r_real: 1.0              # Real/synthetic ratio
+optimizer: {...}         # Generator optimizer
+watch_freq: 1
+metrics: {"loss": 1, "acc": 1, "rob": 1}
+retrain_crit: "acc"      # When to retrain
+tolerance: 0.05          # Accuracy drop tolerance
+retrain: {...}           # ClassificationConfig for retraining
+save: false
+```
+
+### tracking/ — Experiment Tracking
+
+```yaml
+# tracking/online.yaml
+project: gan_train              # W&B project
+entity: your-wandb-entity       # W&B entity
+mode: online                    # online, offline, disabled
+seed: 42                        # Global seed
+random_state: 42
+sampling:                       # Evaluation sampling config
+  num_bins: 200
+  num_spc: 2048
+  batch_spc: 64
+  method: secant
+evasion:                        # Robustness evaluation config
+  method: "FGM"
+  norm: "inf"
+  criterion: {...}
+  strengths: [0.1, 0.3]
+```
+
+### experiments/ — Full Experiments
+
+Experiment configs override defaults:
+
+```yaml
+# experiments/tests/classification.yaml
+# @package _global_
+experiment: classification_test
+
+defaults:
+  - override /trainer/ganstyle: null      # Disable GAN training
+  - override /trainer/adversarial: null   # Disable adversarial training
+```
+
+The `# @package _global_` directive makes overrides apply at the root level.
+
+## Running Experiments
+
+### Recommended: Using Experiment Configs
+
+**Always use experiment configs for real experiments:**
+
+```bash
+# Classification experiment (RECOMMENDED)
+python -m experiments.classification +experiments=pretraining/D18
+
+# GAN-style experiment
+python -m experiments.ganstyle +experiments=ganstyle/default
+
+# Quick test experiment
+python -m experiments.classification +experiments=tests/classification
+```
+
+### Multirun (Sweep)
+
+Define sweep parameters in an experiment config:
+
+```yaml
+# configs/experiments/pretraining/D18_sweep.yaml
+# @package _global_
+experiment: D18_sweep
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: moons_4k
+  # ... other settings
+
+hydra:
+  sweeper:
+    params:
+      born: d10D4,d10D6,d30D18
+      trainer.classification.optimizer.kwargs.lr: 1e-3,1e-4
+```
+
+```bash
+python -m experiments.classification --multirun +experiments=pretraining/D18_sweep
+```
+
+### Command-Line Overrides (for debugging only)
+
+Command-line overrides are useful for quick tests but **not for production experiments**:
+
+```bash
+# Quick debug with fewer epochs
+python -m experiments.classification +experiments=tests/classification trainer.classification.max_epoch=10
+
+# Disable W&B for local debugging
+python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
+
+# Test different learning rate quickly
+python -m experiments.classification +experiments=tests/classification trainer.classification.optimizer.kwargs.lr=1e-3
+```
+
+## Config Inheritance
+
+```
+                    config.yaml (defaults)
+                         │
+                         ▼
+              ┌──────────┴──────────┐
+              │                     │
+         born/d4D3.yaml    dataset/circles_2k.yaml ...
+              │                     │
+              └──────────┬──────────┘
+                         │
+                         ▼
+                experiments/*.yaml (overrides)
+                         │
+                         ▼
+                  Command line (final overrides)
+```
+
+## Schema ↔ Config Mapping
+
+Every config file corresponds to a dataclass in `src/utils/schemas.py`:
+
+| Schema | Config Directory |
+|--------|-----------------|
+| `Config` | `config.yaml` (root) |
+| `DatasetConfig` | `dataset/` |
+| `BornMachineConfig` | `born/` |
+| `ClassificationConfig` | `trainer/classification/` |
+| `GANStyleConfig` | `trainer/ganstyle/` |
+| `AdversarialConfig` | `trainer/adversarial/` |
+| `TrackingConfig` | `tracking/` |
+
+**If you change a schema, update corresponding configs!**
+
+## Output Directory Structure
+
+```
+outputs/
+└── {experiment}_{dataset}_{date}/
+    ├── .hydra/
+    │   ├── config.yaml       # Resolved config
+    │   ├── hydra.yaml        # Hydra config
+    │   └── overrides.yaml    # Command line overrides
+    ├── models/               # Saved model checkpoints
+    │   └── ...
+    └── wandb/                # W&B local files
+        └── ...
+```
+
+## Tips
+
+1. **Debug configs**: Use `--cfg job` to print resolved config:
+   ```bash
+   python -m experiments.classification --cfg job
+   ```
+
+2. **List options**: Use `--help` to see available options:
+   ```bash
+   python -m experiments.classification --help
+   ```
+
+3. **Test quickly**: Use test configs with small values:
+   ```bash
+   python -m experiments.classification \
+       born=test dataset=test \
+       +experiments=tests/classification
+   ```
+
+4. **W&B offline**: Set `tracking.mode=offline` for no network access
+
+5. **Reproducibility**: Always set `tracking.seed` and `dataset.split_seed`
