@@ -214,16 +214,61 @@ adversarial = fgm.generate(
 4. Add: x_adv = x + ε * normalized_gradient
 ```
 
+### Projected Gradient Descent (PGD)
+
+```python
+from src.utils.evasion.minimal import ProjectedGradientDescent
+
+pgd = ProjectedGradientDescent(
+    norm="inf",           # L-infinity norm (also supports p-norms)
+    criterion=CriterionConfig(name="nll", kwargs=None),
+    num_steps=10,         # Number of iterations
+    step_size=None,       # Auto: 2.5 * strength / num_steps
+    random_start=True     # Start from random point in epsilon ball
+)
+
+adversarial = pgd.generate(
+    born=bornmachine,
+    naturals=data,        # Clean inputs
+    labels=labels,
+    strength=0.1,         # Perturbation magnitude (epsilon)
+    device=device
+)
+```
+
+**PGD Algorithm:**
+```
+1. Initialize perturbation δ (random if random_start, else zero)
+2. For each step:
+   a. Compute loss on x + δ
+   b. Compute gradient of loss w.r.t. δ
+   c. Update: δ = δ + step_size * normalized_gradient
+   d. Project: δ = clip(δ, -ε, ε)  [for L∞]
+3. Return x_adv = x + δ
+```
+
 ### Robustness Evaluation
 
 ```python
 from src.utils.evasion.minimal import RobustnessEvaluation
 
+# Using FGM (single-step)
 rob_eval = RobustnessEvaluation(
     method="FGM",
     norm="inf",
     criterion=CriterionConfig(name="nll", kwargs=None),
-    strengths=[0.1, 0.3]  # Multiple perturbation strengths
+    strengths=[0.1, 0.3]
+)
+
+# Using PGD (iterative, stronger attack)
+rob_eval = RobustnessEvaluation(
+    method="PGD",
+    norm="inf",
+    criterion=CriterionConfig(name="nll", kwargs=None),
+    strengths=[0.1, 0.3],
+    num_steps=10,         # PGD iterations
+    step_size=None,       # Auto-computed
+    random_start=True
 )
 
 # Returns list of accuracies, one per strength
@@ -248,6 +293,7 @@ class NewAttack:
 ```python
 _METHOD_MAP = {
     "FGM": FastGradientMethod,
+    "PGD": ProjectedGradientDescent,
     "NewAttack": NewAttack,  # Add here
 }
 ```
@@ -326,7 +372,7 @@ _CLASSIFICATION_LOSSES = {
 
 | File | Lines | Key Functions/Classes |
 |------|-------|----------------------|
-| `schemas.py` | 337 | All `*Config` dataclasses |
+| `schemas.py` | 341 | All `*Config` dataclasses |
 | `get.py` | 289 | `embedding`, `optimizer`, `criterion`, `MPSNLLL` |
 | `_utils.py` | 101 | `set_seed`, `sample_quality_control` |
-| `evasion/minimal.py` | 141 | `FastGradientMethod`, `RobustnessEvaluation` |
+| `evasion/minimal.py` | 254 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |

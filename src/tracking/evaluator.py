@@ -160,7 +160,10 @@ class RobustnessMetric(BaseMetric):
         self.evasion = RobustnessEvaluation(method=cfg.tracking.evasion.method,
                                             norm=cfg.tracking.evasion.norm,
                                             criterion=cfg.tracking.evasion.criterion,
-                                            strengths=cfg.tracking.evasion.strengths)
+                                            strengths=cfg.tracking.evasion.strengths,
+                                            num_steps=cfg.tracking.evasion.num_steps,
+                                            step_size=cfg.tracking.evasion.step_size,
+                                            random_start=cfg.tracking.evasion.random_start)
         
 
     def evaluate(self, bornmachine: BornMachine, split, context):
