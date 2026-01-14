@@ -96,7 +96,7 @@ class ProjectedGradientDescent:
         """
         self.norm = norm
         self.criterion = get.criterion("classification", criterion)
-        self.num_steps = num_steps
+        self.num_steps = num_steps if num_steps is not None else 10
         self.step_size = step_size
         self.random_start = random_start
 

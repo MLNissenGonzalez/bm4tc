@@ -157,13 +157,19 @@ from src.utils.evasion.minimal import RobustnessEvaluation
 class RobustnessMetric(BaseMetric):
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
+        # TODO: num_steps, step_size, random_start might not exist in cfg.tracking.evasion, 
+        #       but there are default values in the RobustnessEvaluation.
+        #       Use those defaults if not in struct/cfg.
+        num_steps = cfg.tracking.evasion.num_steps if hasattr(cfg.tracking.evasion, 'num_steps') else None
+        step_size = cfg.tracking.evasion.step_size if hasattr(cfg.tracking.evasion, 'step_size') else None
+        random_start = cfg.tracking.evasion.random_start if hasattr(cfg.tracking.evasion, 'random_start') else None 
         self.evasion = RobustnessEvaluation(method=cfg.tracking.evasion.method,
                                             norm=cfg.tracking.evasion.norm,
                                             criterion=cfg.tracking.evasion.criterion,
                                             strengths=cfg.tracking.evasion.strengths,
-                                            num_steps=cfg.tracking.evasion.num_steps,
-                                            step_size=cfg.tracking.evasion.step_size,
-                                            random_start=cfg.tracking.evasion.random_start)
+                                            num_steps=num_steps,
+                                            step_size=step_size,
+                                            random_start=random_start)
         
 
     def evaluate(self, bornmachine: BornMachine, split, context):
