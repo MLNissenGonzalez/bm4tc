@@ -49,10 +49,11 @@ class Trainer:
         
         :param validation_metrics: Accuracy and loss of BornClassifier evaluated on validation set.
         """
+        goal_key = list(self.goal.keys())[0]
         toRetrain = (
-            (self.goal.keys()[0] == "acc" and
+            (goal_key == "acc" and
              ((self.goal["acc"]-validation_metrics["acc"]) > self.train_cfg.tolerance))
-            or (self.goal.keys()[0] == "loss" and
+            or (goal_key == "loss" and
                 (validation_metrics["loss"]-self.goal["loss"])/self.goal["loss"] > self.train_cfg.tolerance)
         )
         return toRetrain
@@ -115,7 +116,7 @@ class Trainer:
         sampling_cfg = self.train_cfg.sampling
 
         # Outer loop: GANStyle training
-        for epoch in tqdm(range(max_epoch), desc="GANStyle training"):
+        for epoch in range(max_epoch):
             self.epoch = epoch + 1
             g_losses, d_losses = [], []
             for naturals in self.datahandler.discrimination["train"]:
@@ -155,6 +156,8 @@ class Trainer:
             if self._toRetrain(validation_metrics):
                 logger.info("Retraining.")
                 self.retrainer.train(self.goal)
+                # Move model back to device after retraining (retrainer moves to CPU)
+                self.bornmachine.to(self.device)
             # End of loop
 
         # result on test set of metrics, number of retrainings (maybe epoch number aswell)

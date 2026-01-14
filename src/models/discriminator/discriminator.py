@@ -157,11 +157,11 @@ class Critic(nn.Module):
         return loss
 
     def gen_swapped_bce(self, generated: torch.FloatTensor, eps: float = 1e-12):
-        loss = -torch.log(torch.sigmoid(self.forward(generated)).clamp(min=eps))
+        loss = -torch.log(torch.sigmoid(self.forward(generated)).clamp(min=eps)).mean()
         return loss
     
     def gen_bce(self, generated: torch.FloatTensor, eps: float = 1e-12):
-        loss = torch.log((1-torch.sigmoid(self.forward(generated))).clamp(min=eps))
+        loss = torch.log((1-torch.sigmoid(self.forward(generated))).clamp(min=eps)).mean()
         return loss
 
     def loss(self, natural: torch.FloatTensor, generated: torch.FloatTensor):

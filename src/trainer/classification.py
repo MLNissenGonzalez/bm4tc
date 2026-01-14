@@ -101,13 +101,14 @@ class Trainer:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
         # Check if we reached target accuracy (optional shortcut)
-        if self.goal is None or self.goal.keys()[0] not in self.valid_perf:
+        goal_key = list(self.goal.keys())[0] if self.goal else None
+        if self.goal is None or goal_key not in self.valid_perf:
             reached_goal = False
 
         else:
-            if self.goal.keys()[0] == "acc":
+            if goal_key == "acc":
                 reached_goal = (self.valid_perf["acc"]>self.goal["acc"])
-            elif self.goal.keys()[0] == "loss":
+            elif goal_key == "loss":
                 reached_goal = (self.valid_perf["loss"]<self.goal["loss"])
             else: raise KeyError(f"{self.goal.keys()=} not recognised")
 
@@ -193,7 +194,7 @@ class Trainer:
         
 
         logger.info("Categorisation training begins.")        
-        for epoch in tqdm(range(self.train_cfg.max_epoch), desc=f"Classification {self.stage} epochs"):
+        for epoch in range(self.train_cfg.max_epoch):
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()

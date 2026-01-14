@@ -53,7 +53,17 @@ class BornGenerator(tk.models.MPS):
         super().to(device)
         self.device = device
         self.cls_embs = [emb.to(device) for emb in self.cls_embs]
+        # Also move input_space to the device if it exists
+        if self.input_space is not None:
+            self.input_space = self.input_space.to(device)
         return self
+    
+    def reset(self):
+        """Reset MPS state, ensuring input_space is on the correct device."""
+        super().reset()
+        # If input_space exists but is on a different device, move it to self.device
+        if self.input_space is not None and self.input_space.device != self.device:
+            self.input_space = self.input_space.to(self.device)
 
     def sequential(
             self, 
