@@ -1,5 +1,6 @@
 import hydra
 from pathlib import Path
+import time
 import torch
 from typing import *
 import src.utils.schemas as schemas
@@ -147,6 +148,8 @@ class Trainer:
                 wandb.summary[f"{self.stage}/valid/{metric_name}"] = self.best[metric_name]
         wandb.summary[f"{self.stage}/epoch/best"] = self.best_epoch
         wandb.summary[f"{self.stage}/epoch/last"] = self.epoch
+        if self.epoch_times:
+            wandb.summary[f"{self.stage}/avg_epoch_time_s"] = sum(self.epoch_times) / len(self.epoch_times)
         
         self.bornmachine.reset()
         self.bornmachine.to("cpu")
@@ -186,15 +189,17 @@ class Trainer:
     ):
      
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.epoch_times = []
 
         # Prepare classifier, then instantiate criterion and optimizer.
         self.bornmachine.classifier.prepare(device=self.device, train_cfg=self.train_cfg)
         self.criterion = get.criterion("classification", self.train_cfg.criterion)
         self.optimizer = get.optimizer(self.bornmachine.classifier.parameters(), self.train_cfg.optimizer)
-        
 
-        logger.info("Categorisation training begins.")        
+
+        logger.info("Categorisation training begins.")
         for epoch in range(self.train_cfg.max_epoch):
+            epoch_start = time.perf_counter()
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
@@ -205,6 +210,7 @@ class Trainer:
 
             # Updating and early stopping.
             self._update() # self.best is updated here
+            self.epoch_times.append(time.perf_counter() - epoch_start)
             if self.patience_counter > self.train_cfg.patience:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break

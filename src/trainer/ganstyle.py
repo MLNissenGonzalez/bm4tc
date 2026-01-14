@@ -1,3 +1,4 @@
+import time
 import torch
 import hydra
 from pathlib import Path
@@ -68,6 +69,10 @@ class Trainer:
         for metric_name in ["acc", "rob"]:
             if metric_name in test_results.keys():
                 wandb.summary[f"gan/test/{metric_name}"] = test_results[metric_name]
+        if self.epoch_times_total:
+            wandb.summary["gan/avg_epoch_time_total_s"] = sum(self.epoch_times_total) / len(self.epoch_times_total)
+        if self.epoch_times_no_retrain:
+            wandb.summary["gan/avg_epoch_time_no_retrain_s"] = sum(self.epoch_times_no_retrain) / len(self.epoch_times_no_retrain)
         
         self.bornmachine.reset()
         # Save model
@@ -114,9 +119,12 @@ class Trainer:
         # Other Configs
         max_epoch = self.train_cfg.max_epoch
         sampling_cfg = self.train_cfg.sampling
+        self.epoch_times_total = []
+        self.epoch_times_no_retrain = []
 
         # Outer loop: GANStyle training
         for epoch in range(max_epoch):
+            epoch_start = time.perf_counter()
             self.epoch = epoch + 1
             g_losses, d_losses = [], []
             for naturals in self.datahandler.discrimination["train"]:
@@ -153,11 +161,13 @@ class Trainer:
             validation_metrics = self.evaluator.evaluate(
                 self.bornmachine, "valid", epoch)
             record(validation_metrics, "gan", "valid")
+            self.epoch_times_no_retrain.append(time.perf_counter() - epoch_start)
             if self._toRetrain(validation_metrics):
                 logger.info("Retraining.")
                 self.retrainer.train(self.goal)
                 # Move model back to device after retraining (retrainer moves to CPU)
                 self.bornmachine.to(self.device)
+            self.epoch_times_total.append(time.perf_counter() - epoch_start)
             # End of loop
 
         # result on test set of metrics, number of retrainings (maybe epoch number aswell)
