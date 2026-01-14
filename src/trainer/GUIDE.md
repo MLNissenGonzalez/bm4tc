@@ -272,6 +272,23 @@ wandb.log({"pre/train/loss": loss, "pre/valid/acc": acc})
 wandb.summary["pre/test/acc"] = test_acc
 ```
 
+### Epoch Timing Metrics
+
+Both trainers automatically record average epoch times to W&B summary:
+
+**ClassificationTrainer:**
+```python
+wandb.summary[f"{stage}/avg_epoch_time_s"]  # e.g., "pre/avg_epoch_time_s"
+```
+
+**GANStyleTrainer:**
+```python
+wandb.summary["gan/avg_epoch_time_total_s"]      # Including retraining epochs
+wandb.summary["gan/avg_epoch_time_no_retrain_s"] # Excluding retraining epochs
+```
+
+These metrics help track training performance across different configurations.
+
 ## What Breaks If You Change...
 
 | Change | Impact |

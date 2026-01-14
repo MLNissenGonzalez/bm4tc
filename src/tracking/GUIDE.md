@@ -92,7 +92,7 @@ Evaluates accuracy under adversarial attacks at multiple perturbation strengths.
 results = {"rob/0.1": 0.85, "rob/0.3": 0.72}
 ```
 
-Uses `RobustnessEvaluation` from `src/utils/evasion/minimal.py`.
+Uses `RobustnessEvaluation` from `src/utils/evasion/minimal.py`. Supports both FGM (single-step) and PGD (iterative) attack methods via `tracking.evasion.method`.
 
 ### VisualizationMetric
 

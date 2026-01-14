@@ -234,10 +234,14 @@ sampling:                       # Evaluation sampling config
   batch_spc: 64
   method: secant
 evasion:                        # Robustness evaluation config
-  method: "FGM"
+  method: "FGM"               # Attack method: "FGM" or "PGD"
   norm: "inf"
   criterion: {...}
   strengths: [0.1, 0.3]
+  # PGD-specific parameters (ignored for FGM):
+  num_steps: 10               # Number of PGD iterations
+  step_size: null             # Step size (null = auto: 2.5 * strength / num_steps)
+  random_start: true          # Start from random point in epsilon ball
 ```
 
 ### experiments/ — Full Experiments
