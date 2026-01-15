@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from typing import *
 from math import ceil
+import ast
+
 
 # TODO: Fit pretrained Bornmachine in this.
 
@@ -64,11 +66,7 @@ class MLP(BackBone):
             raise ValueError(
                 f"{nonlinearity} not recognised. Try ReLU or LeakyReLU.")
 
-        # Determine hidden_dims
-        if hidden_multipliers is None or len(hidden_multipliers) == 0:
-            raise ValueError(
-                "hidden_multipliers must be provided as a list of floats.")
-
+        # Determine hidden_dims                  
         hidden_dims = [max(1, ceil(mult * self.data_dim))
                        for mult in hidden_multipliers]
         self.out_dim = hidden_dims[-1]

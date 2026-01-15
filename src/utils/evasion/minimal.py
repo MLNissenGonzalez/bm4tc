@@ -29,6 +29,13 @@ def normalizing(x: torch.FloatTensor, norm: int | str):
     return normalized
 
 class FastGradientMethod:
+    """
+    Fast Gradient Method (FGM) adversarial attack.
+
+    Single-step attack that perturbs inputs in the direction of the loss gradient,
+    normalized according to the specified Lp norm.
+    """
+
     def __init__(
             self,
             norm: int | str = "inf",
@@ -36,6 +43,10 @@ class FastGradientMethod:
     ):
         """
         Initialize FGM with chosen norm and loss function.
+
+        Args:
+            norm: Lp norm for gradient normalization ("inf" or int >= 1).
+            criterion: Loss function configuration.
         """
         self.norm = norm
         self.criterion = get.criterion("classification", criterion)
@@ -75,24 +86,163 @@ class FastGradientMethod:
         return ad_examples
 
 
+class ProjectedGradientDescent:
+    """
+    Projected Gradient Descent (PGD) adversarial attack.
+
+    Iterative attack that performs multiple gradient ascent steps with projection
+    back onto the epsilon ball. Stronger than FGM but more expensive.
+    """
+
+    def __init__(
+            self,
+            norm: int | str = "inf",
+            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
+            num_steps: int = 10,
+            step_size: float | None = None,
+            random_start: bool = True
+    ):
+        """
+        Initialize PGD with chosen norm, loss function, and iteration parameters.
+
+        Args:
+            norm: Lp norm for perturbation ball ("inf" or int >= 1).
+            criterion: Loss function configuration.
+            num_steps: Number of gradient ascent iterations.
+            step_size: Step size per iteration. If None, defaults to 2.5 * strength / num_steps.
+            random_start: Whether to start from random point within epsilon ball.
+        """
+        self.norm = norm
+        self.criterion = get.criterion("classification", criterion)
+        self.num_steps = num_steps if num_steps is not None else 10
+        self.step_size = step_size
+        self.random_start = random_start
+
+    def _project(self, perturbation: torch.Tensor, strength: float) -> torch.Tensor:
+        """Project perturbation back into the epsilon ball."""
+        if self.norm == "inf":
+            return perturbation.clamp(-strength, strength)
+        elif isinstance(self.norm, int):
+            # Project onto Lp ball
+            norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
+            scale = torch.clamp(norms / strength, min=1.0)
+            return perturbation / scale
+        else:
+            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
+
+    def _random_init(self, shape: torch.Size, strength: float, device: torch.device) -> torch.Tensor:
+        """Initialize random perturbation within epsilon ball."""
+        if self.norm == "inf":
+            return (2 * torch.rand(shape, device=device) - 1) * strength
+        elif isinstance(self.norm, int):
+            # Sample uniformly from Lp ball (approximate via normalize + scale)
+            delta = torch.randn(shape, device=device)
+            delta = normalizing(delta, self.norm) * strength * torch.rand(shape[0], 1, device=device)
+            return delta
+        else:
+            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
+
+    def generate(
+            self,
+            born: BornMachine,
+            naturals: torch.Tensor,
+            labels: torch.LongTensor,
+            strength: float = 0.1,
+            device: torch.device | str = "cpu"
+    ):
+        """
+        Generate adversarial examples using PGD.
+        """
+        born.to(device)
+        naturals = naturals.to(device).detach()
+        labels = labels.to(device)
+
+        step_size = self.step_size if self.step_size is not None else 2.5 * strength / self.num_steps
+
+        # Initialize perturbation
+        if self.random_start:
+            delta = self._random_init(naturals.shape, strength, device)
+        else:
+            delta = torch.zeros_like(naturals)
+
+        # Iterative gradient ascent
+        for _ in range(self.num_steps):
+            delta.requires_grad_(True)
+            ad_examples = naturals + delta
+
+            probabilities = born.classifier.probabilities(ad_examples)
+            loss = self.criterion(probabilities, labels)
+
+            born.classifier.zero_grad()
+            if delta.grad is not None:
+                delta.grad.zero_()
+
+            loss.backward()
+
+            grad = delta.grad.detach()
+            normalized_gradient = normalizing(grad, norm=self.norm)
+
+            # Gradient ascent step
+            delta = delta.detach() + step_size * normalized_gradient
+            # Project back into epsilon ball
+            delta = self._project(delta, strength)
+
+        ad_examples = naturals + delta
+        return ad_examples.detach()
+
+
 _METHOD_MAP = {
-    "FGM": FastGradientMethod
+    "FGM": FastGradientMethod,
+    "PGD": ProjectedGradientDescent
 }
 
 
 class RobustnessEvaluation:
+    """
+    Evaluate adversarial robustness of a BornMachine classifier.
+
+    Generates adversarial examples using FGM or PGD and computes accuracy
+    under attack at multiple perturbation strengths.
+    """
+
     def __init__(
             self,
             method: str = "FGM",
             norm: int | str = "inf",
             criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
-            strengths: List[float] = [0.1, 0.3]
+            strengths: List[float] = [0.1, 0.3],
+            # PGD-specific parameters (ignored for FGM)
+            num_steps: int = 10,
+            step_size: float | None = None,
+            random_start: bool = True
     ):
+        """
+        Initialize robustness evaluator.
+
+        Args:
+            method: Attack method - "FGM" or "PGD".
+            norm: Lp norm for perturbation ball.
+            criterion: Loss function configuration.
+            strengths: List of epsilon values to evaluate.
+            num_steps: PGD iterations (ignored for FGM).
+            step_size: PGD step size (ignored for FGM).
+            random_start: PGD random initialization (ignored for FGM).
+        """
         self.strengths = strengths
-        self.method = _METHOD_MAP[method](
-            norm=norm,
-            criterion=criterion
-        )
+        method_cls = _METHOD_MAP[method]
+        if method == "PGD":
+            self.method = method_cls(
+                norm=norm,
+                criterion=criterion,
+                num_steps=num_steps,
+                step_size=step_size,
+                random_start=random_start
+            )
+        else:
+            self.method = method_cls(
+                norm=norm,
+                criterion=criterion
+            )
 
     def generate(
             self,

@@ -1,0 +1,11 @@
+# @package _global_
+# Test configuration for adversarial training experiments
+experiment: adversarial_test
+
+defaults:
+  - override /born: test
+  - override /dataset: test
+  - override /trainer/classification: test
+  - override /trainer/adversarial: test
+  - override /trainer/ganstyle: null
+  - override /tracking: test

@@ -2,5 +2,6 @@
 experiment: classification_test
 
 defaults:
+  - override /trainer/classification: test
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

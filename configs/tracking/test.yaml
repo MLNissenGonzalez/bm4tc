@@ -9,8 +9,8 @@ sampling:
   batch_spc: 8
   method: secant
 evasion: 
-  method: "FGM"
-  norm: "inf"
+  method: "PGD"
+  norm: 2
   criterion: 
     name: "negative log-likelihood"
     kwargs:

@@ -1,3 +1,4 @@
+import time
 import torch
 import hydra
 from pathlib import Path
@@ -6,8 +7,8 @@ import src.utils.schemas as schemas
 import logging
 from .classification import Trainer as ClassificationTrainer
 from src.tracking import *
-from data.handler import DataHandler
-from models import Critic, BornMachine
+from src.data.handler import DataHandler
+from src.models import Critic, BornMachine
 import src.utils.get as get
 import wandb
 from tqdm import tqdm
@@ -15,10 +16,38 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer:
-    def __init__(self, bornmachine: BornMachine, cfg: schemas.Config, 
-                 datahandler: DataHandler, critic: Critic, device: torch.device, 
-                 best: Dict[str, float] = {"acc": 1.0, "loss": 0.0} # do not retrain by default
-                 ):
+    """
+    GAN-style trainer for improving BornMachine generative capabilities.
+
+    Alternates between training a critic to distinguish real/synthetic samples
+    and training the generator to fool the critic. Triggers classification
+    retraining when discriminative accuracy drops below tolerance.
+
+    Records two timing metrics:
+    - avg_epoch_time_total_s: Average time per epoch including retraining.
+    - avg_epoch_time_no_retrain_s: Average time per epoch excluding retraining.
+    """
+
+    def __init__(
+            self,
+            bornmachine: BornMachine,
+            cfg: schemas.Config,
+            datahandler: DataHandler,
+            critic: "Critic",
+            device: torch.device,
+            best: Dict[str, float] = {"acc": 1.0, "loss": 0.0}
+    ):
+        """
+        Initialize the GAN-style trainer.
+
+        Args:
+            bornmachine: BornMachine instance to train.
+            cfg: Complete configuration object.
+            datahandler: DataHandler with loaded datasets.
+            critic: Critic network for discriminating real vs synthetic.
+            device: Torch device for training.
+            best: Target metrics from pretraining (triggers retraining if dropped).
+        """
         # Save some attributes
         self.cfg = cfg
         self.device= device
@@ -49,10 +78,11 @@ class Trainer:
         
         :param validation_metrics: Accuracy and loss of BornClassifier evaluated on validation set.
         """
+        goal_key = list(self.goal.keys())[0]
         toRetrain = (
-            (self.goal.keys()[0] == "acc" and
+            (goal_key == "acc" and
              ((self.goal["acc"]-validation_metrics["acc"]) > self.train_cfg.tolerance))
-            or (self.goal.keys()[0] == "loss" and
+            or (goal_key == "loss" and
                 (validation_metrics["loss"]-self.goal["loss"])/self.goal["loss"] > self.train_cfg.tolerance)
         )
         return toRetrain
@@ -67,6 +97,10 @@ class Trainer:
         for metric_name in ["acc", "rob"]:
             if metric_name in test_results.keys():
                 wandb.summary[f"gan/test/{metric_name}"] = test_results[metric_name]
+        if self.epoch_times_total:
+            wandb.summary["gan/avg_epoch_time_total_s"] = sum(self.epoch_times_total) / len(self.epoch_times_total)
+        if self.epoch_times_no_retrain:
+            wandb.summary["gan/avg_epoch_time_no_retrain_s"] = sum(self.epoch_times_no_retrain) / len(self.epoch_times_no_retrain)
         
         self.bornmachine.reset()
         # Save model
@@ -99,7 +133,15 @@ class Trainer:
             wandb.log_model(str(save_path))
     
     def train(self):
+        """
+        Run the GAN-style training loop.
 
+        For each epoch:
+        1. Train critic on real vs synthetic samples (inner loop).
+        2. Train generator to fool the critic (single step).
+        3. Evaluate on validation set.
+        4. Retrain classifier if accuracy dropped below tolerance.
+        """
         # Initialize optimizer, evaluator, and retrainer
         self.bornmachine.to(device=self.device)
         self.optimizer = get.optimizer(
@@ -109,13 +151,17 @@ class Trainer:
         self.retrainer = ClassificationTrainer(
             self.bornmachine, self.cfg, "re", self.datahandler, self.device)
         self.critic.to(device=self.device)
-        print(f"Device {self.device=}")
+        
         # Other Configs
         max_epoch = self.train_cfg.max_epoch
         sampling_cfg = self.train_cfg.sampling
+        self.epoch_times_total = []
+        self.epoch_times_no_retrain = []
 
         # Outer loop: GANStyle training
-        for epoch in tqdm(range(max_epoch), desc="GANStyle training"):
+        logger.info("Starting GANStyle training.")
+        for epoch in range(max_epoch):
+            epoch_start = time.perf_counter()
             self.epoch = epoch + 1
             g_losses, d_losses = [], []
             for naturals in self.datahandler.discrimination["train"]:
@@ -152,10 +198,16 @@ class Trainer:
             validation_metrics = self.evaluator.evaluate(
                 self.bornmachine, "valid", epoch)
             record(validation_metrics, "gan", "valid")
+            self.epoch_times_no_retrain.append(time.perf_counter() - epoch_start)
             if self._toRetrain(validation_metrics):
                 logger.info("Retraining.")
                 self.retrainer.train(self.goal)
+                # Move model back to device after retraining (retrainer moves to CPU)
+                self.bornmachine.to(self.device)
+                logger.info("Finished retraining.")
+            self.epoch_times_total.append(time.perf_counter() - epoch_start)
             # End of loop
 
         # result on test set of metrics, number of retrainings (maybe epoch number aswell)
         self._summarise_training()
+        logger.info("GANStyle training completed.")

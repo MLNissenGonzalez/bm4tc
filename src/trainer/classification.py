@@ -1,5 +1,6 @@
 import hydra
 from pathlib import Path
+import time
 import torch
 from typing import *
 import src.utils.schemas as schemas
@@ -14,6 +15,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Trainer:
+    """
+    Classification trainer for BornMachine discriminative training.
+
+    Trains the MPS as a classifier using the Born rule. Supports early stopping,
+    metric tracking via W&B, and checkpoint saving. Records average epoch time.
+
+    Attributes:
+        best: Dict of best metric values achieved during training.
+        best_tensors: Tensors from the best-performing epoch.
+    """
+
     def __init__(
             self,
             bornmachine: BornMachine,
@@ -21,14 +33,16 @@ class Trainer:
             stage: str,
             datahandler: DataHandler,
             device: torch.device
-                 ):
+    ):
         """
-        Parameters
-        ----------
-        classifier: BornClassifier (subclass of MPSLayer)
-        cfg: Complete configuration. 
-        loaders: train, valid, and test loaders, loading preprocessed, but unembedded data. 
-        device: torch.device
+        Initialize the classification trainer.
+
+        Args:
+            bornmachine: BornMachine instance to train.
+            cfg: Complete configuration object.
+            stage: Training stage - "pre" for pretraining, "re" for retraining.
+            datahandler: DataHandler with loaded datasets.
+            device: Torch device for training.
         """
         self.datahandler = datahandler
         if self.datahandler.classification == None:
@@ -62,7 +76,8 @@ class Trainer:
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
 
-    def _train_epoch(self,):
+    def _train_epoch(self):
+        """Execute one training epoch: forward pass, loss, backward, optimizer step."""
         losses = []
         self.bornmachine.classifier.train()
         for data, labels in self.datahandler.classification["train"]:
@@ -101,13 +116,14 @@ class Trainer:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
         # Check if we reached target accuracy (optional shortcut)
-        if self.goal is None or self.goal.keys()[0] not in self.valid_perf:
+        goal_key = list(self.goal.keys())[0] if self.goal else None
+        if self.goal is None or goal_key not in self.valid_perf:
             reached_goal = False
 
         else:
-            if self.goal.keys()[0] == "acc":
+            if goal_key == "acc":
                 reached_goal = (self.valid_perf["acc"]>self.goal["acc"])
-            elif self.goal.keys()[0] == "loss":
+            elif goal_key == "loss":
                 reached_goal = (self.valid_perf["loss"]<self.goal["loss"])
             else: raise KeyError(f"{self.goal.keys()=} not recognised")
 
@@ -146,6 +162,8 @@ class Trainer:
                 wandb.summary[f"{self.stage}/valid/{metric_name}"] = self.best[metric_name]
         wandb.summary[f"{self.stage}/epoch/best"] = self.best_epoch
         wandb.summary[f"{self.stage}/epoch/last"] = self.epoch
+        if self.epoch_times:
+            wandb.summary[f"{self.stage}/avg_epoch_time_s"] = sum(self.epoch_times) / len(self.epoch_times)
         
         self.bornmachine.reset()
         self.bornmachine.to("cpu")
@@ -180,20 +198,26 @@ class Trainer:
             wandb.log_model(str(save_path))
         logger.info(f"Classification-Trainer for {self.stage}-training finished.")
 
-    def train(
-            self, goal: Dict[str, float] | None = None
-    ):
-     
+    def train(self, goal: Dict[str, float] | None = None):
+        """
+        Run the classification training loop.
+
+        Args:
+            goal: Optional target metrics to reach early (e.g., {"acc": 0.95}).
+                  If reached, training stops regardless of patience.
+        """
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.epoch_times = []
 
         # Prepare classifier, then instantiate criterion and optimizer.
         self.bornmachine.classifier.prepare(device=self.device, train_cfg=self.train_cfg)
         self.criterion = get.criterion("classification", self.train_cfg.criterion)
         self.optimizer = get.optimizer(self.bornmachine.classifier.parameters(), self.train_cfg.optimizer)
-        
 
-        logger.info("Categorisation training begins.")        
-        for epoch in tqdm(range(self.train_cfg.max_epoch), desc=f"Classification {self.stage} epochs"):
+
+        logger.info("Categorisation training begins.")
+        for epoch in range(self.train_cfg.max_epoch):
+            epoch_start = time.perf_counter()
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
@@ -204,6 +228,7 @@ class Trainer:
 
             # Updating and early stopping.
             self._update() # self.best is updated here
+            self.epoch_times.append(time.perf_counter() - epoch_start)
             if self.patience_counter > self.train_cfg.patience:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break

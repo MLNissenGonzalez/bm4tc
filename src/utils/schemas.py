@@ -65,6 +65,10 @@ class EvasionConfig:
     norm: int | str = "inf",
     criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None)
     strengths: list = field(default_factory=lambda: [0.1, 0.3]) # not relative, default for dataspaces [0,1]^n
+    # PGD-specific parameters (ignored for FGM)
+    num_steps: int = 10
+    step_size: float | None = None  # defaults to 2.5 * strength / num_steps if None
+    random_start: bool = True
 
 
 # --- Data config ---
@@ -202,7 +206,7 @@ class CriticConfig:
     discrimination: DiscriminationConfig
     criterion: CriterionConfig # wgan, bce
 
-cs.store(group="model/crit", name="schema", node=CriticConfig)
+cs.store(group="trainer/ganstyle/critic", name="schema", node=CriticConfig)
 # --- Trainer configs ---  
 
 @dataclass 
@@ -272,20 +276,103 @@ cs.store(group="trainer/gantrain", name="schema", node=GANStyleConfig)
 
 @dataclass
 class AdversarialConfig:
+    """
+    Configuration for adversarial training of the BornMachine classifier.
+
+    Supports two methods:
+    - "pgd_at": PGD Adversarial Training (Madry et al.) - trains on adversarial examples
+    - "trades": TRADES (Zhang et al.) - L(x,y) + beta * KL(p(x) || p(x_adv))
+
+    Parameters
+    ----------
+    max_epoch : int
+        Maximum number of training epochs.
+    batch_size : int
+        Batch size for training.
+    method : str
+        Adversarial training method: "pgd_at" or "trades".
+    optimizer : OptimizerConfig
+        Optimizer configuration for training.
+    criterion : CriterionConfig
+        Base classification loss function.
+    evasion : EvasionConfig
+        Attack configuration (method, norm, strengths, etc.).
+    stop_crit : str
+        Metric to monitor for early stopping: "loss", "acc", or "rob".
+    patience : int
+        Number of epochs without improvement before early stopping.
+    watch_freq : int
+        Frequency of gradient logging to W&B.
+    metrics : Dict[str, int]
+        Metrics to evaluate and their frequencies.
+    trades_beta : float
+        Trade-off parameter for TRADES (ignored for pgd_at). Default 6.0.
+    clean_weight : float
+        Weight for clean examples in pgd_at (0.0 = pure adversarial). Default 0.0.
+    curriculum : bool
+        Whether to use curriculum learning over epsilon. Default False.
+    curriculum_start : float
+        Starting epsilon for curriculum training. Default 0.0.
+    curriculum_end_epoch : int | None
+        Epoch by which to reach full epsilon. Default None (use max_epoch).
+    save : bool
+        Whether to save the trained model.
+    auto_stack : bool
+        tensorkrowch auto_stack option. Default True.
+    auto_unbind : bool
+        tensorkrowch auto_unbind option. Default False.
+    """
     max_epoch: int
     batch_size: int
+    method: str  # "pgd_at" or "trades"
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig
     evasion: EvasionConfig
-    metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
-    save: bool
-    # and more.
+    stop_crit: str  # "loss", "acc", or "rob"
+    patience: int
+    watch_freq: int
+    metrics: Dict[str, int]
+    trades_beta: float = 6.0
+    clean_weight: float = 0.0
+    curriculum: bool = False
+    curriculum_start: float = 0.0
+    curriculum_end_epoch: int | None = None
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
 
 cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
-@dataclass 
+
+@dataclass
+class GenerativeConfig:
+    """
+    Configuration for generative training using NLL minimization.
+
+    Trains p(x|c) by minimizing negative log-likelihood.
+    User must implement the criterion with their normalization approach.
+    """
+    max_epoch: int
+    batch_size: int
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig  # generative NLL criterion (user implements)
+    stop_crit: str  # "loss" or "fid"
+    patience: int
+    watch_freq: int
+    metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
+
+cs.store(group="trainer/generative", name="schema", node=GenerativeConfig)
+
+
+@dataclass
 class TrainerConfig:
     classification: ClassificationConfig | None = None
     ganstyle: GANStyleConfig | None = None
     adversarial: AdversarialConfig | None = None
+    generative: GenerativeConfig | None = None
 
 cs.store(group="trainer", name="wrapper", node=TrainerConfig)
 

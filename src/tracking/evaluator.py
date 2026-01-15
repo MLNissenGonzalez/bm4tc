@@ -10,13 +10,23 @@ logger = logging.getLogger(__name__)
 
 # TODO: Decide where to prepare classifier and generator views. Maybe do this in the trainer.
 class BaseMetric:
+    """
+    Abstract base class for evaluation metrics.
+
+    Provides shared infrastructure for computing metrics on BornMachine,
+    including caching of predictions and synthetic samples in context dict.
+
+    Attributes:
+        freq: How often (in epochs) this metric should be evaluated.
+    """
+
     def __init__(
-            self, 
-            freq: int, 
-            cfg: schemas.Config, 
-            datahandler: DataHandler, 
+            self,
+            freq: int,
+            cfg: schemas.Config,
+            datahandler: DataHandler,
             device: torch.device
-            ):
+    ):
         self.freq = freq
         self.cfg = cfg
         self.datahandler = datahandler
@@ -68,8 +78,9 @@ class BaseMetric:
 # I want here the classification loss taking probabilities (batch_size, num_classes) and labels (batch_size,).
 
 
-# classifier based 
 class LossMetric(BaseMetric):
+    """Compute classification loss (NLL) on the dataset."""
+
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
         self.criterion = get.criterion(mode="classification", cfg=cfg.trainer.classification.criterion)
@@ -87,8 +98,9 @@ class LossMetric(BaseMetric):
         # Compute mean loss
         return sum(losses) / len(losses) if losses else float('nan')
 
-# clean accuracy
 class AccuracyMetric(BaseMetric):
+    """Compute clean classification accuracy on the dataset."""
+
     def __init__(self, freq, cfg, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
 
@@ -110,10 +122,12 @@ class AccuracyMetric(BaseMetric):
 #--------FID-like metric---------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-# generator based
-from .fid_like import FIDEvaluation  
+from .fid_like import FIDEvaluation
+
 
 class FIDMetric(BaseMetric):
+    """Compute FID-like score comparing synthetic samples to real data."""
+
     def __init__(self, freq, cfg, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
         self.fid = FIDEvaluation(cfg, datahandler, device)
@@ -133,10 +147,12 @@ class FIDMetric(BaseMetric):
 #-------Visualisation------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-# generator based
 from .visualisation import visualise_samples
 
+
 class VisualizationMetric(BaseMetric):
+    """Generate visualization of synthetic samples for W&B logging."""
+
     def __init__(self, freq, cfg, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
 
@@ -151,16 +167,27 @@ class VisualizationMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-# Classifier based
 from src.utils.evasion.minimal import RobustnessEvaluation
 
+
 class RobustnessMetric(BaseMetric):
+    """Compute adversarial robustness (accuracy under attack). Supports FGM and PGD."""
+
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
+        # TODO: num_steps, step_size, random_start might not exist in cfg.tracking.evasion, 
+        #       but there are default values in the RobustnessEvaluation.
+        #       Use those defaults if not in struct/cfg.
+        num_steps = cfg.tracking.evasion.num_steps if hasattr(cfg.tracking.evasion, 'num_steps') else None
+        step_size = cfg.tracking.evasion.step_size if hasattr(cfg.tracking.evasion, 'step_size') else None
+        random_start = cfg.tracking.evasion.random_start if hasattr(cfg.tracking.evasion, 'random_start') else None 
         self.evasion = RobustnessEvaluation(method=cfg.tracking.evasion.method,
                                             norm=cfg.tracking.evasion.norm,
                                             criterion=cfg.tracking.evasion.criterion,
-                                            strengths=cfg.tracking.evasion.strengths)
+                                            strengths=cfg.tracking.evasion.strengths,
+                                            num_steps=num_steps,
+                                            step_size=step_size,
+                                            random_start=random_start)
         
 
     def evaluate(self, bornmachine: BornMachine, split, context):
@@ -178,15 +205,18 @@ class RobustnessMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # TODO: Consider where to put bornmachine preparation
-# Metric Factory
 class MetricFactory:
+    """Factory for creating metric instances by name."""
+
     @staticmethod
     def create(
-        metric_name: str, freq: int, 
-        cfg: schemas.Config, 
-        datahandler: DataHandler, 
-        device: torch.device
-        ) -> BaseMetric:
+            metric_name: str,
+            freq: int,
+            cfg: schemas.Config,
+            datahandler: DataHandler,
+            device: torch.device
+    ) -> BaseMetric:
+        """Create a metric instance by name (loss, acc, fid, rob, viz)."""
         mapping = {
             "loss": LossMetric,
             "acc": AccuracyMetric,
@@ -198,14 +228,20 @@ class MetricFactory:
 
 
 class PerformanceEvaluator:
+    """
+    Unified evaluator that computes multiple metrics on a BornMachine.
+
+    Metrics are configured via train_cfg.metrics dict mapping metric names
+    to evaluation frequencies. Results are returned as a dict.
+    """
+
     def __init__(
-            self, 
-            cfg: schemas.Config, 
+            self,
+            cfg: schemas.Config,
             datahandler: DataHandler,
             train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig | schemas.AdversarialConfig,
             device: torch.device
-            ):
-        
+    ):
         if datahandler.classification is None:
             datahandler.get_classification_loaders()
 
@@ -255,7 +291,7 @@ class PerformanceEvaluator:
                 if result is None or name == "viz":
                     continue
                 elif isinstance(result, (float, int)):
-                    logger.info(f"Evaluation results - {split} - {name}: {result:.3f}")
+                    logger.info(f"Epoch {step+1} evaluation: {split} - {name}: {result:.3f}")
                 else:
                     logger.warning(f"Skipping logging for metric '{name}' - unsupported type: {type(result)}")
         return results
