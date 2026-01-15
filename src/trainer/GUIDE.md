@@ -1,15 +1,16 @@
 # Trainer Module Guide
 
-This module contains the training loops for different training paradigms: classification (discriminative), GAN-style (generative), and adversarial (robust).
+This module contains the training loops for different training paradigms: classification (discriminative), GAN-style (generative), generative NLL, and adversarial (robust).
 
 ## Module Structure
 
 ```
 src/trainer/
 ├── GUIDE.md              # This file
-├── __init__.py           # Exports: ClassificationTrainer, GANStyleTrainer, AdversarialTrainer
+├── __init__.py           # Exports: ClassificationTrainer, GANStyleTrainer, GenerativeTrainer, AdversarialTrainer
 ├── classification.py     # Discriminative classifier training
 ├── ganstyle.py          # GAN-style generative training
+├── generative.py        # Generative NLL training
 └── adversarial.py       # Adversarial robustness training (stub)
 ```
 
@@ -178,6 +179,64 @@ from src.data.handler import DataHandler
 from src.models import Critic, BornMachine
 ```
 
+## GenerativeTrainer (`generative.py`)
+
+Trains the BornMachine generator using NLL minimization on p(x|c).
+
+### Initialization
+
+```python
+from src.utils.generative_losses import GenerativeNLL
+
+# User must implement their own criterion subclass
+class MyGenerativeNLL(GenerativeNLL):
+    def compute_unnormalized_log_prob(self, bornmachine, data, labels):
+        # Implement: log(|psi(x,c)|^2)
+        pass
+
+    def compute_log_partition(self, bornmachine, labels):
+        # Implement: log(Z_c) normalization
+        pass
+
+criterion = MyGenerativeNLL()
+
+trainer = GenerativeTrainer(
+    bornmachine=bm,
+    cfg=cfg,
+    datahandler=dh,
+    criterion=criterion,  # User-implemented criterion
+    device=device
+)
+```
+
+### Training Flow
+
+```python
+def train(self, goal: Dict[str, float] | None = None):
+    """
+    goal: Optional early stopping target, e.g., {"fid": 10.0}
+    """
+```
+
+**Flow:**
+1. Prepare generator and optimizer
+2. For each epoch:
+   - `_train_epoch()` — Forward through criterion, backward, step
+   - `sync_tensors(after="generation")` — Sync to classifier view
+   - `evaluator.evaluate()` — Compute metrics (fid, viz, etc.)
+   - `_update()` — Check for improvement, early stopping
+3. `_summarise_training()` — Restore best weights, test eval, save
+
+### Key Difference from ClassificationTrainer
+
+The criterion takes the full BornMachine (not just probabilities):
+```python
+loss = self.criterion(self.bornmachine, data, labels)
+```
+
+This allows the criterion to access the generator's internal state for computing
+unnormalized probabilities and partition functions.
+
 ## AdversarialTrainer (`adversarial.py`)
 
 **Status: Stub / Not Implemented**
@@ -232,6 +291,26 @@ retrain_crit: "acc"        # When to retrain
 tolerance: 0.05            # Accuracy drop tolerance
 retrain: {...}             # ClassificationConfig for retraining
 save: false
+```
+
+### GenerativeConfig (`schemas.py:289-307`)
+
+```yaml
+max_epoch: 100
+batch_size: 64
+criterion:
+  name: "generative-nll"   # User implements GenerativeNLL subclass
+  kwargs: {eps: 1e-8}
+optimizer:
+  name: "adam"
+  kwargs: {lr: 1e-4, weight_decay: 0.0}
+patience: 50
+stop_crit: "loss"          # "loss" or "fid"
+watch_freq: 100
+metrics: {loss: 1, fid: 10, viz: 10}
+save: false
+auto_stack: true
+auto_unbind: false
 ```
 
 ## Integration Points

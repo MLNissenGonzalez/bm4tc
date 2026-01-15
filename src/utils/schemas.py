@@ -285,11 +285,36 @@ class AdversarialConfig:
 
 cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
-@dataclass 
+
+@dataclass
+class GenerativeConfig:
+    """
+    Configuration for generative training using NLL minimization.
+
+    Trains p(x|c) by minimizing negative log-likelihood.
+    User must implement the criterion with their normalization approach.
+    """
+    max_epoch: int
+    batch_size: int
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig  # generative NLL criterion (user implements)
+    stop_crit: str  # "loss" or "fid"
+    patience: int
+    watch_freq: int
+    metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
+
+cs.store(group="trainer/generative", name="schema", node=GenerativeConfig)
+
+
+@dataclass
 class TrainerConfig:
     classification: ClassificationConfig | None = None
     ganstyle: GANStyleConfig | None = None
     adversarial: AdversarialConfig | None = None
+    generative: GenerativeConfig | None = None
 
 cs.store(group="trainer", name="wrapper", node=TrainerConfig)
 
