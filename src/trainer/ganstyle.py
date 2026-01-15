@@ -16,10 +16,38 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer:
-    def __init__(self, bornmachine: BornMachine, cfg: schemas.Config, 
-                 datahandler: DataHandler, critic: Critic, device: torch.device, 
-                 best: Dict[str, float] = {"acc": 1.0, "loss": 0.0} # do not retrain by default
-                 ):
+    """
+    GAN-style trainer for improving BornMachine generative capabilities.
+
+    Alternates between training a critic to distinguish real/synthetic samples
+    and training the generator to fool the critic. Triggers classification
+    retraining when discriminative accuracy drops below tolerance.
+
+    Records two timing metrics:
+    - avg_epoch_time_total_s: Average time per epoch including retraining.
+    - avg_epoch_time_no_retrain_s: Average time per epoch excluding retraining.
+    """
+
+    def __init__(
+            self,
+            bornmachine: BornMachine,
+            cfg: schemas.Config,
+            datahandler: DataHandler,
+            critic: "Critic",
+            device: torch.device,
+            best: Dict[str, float] = {"acc": 1.0, "loss": 0.0}
+    ):
+        """
+        Initialize the GAN-style trainer.
+
+        Args:
+            bornmachine: BornMachine instance to train.
+            cfg: Complete configuration object.
+            datahandler: DataHandler with loaded datasets.
+            critic: Critic network for discriminating real vs synthetic.
+            device: Torch device for training.
+            best: Target metrics from pretraining (triggers retraining if dropped).
+        """
         # Save some attributes
         self.cfg = cfg
         self.device= device
@@ -105,7 +133,15 @@ class Trainer:
             wandb.log_model(str(save_path))
     
     def train(self):
+        """
+        Run the GAN-style training loop.
 
+        For each epoch:
+        1. Train critic on real vs synthetic samples (inner loop).
+        2. Train generator to fool the critic (single step).
+        3. Evaluate on validation set.
+        4. Retrain classifier if accuracy dropped below tolerance.
+        """
         # Initialize optimizer, evaluator, and retrainer
         self.bornmachine.to(device=self.device)
         self.optimizer = get.optimizer(

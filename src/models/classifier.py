@@ -3,8 +3,18 @@ import torch
 import tensorkrowch as tk
 import src.utils.schemas as schemas
 
-# As init, take either basic config or tensors (optional). 
 class BornClassifier(tk.models.MPSLayer):
+    """
+    MPS-based classifier that computes class probabilities using the Born rule.
+
+    Extends tensorkrowch's MPSLayer with:
+    - Custom embedding function for input features
+    - Parallel contraction for efficient batch classification
+    - Born rule: probability = |amplitude|^2, normalized across classes
+
+    The classifier owns the MPS tensors; the generator shares these tensors.
+    """
+
     def __init__(
             self,
             embedding: Callable[[torch.Tensor, int], torch.Tensor],
@@ -29,19 +39,35 @@ class BornClassifier(tk.models.MPSLayer):
         )
         self.embedding = embedding
 
-    def embed(self,
-              data: torch.Tensor):
+    def embed(self, data: torch.Tensor) -> torch.Tensor:
+        """
+        Embed raw input data into the MPS physical dimension.
+
+        Args:
+            data: Input tensor of shape (batch_size, data_dim).
+
+        Returns:
+            Embedded tensor of shape (batch_size, data_dim, phys_dim).
+        """
         in_dim = self.in_dim[0]
         return self.embedding(data, in_dim)
-    
-    def prepare(self, 
-                tensors: List[torch.Tensor] | None = None, 
-                device: torch.device | None = None,
-                train_cfg: schemas.ClassificationConfig | None = None):
-        """
-        Preperation of tensor network for classification as implemented in `tensorkrowch` tutorials.
-        """
 
+    def prepare(
+            self,
+            tensors: List[torch.Tensor] | None = None,
+            device: torch.device | None = None,
+            train_cfg: schemas.ClassificationConfig | None = None):
+        """
+        Prepare the MPS for classification training or inference.
+
+        Resets internal state, optionally initializes from given tensors,
+        moves to device, and traces the network for efficient contraction.
+
+        Args:
+            tensors: Optional tensors to initialize from.
+            device: Device to move the network to.
+            train_cfg: Training config for auto_stack/auto_unbind settings.
+        """
         self.unset_data_nodes(), self.reset()
         if tensors is not None:
             self.initialize(tensors=tensors)
@@ -87,10 +113,21 @@ class BornClassifier(tk.models.MPSLayer):
         return p / p.sum(dim=-1, keepdim=True)
         
     
-    def probabilities(self, data: torch.Tensor):
-        "Returns class probability given unembedded input."
+    def probabilities(self, data: torch.Tensor) -> torch.Tensor:
+        """
+        Compute class probabilities from raw (unembedded) input.
+
+        Convenience method that embeds input and calls parallel().
+
+        Args:
+            data: Raw input tensor of shape (batch_size, data_dim).
+
+        Returns:
+            Tensor of shape (batch_size, num_classes) with normalized probabilities.
+        """
         embs = self.embed(data)
         return self.parallel(embs)
 
     def eval(self):
+        """Set the classifier to evaluation mode."""
         super().eval()

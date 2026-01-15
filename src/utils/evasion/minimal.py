@@ -29,6 +29,13 @@ def normalizing(x: torch.FloatTensor, norm: int | str):
     return normalized
 
 class FastGradientMethod:
+    """
+    Fast Gradient Method (FGM) adversarial attack.
+
+    Single-step attack that perturbs inputs in the direction of the loss gradient,
+    normalized according to the specified Lp norm.
+    """
+
     def __init__(
             self,
             norm: int | str = "inf",
@@ -36,6 +43,10 @@ class FastGradientMethod:
     ):
         """
         Initialize FGM with chosen norm and loss function.
+
+        Args:
+            norm: Lp norm for gradient normalization ("inf" or int >= 1).
+            criterion: Loss function configuration.
         """
         self.norm = norm
         self.criterion = get.criterion("classification", criterion)
@@ -76,6 +87,13 @@ class FastGradientMethod:
 
 
 class ProjectedGradientDescent:
+    """
+    Projected Gradient Descent (PGD) adversarial attack.
+
+    Iterative attack that performs multiple gradient ascent steps with projection
+    back onto the epsilon ball. Stronger than FGM but more expensive.
+    """
+
     def __init__(
             self,
             norm: int | str = "inf",
@@ -88,11 +106,11 @@ class ProjectedGradientDescent:
         Initialize PGD with chosen norm, loss function, and iteration parameters.
 
         Args:
-            norm: Lp norm for perturbation ball ("inf" or int >= 1)
-            criterion: Loss function config
-            num_steps: Number of gradient ascent iterations
-            step_size: Step size per iteration. If None, defaults to 2.5 * strength / num_steps
-            random_start: Whether to start from random point within epsilon ball
+            norm: Lp norm for perturbation ball ("inf" or int >= 1).
+            criterion: Loss function configuration.
+            num_steps: Number of gradient ascent iterations.
+            step_size: Step size per iteration. If None, defaults to 2.5 * strength / num_steps.
+            random_start: Whether to start from random point within epsilon ball.
         """
         self.norm = norm
         self.criterion = get.criterion("classification", criterion)
@@ -180,6 +198,13 @@ _METHOD_MAP = {
 
 
 class RobustnessEvaluation:
+    """
+    Evaluate adversarial robustness of a BornMachine classifier.
+
+    Generates adversarial examples using FGM or PGD and computes accuracy
+    under attack at multiple perturbation strengths.
+    """
+
     def __init__(
             self,
             method: str = "FGM",
@@ -191,6 +216,18 @@ class RobustnessEvaluation:
             step_size: float | None = None,
             random_start: bool = True
     ):
+        """
+        Initialize robustness evaluator.
+
+        Args:
+            method: Attack method - "FGM" or "PGD".
+            norm: Lp norm for perturbation ball.
+            criterion: Loss function configuration.
+            strengths: List of epsilon values to evaluate.
+            num_steps: PGD iterations (ignored for FGM).
+            step_size: PGD step size (ignored for FGM).
+            random_start: PGD random initialization (ignored for FGM).
+        """
         self.strengths = strengths
         method_cls = _METHOD_MAP[method]
         if method == "PGD":

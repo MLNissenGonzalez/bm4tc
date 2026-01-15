@@ -15,6 +15,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Trainer:
+    """
+    Classification trainer for BornMachine discriminative training.
+
+    Trains the MPS as a classifier using the Born rule. Supports early stopping,
+    metric tracking via W&B, and checkpoint saving. Records average epoch time.
+
+    Attributes:
+        best: Dict of best metric values achieved during training.
+        best_tensors: Tensors from the best-performing epoch.
+    """
+
     def __init__(
             self,
             bornmachine: BornMachine,
@@ -22,14 +33,16 @@ class Trainer:
             stage: str,
             datahandler: DataHandler,
             device: torch.device
-                 ):
+    ):
         """
-        Parameters
-        ----------
-        classifier: BornClassifier (subclass of MPSLayer)
-        cfg: Complete configuration. 
-        loaders: train, valid, and test loaders, loading preprocessed, but unembedded data. 
-        device: torch.device
+        Initialize the classification trainer.
+
+        Args:
+            bornmachine: BornMachine instance to train.
+            cfg: Complete configuration object.
+            stage: Training stage - "pre" for pretraining, "re" for retraining.
+            datahandler: DataHandler with loaded datasets.
+            device: Torch device for training.
         """
         self.datahandler = datahandler
         if self.datahandler.classification == None:
@@ -63,7 +76,8 @@ class Trainer:
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
 
-    def _train_epoch(self,):
+    def _train_epoch(self):
+        """Execute one training epoch: forward pass, loss, backward, optimizer step."""
         losses = []
         self.bornmachine.classifier.train()
         for data, labels in self.datahandler.classification["train"]:
@@ -184,10 +198,14 @@ class Trainer:
             wandb.log_model(str(save_path))
         logger.info(f"Classification-Trainer for {self.stage}-training finished.")
 
-    def train(
-            self, goal: Dict[str, float] | None = None
-    ):
-     
+    def train(self, goal: Dict[str, float] | None = None):
+        """
+        Run the classification training loop.
+
+        Args:
+            goal: Optional target metrics to reach early (e.g., {"acc": 0.95}).
+                  If reached, training stops regardless of patience.
+        """
         self.step, self.patience_counter, self.goal = 0, 0, goal
         self.epoch_times = []
 

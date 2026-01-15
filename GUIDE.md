@@ -270,7 +270,7 @@ embedding: "fourier"
 
 3. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
 
-4. **Docstrings may be outdated** — Trust the actual code implementation over docstrings
+4. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
 
 5. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
 
@@ -278,7 +278,7 @@ embedding: "fourier"
 
 ## Future Directions (from README)
 
-1. **More adversarial attack methods**: Currently only FGM, need PGD and others
+1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
 2. **MNIST support**: Currently only 2D toy data
 3. **MPS as discriminator backbone**: Using MPS features as input to critic
 4. **More datasets**: Time series, higher-dimensional data
@@ -309,7 +309,55 @@ python -m experiments.classification +experiments=tests/classification tracking.
 
 ---
 
+## Documentation Maintenance (for AI Assistants)
+
+**IMPORTANT**: This section is a reminder for AI coding assistants (Claude, etc.) working on this codebase.
+
+When making code changes, **always update the corresponding documentation**:
+
+### Checklist for Code Changes
+
+1. **Docstrings**: Update or add docstrings for any modified/added functions, classes, or methods
+   - Include parameter descriptions with types
+   - Document return values
+   - Note any important side effects or exceptions
+
+2. **GUIDE.md files**: Update the relevant GUIDE.md when:
+   - Adding new features or configuration options
+   - Changing function signatures or behavior
+   - Adding new files or modules
+   - Modifying training loops or evaluation metrics
+
+3. **Schema changes** (`src/utils/schemas.py`):
+   - Update corresponding YAML config files in `configs/`
+   - Update relevant GUIDE.md files documenting the config
+
+4. **This file** (`GUIDE.md`):
+   - Update "Known Issues & Gotchas" if fixing or introducing issues
+   - Update "Future Directions" when implementing planned features
+   - Update "Navigation Guide" when adding new functionality
+
+### Documentation Style
+
+- Keep docstrings concise but complete
+- Use Google-style docstring format
+- Include type hints in function signatures
+- Reference line numbers in GUIDE.md when they help locate code
+
+### Before Finishing Any Task
+
+Ask yourself:
+- Did I update docstrings for changed functions?
+- Does any GUIDE.md need updating?
+- Are there any "Future Directions" items I just completed?
+- Did I introduce any new gotchas or fix existing ones?
+
+---
+
 For detailed module documentation, see:
 - `src/models/GUIDE.md` — Model architecture details
 - `src/trainer/GUIDE.md` — Training pipeline details
+- `src/tracking/GUIDE.md` — Tracking and evaluation details
+- `src/data/GUIDE.md` — Data handling details
 - `src/utils/GUIDE.md` — Utilities and configuration details
+- `configs/GUIDE.md` — Configuration system details

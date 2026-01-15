@@ -12,25 +12,48 @@ from math import ceil
 _SCALER_MAP = {
     "minmax": MinMaxScaler
 }
+
+
 class DataHandler:
+    """
+    Central data management for loading, preprocessing, and providing data loaders.
+
+    Handles dataset loading, train/valid/test splitting, feature scaling,
+    and provides DataLoaders for both classification and GAN-style training.
+
+    Attributes:
+        data: Dict of split tensors {"train", "valid", "test"} after preprocessing.
+        labels: Dict of label tensors {"train", "valid", "test"}.
+        data_dim: Number of input features.
+        num_cls: Number of classes.
+        classification: DataLoaders for classification training.
+        discrimination: DataLoaders for GAN-style training (samples per class).
+    """
+
     def __init__(self, cfg: schemas.DatasetConfig):
+        """
+        Initialize DataHandler with dataset configuration.
+
+        Args:
+            cfg: Dataset configuration with gen_dow_kwargs, split ratios, etc.
+        """
         self.cfg = cfg
         self.data = None
         self.labels = None
-        self.means : List[torch.Tensor] = None
-        self.covs : List[torch.Tensor] = None
-        self.classification : Dict[str, DataLoader] = None
+        self.means: List[torch.Tensor] = None
+        self.covs: List[torch.Tensor] = None
+        self.classification: Dict[str, DataLoader] = None
         self.discrimination: Dict[str, DataLoader] = None
-        self.data_dim : int = None 
-        self.num_cls : int = None 
-        self.total_size : int = None
+        self.data_dim: int = None
+        self.num_cls: int = None
+        self.total_size: int = None
         self.num_spc: List[int] = None
 
     def load(self):
+        """Load raw dataset from disk (or generate if needed)."""
         lbld_data = load_dataset(self.cfg)
         self.data, self.labels = lbld_data.X, lbld_data.t
         self.data_dim, self.num_cls, self.total_size = lbld_data.num_feat, lbld_data.num_cls, lbld_data.size
-        # load data to Handler. use gen_n_load script.
         
 
     def _compute_mean_and_covariance(self, data: torch.FloatTensor):
@@ -47,11 +70,17 @@ class DataHandler:
 
 
     def split_and_rescale(
-            self, 
-            bornmachine: BornMachine, 
+            self,
+            bornmachine: BornMachine,
             scaler_name: str = "minmax"
-            ):
-        
+    ):
+        """
+        Split data into train/valid/test and rescale to embedding range.
+
+        Args:
+            bornmachine: BornMachine (used to determine input range from embedding).
+            scaler_name: Scaler type ("minmax").
+        """
         # Check that data is already loaded to handler, otherwise, load it:
         if self.data is None:
             self.load(self.cfg)
@@ -106,6 +135,7 @@ class DataHandler:
         del all_labels
 
     def get_classification_loaders(self):
+        """Create DataLoaders for classification training (data, labels) pairs."""
         if not isinstance(self.data, dict):
             raise AttributeError(f"Call split_and_rescale first.")
         
@@ -119,7 +149,15 @@ class DataHandler:
                                              shuffle=(split=="train"))
             
     def get_discrimination_loaders(self, batch_size: int = 16):
+        """
+        Create DataLoaders for GAN-style training.
 
+        Provides batches of shape (batch_size, num_classes, data_dim) for
+        comparing real samples against synthetic samples from the generator.
+
+        Args:
+            batch_size: Number of samples per class per batch.
+        """
         num_spc = self.classified_data.shape[0]
 
         # Convert ratios to cumulative boundaries

@@ -45,6 +45,7 @@ class BornGenerator(tk.models.MPS):
         self.device = device
 
     def prepare(self):
+        """Reset MPS state and clear data nodes for a fresh sampling pass."""
         self.reset()
         self.unset_data_nodes()
 
@@ -208,8 +209,17 @@ class BornGenerator(tk.models.MPS):
         samples = torch.stack(tensors=samples, dim=1)  # shape (num_spc, data_dim)
         return samples
 
-    # Created a batched version of this
-    def sample_single_class(self, cls: int, cfg: schemas.SamplingConfig):
+    def sample_single_class(self, cls: int, cfg: schemas.SamplingConfig) -> torch.Tensor:
+        """
+        Sample from the generator for a single class.
+
+        Args:
+            cls: Class index to sample from.
+            cfg: Sampling configuration with num_bins, num_spc, batch_spc, method.
+
+        Returns:
+            Tensor of shape (num_spc, data_dim) with sampled points.
+        """
         # Create the 1D grid (input_space) and instanciate the embedding callable
         if (self.input_space is None) or (not self.input_space.shape[0] == cfg.num_bins):
             self.input_space = torch.linspace(self.input_range[0], self.input_range[1], cfg.num_bins, device=self.device)
@@ -269,7 +279,16 @@ class BornGenerator(tk.models.MPS):
         return samples
 
     
-    def sample_all_classes(self, cfg: schemas.SamplingConfig):
+    def sample_all_classes(self, cfg: schemas.SamplingConfig) -> torch.Tensor:
+        """
+        Sample from the generator for all classes.
+
+        Args:
+            cfg: Sampling configuration with num_bins, num_spc, batch_spc, method.
+
+        Returns:
+            Tensor of shape (num_spc, num_classes, data_dim) with sampled points.
+        """
         # Create the 1D grid (input_space) and instanciate the embedding callable, and send it to device.
         if self.input_space is None or not self.input_space.shape[0] == cfg.num_bins:
             self.input_space = torch.linspace(self.input_range[0], self.input_range[1], cfg.num_bins, device=self.device)
