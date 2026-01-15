@@ -1,0 +1,21 @@
+critic:
+  backbone:
+    architecture: mlp
+    model_kwargs: {hidden_multipliers: [8.0, 8.0], nonlinearity: LeakyReLU, negative_slope: 0.01}
+  head:
+    class_aware: True
+    architecture: linear
+    model_kwargs: {}
+  discrimination:
+    max_epoch_pre: 100
+    max_epoch_gan: 20
+    batch_size: 32
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4
+        weight_decay: 0.00
+    patience: 25
+  criterion:
+    name: "BCE"
+    kwargs: null

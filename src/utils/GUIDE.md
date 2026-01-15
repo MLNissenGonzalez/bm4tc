@@ -11,9 +11,10 @@ src/utils/
 ├── schemas.py            # Hydra config dataclasses (CRITICAL)
 ├── get.py                # Factory functions for embeddings, optimizers, losses
 ├── _utils.py             # Misc utilities (seed setting, sample QC)
+├── generative_losses.py  # Abstract base for generative NLL losses
 └── evasion/
     ├── __init__.py
-    └── minimal.py        # Adversarial attack implementations (FGM)
+    └── minimal.py        # Adversarial attack implementations (FGM, PGD)
 ```
 
 ## schemas.py — Configuration Schemas
@@ -32,6 +33,8 @@ DatasetConfig             →    dataset/*.yaml
 BornMachineConfig         →    born/*.yaml
 ClassificationConfig      →    trainer/classification/*.yaml
 GANStyleConfig            →    trainer/ganstyle/*.yaml
+CriticConfig              →    trainer/ganstyle/critics/*
+GenerativeConfig          →    trainer/generative/*.yaml
 AdversarialConfig         →    trainer/adversarial/*.yaml
 TrackingConfig            →    tracking/*.yaml
 ```
@@ -51,6 +54,7 @@ class Config:                    # Top-level config
 class TrainerConfig:             # Wrapper for trainer configs
     classification: ClassificationConfig | None
     ganstyle: GANStyleConfig | None
+    generative: GenerativeConfig | None
     adversarial: AdversarialConfig | None
 ```
 
@@ -300,6 +304,54 @@ _METHOD_MAP = {
 
 3. Update `EvasionConfig` in `schemas.py` if needed
 
+## generative_losses.py — Generative NLL Losses
+
+Abstract base class for computing negative log-likelihood for generative training.
+
+### GenerativeNLL
+
+```python
+from src.utils.generative_losses import GenerativeNLL
+
+class MyGenerativeNLL(GenerativeNLL):
+    """Custom implementation for normalization."""
+
+    def compute_unnormalized_log_prob(self, bornmachine, data, labels):
+        # Compute log(|psi(x,c)|^2) for each sample
+        # Default implementation uses sequential contraction
+        ...
+        return log_probs  # shape: (batch_size,)
+
+    def compute_log_partition(self, bornmachine):
+        # Compute log(Z) - the partition function
+        # Default implementation uses norm() method
+        ...
+        return log_Z  # shape: (1,)
+
+# Usage
+criterion = MyGenerativeNLL(eps=1e-12)
+loss = criterion(bornmachine, data, labels)
+```
+
+**Loss Formula:**
+```
+NLL = -log(p(x|c)) = -log(|psi(x,c)|^2) + log(Z)
+    = -log_unnorm + log_Z
+```
+
+**Key Methods:**
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `compute_unnormalized_log_prob()` | `(batch,)` | log(|ψ(x,c)|²) for each sample |
+| `compute_log_partition()` | `(1,)` | log(Z) normalization constant |
+| `forward()` | scalar | Mean NLL over batch |
+
+**Implementation Notes:**
+- Default implementations exist but are marked `@abstractmethod` for documentation
+- `compute_unnormalized_log_prob` uses `bornmachine.generator.sequential()` for contraction
+- `compute_log_partition` uses `bornmachine.generator.norm()` (squared for partition function)
+- Contains TODOs for discussion with tensorkrowch developer regarding gradient flow
+
 ## Key Patterns
 
 ### Adding a New Embedding
@@ -372,7 +424,8 @@ _CLASSIFICATION_LOSSES = {
 
 | File | Lines | Key Functions/Classes |
 |------|-------|----------------------|
-| `schemas.py` | 341 | All `*Config` dataclasses |
-| `get.py` | 289 | `embedding`, `optimizer`, `criterion`, `MPSNLLL` |
-| `_utils.py` | 101 | `set_seed`, `sample_quality_control` |
-| `evasion/minimal.py` | 254 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |
+| `schemas.py` | ~370 | All `*Config` dataclasses |
+| `get.py` | ~290 | `embedding`, `optimizer`, `criterion`, `MPSNLLL` |
+| `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
+| `generative_losses.py` | ~120 | `GenerativeNLL` abstract base class |
+| `evasion/minimal.py` | ~290 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |

@@ -64,8 +64,18 @@ configs/
 │   │   ├── test2.yaml
 │   │   └── test3.yaml
 │   ├── ganstyle/             # GAN training configs
+│   │   ├── default.yaml      # Default GAN config
 │   │   ├── test.yaml         # Test config
-│   │   └── test2.yaml
+│   │   └── critics/          # Critic architecture configs
+│   │       ├── default       # Default critic (4 layers, width 8)
+│   │       ├── test          # Test critic (smaller)
+│   │       ├── d2            # 2 hidden layers
+│   │       ├── d3            # 3 hidden layers
+│   │       ├── d4            # 4 hidden layers
+│   │       └── d5            # 5 hidden layers
+│   ├── generative/           # Generative training configs
+│   │   ├── default.yaml      # Default generative config
+│   │   └── test.yaml         # Test config
 │   └── adversarial/          # Adversarial training configs
 │       └── test.yaml         # Placeholder
 ├── tracking/                  # W&B and evaluation configs
@@ -179,14 +189,40 @@ auto_unbind: false     # tensorkrowch setting
 
 ### trainer/ganstyle/ — GAN Training
 
+The critic configuration is factored out into separate files under `critics/` to enable easy sweeping over architectures.
+
 ```yaml
-# trainer/ganstyle/test.yaml
-max_epoch: 5
+# trainer/ganstyle/default.yaml
+max_epoch: 100
+critic: critics/default   # Reference to critic config file
+
+sampling:
+  num_bins: 200          # Sampling resolution
+  num_spc: 128           # Samples per class
+  batch_spc: 16          # Sampling batch size
+  method: secant         # Sampling method
+
+r_real: 1.0              # Real/synthetic ratio
+optimizer: {...}         # Generator optimizer
+watch_freq: 100
+metrics: {"loss": 1, "acc": 1, "rob": 10, "viz": 10, "fid": 10}
+retrain_crit: "acc"      # When to retrain
+tolerance: 0.05          # Accuracy drop tolerance
+retrain: {...}           # ClassificationConfig for retraining
+save: false
+```
+
+### trainer/ganstyle/critics/ — Critic Architecture Configs
+
+Critic configs are stored separately to enable Hydra sweeps over architectures.
+
+```yaml
+# trainer/ganstyle/critics/default
 critic:
   backbone:
     architecture: mlp
     model_kwargs:
-      hidden_multipliers: [3.0, 3.0, 3.0]
+      hidden_multipliers: [8.0, 8.0, 8.0, 8.0]  # 4 hidden layers
       nonlinearity: LeakyReLU
       negative_slope: 0.01
   head:
@@ -194,29 +230,52 @@ critic:
     architecture: linear
     model_kwargs: {}
   discrimination:
-    max_epoch_pre: 40    # Critic pre-training epochs
-    max_epoch_gan: 10    # Critic steps per generator step
+    max_epoch_pre: 100   # Critic pre-training epochs
+    max_epoch_gan: 20    # Critic steps per generator step
     batch_size: 32
     optimizer: {...}
     patience: 25
   criterion:
     name: "BCE"          # Or "wgan" for WGAN-GP
     kwargs: null
+```
 
-sampling:
-  num_bins: 200          # Sampling resolution
-  num_spc: 64            # Samples per class
-  batch_spc: 8           # Sampling batch size
-  method: secant         # Sampling method
+**Available critic configs:**
+| Config | Hidden Layers | Description |
+|--------|---------------|-------------|
+| `critics/d2` | `[8.0, 8.0]` | Shallow, 2 layers |
+| `critics/d3` | `[8.0, 8.0, 8.0]` | Medium, 3 layers |
+| `critics/d4` | `[8.0, 8.0, 8.0, 8.0]` | Deep, 4 layers |
+| `critics/d5` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers |
 
-r_real: 1.0              # Real/synthetic ratio
-optimizer: {...}         # Generator optimizer
-watch_freq: 1
-metrics: {"loss": 1, "acc": 1, "rob": 1}
-retrain_crit: "acc"      # When to retrain
-tolerance: 0.05          # Accuracy drop tolerance
-retrain: {...}           # ClassificationConfig for retraining
+**Sweeping over critic architectures:**
+```yaml
+# In experiment config
+hydra:
+  sweeper:
+    params:
+      trainer.ganstyle.critic: critics/d2, critics/d3, critics/d4, critics/d5
+```
+
+### trainer/generative/ — Generative Training
+
+```yaml
+# trainer/generative/default.yaml
+max_epoch: 100
+batch_size: 64
+optimizer:
+  name: "adam"
+  kwargs: {lr: 1e-4, weight_decay: 0.0}
+criterion:
+  name: "generative-nll"  # User must implement GenerativeNLL subclass
+  kwargs: {eps: 1e-8}
+patience: 50
+stop_crit: "loss"
+watch_freq: 100
+metrics: {"loss": 1, "fid": 10, "viz": 10}
 save: false
+auto_stack: true
+auto_unbind: false
 ```
 
 ### tracking/ — Experiment Tracking
@@ -347,6 +406,8 @@ Every config file corresponds to a dataclass in `src/utils/schemas.py`:
 | `BornMachineConfig` | `born/` |
 | `ClassificationConfig` | `trainer/classification/` |
 | `GANStyleConfig` | `trainer/ganstyle/` |
+| `CriticConfig` | `trainer/ganstyle/critics/` |
+| `GenerativeConfig` | `trainer/generative/` |
 | `AdversarialConfig` | `trainer/adversarial/` |
 | `TrackingConfig` | `tracking/` |
 
