@@ -1,0 +1,45 @@
+# TRADES Adversarial Training (Zhang et al.)
+# Loss = L(x, y) + beta * KL(p(x) || p(x_adv))
+# Better accuracy/robustness trade-off than PGD-AT
+max_epoch: 100
+batch_size: 64
+method: "trades"
+
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.0
+
+criterion:
+  name: "negative log-likelihood"
+  kwargs:
+    eps: 1e-8
+
+evasion:
+  method: "PGD"
+  norm: "inf"
+  criterion:
+    name: "negative log-likelihood"
+    kwargs:
+      eps: 1e-8
+  strengths: [0.1]
+  num_steps: 10
+  step_size: null  # defaults to 2.5 * strength / num_steps
+  random_start: true
+
+stop_crit: "acc"  # TRADES optimizes for accuracy/robustness trade-off
+patience: 30
+watch_freq: 500
+
+metrics: {"loss": 1, "acc": 1, "rob": 5}
+
+trades_beta: 6.0  # key TRADES hyperparameter (typically 1.0-6.0)
+clean_weight: 0.0  # ignored for TRADES
+curriculum: false
+curriculum_start: 0.0
+curriculum_end_epoch: null
+
+save: true
+auto_stack: true
+auto_unbind: false

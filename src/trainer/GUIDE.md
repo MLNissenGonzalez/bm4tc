@@ -166,19 +166,6 @@ def _toRetrain(self, validation_metrics):
 
 This triggers a `ClassificationTrainer` run to recover discriminative performance.
 
-### Important Issue
-
-**Bug in imports (`ganstyle.py:9-10`):**
-```python
-# WRONG:
-from data.handler import DataHandler
-from models import Critic, BornMachine
-
-# SHOULD BE:
-from src.data.handler import DataHandler
-from src.models import Critic, BornMachine
-```
-
 ## GenerativeTrainer (`generative.py`)
 
 Trains the BornMachine generator using NLL minimization on p(x|c).
@@ -239,21 +226,79 @@ unnormalized probabilities and partition functions.
 
 ## AdversarialTrainer (`adversarial.py`)
 
-**Status: Stub / Not Implemented**
+Trains the BornMachine classifier for robustness against adversarial examples.
+
+### Supported Methods
+
+**PGD-AT (Madry et al.)**
+```
+Loss = L(x_adv, y)
+```
+- Generates adversarial examples via PGD attack
+- Trains on adversarial examples instead of clean ones
+- Optionally mixes with clean examples via `clean_weight` parameter
+
+**TRADES (Zhang et al.)**
+```
+Loss = L(x, y) + β * KL(p(x) || p(x_adv))
+```
+- Clean loss maintains classification accuracy
+- KL term regularizes for robustness
+- `trades_beta` parameter controls the trade-off (typically 1.0-6.0)
+
+### Initialization
 
 ```python
-class Trainer:
-    def __init__(self):
-        pass
-
-    def train(bornmachine, cfg):
-        return NotImplementedError
+trainer = AdversarialTrainer(
+    bornmachine=bm,      # BornMachine instance
+    cfg=cfg,             # Full Config object
+    stage="adv",         # Training stage identifier
+    datahandler=dh,      # DataHandler with loaded data
+    device=device
+)
 ```
 
-**Planned functionality:**
-- Train classifier for robustness against adversarial examples
-- Use attacks from `src/utils/evasion/` during training
-- Alternate between normal and adversarial examples
+### Training Flow
+
+```python
+def train(self, goal: Dict[str, float] | None = None):
+    """
+    goal: Optional early stopping target, e.g., {"acc": 0.90, "rob": 0.70}
+    """
+```
+
+**Flow:**
+1. Prepare classifier, criterion, and optimizer
+2. For each epoch:
+   - Get current epsilon (handles curriculum if enabled)
+   - `_train_epoch()` — Generate adversarial examples and train
+   - `sync_tensors()` — Sync for evaluation
+   - `evaluator.evaluate()` — Compute metrics including robustness
+   - `_update()` — Check for improvement, early stopping
+3. `_summarise_training()` — Restore best weights, test eval, save
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| Curriculum training | Gradually increase epsilon over training epochs |
+| Mixed training | Combine clean and adversarial examples (PGD-AT only) |
+| Early stopping | Monitor "acc", "loss", or "rob" metrics |
+| Attack flexibility | Use FGM or PGD attacks via config |
+
+### Example Usage
+
+```python
+from src.trainer import ClassificationTrainer, AdversarialTrainer
+
+# Phase 1: Classification pretraining
+pre_trainer = ClassificationTrainer(bm, cfg, "pre", datahandler, device)
+pre_trainer.train()
+
+# Phase 2: Adversarial training
+adv_trainer = AdversarialTrainer(bm, cfg, "adv", datahandler, device)
+adv_trainer.train()
+```
 
 ## Configuration
 
@@ -309,6 +354,40 @@ stop_crit: "loss"          # "loss" or "fid"
 watch_freq: 100
 metrics: {loss: 1, fid: 10, viz: 10}
 save: false
+auto_stack: true
+auto_unbind: false
+```
+
+### AdversarialConfig (`schemas.py:277-344`)
+
+```yaml
+max_epoch: 100
+batch_size: 64
+method: "pgd_at"            # "pgd_at" or "trades"
+optimizer:
+  name: "adam"
+  kwargs: {lr: 1e-4, weight_decay: 0.0}
+criterion:
+  name: "negative log-likelihood"
+  kwargs: {eps: 1e-8}
+evasion:
+  method: "PGD"             # Attack method: "FGM" or "PGD"
+  norm: "inf"
+  criterion: {...}
+  strengths: [0.1]          # Epsilon values
+  num_steps: 10             # PGD iterations
+  step_size: null           # Auto-computed if null
+  random_start: true
+stop_crit: "rob"            # "loss", "acc", or "rob"
+patience: 30
+watch_freq: 500
+metrics: {loss: 1, acc: 1, rob: 5}
+trades_beta: 6.0            # TRADES trade-off parameter
+clean_weight: 0.0           # Mix clean examples (PGD-AT only)
+curriculum: false           # Gradually increase epsilon
+curriculum_start: 0.0
+curriculum_end_epoch: null
+save: true
 auto_stack: true
 auto_unbind: false
 ```

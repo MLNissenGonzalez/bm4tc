@@ -7,8 +7,8 @@ import src.utils.schemas as schemas
 import logging
 from .classification import Trainer as ClassificationTrainer
 from src.tracking import *
-from data.handler import DataHandler
-from models import Critic, BornMachine
+from src.data.handler import DataHandler
+from src.models import Critic, BornMachine
 import src.utils.get as get
 import wandb
 from tqdm import tqdm

@@ -36,7 +36,6 @@ class GenerativeNLL(nn.Module, ABC):
         super().__init__()
         self.eps = eps
 
-    @abstractmethod
     def compute_unnormalized_log_prob(
             self,
             bornmachine: "BornMachine",
@@ -71,7 +70,6 @@ class GenerativeNLL(nn.Module, ABC):
         unnormalized_probs = bornmachine.generator.sequential(embs) # batch_size
         return torch.log(unnormalized_probs + self.eps)
 
-    @abstractmethod
     def compute_log_partition(
             self,
             bornmachine: "BornMachine"

@@ -1,9 +1,43 @@
-max_epoch: 20
+# Test configuration for adversarial training (minimal settings for quick testing)
+max_epoch: 10
 batch_size: 16
+method: "pgd_at"
+
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.0
+
+criterion:
+  name: "negative log-likelihood"
+  kwargs:
+    eps: 1e-8
+
 evasion:
   method: "FGM"
   norm: "inf"
-  criterion: "crossentropy"
-  strengths: [0.1, 0.3] # not relative, default for dataspaces [0,1]^n
+  criterion:
+    name: "negative log-likelihood"
+    kwargs:
+      eps: 1e-8
+  strengths: [0.1]
+  num_steps: 5
+  step_size: null
+  random_start: true
+
+stop_crit: "acc"
+patience: 5
+watch_freq: 100
+
 metrics: {"loss": 1, "acc": 1}
-save: False
+
+trades_beta: 6.0
+clean_weight: 0.0
+curriculum: false
+curriculum_start: 0.0
+curriculum_end_epoch: null
+
+save: false
+auto_stack: true
+auto_unbind: false

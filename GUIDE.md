@@ -264,25 +264,19 @@ embedding: "fourier"
 
 ## Known Issues & Gotchas
 
-1. **Import Paths**: Some files use relative imports like `from models import ...` instead of `from src.models import ...`. This can cause issues.
+1. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
 
-2. **`ganstyle.py` trainer** has incorrect imports at line 9: `from data.handler import DataHandler` should be `from src.data.handler import DataHandler`
+2. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
 
-3. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
-
-4. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
-
-5. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
-
-6. **`adversarial.py` trainer** is a stub — not yet implemented
+3. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
 
 ## Future Directions (from README)
 
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
-2. **MNIST support**: Currently only 2D toy data
-3. **MPS as discriminator backbone**: Using MPS features as input to critic
-4. **More datasets**: Time series, higher-dimensional data
-5. **Adversarial training**: Full implementation of robust training
+2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
+3. **MNIST support**: Currently only 2D toy data
+4. **MPS as discriminator backbone**: Using MPS features as input to critic
+5. **More datasets**: Time series, higher-dimensional data
 
 ## Quick Reference: Common Commands
 
@@ -302,6 +296,15 @@ python -m experiments.classification +experiments=tests/classification
 
 # Run with W&B disabled (for debugging)
 python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
+
+# Test run adversarial training
+python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
+
+# PGD-AT training
+python -m experiments.adversarial trainer/adversarial=pgd_at dataset=moons_2k
+
+# TRADES training
+python -m experiments.adversarial trainer/adversarial=trades dataset=moons_2k
 
 # Check W&B dashboard
 # Visit: https://wandb.ai/<entity>/<project>

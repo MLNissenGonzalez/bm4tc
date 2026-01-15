@@ -276,12 +276,70 @@ cs.store(group="trainer/gantrain", name="schema", node=GANStyleConfig)
 
 @dataclass
 class AdversarialConfig:
+    """
+    Configuration for adversarial training of the BornMachine classifier.
+
+    Supports two methods:
+    - "pgd_at": PGD Adversarial Training (Madry et al.) - trains on adversarial examples
+    - "trades": TRADES (Zhang et al.) - L(x,y) + beta * KL(p(x) || p(x_adv))
+
+    Parameters
+    ----------
+    max_epoch : int
+        Maximum number of training epochs.
+    batch_size : int
+        Batch size for training.
+    method : str
+        Adversarial training method: "pgd_at" or "trades".
+    optimizer : OptimizerConfig
+        Optimizer configuration for training.
+    criterion : CriterionConfig
+        Base classification loss function.
+    evasion : EvasionConfig
+        Attack configuration (method, norm, strengths, etc.).
+    stop_crit : str
+        Metric to monitor for early stopping: "loss", "acc", or "rob".
+    patience : int
+        Number of epochs without improvement before early stopping.
+    watch_freq : int
+        Frequency of gradient logging to W&B.
+    metrics : Dict[str, int]
+        Metrics to evaluate and their frequencies.
+    trades_beta : float
+        Trade-off parameter for TRADES (ignored for pgd_at). Default 6.0.
+    clean_weight : float
+        Weight for clean examples in pgd_at (0.0 = pure adversarial). Default 0.0.
+    curriculum : bool
+        Whether to use curriculum learning over epsilon. Default False.
+    curriculum_start : float
+        Starting epsilon for curriculum training. Default 0.0.
+    curriculum_end_epoch : int | None
+        Epoch by which to reach full epsilon. Default None (use max_epoch).
+    save : bool
+        Whether to save the trained model.
+    auto_stack : bool
+        tensorkrowch auto_stack option. Default True.
+    auto_unbind : bool
+        tensorkrowch auto_unbind option. Default False.
+    """
     max_epoch: int
     batch_size: int
+    method: str  # "pgd_at" or "trades"
+    optimizer: OptimizerConfig
+    criterion: CriterionConfig
     evasion: EvasionConfig
-    metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
-    save: bool
-    # and more.
+    stop_crit: str  # "loss", "acc", or "rob"
+    patience: int
+    watch_freq: int
+    metrics: Dict[str, int]
+    trades_beta: float = 6.0
+    clean_weight: float = 0.0
+    curriculum: bool = False
+    curriculum_start: float = 0.0
+    curriculum_end_epoch: int | None = None
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
 
 cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
