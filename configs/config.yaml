@@ -6,6 +6,7 @@ defaults:
   - born: d4D3
   - trainer/classification: test
   - trainer/ganstyle: test
+  - trainer/generative: null
   - trainer/adversarial: test
   - tracking: test
   - override hydra/job_logging: stream_only

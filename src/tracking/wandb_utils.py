@@ -83,12 +83,15 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     born_name = f"_D{cfg.born.init_kwargs.bond_dim}-d{cfg.born.init_kwargs.in_dim}"
     trainer_name = ""
     
-    if OmegaConf.select(cfg, "trainer.classification") is not None:
-        trainer_name = trainer_name + f"pre{cfg.trainer.classification.max_epoch}"
-    if OmegaConf.select(cfg, "trainer.ganstyle") is not None:
+    if OmegaConf.select(cfg, "trainer.classification.max_epoch") is not None:
+      trainer_name = trainer_name + f"pre{cfg.trainer.classification.max_epoch}"
+    if OmegaConf.select(cfg, "trainer.ganstyle.max_epoch") is not None:
         trainer_name = trainer_name + f"gan{cfg.trainer.ganstyle.max_epoch}"
-    if OmegaConf.select(cfg, "trainer.adversarial") is not None:
+    if OmegaConf.select(cfg, "trainer.generative.max_epoch") is not None:
+        trainer_name = trainer_name + f"gen{cfg.trainer.generative.max_epoch}"
+    if OmegaConf.select(cfg, "trainer.adversarial.max_epoch") is not None:
         trainer_name = trainer_name + f"adv{cfg.trainer.adversarial.max_epoch}"
+
 
     run_name = job_num_name + born_name + trainer_name
 

@@ -206,7 +206,7 @@ class CriticConfig:
     discrimination: DiscriminationConfig
     criterion: CriterionConfig # wgan, bce
 
-cs.store(group="model/crit", name="schema", node=CriticConfig)
+cs.store(group="trainer/ganstyle/critic", name="schema", node=CriticConfig)
 # --- Trainer configs ---  
 
 @dataclass 

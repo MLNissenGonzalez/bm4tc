@@ -1,5 +1,7 @@
+defaults:
+- critic: default
+
 max_epoch: 100
-critic: critics/default
 sampling:
   num_bins: 200
   num_spc: 128
