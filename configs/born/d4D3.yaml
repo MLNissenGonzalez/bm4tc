@@ -1,0 +1,7 @@
+init_kwargs:
+  in_dim: 4 # physical dimension
+  bond_dim: 3
+  boundary: "obc"
+  init_method: "randn_eye"
+  std: 1e-9
+embedding: "fourier"

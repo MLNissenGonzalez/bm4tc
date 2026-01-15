@@ -1,0 +1,2 @@
+This module configures how 'Weights & Biases' is used in experiment tracking. 
+Furthermore, evaluation of the `BornMachine` is implemented via the `PerformanceEvaluator` class that collects different metrics of interest and evaluates the Born machine efficiently. 

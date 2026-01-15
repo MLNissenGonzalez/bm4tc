@@ -1,0 +1,18 @@
+max_epoch: 100
+batch_size: 64
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+criterion:
+  name: "generative-nll"  # User must implement and pass GenerativeNLL subclass
+  kwargs:
+    eps: 1e-8
+patience: 50
+stop_crit: "loss"
+watch_freq: 100
+metrics: {"loss": 1, "fid": 10, "viz": 10}
+save: false
+auto_stack: true
+auto_unbind: false

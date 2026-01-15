@@ -1,0 +1,23 @@
+# @package _global_
+experiment: critic_sweep
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: moons_4k # change if you change the models
+  - override /trainer/classification: adam_b64e500 # right now I have to pass this as I am defaulting to this in the code
+  - override /trainer/ganstyle: default
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+trainer:
+  classification:
+    save: False
+  
+# provide path or give null
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/moons_4k_080126.005
+
+hydra:
+  sweeper:
+    params:
+      trainer.ganstyle.optimizer.kwargs.lr: 0.005
+      trainer/ganstyle/critic: d2, d3, d4, d5

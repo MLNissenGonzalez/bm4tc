@@ -1,0 +1,1 @@
+This implements a data handler class that loads (and generates or downloads if necessary) data, preprocesses it, and stores information of that dataset. Preprocessing is dependent on the embedding used by the model.  

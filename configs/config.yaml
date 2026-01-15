@@ -1,15 +1,14 @@
+experiment: default
+
 defaults:
   - _self_ # has to be here such that overrides work
-  - sampling: test
-  - gantrain: test2
-  - dataset: moons_4k
-  - model/mps: d30D18
-  - model/dis: wide_leaky_ens
-  - pretrain/mps: adam_b64e500
-  - pretrain/dis: adam_b64e1000lr3
-  - wandb: defaults
-  - reproduce/save: none
-  - reproduce/random: "2811"
+  - dataset: circles_2k
+  - born: d4D3
+  - trainer/classification: test
+  - trainer/ganstyle: test
+  - trainer/generative: null
+  - trainer/adversarial: test
+  - tracking: test
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
 

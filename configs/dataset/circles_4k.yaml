@@ -6,3 +6,4 @@ gen_dow_kwargs:
   noise: 0.05
   circ_factor: 0.3
 split: [0.5, 0.25, 0.25] # train, val, test
+split_seed: 11

@@ -1,0 +1,11 @@
+# @package _global_
+experiment: classifications_test
+
+defaults:
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+
+hydra:
+  sweeper:
+    params:
+      born: d4D3, d10D4
