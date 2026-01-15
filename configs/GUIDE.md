@@ -66,13 +66,13 @@ configs/
 │   ├── ganstyle/             # GAN training configs
 │   │   ├── default.yaml      # Default GAN config
 │   │   ├── test.yaml         # Test config
-│   │   └── critics/          # Critic architecture configs
-│   │       ├── default       # Default critic (4 layers, width 8)
-│   │       ├── test          # Test critic (smaller)
-│   │       ├── d2            # 2 hidden layers
-│   │       ├── d3            # 3 hidden layers
-│   │       ├── d4            # 4 hidden layers
-│   │       └── d5            # 5 hidden layers
+│   │   └── critic/           # Critic architecture configs (Hydra config group)
+│   │       ├── default.yaml  # Default critic (4 layers, width 8)
+│   │       ├── test.yaml     # Test critic (smaller)
+│   │       ├── d2.yaml       # 2 hidden layers
+│   │       ├── d3.yaml       # 3 hidden layers
+│   │       ├── d4.yaml       # 4 hidden layers
+│   │       └── d5.yaml       # 5 hidden layers
 │   ├── generative/           # Generative training configs
 │   │   ├── default.yaml      # Default generative config
 │   │   └── test.yaml         # Test config
@@ -189,13 +189,14 @@ auto_unbind: false     # tensorkrowch setting
 
 ### trainer/ganstyle/ — GAN Training
 
-The critic configuration is factored out into separate files under `critics/` to enable easy sweeping over architectures.
+The critic configuration is a Hydra config group under `critic/`, enabling easy sweeping over architectures.
 
 ```yaml
 # trainer/ganstyle/default.yaml
-max_epoch: 100
-critic: critics/default   # Reference to critic config file
+defaults:
+  - critic: default      # Loads critic/default.yaml via Hydra composition
 
+max_epoch: 100
 sampling:
   num_bins: 200          # Sampling resolution
   num_spc: 128           # Samples per class
@@ -212,49 +213,53 @@ retrain: {...}           # ClassificationConfig for retraining
 save: false
 ```
 
-### trainer/ganstyle/critics/ — Critic Architecture Configs
+### trainer/ganstyle/critic/ — Critic Architecture Configs
 
-Critic configs are stored separately to enable Hydra sweeps over architectures.
+Critic configs are a Hydra config group, composed via the `defaults` list. Fields are at root level (no `critic:` wrapper).
 
 ```yaml
-# trainer/ganstyle/critics/default
-critic:
-  backbone:
-    architecture: mlp
-    model_kwargs:
-      hidden_multipliers: [8.0, 8.0, 8.0, 8.0]  # 4 hidden layers
-      nonlinearity: LeakyReLU
-      negative_slope: 0.01
-  head:
-    class_aware: true
-    architecture: linear
-    model_kwargs: {}
-  discrimination:
-    max_epoch_pre: 100   # Critic pre-training epochs
-    max_epoch_gan: 20    # Critic steps per generator step
-    batch_size: 32
-    optimizer: {...}
-    patience: 25
-  criterion:
-    name: "BCE"          # Or "wgan" for WGAN-GP
-    kwargs: null
+# trainer/ganstyle/critic/d2.yaml
+backbone:
+  architecture: mlp
+  model_kwargs:
+    hidden_multipliers: [8.0, 8.0]  # 2 hidden layers
+    nonlinearity: LeakyReLU
+    negative_slope: 0.01
+head:
+  class_aware: true
+  architecture: linear
+  model_kwargs: {}
+discrimination:
+  max_epoch_pre: 100   # Critic pre-training epochs
+  max_epoch_gan: 20    # Critic steps per generator step
+  batch_size: 32
+  optimizer: {...}
+  patience: 25
+criterion:
+  name: "BCE"          # Or "wgan" for WGAN-GP
+  kwargs: null
 ```
 
 **Available critic configs:**
 | Config | Hidden Layers | Description |
 |--------|---------------|-------------|
-| `critics/d2` | `[8.0, 8.0]` | Shallow, 2 layers |
-| `critics/d3` | `[8.0, 8.0, 8.0]` | Medium, 3 layers |
-| `critics/d4` | `[8.0, 8.0, 8.0, 8.0]` | Deep, 4 layers |
-| `critics/d5` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers |
+| `d2` | `[8.0, 8.0]` | Shallow, 2 layers |
+| `d3` | `[8.0, 8.0, 8.0]` | Medium, 3 layers |
+| `d4` | `[8.0, 8.0, 8.0, 8.0]` | Deep, 4 layers |
+| `d5` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers |
 
 **Sweeping over critic architectures:**
+```bash
+# Command line multirun
+python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2,d3,d4,d5'
+```
+
 ```yaml
-# In experiment config
+# Or in experiment config
 hydra:
   sweeper:
     params:
-      trainer.ganstyle.critic: critics/d2, critics/d3, critics/d4, critics/d5
+      trainer/ganstyle/critic: d2, d3, d4, d5
 ```
 
 ### trainer/generative/ — Generative Training
@@ -406,7 +411,7 @@ Every config file corresponds to a dataclass in `src/utils/schemas.py`:
 | `BornMachineConfig` | `born/` |
 | `ClassificationConfig` | `trainer/classification/` |
 | `GANStyleConfig` | `trainer/ganstyle/` |
-| `CriticConfig` | `trainer/ganstyle/critics/` |
+| `CriticConfig` | `trainer/ganstyle/critic/` |
 | `GenerativeConfig` | `trainer/generative/` |
 | `AdversarialConfig` | `trainer/adversarial/` |
 | `TrackingConfig` | `tracking/` |

@@ -33,7 +33,7 @@ DatasetConfig             →    dataset/*.yaml
 BornMachineConfig         →    born/*.yaml
 ClassificationConfig      →    trainer/classification/*.yaml
 GANStyleConfig            →    trainer/ganstyle/*.yaml
-CriticConfig              →    trainer/ganstyle/critics/*
+CriticConfig              →    trainer/ganstyle/critic/*.yaml
 GenerativeConfig          →    trainer/generative/*.yaml
 AdversarialConfig         →    trainer/adversarial/*.yaml
 TrackingConfig            →    tracking/*.yaml
