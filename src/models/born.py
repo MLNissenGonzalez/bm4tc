@@ -72,7 +72,7 @@ class BornMachine:
         (self.in_dim, self.out_dim,
          self.bond_dim, self.out_position) = (cfg.init_kwargs.in_dim, cfg.init_kwargs.out_dim,
                            cfg.init_kwargs.bond_dim, self.classifier.out_position)
-        
+        self.num_sites = len(self.classifier.tensors)
         self.cfg = cfg
         self.device = device
         

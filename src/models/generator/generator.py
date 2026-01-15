@@ -114,7 +114,7 @@ class BornGenerator(tk.models.MPS):
                 "embedded tensors as values."
             )
 
-        # Identify which features are fed into the MPS.
+        # Identify which features are fed into the MPS, including class site.
         self.in_features = [i for i in embs.keys()]
         in_tensors = [embs[i] for i in self.in_features]
 

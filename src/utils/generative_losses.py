@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 from typing import TYPE_CHECKING
+import tensorkrowch as tk
 
 if TYPE_CHECKING:
     from src.models import BornMachine
@@ -46,7 +47,7 @@ class GenerativeNLL(nn.Module, ABC):
         Compute log(|psi(x,c)|^2) for each sample.
 
         This should use the generator's sequential method with full contraction
-        to compute the squared amplitude for each (data, label) pair.
+        (because on internal tensorkrowch stuff) to compute the squared amplitude for each (data, label) pair.
 
         Args:
             bornmachine: BornMachine instance with generator view.
@@ -56,31 +57,47 @@ class GenerativeNLL(nn.Module, ABC):
         Returns:
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
-        pass
+        data_embs = bornmachine.embedding(data, bornmachine.in_dim) # (batch_size, data_dim, physical_dim)
+        class_embs = tk.embeddings.basis(labels, bornmachine.out_dim) # (batch_size, num_classes)
+        embs = {}
+        # TODO: Can this be vectorized?
+        for site in range(bornmachine.num_sites):
+            if site == bornmachine.out_position:
+                embs[site] = class_embs # (batch_size, num_classes)
+            else:
+                offset = int(site > bornmachine.out_position)
+                embs[site] = data_embs[:, site - offset, :] # (batch_size, physical_dim)
+        # TODO: Check with José if I have to use sequential method here because num_classes neq physical_dim
+        unnormalized_probs = bornmachine.generator.sequential(embs) # batch_size
+        return torch.log(unnormalized_probs + self.eps)
 
     @abstractmethod
     def compute_log_partition(
             self,
-            bornmachine: "BornMachine",
-            labels: torch.Tensor
+            bornmachine: "BornMachine"
     ) -> torch.Tensor:
         """
-        Compute log(Z_c) for each class in the batch.
+        Compute log(Z).
 
-        The partition function Z_c = sum_x |psi(x,c)|^2 normalizes the
-        Born distribution. Implement using your chosen approach:
-        - Exact enumeration (tractable for MPS via tensor contraction)
-        - Importance sampling
-        - Variational bounds
+        The partition function Z = sum_x,c |psi(x,c)|^2 normalizes the joint Born distribution. 
+        Basically just the norm of the MPS squared (Full contraction of all tensors with themselves).
 
         Args:
-            bornmachine: BornMachine instance.
-            labels: Class labels of shape (batch_size,).
+            bornmachine: BornMachine instance
 
         Returns:
-            Tensor of shape (batch_size,) with log partition function values.
+            Tensor of shape (1,) with log partition function values.
         """
-        pass
+        # TODO: Problem: reset changes parameters of bornmachine.generator! 
+        #       For gradient descent, gradients need to pass through here. Talk with José about this.
+        #       1. I could take two optimization steps, one after log_unnorm and one after log_Z, but could be inefficient.
+        #       2. I could write the contraction myself without renaming of the nn.Parameters, but could be tedious. 
+
+        bornmachine.generator.reset()
+        Z = bornmachine.generator.norm() # this takes the square root of the full contraction (need to  be squared)
+        bornmachine.generator.reset()
+
+        return torch.log(Z + self.eps)
 
     def forward(
             self,
