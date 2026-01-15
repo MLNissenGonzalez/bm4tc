@@ -1,8 +1,9 @@
+defaults:
+- critic: test
 max_epoch: 5
-critic: critics/test
 sampling:
   num_bins: 200
-  num_spc: 64
+  num_spc: 32
   batch_spc: 8
   method: secant
 r_real: 1.0 # ratio n_real = n_synth * r_real

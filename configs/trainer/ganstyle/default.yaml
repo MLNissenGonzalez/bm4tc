@@ -4,7 +4,7 @@ defaults:
 max_epoch: 100
 sampling:
   num_bins: 200
-  num_spc: 128
+  num_spc: 256
   batch_spc: 16
   method: secant
 r_real: 1.0 # ratio n_real = n_synth * r_real
@@ -14,7 +14,7 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.00
 watch_freq: 100
-metrics: {"loss": 1, "acc": 1, "rob": 10, "viz": 10, "fid": 10}
+metrics: {"loss": 1, "acc": 1, "rob": 5, "viz": 10, "fid": 10}
 retrain_crit: "acc"
 tolerance: 0.05
 retrain:

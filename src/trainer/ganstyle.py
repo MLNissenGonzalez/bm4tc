@@ -11,7 +11,6 @@ from src.data.handler import DataHandler
 from src.models import Critic, BornMachine
 import src.utils.get as get
 import wandb
-from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 

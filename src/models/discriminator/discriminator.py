@@ -16,10 +16,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-# TODO: Include training in this? Yes because, discriminator should be understood to be only an approximation to distance on probability spaces
-# TODO: criterion, some basic data info, architecture design, are owned by the class. training info has to fed to the discriminator
-
-# ADDED AS ISSUE.
+# # ADDED AS ISSUE.
 # TODO: Add other discriminator functions, e.g. MPS with MLP module, shared backbone critic with class heads
 # TODO: Add the discriminator class taking an MPS as input
 #       and returning a pytorch module that is the MPS with an
@@ -133,7 +130,7 @@ class Critic(nn.Module):
         N, C, D = natural.shape
         alpha = torch.rand(size = (N, C, 1), device=natural.device)                 # (N, C, 1)
         x_hat = alpha * natural + (1-alpha) * generated                             # (N, C, D)
-        x_hat.requires_grad = True
+        x_hat = x_hat.detach().requires_grad_(True)
         output = self.forward(x_hat).mean()                                         # scalar
         grads = autograd.grad(outputs=output, inputs=x_hat, create_graph=True)[0]   # (N, C, D)
         penalty = torch.square(
@@ -205,8 +202,8 @@ class Critic(nn.Module):
             if mode=="train":
                 loss = self.train_step(naturals, generated)
             else:
-                with torch.no_grad():
-                    loss = self.loss(naturals, generated).cpu().item()
+                # Don't use no_grad() for WGAN as it needs gradients for penalty computation
+                loss = self.loss(naturals, generated).detach().cpu().item()
             losses.append(loss)
         epoch_loss = sum(losses) / len(losses)
         return epoch_loss
@@ -263,11 +260,21 @@ class Critic(nn.Module):
         loaders = {}
         bornmachine.to(device)
         sampling_cfg = deepcopy(self.sampling_cfg)
+        
+        # Get the batch size used for natural data loaders
+        natural_batch_size = None
+        for batch in datahandler.discrimination["train"]:
+            natural_batch_size = batch.shape[0]
+            break
+        
+        # Use same batch size for synthetic loaders
+        batch_size = natural_batch_size if natural_batch_size is not None else self.train_cfg.batch_size
+        
         for i, split in enumerate(["train", "valid", "test"]):
             sampling_cfg.num_spc = datahandler.num_spc[i]
             with torch.no_grad():
                 generated = bornmachine.sample(sampling_cfg).cpu()
-            loaders[split] = DataLoader(generated, batch_size=self.train_cfg.batch_size,
+            loaders[split] = DataLoader(generated, batch_size=batch_size,
                                         shuffle=(split=="train"), drop_last=(split=="train"))
         return loaders
 
