@@ -1,0 +1,40 @@
+defaults:
+- critic: default
+
+max_epoch: 200
+sampling:
+  num_bins: 400
+  num_spc: 256
+  batch_spc: 16
+  method: secant
+r_real: 1.0 # ratio n_real = n_synth * r_real
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+watch_freq: 100
+metrics: {"loss": 1, "acc": 1, "rob": 5, "viz": 20, "fid": 20}
+retrain_crit: "acc"
+tolerance: 0.05
+retrain:
+  max_epoch: 40
+  batch_size: 256 # samples loaded per categorisation step for all classes involved
+  criterion: 
+    name: "negative log-likelihood"
+    kwargs:
+      eps: 1e-8
+  optimizer:
+    name: "adam"
+    kwargs:
+      lr: 1e-4
+      weight_decay: 0.00
+  auto_stack: True
+  auto_unbind: False
+  patience: 30
+  stop_crit: "acc"
+  watch_freq: 100
+  metrics: {"acc": 10}
+  save: False
+save: False
+
