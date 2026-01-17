@@ -10,9 +10,9 @@ criterion:
   kwargs:
     eps: 1e-8
 patience: 10
-stop_crit: "loss"
+stop_crit: "acc"
 watch_freq: 1
-metrics: {"loss": 1, "fid": 1, "viz": 1}
+metrics: {"genloss": 1, "acc": 1, "fid": 1, "viz": 1}
 save: false
 auto_stack: true
 auto_unbind: false

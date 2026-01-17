@@ -43,6 +43,8 @@ def main(cfg: schemas.Config):
 
     If model_path is provided in config, loads a pretrained model.
     Otherwise, trains a new model with classification first.
+
+    Returns the best validation loss for HPO (Optuna sweeper).
     """
     # Initialize wandb and device
     run = init_wandb(cfg)
@@ -76,6 +78,7 @@ def main(cfg: schemas.Config):
             logger.warning("No classification config provided, starting adversarial training from random init.")
 
     # Adversarial Training
+    adv_trainer = None
     if cfg.trainer.adversarial is not None:
         logger.info(f"Starting adversarial training with method: {cfg.trainer.adversarial.method}")
         adv_trainer = AdversarialTrainer(bornmachine, cfg, "adv", datahandler, device)
@@ -86,6 +89,15 @@ def main(cfg: schemas.Config):
 
     # Finish
     run.finish()
+
+    # Return objective for HPO (Optuna sweeper uses this)
+    # Uses the metric specified by stop_crit in the adversarial config
+    stop_crit = cfg.trainer.adversarial.stop_crit
+    objective = adv_trainer.best.get(stop_crit, float("inf"))
+    # Negate accuracy/robustness metrics for minimization (Optuna minimizes by default)
+    if stop_crit in ["acc", "rob"]:
+        objective = -objective
+    return objective
 
 
 if __name__ == "__main__":

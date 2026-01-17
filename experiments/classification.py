@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(cfg: schemas.Config):
+    """
+    Main entry point for classification training.
 
+    Returns the best validation loss for HPO (Optuna sweeper).
+    """
     # Initialising wandb and device
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,6 +44,15 @@ def main(cfg: schemas.Config):
 
     # Finish
     run.finish()
+
+    # Return objective for HPO (Optuna sweeper uses this)
+    # Uses the metric specified by stop_crit in the classification config
+    stop_crit = cfg.trainer.classification.stop_crit
+    objective = trainer.best.get(stop_crit, float("inf"))
+    # Negate accuracy/robustness metrics for minimization (Optuna minimizes by default)
+    if stop_crit in ["acc", "rob"]:
+        objective = -objective
+    return objective
 
 if __name__ == "__main__":
     main()

@@ -31,7 +31,7 @@ stop_crit: "rob"
 patience: 30
 watch_freq: 500
 
-metrics: {"loss": 1, "acc": 1, "rob": 5}
+metrics: {"clsloss": 1, "acc": 1, "rob": 5}
 
 trades_beta: 6.0  # ignored for pgd_at
 clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)

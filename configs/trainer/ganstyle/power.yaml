@@ -14,9 +14,10 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.00
 watch_freq: 100
-metrics: {"loss": 1, "acc": 1, "rob": 5, "viz": 20, "fid": 20}
+metrics: {"clsloss": 1, "acc": 1, "rob": 5, "viz": 20, "fid": 20}
 retrain_crit: "acc"
 tolerance: 0.05
+stop_crit: "acc"
 retrain:
   max_epoch: 40
   batch_size: 256 # samples loaded per categorisation step for all classes involved

@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
 def main(cfg: schemas.Config):
+    """
+    Main entry point for GAN-style training.
 
+    Returns the best validation metric (determined by stop_crit) for HPO.
+    """
     # Initialising wandb and device
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -44,16 +48,16 @@ def main(cfg: schemas.Config):
         # Pretrain
         pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
         pre_trainer.train()
-    
+
 
     # Critic TODO: Think about how to actually use backbone flexibility
-    critic = Critic(cfg.trainer.ganstyle, datahandler, device=device) 
-    
-    
+    critic = Critic(cfg.trainer.ganstyle, datahandler, device=device)
+
+
     # Gantrain
     if pre_trainer is None:
         logger.info("Evaluating former best performance.")
-        evaluator = PerformanceEvaluator(cfg, datahandler, cfg.trainer.ganstyle, device) 
+        evaluator = PerformanceEvaluator(cfg, datahandler, cfg.trainer.ganstyle, device)
         former_best = evaluator.evaluate(bornmachine, split="valid", step=0) # evaluator is not needed after this
     else:
         former_best = pre_trainer.best
@@ -63,6 +67,15 @@ def main(cfg: schemas.Config):
 
     # Finish
     run.finish()
+
+    # Return objective for HPO (Optuna sweeper uses this)
+    # Returns the metric specified by stop_crit in the ganstyle config
+    stop_crit = cfg.trainer.ganstyle.stop_crit
+    objective = gan_trainer.best.get(stop_crit, float("inf"))
+    # Negate accuracy/robustness metrics for minimization (Optuna minimizes by default)
+    if stop_crit in ["acc", "rob"]:
+        objective = -objective
+    return objective
 
 
 if __name__ == "__main__":

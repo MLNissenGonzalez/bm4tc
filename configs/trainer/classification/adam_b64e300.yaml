@@ -12,8 +12,8 @@ optimizer:
 auto_stack: True
 auto_unbind: False
 patience: 40
-stop_crit: "loss"
+stop_crit: "acc"
 watch_freq: 1000
-metrics: {"loss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
+metrics: {"clsloss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
 save: True
 

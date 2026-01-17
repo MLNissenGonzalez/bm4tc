@@ -20,5 +20,6 @@ dependencies:
       - tensorkrowch
       - opt_einsum==3.2
       - hydra-core
+      - hydra-optuna-sweeper    # For Bayesian HPO
       - wandb
 

@@ -215,7 +215,7 @@ class ClassificationConfig:
     batch_size: int  # samples loaded per categorisation step for all classes involved
     optimizer: OptimizerConfig
     criterion: CriterionConfig 
-    stop_crit: str  # loss / acc
+    stop_crit: str  # "acc", "clsloss", "genloss", "fid", or "rob"
     patience: int
     watch_freq: int
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
@@ -257,6 +257,9 @@ class GANStyleConfig:
         Accuracy drop tolerance; triggers retraining if validation accuracy falls below (best_acc - acc_drop_tol).
     retrain : PretrainMPSConfig
         Pretraining configuration used for retraining generator when needed.
+    stop_crit : str, default="acc"
+        Metric used to determine the best model for HPO. Options: "clsloss", "genloss", "acc", "fid", "rob".
+        When this metric improves, all validation metrics are saved as the best model's metrics.
     smoothing : float, default=0.0
         Optional label smoothing applied to targets for the generator/discriminator losses.
     """
@@ -267,9 +270,10 @@ class GANStyleConfig:
     optimizer: OptimizerConfig
     watch_freq: int
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
-    retrain_crit: str # "acc" or "loss"
-    tolerance: float # retrain for acc, if: tolerance < (goal_acc - current_acc), retrain for loss, if: tolerance < (current_loss - goal_loss) / goal_loss     
+    retrain_crit: str # "acc" or "loss" - criterion for triggering classifier retraining
+    tolerance: float # retrain for acc, if: tolerance < (goal_acc - current_acc), retrain for loss, if: tolerance < (current_loss - goal_loss) / goal_loss
     retrain: ClassificationConfig
+    stop_crit: str = "acc"  # metric determining best model for HPO (e.g., "clsloss", "genloss", "acc", "fid", "rob")
     save: bool = False
 
 cs.store(group="trainer/gantrain", name="schema", node=GANStyleConfig)
@@ -298,7 +302,7 @@ class AdversarialConfig:
     evasion : EvasionConfig
         Attack configuration (method, norm, strengths, etc.).
     stop_crit : str
-        Metric to monitor for early stopping: "loss", "acc", or "rob".
+        Metric to monitor for early stopping: "acc", "clsloss", "genloss", "fid", or "rob".
     patience : int
         Number of epochs without improvement before early stopping.
     watch_freq : int
@@ -328,7 +332,7 @@ class AdversarialConfig:
     optimizer: OptimizerConfig
     criterion: CriterionConfig
     evasion: EvasionConfig
-    stop_crit: str  # "loss", "acc", or "rob"
+    stop_crit: str  # "acc", "clsloss", "genloss", "fid", or "rob"
     patience: int
     watch_freq: int
     metrics: Dict[str, int]
@@ -356,7 +360,7 @@ class GenerativeConfig:
     batch_size: int
     optimizer: OptimizerConfig
     criterion: CriterionConfig  # generative NLL criterion (user implements)
-    stop_crit: str  # "loss" or "fid"
+    stop_crit: str  # "acc", "genloss", "fid", or "rob"
     patience: int
     watch_freq: int
     metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
