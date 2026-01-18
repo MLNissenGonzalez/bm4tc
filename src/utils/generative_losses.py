@@ -91,6 +91,11 @@ class GenerativeNLL(nn.Module, ABC):
         #       1. I could take two optimization steps, one after log_unnorm and one after log_Z, but could be inefficient.
         #       2. I could write the contraction myself without renaming of the nn.Parameters, but could be tedious. 
 
+        # Solution proposed by José: Let BornGenerator carry a virtual tk copy of the MPS. 
+        # This copy shares the tensors with the original BornGenerator.
+        # The copy is responsible for computing the partition function. This way, the virtual structure of the 
+        # partition function computation is not inferferring with the likelihood computation
+
         bornmachine.generator.reset()
         Z = bornmachine.generator.norm() # this takes the square root of the full contraction (need to  be squared)
         bornmachine.generator.reset()

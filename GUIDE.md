@@ -139,8 +139,7 @@ adversarial_training_mps/
 │   ├── tracking/              # W&B tracking configs
 │   ├── experiments/           # Full experiment configs (override defaults)
 │   └── hydra/                 # Hydra-specific configs
-│       ├── job_logging/      # Logging configs
-│       └── sweeper/          # HPO sweeper configs (optuna)
+│       └── job_logging/      # Logging configs
 ├── experiments/               # Entry point scripts
 │   ├── classification.py      # Classification-only training
 │   ├── ganstyle.py           # Classification + GAN-style training

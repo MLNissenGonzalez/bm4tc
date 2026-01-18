@@ -94,11 +94,9 @@ configs/
 │       ├── classifications.yaml
 │       └── ganstyle.yaml
 └── hydra/                    # Hydra-specific configs
-    ├── job_logging/
-    │   ├── debug.yaml        # Verbose logging
-    │   └── stream_only.yaml  # Console-only logging
-    └── sweeper/
-        └── optuna.yaml       # Optuna HPO sweeper config
+    └── job_logging/
+        ├── debug.yaml        # Verbose logging
+        └── stream_only.yaml  # Console-only logging
 ```
 
 ## Main Config (`config.yaml`)
@@ -431,19 +429,8 @@ hydra:
     study_name: my_study  # Reuse same name to resume
 ```
 
-**Base Sweeper Config** (`configs/hydra/sweeper/optuna.yaml`):
-```yaml
-_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
-sampler:
-  _target_: optuna.samplers.TPESampler
-  seed: 42
-  n_startup_trials: 10
-direction: minimize
-study_name: hpo_study
-storage: null
-n_trials: 50
-n_jobs: 1
-```
+**Note on Sweeper Configuration**:
+Do NOT create a custom `configs/hydra/sweeper/optuna.yaml` file. This triggers deprecated Hydra 1.1 automatic schema matching. Instead, configure the Optuna sweeper entirely within your experiment configs using the `hydra.sweeper` section as shown above. The `- override /hydra/sweeper: optuna` default loads the plugin's built-in configuration.
 
 See `experiments/GUIDE.md` for running HPO experiments.
 
