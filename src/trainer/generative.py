@@ -92,6 +92,12 @@ class Trainer:
                 self.best[metric_name] = float("Inf")
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
+        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        if self.stopping_criterion_name not in valid_criteria:
+            raise ValueError(
+                f"Invalid stop_crit '{self.stopping_criterion_name}'. "
+                f"Must be one of: {valid_criteria}"
+            )
         # Always track rob for averaging (even if not in metrics explicitly)
         if self.stopping_criterion_name == "rob" and "rob" not in self.best:
             self.best["rob"] = 0.0
@@ -251,6 +257,7 @@ class Trainer:
                   If reached, training stops regardless of patience.
         """
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.best_epoch = 0
         self.epoch_times = []
 
         # Prepare generator and optimizer

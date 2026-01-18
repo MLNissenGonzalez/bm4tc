@@ -73,6 +73,12 @@ class Trainer:
 
         # Initialize best metrics tracking (for HPO)
         self.stopping_criterion = self.train_cfg.stop_crit
+        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        if self.stopping_criterion not in valid_criteria:
+            raise ValueError(
+                f"Invalid stop_crit '{self.stopping_criterion}'. "
+                f"Must be one of: {valid_criteria}"
+            )
         # Ensure stop_crit is in metrics (evaluated every epoch if not already)
         metrics_for_best = dict(self.train_cfg.metrics)
         if self.stopping_criterion not in metrics_for_best and self.stopping_criterion != "rob":
