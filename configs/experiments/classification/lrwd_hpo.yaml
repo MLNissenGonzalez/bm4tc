@@ -8,6 +8,7 @@ defaults:
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
+  - override /hydra/sweeper: optuna  # Enable Optuna
 
 trainer:
   classification:
@@ -27,5 +28,5 @@ hydra:
 
     params:
       trainer.classification.optimizer.kwargs.lr: tag(log, interval(1e-6, 1e-1))
-      trainer.classification.optimizer.kwargs.weight_decay: tag(log, interval(1e-4, 1e-1)
+      trainer.classification.optimizer.kwargs.weight_decay: tag(log, interval(1e-4, 1e-1))
       trainer.classification.batch_size: choice(64, 128, 512)
