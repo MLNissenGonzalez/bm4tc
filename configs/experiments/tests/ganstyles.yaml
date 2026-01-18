@@ -3,8 +3,8 @@ experiment: ganstyle_test
 
 defaults:
   - override /born: d30D18
-  - override /dataset: spirals_2k
-  - override /trainer/classification: adam_b64e500
+  - override /dataset: test
+  - override /trainer/classification: null
   - override /trainer/ganstyle: test
   - override /trainer/adversarial: null
   - override /tracking: test
@@ -14,9 +14,9 @@ trainer:
     save: False
   
 # provide path or give null
-model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/spirals_4k_080126_1.001
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/moons_4k_080126.005
 
 hydra:
   sweeper:
     params:
-      trainer.ganstyle.optimizer.kwargs.lr: 1e-3, 1e-4 # moons: 5e-2, 1e-2, 5e-3, circles: 1e-3, 5e-3, 5e-2, spirals: 1e-3, 5e-4, 1e-4
+      trainer.ganstyle.optimizer.kwargs.lr: 5e-2, 1e-2, 5e-3 # moons: 5e-2, 1e-2, 5e-3, circles: 1e-3, 5e-3, 5e-2, spirals: 1e-3, 5e-4, 1e-4

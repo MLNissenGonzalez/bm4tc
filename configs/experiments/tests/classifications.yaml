@@ -4,6 +4,8 @@ experiment: classifications_test
 defaults:
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
+  - override /trainer/classification: test
+  - override /dataset: test
 
 hydra:
   sweeper:

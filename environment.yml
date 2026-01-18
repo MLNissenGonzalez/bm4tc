@@ -1,25 +1,23 @@
-name: tn_adv_train
-channels:
-  - nvidia    # for GPU CUDA packages
-  - pytorch
-  - defaults
-dependencies:
-  - python=3.10
-  - pytorch=2.0.*        # stable with TensorKrowch
-  - torchvision
-  - torchaudio
-  - matplotlib
-  - jupyter
-  - ipykernel
-  - numpy=1.25.*          # compatible with PyTorch 2.0
-  - scipy
-  - scikit-learn
-  - tqdm
-  - pip
-  - pip:
-      - tensorkrowch
-      - opt_einsum==3.2
-      - hydra-core
-      - hydra-optuna-sweeper    # For Bayesian HPO
-      - wandb
-
+name: tn_adv_train                                                                                                                                                                    
+channels:                                                                                                                                                                             
+  - nvidia                                                                                                                                                                            
+  - defaults                                                                                                                                                                          
+dependencies:                                                                                                                                                                         
+  - python=3.10                                                                                                                                                                       
+  - matplotlib                                                                                                                                                                        
+  - jupyter                                                                                                                                                                           
+  - ipykernel                                                                                                                                                                         
+  - numpy=1.25.*                                                                                                                                                                      
+  - scipy                                                                                                                                                                             
+  - scikit-learn                                                                                                                                                                      
+  - tqdm                                                                                                                                                                              
+  - pip                                                                                                                                                                               
+  - pip:                                                                                                                                                                              
+      - torch==2.0.1                                                                                                                                                                  
+      - torchvision                                                                                                                                                                   
+      - torchaudio                                                                                                                                                                    
+      - tensorkrowch                                                                                                                                                                  
+      - opt_einsum==3.2                                                                                                                                                               
+      - hydra-core                                                                                                                                                                    
+      - hydra-optuna-sweeper                                                                                                                                                          
+      - wandb 

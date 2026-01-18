@@ -1,0 +1,27 @@
+# @package _global_
+experiment: test_classification_hpo
+
+defaults:
+  - override /born: d10D4
+  - override /dataset: test
+  - override /trainer/classification: test
+  - override /tracking: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /hydra/sweeper: optuna  # Enable Optuna
+
+hydra:
+  sweeper:
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 2
+
+    direction: minimize  # or maximize
+    n_trials: 10
+    n_jobs: 1
+
+    # Search space
+    params:
+      trainer.classification.optimizer.kwargs.lr: tag(log, interval(1e-5, 1e-3))
+      trainer.classification.optimizer.kwargs.weight_decay: interval(0.0, 0.1)
