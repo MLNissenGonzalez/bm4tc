@@ -4,7 +4,7 @@ experiment: D18
 defaults:
   - override /born: d30D18        
   - override /dataset: 2Dtoy/moons_4k
-  - override /trainer/classification: adam_b64e300
+  - override /trainer/classification: adam500_loss
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
