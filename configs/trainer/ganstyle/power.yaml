@@ -3,7 +3,7 @@ defaults:
 
 max_epoch: 200
 sampling:
-  num_bins: 400
+  num_bins: 1000
   num_spc: 256
   batch_spc: 16
   method: secant
@@ -16,8 +16,8 @@ optimizer:
 watch_freq: 100
 metrics: {"clsloss": 1, "acc": 1, "rob": 5, "viz": 20, "fid": 20}
 retrain_crit: "acc"
-tolerance: 0.05
-stop_crit: "acc"
+tolerance: 0.75
+stop_crit: "fid"
 retrain:
   max_epoch: 40
   batch_size: 256 # samples loaded per categorisation step for all classes involved
