@@ -8,12 +8,14 @@
 # - **local**: Loads data from local outputs/ directory (Hydra multirun)
 #
 # **Visualizations:**
-# 1. Scatter/histogram plots: Each parameter vs each metric
-# 2. Surface plots: lr × weight_decay vs validation accuracy
-# 3. Surface plots: lr × weight_decay vs HPO goal metric
-# 4. Surface plots: lr × weight_decay vs robust accuracy (if available)
-# 5. Metric-metric correlations: How metrics relate to each other
-# 6. Parameter-metric correlations: How parameters affect metrics
+# 1. Scatter plots: Each parameter vs each metric
+# 2. Parameter distribution histograms colored by metric
+# 3. Contour plots: Parameter pairs vs metrics (interpolated from point evaluations)
+# 4. Marginal importance: Which parameters matter most
+# 5. Parameter interaction effects: How parameter pairs jointly affect metrics
+# 6. Pareto frontier: Trade-off between accuracy and robustness
+# 7. Metric-metric correlations: How metrics relate to each other
+# 8. Parameter-metric correlations: How parameters affect metrics
 
 # %% [markdown]
 # ## Setup and Configuration
@@ -37,7 +39,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import griddata
 import warnings
 
@@ -85,9 +86,29 @@ TEST_METRICS = [
     "summary/pre/test/loss",
 ]
 
+# --- IMPORTANCE & INTERACTION SETTINGS ---
+# Primary metric for marginal importance analysis (higher is better if minimize=False)
+PRIMARY_METRIC = "summary/pre/valid/acc"
+PRIMARY_METRIC_MINIMIZE = False  # Set True if lower is better (e.g., loss)
+
+# Parameter pairs for interaction effect analysis
+# Each tuple is (param1, param2) - set to None or [] to analyze all pairs
+INTERACTION_PAIRS = [
+    ("config/lr", "config/weight_decay"),
+    # ("config/lr", "config/batch_size"),  # Uncomment to include
+    # ("config/weight_decay", "config/batch_size"),
+]
+
+# --- PARETO FRONTIER SETTINGS ---
+# Metrics for Pareto frontier analysis (trade-off visualization)
+# Format: (metric, maximize) where maximize=True means higher is better
+PARETO_METRICS = [
+    ("summary/pre/valid/acc", True),       # Clean accuracy (maximize)
+    ("summary/pre/valid/rob/0.1", True),   # Robust accuracy (maximize)
+]
+
 # Plot settings
 FIGSIZE = (10, 6)
-SURFACE_FIGSIZE = (12, 8)
 DPI = 100
 
 # %% [markdown]
@@ -447,71 +468,32 @@ if not df.empty:
         plt.show()
 
 # %% [markdown]
-# ## 3. Surface Plots: LR × Weight Decay vs Metrics
+# ## 3. Contour Plots: LR × Weight Decay vs Metrics
+#
+# **How the contour plot is created from point evaluations:**
+#
+# HPO experiments produce discrete point evaluations: each run samples a specific
+# (lr, weight_decay) pair and measures the resulting metric. To visualize the
+# underlying response surface, we use **scipy.interpolate.griddata** with linear
+# interpolation:
+#
+# 1. **Log transformation**: LR and weight_decay are transformed to log10 space
+#    since they typically span several orders of magnitude.
+#
+# 2. **Grid creation**: A regular 50×50 grid is created spanning the min/max of
+#    the observed parameter values in log space.
+#
+# 3. **Linear interpolation**: For each grid point, the metric value is estimated
+#    by triangulating the scattered data points (Delaunay triangulation) and
+#    performing barycentric interpolation within the enclosing triangle.
+#
+# 4. **Extrapolation**: Grid points outside the convex hull of the data are
+#    marked as NaN (shown as white regions in the plot).
+#
+# The red dots show the actual HPO evaluations; the colored contours show the
+# interpolated surface. Regions with sparse sampling may be less accurate.
 
 # %%
-def create_surface_plot(
-    df: pd.DataFrame,
-    x_col: str,
-    y_col: str,
-    z_col: str,
-    log_x: bool = True,
-    log_y: bool = True,
-    grid_resolution: int = 50,
-    method: str = "linear",
-    title: str = None,
-) -> tuple:
-    """Create 3D surface plot from scattered data."""
-    valid_mask = df[x_col].notna() & df[y_col].notna() & df[z_col].notna()
-    x = df.loc[valid_mask, x_col].astype(float).values
-    y = df.loc[valid_mask, y_col].astype(float).values
-    z = df.loc[valid_mask, z_col].astype(float).values
-
-    if len(x) < 4:
-        print(f"Not enough data points for surface plot ({len(x)} points, need >= 4)")
-        return None, None
-
-    # Filter positive values for log scale
-    if log_x or log_y:
-        pos_mask = (x > 0) & (y > 0) if (log_x and log_y) else (x > 0 if log_x else y > 0)
-        x, y, z = x[pos_mask], y[pos_mask], z[pos_mask]
-
-    if len(x) < 4:
-        print("Not enough positive values for log scale")
-        return None, None
-
-    # Transform to log space
-    x_t = np.log10(x) if log_x else x
-    y_t = np.log10(y) if log_y else y
-
-    # Create interpolation grid
-    xi = np.linspace(x_t.min(), x_t.max(), grid_resolution)
-    yi = np.linspace(y_t.min(), y_t.max(), grid_resolution)
-    xi_grid, yi_grid = np.meshgrid(xi, yi)
-
-    # Interpolate
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        zi_grid = griddata((x_t, y_t), z, (xi_grid, yi_grid), method=method, fill_value=np.nan)
-
-    # Create plot
-    fig = plt.figure(figsize=SURFACE_FIGSIZE, dpi=DPI)
-    ax = fig.add_subplot(111, projection="3d")
-
-    surf = ax.plot_surface(xi_grid, yi_grid, zi_grid, cmap="viridis", alpha=0.8, edgecolor="none")
-    ax.scatter(x_t, y_t, z, c="red", s=20, alpha=0.6, label="Data")
-
-    ax.set_xlabel(clean_column_name(x_col) + (" (log10)" if log_x else ""))
-    ax.set_ylabel(clean_column_name(y_col) + (" (log10)" if log_y else ""))
-    ax.set_zlabel(clean_column_name(z_col))
-
-    if title:
-        ax.set_title(title)
-
-    fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, pad=0.1)
-    return fig, ax
-
-
 def create_contour_plot(
     df: pd.DataFrame,
     x_col: str,
@@ -570,9 +552,9 @@ def create_contour_plot(
 
 
 # %%
-# Create surface plots for LR × Weight Decay
+# Create contour plots for LR × Weight Decay
 if not df.empty:
-    print("\n=== Creating Surface Plots ===")
+    print("\n=== Creating Contour Plots ===")
 
     lr_cols = get_available_columns(df, ["config/lr"], verbose=False)
     wd_cols = get_available_columns(df, ["config/weight_decay"], verbose=False)
@@ -585,27 +567,532 @@ if not df.empty:
             metric_name = metric_col.split("/")[-1]
             title = f"{clean_column_name(metric_col)} vs LR and Weight Decay"
 
-            # Contour plot (more readable)
             fig, ax = create_contour_plot(df, lr_col, wd_col, metric_col, title=title)
             if fig:
                 output_path = project_root / "analysis" / f"contour_lr_wd_{metric_name}.png"
                 plt.savefig(output_path, bbox_inches="tight")
                 print(f"Saved contour plot to: {output_path}")
                 plt.show()
-
-            # Surface plot
-            fig, ax = create_surface_plot(df, lr_col, wd_col, metric_col, title=title)
-            if fig:
-                output_path = project_root / "analysis" / f"surface_lr_wd_{metric_name}.png"
-                plt.savefig(output_path, bbox_inches="tight")
-                print(f"Saved surface plot to: {output_path}")
-                plt.show()
     else:
         print("Could not find LR and/or weight_decay columns")
         print(f"Available config columns: {[c for c in df.columns if c.startswith('config/')]}")
 
 # %% [markdown]
-# ## 4. Best Runs Summary
+# ## 4. Marginal Importance Analysis
+#
+# Marginal importance quantifies how much each parameter affects the primary metric,
+# averaged over all other parameter values. This is computed by:
+#
+# 1. Binning each parameter into groups (using quantiles for continuous params)
+# 2. Computing the mean metric value within each bin
+# 3. Measuring the variance of these bin means (higher variance = more important)
+#
+# The importance score is normalized so that all parameters sum to 1.
+
+# %%
+def compute_marginal_importance(
+    df: pd.DataFrame,
+    params: list,
+    metric_col: str,
+    n_bins: int = 10,
+) -> pd.DataFrame:
+    """
+    Compute marginal importance of each parameter for the given metric.
+
+    Returns DataFrame with columns: parameter, importance, mean_range, bin_means
+    """
+    params = get_available_columns(df, params, verbose=False)
+    metric_cols = get_available_columns(df, [metric_col], verbose=False)
+
+    if not params or not metric_cols:
+        return pd.DataFrame()
+
+    metric_col = metric_cols[0]
+    results = []
+
+    for param in params:
+        valid_mask = df[param].notna() & df[metric_col].notna()
+        if valid_mask.sum() < n_bins:
+            continue
+
+        x = df.loc[valid_mask, param].astype(float).values
+        y = df.loc[valid_mask, metric_col].astype(float).values
+
+        # Use log scale for lr/weight_decay
+        if is_log_scale_param(param) and (x > 0).all():
+            x = np.log10(x)
+
+        # Bin by quantiles to handle non-uniform sampling
+        try:
+            bin_edges = np.percentile(x, np.linspace(0, 100, n_bins + 1))
+            # Make edges unique
+            bin_edges = np.unique(bin_edges)
+            if len(bin_edges) < 3:
+                continue
+            bin_indices = np.digitize(x, bin_edges[1:-1])
+        except Exception:
+            continue
+
+        # Compute mean metric per bin
+        bin_means = []
+        for i in range(len(bin_edges) - 1):
+            mask = bin_indices == i
+            if mask.sum() > 0:
+                bin_means.append(y[mask].mean())
+
+        if len(bin_means) < 2:
+            continue
+
+        bin_means = np.array(bin_means)
+        importance = np.var(bin_means)  # Variance of bin means
+        mean_range = bin_means.max() - bin_means.min()
+
+        results.append({
+            "parameter": param,
+            "importance_raw": importance,
+            "mean_range": mean_range,
+            "bin_means": bin_means,
+            "n_bins_actual": len(bin_means),
+        })
+
+    if not results:
+        return pd.DataFrame()
+
+    result_df = pd.DataFrame(results)
+
+    # Normalize importance to sum to 1
+    total = result_df["importance_raw"].sum()
+    if total > 0:
+        result_df["importance"] = result_df["importance_raw"] / total
+    else:
+        result_df["importance"] = 0
+
+    return result_df.sort_values("importance", ascending=False)
+
+
+def plot_marginal_importance(
+    importance_df: pd.DataFrame,
+    metric_name: str,
+    figsize: tuple = (10, 5),
+) -> plt.Figure:
+    """Plot marginal importance as horizontal bar chart."""
+    if importance_df.empty:
+        return None
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, dpi=DPI)
+
+    # Left: Importance bar chart
+    ax = axes[0]
+    params = [clean_column_name(p) for p in importance_df["parameter"]]
+    importance = importance_df["importance"].values
+
+    colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(params)))
+    bars = ax.barh(params, importance, color=colors, edgecolor="white")
+    ax.set_xlabel("Relative Importance")
+    ax.set_title(f"Marginal Importance for {clean_column_name(metric_name)}")
+    ax.invert_yaxis()
+
+    # Add percentage labels
+    for bar, imp in zip(bars, importance):
+        ax.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+                f"{imp * 100:.1f}%", va="center", fontsize=9)
+
+    ax.set_xlim(0, max(importance) * 1.2)
+    ax.grid(True, alpha=0.3, axis="x")
+
+    # Right: Mean range (practical effect size)
+    ax = axes[1]
+    mean_range = importance_df["mean_range"].values
+
+    bars = ax.barh(params, mean_range, color=colors, edgecolor="white")
+    ax.set_xlabel(f"Range of Mean {clean_column_name(metric_name)}")
+    ax.set_title("Effect Size (Max - Min Bin Mean)")
+    ax.invert_yaxis()
+
+    for bar, mr in zip(bars, mean_range):
+        ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height() / 2,
+                f"{mr:.4f}", va="center", fontsize=9)
+
+    ax.set_xlim(0, max(mean_range) * 1.2)
+    ax.grid(True, alpha=0.3, axis="x")
+
+    fig.tight_layout()
+    return fig
+
+
+# %%
+# Compute and plot marginal importance
+if not df.empty:
+    print("\n=== Marginal Importance Analysis ===")
+
+    metric_cols = get_available_columns(df, [PRIMARY_METRIC], verbose=True)
+    if metric_cols:
+        metric_col = metric_cols[0]
+        importance_df = compute_marginal_importance(df, HPO_PARAMS, metric_col)
+
+        if not importance_df.empty:
+            print(f"\nParameter importance for {clean_column_name(metric_col)}:")
+            print(importance_df[["parameter", "importance", "mean_range", "n_bins_actual"]].to_string(index=False))
+
+            fig = plot_marginal_importance(importance_df, metric_col)
+            if fig:
+                output_path = project_root / "analysis" / "marginal_importance.png"
+                plt.savefig(output_path, bbox_inches="tight")
+                print(f"\nSaved to: {output_path}")
+                plt.show()
+        else:
+            print("Could not compute marginal importance (insufficient data)")
+    else:
+        print(f"Primary metric '{PRIMARY_METRIC}' not found in data")
+
+# %% [markdown]
+# ## 5. Parameter Interaction Effects
+#
+# Interaction effects show how pairs of parameters jointly affect the metric.
+# A strong interaction means the effect of one parameter depends on the value
+# of another (the surface is "twisted" rather than additive).
+#
+# We visualize this with contour plots for each configured parameter pair.
+# The red dots show actual evaluations; regions without dots are interpolated.
+
+# %%
+def plot_interaction_effect(
+    df: pd.DataFrame,
+    param1: str,
+    param2: str,
+    metric_col: str,
+    grid_resolution: int = 30,
+    figsize: tuple = (8, 6),
+) -> tuple:
+    """
+    Plot interaction effect between two parameters on a metric.
+
+    Returns (fig, interaction_strength) where interaction_strength is a measure
+    of how non-additive the effects are.
+    """
+    cols = get_available_columns(df, [param1, param2, metric_col], verbose=False)
+    if len(cols) < 3:
+        return None, None
+
+    param1, param2, metric_col = cols[0], cols[1], cols[2]
+
+    valid_mask = df[param1].notna() & df[param2].notna() & df[metric_col].notna()
+    x = df.loc[valid_mask, param1].astype(float).values
+    y = df.loc[valid_mask, param2].astype(float).values
+    z = df.loc[valid_mask, metric_col].astype(float).values
+
+    if len(x) < 4:
+        return None, None
+
+    # Log transform if needed
+    log_x = is_log_scale_param(param1)
+    log_y = is_log_scale_param(param2)
+
+    if log_x:
+        pos_x = x > 0
+        x, y, z = x[pos_x], y[pos_x], z[pos_x]
+    if log_y:
+        pos_y = y > 0
+        x, y, z = x[pos_y], y[pos_y], z[pos_y]
+
+    if len(x) < 4:
+        return None, None
+
+    x_t = np.log10(x) if log_x else x
+    y_t = np.log10(y) if log_y else y
+
+    # Create grid and interpolate
+    xi = np.linspace(x_t.min(), x_t.max(), grid_resolution)
+    yi = np.linspace(y_t.min(), y_t.max(), grid_resolution)
+    xi_grid, yi_grid = np.meshgrid(xi, yi)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        zi_grid = griddata((x_t, y_t), z, (xi_grid, yi_grid), method="linear", fill_value=np.nan)
+
+    # Compute interaction strength (deviation from additive model)
+    # Fit additive model: z = a*x + b*y + c
+    try:
+        from numpy.linalg import lstsq
+        A = np.column_stack([x_t, y_t, np.ones_like(x_t)])
+        coeffs, residuals, _, _ = lstsq(A, z, rcond=None)
+        z_additive = coeffs[0] * x_t + coeffs[1] * y_t + coeffs[2]
+        ss_res = np.sum((z - z_additive) ** 2)
+        ss_tot = np.sum((z - z.mean()) ** 2)
+        interaction_strength = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        # This is R² of additive model; lower means more interaction
+        interaction_strength = 1 - interaction_strength  # Flip so higher = more interaction
+    except Exception:
+        interaction_strength = None
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize, dpi=DPI)
+
+    contour = ax.contourf(xi_grid, yi_grid, zi_grid, levels=15, cmap="viridis")
+    ax.scatter(x_t, y_t, c="red", s=25, alpha=0.6, edgecolors="white", linewidth=0.5,
+               label=f"Evaluations (n={len(x)})")
+
+    ax.set_xlabel(clean_column_name(param1) + (" (log10)" if log_x else ""))
+    ax.set_ylabel(clean_column_name(param2) + (" (log10)" if log_y else ""))
+
+    title = f"Interaction: {clean_column_name(param1)} × {clean_column_name(param2)}"
+    if interaction_strength is not None:
+        title += f"\n(non-additivity: {interaction_strength:.3f})"
+    ax.set_title(title)
+
+    cbar = fig.colorbar(contour, ax=ax)
+    cbar.set_label(clean_column_name(metric_col))
+
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    return fig, interaction_strength
+
+
+# %%
+# Plot interaction effects for configured pairs
+if not df.empty:
+    print("\n=== Parameter Interaction Effects ===")
+
+    metric_cols = get_available_columns(df, [PRIMARY_METRIC], verbose=False)
+    if not metric_cols:
+        print(f"Primary metric '{PRIMARY_METRIC}' not found")
+    elif not INTERACTION_PAIRS:
+        print("No interaction pairs configured (INTERACTION_PAIRS is empty)")
+    else:
+        metric_col = metric_cols[0]
+        print(f"Analyzing interactions for: {clean_column_name(metric_col)}")
+
+        interaction_results = []
+
+        for param1, param2 in INTERACTION_PAIRS:
+            fig, strength = plot_interaction_effect(df, param1, param2, metric_col)
+
+            if fig:
+                p1_name = param1.split("/")[-1]
+                p2_name = param2.split("/")[-1]
+                output_path = project_root / "analysis" / f"interaction_{p1_name}_{p2_name}.png"
+                plt.savefig(output_path, bbox_inches="tight")
+                print(f"Saved interaction plot to: {output_path}")
+                plt.show()
+
+                if strength is not None:
+                    interaction_results.append({
+                        "param1": clean_column_name(param1),
+                        "param2": clean_column_name(param2),
+                        "non_additivity": strength,
+                    })
+            else:
+                print(f"Could not plot interaction for {param1} × {param2}")
+
+        if interaction_results:
+            print("\nInteraction summary (higher = stronger interaction):")
+            int_df = pd.DataFrame(interaction_results).sort_values("non_additivity", ascending=False)
+            print(int_df.to_string(index=False))
+
+# %% [markdown]
+# ## 6. Pareto Frontier: Accuracy vs Robustness Trade-off
+#
+# The Pareto frontier identifies **non-dominated** runs: configurations where you
+# cannot improve one metric without worsening the other. These represent the best
+# achievable trade-offs between competing objectives.
+#
+# A point is Pareto-optimal if no other point is better in ALL objectives.
+# Points on the frontier define the "efficient boundary" of what's achievable.
+
+# %%
+def compute_pareto_frontier(
+    x: np.ndarray,
+    y: np.ndarray,
+    maximize_x: bool = True,
+    maximize_y: bool = True,
+) -> np.ndarray:
+    """
+    Compute indices of Pareto-optimal points.
+
+    Args:
+        x, y: Arrays of metric values
+        maximize_x, maximize_y: Whether higher is better for each metric
+
+    Returns:
+        Boolean array indicating Pareto-optimal points
+    """
+    n = len(x)
+    is_pareto = np.ones(n, dtype=bool)
+
+    # Flip signs if minimizing
+    x_comp = x if maximize_x else -x
+    y_comp = y if maximize_y else -y
+
+    for i in range(n):
+        if not is_pareto[i]:
+            continue
+        # Check if any other point dominates point i
+        for j in range(n):
+            if i == j or not is_pareto[j]:
+                continue
+            # j dominates i if j is >= in both and > in at least one
+            if (x_comp[j] >= x_comp[i] and y_comp[j] >= y_comp[i] and
+                (x_comp[j] > x_comp[i] or y_comp[j] > y_comp[i])):
+                is_pareto[i] = False
+                break
+
+    return is_pareto
+
+
+def plot_pareto_frontier(
+    df: pd.DataFrame,
+    metric1: str,
+    metric2: str,
+    maximize1: bool = True,
+    maximize2: bool = True,
+    figsize: tuple = (10, 8),
+    show_labels: bool = True,
+) -> plt.Figure:
+    """
+    Plot scatter of two metrics with Pareto frontier highlighted.
+
+    Args:
+        df: DataFrame with HPO results
+        metric1, metric2: Column names for the two metrics (x and y axis)
+        maximize1, maximize2: Whether higher is better for each metric
+        figsize: Figure size
+        show_labels: Whether to label Pareto-optimal points with run names
+
+    Returns:
+        matplotlib Figure
+    """
+    cols = get_available_columns(df, [metric1, metric2], verbose=True)
+    if len(cols) < 2:
+        print(f"Could not find both metrics: {metric1}, {metric2}")
+        return None
+
+    metric1, metric2 = cols[0], cols[1]
+
+    valid_mask = df[metric1].notna() & df[metric2].notna()
+    valid_df = df[valid_mask].copy()
+
+    if len(valid_df) < 2:
+        print("Not enough valid data points for Pareto analysis")
+        return None
+
+    x = valid_df[metric1].astype(float).values
+    y = valid_df[metric2].astype(float).values
+
+    # Compute Pareto frontier
+    is_pareto = compute_pareto_frontier(x, y, maximize1, maximize2)
+    n_pareto = is_pareto.sum()
+
+    # Sort Pareto points for line plotting
+    pareto_x = x[is_pareto]
+    pareto_y = y[is_pareto]
+    sort_idx = np.argsort(pareto_x)
+    pareto_x_sorted = pareto_x[sort_idx]
+    pareto_y_sorted = pareto_y[sort_idx]
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize, dpi=DPI)
+
+    # Plot all points
+    ax.scatter(x[~is_pareto], y[~is_pareto], c="lightgray", s=40, alpha=0.6,
+               edgecolors="white", linewidth=0.5, label=f"Dominated (n={len(x) - n_pareto})")
+
+    # Plot Pareto-optimal points
+    ax.scatter(pareto_x, pareto_y, c="red", s=80, alpha=0.9,
+               edgecolors="darkred", linewidth=1, label=f"Pareto-optimal (n={n_pareto})", zorder=5)
+
+    # Draw Pareto frontier line
+    ax.plot(pareto_x_sorted, pareto_y_sorted, "r--", alpha=0.7, linewidth=2, zorder=4)
+
+    # Optionally label Pareto points with run names
+    if show_labels and "run_name" in valid_df.columns and n_pareto <= 15:
+        pareto_names = valid_df.loc[valid_df.index[is_pareto], "run_name"].values
+        for i, (px, py) in enumerate(zip(pareto_x, pareto_y)):
+            name = pareto_names[i] if i < len(pareto_names) else ""
+            # Shorten name for display
+            short_name = name.split("-")[-1][:8] if "-" in name else name[:8]
+            ax.annotate(short_name, (px, py), textcoords="offset points",
+                        xytext=(5, 5), fontsize=7, alpha=0.8)
+
+    ax.set_xlabel(clean_column_name(metric1) + (" (↑ better)" if maximize1 else " (↓ better)"))
+    ax.set_ylabel(clean_column_name(metric2) + (" (↑ better)" if maximize2 else " (↓ better)"))
+    ax.set_title(f"Pareto Frontier: {clean_column_name(metric1)} vs {clean_column_name(metric2)}")
+
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+
+    # Add summary stats
+    stats_text = f"Total runs: {len(x)}\nPareto-optimal: {n_pareto} ({100*n_pareto/len(x):.1f}%)"
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
+            verticalalignment="top", bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+
+    fig.tight_layout()
+    return fig
+
+
+def get_pareto_runs(
+    df: pd.DataFrame,
+    metric1: str,
+    metric2: str,
+    maximize1: bool = True,
+    maximize2: bool = True,
+) -> pd.DataFrame:
+    """Return DataFrame of Pareto-optimal runs sorted by metric1."""
+    cols = get_available_columns(df, [metric1, metric2], verbose=False)
+    if len(cols) < 2:
+        return pd.DataFrame()
+
+    metric1, metric2 = cols[0], cols[1]
+
+    valid_mask = df[metric1].notna() & df[metric2].notna()
+    valid_df = df[valid_mask].copy()
+
+    if len(valid_df) < 2:
+        return pd.DataFrame()
+
+    x = valid_df[metric1].astype(float).values
+    y = valid_df[metric2].astype(float).values
+
+    is_pareto = compute_pareto_frontier(x, y, maximize1, maximize2)
+
+    pareto_df = valid_df[is_pareto].copy()
+
+    # Select columns to display
+    config_cols = [c for c in pareto_df.columns if c.startswith("config/")]
+    display_cols = ["run_name"] + config_cols + [metric1, metric2]
+    display_cols = [c for c in display_cols if c in pareto_df.columns]
+
+    return pareto_df[display_cols].sort_values(metric1, ascending=not maximize1)
+
+
+# %%
+# Plot Pareto frontier
+if not df.empty and PARETO_METRICS and len(PARETO_METRICS) >= 2:
+    print("\n=== Pareto Frontier Analysis ===")
+
+    metric1, maximize1 = PARETO_METRICS[0]
+    metric2, maximize2 = PARETO_METRICS[1]
+
+    fig = plot_pareto_frontier(df, metric1, metric2, maximize1, maximize2)
+
+    if fig:
+        m1_name = metric1.split("/")[-1]
+        m2_name = metric2.split("/")[-1]
+        output_path = project_root / "analysis" / f"pareto_{m1_name}_vs_{m2_name}.png"
+        plt.savefig(output_path, bbox_inches="tight")
+        print(f"Saved Pareto frontier to: {output_path}")
+        plt.show()
+
+        # Print Pareto-optimal runs
+        print("\n--- Pareto-Optimal Runs ---")
+        pareto_df = get_pareto_runs(df, metric1, metric2, maximize1, maximize2)
+        if not pareto_df.empty:
+            print(pareto_df.to_string(index=False))
+        else:
+            print("No Pareto-optimal runs found")
+
+# %% [markdown]
+# ## 7. Best Runs Summary
 
 # %%
 def get_best_runs(df: pd.DataFrame, metric_col: str, n_best: int = 5, minimize: bool = True) -> pd.DataFrame:
@@ -653,7 +1140,7 @@ if not df.empty:
             print(best.to_string(index=False))
 
 # %% [markdown]
-# ## 5. Parameter-Metric Correlations
+# ## 8. Parameter-Metric Correlations
 
 # %%
 def compute_param_metric_correlations(df: pd.DataFrame, params: list, metrics: list) -> pd.DataFrame:
@@ -690,7 +1177,7 @@ def compute_param_metric_correlations(df: pd.DataFrame, params: list, metrics: l
 
 
 # %% [markdown]
-# ## 6. Metric-Metric Correlations
+# ## 9. Metric-Metric Correlations
 #
 # Shows how different metrics correlate with each other across all runs.
 # This helps understand trade-offs (e.g., accuracy vs robustness).
@@ -861,7 +1348,7 @@ if not df.empty:
                 plt.show()
 
 # %% [markdown]
-# ## 7. Export Results
+# ## 10. Export Results
 
 # %%
 if not df.empty:
