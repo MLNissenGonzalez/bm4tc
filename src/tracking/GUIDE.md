@@ -47,23 +47,27 @@ results = evaluator.evaluate(bornmachine, "test", step=100)
 Metrics are evaluated based on their frequency setting in config:
 
 ```yaml
-metrics: {"loss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
+metrics: {"clsloss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
 ```
 
-- `loss` and `acc`: Every epoch
+- `clsloss` and `acc`: Every epoch
 - `viz`, `fid`, `rob`: Every 30 epochs
 
 The stopping criterion metric is always evaluated every epoch.
 
 ## Available Metrics
 
-### LossMetric
+### ClassificationLossMetric (`clsloss`)
 
 Computes negative log-likelihood loss on class probabilities.
 
 ```python
 loss = -mean(log(p[i, true_class[i]]))
 ```
+
+### GenerativeLossMetric (`genloss`)
+
+Computes generative NLL loss on the joint distribution p(x, c).
 
 ### AccuracyMetric
 
@@ -135,7 +139,7 @@ class MetricFactory:
 
 3. **Update config** to include the metric:
 ```yaml
-metrics: {"loss": 1, "acc": 1, "mymetric": 10}
+metrics: {"clsloss": 1, "acc": 1, "mymetric": 10}
 ```
 
 ## W&B Integration (`wandb_utils.py`)

@@ -41,6 +41,7 @@ class BaseMetric:
         """
         Method to precompute class probabilities if not already in context.
         """
+        
         if "labels_n_probs" not in context:
             context["labels_n_probs"] = []
             with torch.no_grad():
@@ -72,19 +73,22 @@ class BaseMetric:
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#------Loss and Accuracy-----------------------------------------------------------------------------------------------------------------------------------------------------------
+#------Classification Loss and Accuracy-----------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # I want here the classification loss taking probabilities (batch_size, num_classes) and labels (batch_size,).
 
-
-class LossMetric(BaseMetric):
+# TODO: cfg.trainer.classification might not be provided in a pure GAN-syle training or pure generative training. 
+class ClassificationLossMetric(BaseMetric):
     """Compute classification loss (NLL) on the dataset."""
 
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
-        self.criterion = get.criterion(mode="classification", cfg=cfg.trainer.classification.criterion)
-
+        if hasattr(cfg.trainer, "classification") and hasattr(cfg.trainer.classification, "criterion"):
+            self.criterion = get.criterion(mode="classification", cfg=cfg.trainer.classification.criterion)
+        else:
+            crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})
+            self.criterion = get.criterion(mode="classification", cfg=crit_cfg)
     def evaluate(self, bornmachine, split, context):
         bornmachine.classifier.eval()
         losses = []
@@ -200,6 +204,33 @@ class RobustnessMetric(BaseMetric):
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-------------NLL of full joint for GenerativeLossMetric----------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+class GenerativeLossMetric(BaseMetric):
+    """Compute generative loss (NLL of joint distribution) on the dataset."""
+
+    def __init__(self, freq, cfg: schemas.Config, datahandler, device):
+        super().__init__(freq, cfg, datahandler, device)
+        if hasattr(cfg.trainer, "generative") and hasattr(cfg.trainer.generative, "criterion"):
+            self.criterion = get.criterion(mode="generative", cfg=cfg.trainer.generative.criterion)
+        else:
+            crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})
+            self.criterion = get.criterion(mode="generative", cfg=crit_cfg)
+
+    def evaluate(self, bornmachine, split, context):
+        """Compute mean generative NLL over the dataset."""
+        losses = []
+        with torch.no_grad():
+            for data, labels in self.datahandler.classification[split]:
+                data, labels = data.to(self.device), labels.to(self.device)
+                loss = self.criterion(bornmachine, data, labels).item()
+                losses.append(loss)
+        return sum(losses) / len(losses) if losses else float('nan')
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-------------Collecting metrics in a single class----------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -216,13 +247,14 @@ class MetricFactory:
             datahandler: DataHandler,
             device: torch.device
     ) -> BaseMetric:
-        """Create a metric instance by name (loss, acc, fid, rob, viz)."""
+        """Create a metric instance by name (clsloss, genloss, acc, fid, rob, viz)."""
         mapping = {
-            "loss": LossMetric,
+            "clsloss": ClassificationLossMetric,
             "acc": AccuracyMetric,
             "fid": FIDMetric,
             "rob": RobustnessMetric,
             "viz": VisualizationMetric,
+            "genloss": GenerativeLossMetric,
         }
         return mapping[metric_name](freq, cfg, datahandler, device)
 
@@ -242,7 +274,7 @@ class PerformanceEvaluator:
             train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig | schemas.AdversarialConfig,
             device: torch.device
     ):
-        if datahandler.classification is None:
+        if getattr(datahandler, "classification") is None:
             datahandler.get_classification_loaders()
 
         self.metrics = {}
@@ -270,7 +302,7 @@ class PerformanceEvaluator:
                  step: int):
         """
         Evaluates the bornmachine on a collection of metrics that are given in the tracking config of the experiment.
-        Returns a dictionary of those metrics with keys in ['loss', 'acc', 'fid', 'rob', 'viz'].
+        Returns a dictionary of those metrics with keys in ['clsloss', 'genloss', 'acc', 'fid', 'rob', 'viz'].
         Metric carry `freq` attribute how often per `evaluate` call they are evaluated.
         """
         results, context = {}, {}

@@ -1,0 +1,34 @@
+# @package _global_
+experiment: ganstyle_hpo
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null
+  - override /trainer/ganstyle: power
+  - override /trainer/adversarial: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna  # Enable Optuna
+
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/best_cls_loss_moons_4k_180126.086
+
+
+hydra:
+  sweeper:
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 10
+
+    direction: minimize  # or maximize
+    n_trials: 200
+    n_jobs: 1
+
+    params:
+      trainer.ganstyle.optimizer.kwargs.lr: tag(log, interval(1e-6, 1e-1))
+      trainer.ganstyle.optimizer.kwargs.weight_decay: tag(log, interval(1e-4, 1e-1))
+      trainer/ganstyle/critic: d5w8, d5w12, d6w8, d5w20
+      trainer.ganstyle.critic.discrimination.max_epoch_gan: range(1, 50)
+      trainer.ganstyle.critic.discrimination.optimizer.kwargs.lr: tag(log, interval(1e-6,  9e-1))
+      trainer.ganstyle.critic.discrimination.optimizer.kwargs.weight_decay: tag(log, interval(1e-6, 1e-1))
+      trainer.ganstyle.sampling.num_bins: range(100, 2000, 100)

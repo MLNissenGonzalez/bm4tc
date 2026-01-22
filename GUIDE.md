@@ -128,23 +128,32 @@ adversarial_training_mps/
 ├── configs/                    # Hydra configuration files
 │   ├── config.yaml            # Main config with defaults
 │   ├── born/                  # BornMachine configs (bond_dim, in_dim, embedding)
-│   ├── dataset/               # Dataset configs (moons, circles, spirals)
+│   ├── dataset/               # Dataset configs (organized by type)
+│   │   ├── 2Dtoy/            # 2D toy datasets (moons, circles, spirals)
+│   │   ├── mnist/            # MNIST configs (planned)
+│   │   └── timeseries/       # Time series configs (planned)
 │   ├── trainer/               # Training configs
 │   │   ├── classification/    # Classifier training configs
 │   │   ├── ganstyle/          # GAN-style training configs
 │   │   └── adversarial/       # Adversarial training configs
 │   ├── tracking/              # W&B tracking configs
 │   ├── experiments/           # Full experiment configs (override defaults)
-│   └── hydra/                 # Hydra-specific configs (logging)
+│   └── hydra/                 # Hydra-specific configs
+│       └── job_logging/      # Logging configs
 ├── experiments/               # Entry point scripts
 │   ├── classification.py      # Classification-only training
-│   └── ganstyle.py           # Classification + GAN-style training
+│   ├── ganstyle.py           # Classification + GAN-style training
+│   ├── adversarial.py        # Classification + Adversarial training
+│   └── generative.py         # Classification + Generative NLL training
 ├── src/                       # Main source code
 │   ├── models/               # Model definitions (see src/models/GUIDE.md)
 │   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
 │   ├── tracking/             # Evaluation & logging
 │   ├── data/                 # Data loading & preprocessing
 │   └── utils/                # Utilities, schemas, embeddings
+├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
+│   ├── hpo_analysis.py      # HPO experiment analysis notebook
+│   └── utils/               # W&B API utilities
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -253,6 +262,8 @@ embedding: "fourier"
 | Add new dataset | `src/data/gen_n_load.py` |
 | Configure experiments | `configs/` directory |
 | Add adversarial attack | `src/utils/evasion/minimal.py` |
+| Analyze HPO results | `analysis/hpo_analysis.py` |
+| Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
 ### Critical code sections to understand:
 
@@ -274,9 +285,9 @@ embedding: "fourier"
 
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
 2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
-3. **MNIST support**: Currently only 2D toy data
+3. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
 4. **MPS as discriminator backbone**: Using MPS features as input to critic
-5. **More datasets**: Time series, higher-dimensional data
+5. **More datasets**: Univariate time series dataset planned (`configs/dataset/timeseries/`)
 
 ## Quick Reference: Common Commands
 
@@ -312,9 +323,9 @@ python -m experiments.adversarial trainer/adversarial=trades dataset=moons_2k
 
 ---
 
-## Documentation Maintenance (for AI Assistants)
+## Documentation Maintenance
 
-**IMPORTANT**: This section is a reminder for AI coding assistants (Claude, etc.) working on this codebase.
+**IMPORTANT**: This section is a reminder for anyone/anything working on this codebase.
 
 When making code changes, **always update the corresponding documentation**:
 
@@ -358,9 +369,11 @@ Ask yourself:
 ---
 
 For detailed module documentation, see:
+- `experiments/GUIDE.md` — Running experiments, bash commands, output structure
+- `configs/GUIDE.md` — Configuration system and syntax details
 - `src/models/GUIDE.md` — Model architecture details
 - `src/trainer/GUIDE.md` — Training pipeline details
 - `src/tracking/GUIDE.md` — Tracking and evaluation details
 - `src/data/GUIDE.md` — Data handling details
 - `src/utils/GUIDE.md` — Utilities and configuration details
-- `configs/GUIDE.md` — Configuration system details
+- `analysis/GUIDE.md` — Post-experiment analysis and W&B utilities

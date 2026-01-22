@@ -1,4 +1,4 @@
-max_epoch: 300
+max_epoch: 500
 batch_size: 64 # samples loaded per categorisation step for all classes involved
 criterion: 
   name: "negative log-likelihood"
@@ -11,9 +11,9 @@ optimizer:
     weight_decay: 0.00
 auto_stack: True
 auto_unbind: False
-patience: 40
-stop_crit: "loss"
+patience: 100
+stop_crit: "rob"
 watch_freq: 1000
-metrics: {"loss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
+metrics: {"clsloss": 1, "acc": 1, "viz": 50, "fid": 50, "rob": 1}
 save: True
 

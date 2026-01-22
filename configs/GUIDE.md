@@ -49,13 +49,15 @@ configs/
 │   ├── d30D18.yaml            # in_dim=30, bond_dim=18
 │   └── test.yaml              # Minimal test config
 ├── dataset/                    # Dataset configs
-│   ├── circles_2k.yaml        # 2k samples, circles
-│   ├── circles_4k.yaml        # 4k samples, circles
-│   ├── moons_2k.yaml          # 2k samples, moons
-│   ├── moons_4k.yaml          # 4k samples, moons
-│   ├── spirals_2k.yaml        # 2k samples, spirals
-│   ├── spirals_4k.yaml        # 4k samples, spirals
-│   └── test.yaml              # Minimal test config
+│   ├── test.yaml              # Minimal test config
+│   └── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
+│       ├── circles_2k.yaml    # 2k samples, circles
+│       ├── circles_4k.yaml    # 4k samples, circles
+│       ├── moons_2k.yaml      # 2k samples, moons
+│       ├── moons_4k.yaml      # 4k samples, moons
+│       ├── spirals_2k.yaml    # 2k samples, spirals
+│       └── spirals_4k.yaml    # 4k samples, spirals
+│   # Future: mnist/, timeseries/
 ├── trainer/
 │   ├── classification/        # Classifier training configs
 │   │   ├── adam_b64e300.yaml # Adam, batch 64, 300 epochs
@@ -92,11 +94,9 @@ configs/
 │       ├── classifications.yaml
 │       └── ganstyle.yaml
 └── hydra/                    # Hydra-specific configs
-    ├── job_logging/
-    │   ├── debug.yaml        # Verbose logging
-    │   └── stream_only.yaml  # Console-only logging
-    └── hydra_logging/
-        └── none.yaml         # Disable hydra logging
+    └── job_logging/
+        ├── debug.yaml        # Verbose logging
+        └── stream_only.yaml  # Console-only logging
 ```
 
 ## Main Config (`config.yaml`)
@@ -152,19 +152,32 @@ embedding: "fourier"   # Embedding type
 
 ### dataset/ — Dataset Configs
 
+Dataset configs are organized by dataset type in subdirectories:
+
+```
+dataset/
+├── test.yaml          # Minimal test config
+├── 2Dtoy/             # 2D toy datasets (current)
+│   ├── moons_*.yaml
+│   ├── circles_*.yaml
+│   └── spirals_*.yaml
+├── mnist/             # MNIST (planned)
+└── timeseries/        # Univariate time series (planned)
+```
+
+**2D Toy Datasets** (`dataset/2Dtoy/`):
 ```yaml
-# dataset/moons_4k.yaml
+# dataset/2Dtoy/moons_4k.yaml
 name: "moons_4k"
 gen_dow_kwargs:
   name: "moons_4k"
-  size: 2000           # Samples per class
-  seed: 42             # Generation seed
-  noise: 0.1           # Noise level
-  circ_factor: null    # Circle factor (circles only)
-  dow_link: null       # Download link (future)
-split: [0.7, 0.15, 0.15]  # Train/valid/test
-split_seed: 42
+  size: 4000           # Total samples
+  seed: 25             # Generation seed
+  noise: 0.05          # Noise level
+split: [0.5, 0.25, 0.25]  # Train/valid/test
+split_seed: 11
 ```
+- `dataset: 2Dtoy/moons_4k` (do not forget the subfolder)
 
 ### trainer/classification/ — Classifier Training
 
@@ -179,9 +192,9 @@ optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
 patience: 40           # Early stopping patience
-stop_crit: "loss"      # Monitored metric
+stop_crit: "acc"       # Monitored metric ("clsloss", "genloss", "acc", "fid", "rob")
 watch_freq: 1000       # Gradient logging frequency
-metrics: {"loss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
+metrics: {"clsloss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
 save: true
 auto_stack: true       # tensorkrowch setting
 auto_unbind: false     # tensorkrowch setting
@@ -206,7 +219,7 @@ sampling:
 r_real: 1.0              # Real/synthetic ratio
 optimizer: {...}         # Generator optimizer
 watch_freq: 100
-metrics: {"loss": 1, "acc": 1, "rob": 10, "viz": 10, "fid": 10}
+metrics: {"clsloss": 1, "acc": 1, "rob": 10, "viz": 10, "fid": 10}
 retrain_crit: "acc"      # When to retrain
 tolerance: 0.05          # Accuracy drop tolerance
 retrain: {...}           # ClassificationConfig for retraining
@@ -275,9 +288,9 @@ criterion:
   name: "generative-nll"  # User must implement GenerativeNLL subclass
   kwargs: {eps: 1e-8}
 patience: 50
-stop_crit: "loss"
+stop_crit: "acc"
 watch_freq: 100
-metrics: {"loss": 1, "fid": 10, "viz": 10}
+metrics: {"genloss": 1, "acc": 1, "fid": 10, "viz": 10}
 save: false
 auto_stack: true
 auto_unbind: false
@@ -326,22 +339,9 @@ The `# @package _global_` directive makes overrides apply at the root level.
 
 ## Running Experiments
 
-### Recommended: Using Experiment Configs
+See `experiments/GUIDE.md` for detailed usage and bash commands.
 
-**Always use experiment configs for real experiments:**
-
-```bash
-# Classification experiment (RECOMMENDED)
-python -m experiments.classification +experiments=pretraining/D18
-
-# GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/default
-
-# Quick test experiment
-python -m experiments.classification +experiments=tests/classification
-```
-
-### Multirun (Sweep)
+### Multirun (Grid Sweep)
 
 Define sweep parameters in an experiment config:
 
@@ -352,7 +352,7 @@ experiment: D18_sweep
 
 defaults:
   - override /born: d30D18
-  - override /dataset: moons_4k
+  - override /dataset: 2Dtoy/moons_4k
   # ... other settings
 
 hydra:
@@ -362,24 +362,77 @@ hydra:
       trainer.classification.optimizer.kwargs.lr: 1e-3,1e-4
 ```
 
-```bash
-python -m experiments.classification --multirun +experiments=pretraining/D18_sweep
+### Hyperparameter Optimization (HPO) with Optuna
+
+Use the Optuna sweeper for Bayesian hyperparameter optimization (TPE).
+
+**Enable Optuna in experiment config** (add to defaults):
+```yaml
+defaults:
+  - override /hydra/sweeper: optuna
 ```
 
-### Command-Line Overrides (for debugging only)
+**HPO Experiment Config Example**:
+```yaml
+# configs/experiments/hpo/classification_hpo.yaml
+# @package _global_
+experiment: classification_hpo
 
-Command-line overrides are useful for quick tests but **not for production experiments**:
+defaults:
+  - override /born: d10D4
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: adam_b64e300
+  - override /tracking: online
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /hydra/sweeper: optuna  # Enable Optuna
 
-```bash
-# Quick debug with fewer epochs
-python -m experiments.classification +experiments=tests/classification trainer.classification.max_epoch=10
+hydra:
+  sweeper:
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 10
 
-# Disable W&B for local debugging
-python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
+    direction: minimize  # or maximize
+    n_trials: 50
+    n_jobs: 1
 
-# Test different learning rate quickly
-python -m experiments.classification +experiments=tests/classification trainer.classification.optimizer.kwargs.lr=1e-3
+    # Search space
+    params:
+      trainer.classification.optimizer.kwargs.lr: tag(log, interval(1e-5, 1e-2))
+      trainer.classification.optimizer.kwargs.weight_decay: interval(0.0, 0.1)
+      born: choice(d10D3, d10D4, d10D6)
+      born.init_kwargs.bond_dim: range(2, 10)
 ```
+
+**Search Space Syntax** (Optuna-specific):
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| `interval(low, high)` | Uniform float | `interval(0.0, 1.0)` |
+| `tag(log, interval(low, high))` | Log-uniform float | `tag(log, interval(1e-5, 1e-2))` |
+| `range(low, high)` | Integer range | `range(2, 10)` |
+| `range(low, high, step)` | Integer with step | `range(0, 100, 10)` |
+| `choice(a, b, c)` | Categorical | `choice(adam, sgd, rmsprop)` |
+
+**HPO Notes & Limitations**:
+- **Valid `stop_crit` values**: `"clsloss"`, `"genloss"`, `"acc"`, `"fid"`, `"rob"`. Do NOT use `"viz"` (not numeric).
+- **Robustness (`stop_crit: "rob"`)**: Uses average across all evaluated perturbation strengths.
+- **Direction must be `minimize`**: All entry points negate acc/rob metrics internally for minimization. Do not change `direction: maximize` in Optuna config.
+- **Objective selection**: All entry points return `trainer.best[stop_crit]`. Ensure your chosen `stop_crit` metric is included in your metrics config.
+
+**Persistent Storage** (resume studies):
+```yaml
+hydra:
+  sweeper:
+    storage: "sqlite:///outputs/hpo_study.db"
+    study_name: my_study  # Reuse same name to resume
+```
+
+**Note on Sweeper Configuration**:
+Do NOT create a custom `configs/hydra/sweeper/optuna.yaml` file. This triggers deprecated Hydra 1.1 automatic schema matching. Instead, configure the Optuna sweeper entirely within your experiment configs using the `hydra.sweeper` section as shown above. The `- override /hydra/sweeper: optuna` default loads the plugin's built-in configuration.
+
+See `experiments/GUIDE.md` for running HPO experiments.
 
 ## Config Inheritance
 
@@ -418,40 +471,8 @@ Every config file corresponds to a dataclass in `src/utils/schemas.py`:
 
 **If you change a schema, update corresponding configs!**
 
-## Output Directory Structure
-
-```
-outputs/
-└── {experiment}_{dataset}_{date}/
-    ├── .hydra/
-    │   ├── config.yaml       # Resolved config
-    │   ├── hydra.yaml        # Hydra config
-    │   └── overrides.yaml    # Command line overrides
-    ├── models/               # Saved model checkpoints
-    │   └── ...
-    └── wandb/                # W&B local files
-        └── ...
-```
-
 ## Tips
 
-1. **Debug configs**: Use `--cfg job` to print resolved config:
-   ```bash
-   python -m experiments.classification --cfg job
-   ```
-
-2. **List options**: Use `--help` to see available options:
-   ```bash
-   python -m experiments.classification --help
-   ```
-
-3. **Test quickly**: Use test configs with small values:
-   ```bash
-   python -m experiments.classification \
-       born=test dataset=test \
-       +experiments=tests/classification
-   ```
-
-4. **W&B offline**: Set `tracking.mode=offline` for no network access
-
-5. **Reproducibility**: Always set `tracking.seed` and `dataset.split_seed`
+- **W&B offline**: Set `tracking.mode=offline` for no network access
+- **Reproducibility**: Always set `tracking.seed` and `dataset.split_seed`
+- See `experiments/GUIDE.md` for output directory structure and bash commands

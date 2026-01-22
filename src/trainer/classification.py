@@ -9,7 +9,6 @@ import wandb
 from src.tracking import *
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from tqdm import tqdm
 
 import logging
 logger = logging.getLogger(__name__)
@@ -71,10 +70,19 @@ class Trainer:
         for metric_name in self.best.keys():
             if metric_name in ["acc", "rob"]:
                 self.best[metric_name] = 0.0
-            elif metric_name  in ["loss", "fid"]:
+            elif metric_name in ["clsloss", "genloss", "fid"]:
                 self.best[metric_name] = float("Inf")
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
+        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        if self.stopping_criterion_name not in valid_criteria:
+            raise ValueError(
+                f"Invalid stop_crit '{self.stopping_criterion_name}'. "
+                f"Must be one of: {valid_criteria}"
+            )
+        # Always track rob for averaging (even if not in metrics explicitly)
+        if self.stopping_criterion_name == "rob" and "rob" not in self.best:
+            self.best["rob"] = 0.0
 
     def _train_epoch(self):
         """Execute one training epoch: forward pass, loss, backward, optimizer step."""
@@ -100,44 +108,69 @@ class Trainer:
         
     def _update(self):
         """
-        Epoch-wise check whether model performs better than previous best on validation set. Then:
+        Epoch-wise check whether model performs better than previous best on validation set.
+
         - If better: update best performance values and tensors. Reset patience counter.
         - If not: Increase patience counter.
+
+        For rob metric: averages all rob/{strength} values since robustness is evaluated
+        at multiple perturbation strengths.
         """
-        current_value = self.valid_perf[self.stopping_criterion_name]
-        former_best = self.best[self.stopping_criterion_name]
+        # Handle rob specially: average all rob/{strength} values
+        if self.stopping_criterion_name == "rob":
+            rob_values = [v for k, v in self.valid_perf.items()
+                         if k.startswith("rob/") and isinstance(v, (int, float))]
+            current_value = sum(rob_values) / len(rob_values) if rob_values else None
+        else:
+            current_value = self.valid_perf.get(self.stopping_criterion_name)
+
+        if current_value is None:
+            return
+
+        former_best = self.best.get(
+            self.stopping_criterion_name,
+            0.0 if self.stopping_criterion_name in ["acc", "rob"] else float("Inf")
+        )
 
         # Check whether the monitored metric improved
         if self.stopping_criterion_name in ["acc", "rob"]:
             improved = current_value > former_best
-        elif self.stopping_criterion_name in ["loss", "fid"]:
+        elif self.stopping_criterion_name in ["clsloss", "genloss", "fid"]:
             improved = current_value < former_best
         else:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
-        # Check if we reached target accuracy (optional shortcut)
+        # Check if we reached target (optional shortcut)
         goal_key = list(self.goal.keys())[0] if self.goal else None
-        if self.goal is None or goal_key not in self.valid_perf:
+        if self.goal is None:
             reached_goal = False
-
+        elif goal_key == "rob":
+            # Handle rob goal by averaging rob/* values
+            rob_values = [v for k, v in self.valid_perf.items()
+                         if k.startswith("rob/") and isinstance(v, (int, float))]
+            goal_value = sum(rob_values) / len(rob_values) if rob_values else 0.0
+            reached_goal = goal_value > self.goal["rob"]
+        elif goal_key in ["acc"]:
+            reached_goal = self.valid_perf.get(goal_key, 0.0) > self.goal[goal_key]
+        elif goal_key in ["clsloss", "genloss", "fid"]:
+            reached_goal = self.valid_perf.get(goal_key, float("Inf")) < self.goal[goal_key]
         else:
-            if goal_key == "acc":
-                reached_goal = (self.valid_perf["acc"]>self.goal["acc"])
-            elif goal_key == "loss":
-                reached_goal = (self.valid_perf["loss"]<self.goal["loss"])
-            else: raise KeyError(f"{self.goal.keys()=} not recognised")
+            reached_goal = False
 
         isBetter = improved or reached_goal
 
         if isBetter:
             self.best = dict(self.valid_perf)  # make a shallow copy
+            # Store averaged rob value if using rob as stopping criterion
+            if self.stopping_criterion_name == "rob":
+                self.best["rob"] = current_value
             self.best_tensors = [t.clone().detach() for t in self.bornmachine.classifier.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
 
-            if reached_goal: # do I want to train after reaching the goal acc? No!
+            if reached_goal:
                 self.patience_counter = self.train_cfg.patience + 1
-                logger.info("Goal acc reached.")
+                logger.info("Goal reached.")
         else:
             self.patience_counter += 1
 
@@ -207,6 +240,7 @@ class Trainer:
                   If reached, training stops regardless of patience.
         """
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.best_epoch = 0
         self.epoch_times = []
 
         # Prepare classifier, then instantiate criterion and optimizer.

@@ -199,7 +199,7 @@ def optimizer(params, config: schemas.OptimizerConfig) -> optim.Optimizer:
 # Using classes instead of functions in case I want to you use loss functions with more hyperparameters and/or learnable parameters
 # TODO: maybe differentiate between different training modes and models?
 
-class MPSNLLL(nn.Module):
+class ClassificationNLL(nn.Module):
     """
     Negative Log-Likelihood Loss (custom implementation for MPS models).
 
@@ -234,16 +234,25 @@ class MPSNLLL(nn.Module):
     
 
 _CLASSIFICATION_LOSSES = {
-    "nll": MPSNLLL,
-    "nlll": MPSNLLL,
-    "negativeloglikelihood": MPSNLLL,
-    "negloglikelihood": MPSNLLL,
+    "nll": ClassificationNLL,
+    "nlll": ClassificationNLL,
+    "negativeloglikelihood": ClassificationNLL,
+    "negloglikelihood": ClassificationNLL,
 }
 
+from .generative_losses import GenerativeNLL
+_GENERATIVE_LOSSES = {
+    "nll": GenerativeNLL,
+    "nlll": GenerativeNLL,
+    "negativeloglikelihood": GenerativeNLL,
+    "negloglikelihood": GenerativeNLL
+}
 
 _LOSS_MAP = {
     "classification": _CLASSIFICATION_LOSSES,
     "classifiy": _CLASSIFICATION_LOSSES,
+    "generate": _GENERATIVE_LOSSES,
+    "generative": _GENERATIVE_LOSSES
 }
 
 def criterion(mode: str, cfg: schemas.CriterionConfig) -> nn.Module:

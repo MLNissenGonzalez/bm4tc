@@ -314,9 +314,9 @@ optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
 patience: 40
-stop_crit: "loss"          # Metric to monitor
+stop_crit: "acc"           # Metric to monitor ("clsloss", "genloss", "acc", "fid", "rob")
 watch_freq: 1000           # Gradient logging frequency
-metrics: {loss: 1, acc: 1, viz: 30, fid: 30, rob: 30}
+metrics: {clsloss: 1, acc: 1, viz: 30, fid: 30, rob: 30}
 save: true
 auto_stack: true           # tensorkrowch option
 auto_unbind: false         # tensorkrowch option
@@ -331,7 +331,7 @@ sampling: {...}            # SamplingConfig
 r_real: 1.0               # Ratio of real to synthetic samples
 optimizer: {...}
 watch_freq: 1
-metrics: {loss: 1, acc: 1, rob: 1}
+metrics: {clsloss: 1, acc: 1, rob: 1}
 retrain_crit: "acc"        # When to retrain
 tolerance: 0.05            # Accuracy drop tolerance
 retrain: {...}             # ClassificationConfig for retraining
@@ -350,9 +350,9 @@ optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
 patience: 50
-stop_crit: "loss"          # "loss" or "fid"
+stop_crit: "acc"           # "genloss", "acc", or "fid"
 watch_freq: 100
-metrics: {loss: 1, fid: 10, viz: 10}
+metrics: {genloss: 1, acc: 1, fid: 10, viz: 10}
 save: false
 auto_stack: true
 auto_unbind: false
@@ -378,10 +378,10 @@ evasion:
   num_steps: 10             # PGD iterations
   step_size: null           # Auto-computed if null
   random_start: true
-stop_crit: "rob"            # "loss", "acc", or "rob"
+stop_crit: "rob"            # "clsloss", "acc", or "rob"
 patience: 30
 watch_freq: 500
-metrics: {loss: 1, acc: 1, rob: 5}
+metrics: {clsloss: 1, acc: 1, rob: 5}
 trades_beta: 6.0            # TRADES trade-off parameter
 clean_weight: 0.0           # Mix clean examples (PGD-AT only)
 curriculum: false           # Gradually increase epsilon

@@ -32,7 +32,7 @@ stop_crit: "acc"  # TRADES optimizes for accuracy/robustness trade-off
 patience: 30
 watch_freq: 500
 
-metrics: {"loss": 1, "acc": 1, "rob": 5}
+metrics: {"clsloss": 1, "acc": 1, "rob": 5}
 
 trades_beta: 6.0  # key TRADES hyperparameter (typically 1.0-6.0)
 clean_weight: 0.0  # ignored for TRADES

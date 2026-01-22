@@ -34,7 +34,7 @@ class Trainer:
             datahandler: DataHandler,
             critic: "Critic",
             device: torch.device,
-            best: Dict[str, float] = {"acc": 1.0, "loss": 0.0}
+            best: Dict[str, float] = {"acc": 1.0, "clsloss": 0.0}
     ):
         """
         Initialize the GAN-style trainer.
@@ -71,6 +71,76 @@ class Trainer:
         if not self.critic.pretrained:
             self.critic.ganstyle_pretrain(datahandler, bornmachine, device)
 
+        # Initialize best metrics tracking (for HPO)
+        self.stopping_criterion = self.train_cfg.stop_crit
+        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        if self.stopping_criterion not in valid_criteria:
+            raise ValueError(
+                f"Invalid stop_crit '{self.stopping_criterion}'. "
+                f"Must be one of: {valid_criteria}"
+            )
+        # Ensure stop_crit is in metrics (evaluated every epoch if not already)
+        metrics_for_best = dict(self.train_cfg.metrics)
+        if self.stopping_criterion not in metrics_for_best and self.stopping_criterion != "rob":
+            logger.warning(f"stop_crit '{self.stopping_criterion}' not in metrics, adding with freq=1")
+            metrics_for_best[self.stopping_criterion] = 1
+        self._best_perf_factory(metrics_for_best)
+        self.best_epoch = 0
+
+    def _best_perf_factory(self, metrics: Dict[str, int]):
+        """Initialize tracking for best metric values (similar to ClassificationTrainer)."""
+        self.best = dict.fromkeys(metrics.keys())
+        for metric_name in self.best.keys():
+            if metric_name in ["acc", "rob"]:
+                self.best[metric_name] = 0.0
+            else:
+                self.best[metric_name] = float("Inf")
+        # Always track rob for averaging (even if not in metrics explicitly)
+        if self.stopping_criterion == "rob" and "rob" not in self.best:
+            self.best["rob"] = 0.0
+
+    def _update_best(self, validation_metrics: Dict[str, float]):
+        """
+        Update best metrics if current epoch improves on the stopping criterion.
+
+        When the stopping criterion improves, ALL metrics are updated to current values.
+        This ensures self.best reflects the metrics of the best model according to
+        the stopping criterion.
+
+        For rob metric: averages all rob/{strength} values since robustness is evaluated
+        at multiple perturbation strengths.
+        """
+        criterion = self.stopping_criterion
+
+        # Handle rob specially: average all rob/{strength} values
+        if criterion == "rob":
+            rob_values = [v for k, v in validation_metrics.items()
+                        if k.startswith("rob/") and isinstance(v, (int, float))]
+            current_value = sum(rob_values) / len(rob_values) if rob_values else None
+        else:
+            current_value = validation_metrics.get(criterion)
+
+        if current_value is None:
+            return
+
+        # Check if improved based on criterion type
+        improved = False
+        if criterion in ["acc", "rob"]:
+            if current_value > self.best.get(criterion, 0.0):
+                improved = True
+        else:
+            if current_value < self.best.get(criterion, float("Inf")):
+                improved = True
+
+        if improved:
+            # Update ALL metrics to current values (this is the new best model)
+            # Use shallow copy to include all keys (including rob/* variants)
+            self.best = dict(validation_metrics)
+            # Store averaged rob value for HPO access
+            if criterion == "rob":
+                self.best["rob"] = current_value
+            self.best_epoch = self.epoch
+
     def _toRetrain(self, validation_metrics):
         """
         Checks whether bornmachine should be retrained given goal metric and tolerance. Returns boolean. 
@@ -81,8 +151,8 @@ class Trainer:
         toRetrain = (
             (goal_key == "acc" and
              ((self.goal["acc"]-validation_metrics["acc"]) > self.train_cfg.tolerance))
-            or (goal_key == "loss" and
-                (validation_metrics["loss"]-self.goal["loss"])/self.goal["loss"] > self.train_cfg.tolerance)
+            or (goal_key == "clsloss" and
+                (validation_metrics["clsloss"]-self.goal["clsloss"])/self.goal["clsloss"] > self.train_cfg.tolerance)
         )
         return toRetrain
 
@@ -197,6 +267,7 @@ class Trainer:
             validation_metrics = self.evaluator.evaluate(
                 self.bornmachine, "valid", epoch)
             record(validation_metrics, "gan", "valid")
+            self._update_best(validation_metrics)
             self.epoch_times_no_retrain.append(time.perf_counter() - epoch_start)
             if self._toRetrain(validation_metrics):
                 logger.info("Retraining.")

@@ -30,7 +30,7 @@ stop_crit: "acc"
 patience: 5
 watch_freq: 100
 
-metrics: {"loss": 1, "acc": 1}
+metrics: {"clsloss": 1, "acc": 1}
 
 trades_beta: 6.0
 clean_weight: 0.0
