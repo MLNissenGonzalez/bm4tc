@@ -151,6 +151,9 @@ adversarial_training_mps/
 │   ├── tracking/             # Evaluation & logging
 │   ├── data/                 # Data loading & preprocessing
 │   └── utils/                # Utilities, schemas, embeddings
+├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
+│   ├── hpo_analysis.py      # HPO experiment analysis notebook
+│   └── utils/               # W&B API utilities
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -259,6 +262,8 @@ embedding: "fourier"
 | Add new dataset | `src/data/gen_n_load.py` |
 | Configure experiments | `configs/` directory |
 | Add adversarial attack | `src/utils/evasion/minimal.py` |
+| Analyze HPO results | `analysis/hpo_analysis.py` |
+| Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
 ### Critical code sections to understand:
 
@@ -371,3 +376,4 @@ For detailed module documentation, see:
 - `src/tracking/GUIDE.md` — Tracking and evaluation details
 - `src/data/GUIDE.md` — Data handling details
 - `src/utils/GUIDE.md` — Utilities and configuration details
+- `analysis/GUIDE.md` — Post-experiment analysis and W&B utilities
