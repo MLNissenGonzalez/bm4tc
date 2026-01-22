@@ -84,7 +84,7 @@ class ClassificationLossMetric(BaseMetric):
 
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
-        if cfg.trainer.classification is not None and hasattr(cfg.trainer.classification, "criterion"):
+        if hasattr(cfg.trainer, "classification") and hasattr(cfg.trainer.classification, "criterion"):
             self.criterion = get.criterion(mode="classification", cfg=cfg.trainer.classification.criterion)
         else:
             crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})
@@ -213,7 +213,7 @@ class GenerativeLossMetric(BaseMetric):
 
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
-        if cfg.trainer.generative is not None and hasattr(cfg.trainer.generative, "criterion"):
+        if hasattr(cfg.trainer, "generative") and hasattr(cfg.trainer.generative, "criterion"):
             self.criterion = get.criterion(mode="generative", cfg=cfg.trainer.generative.criterion)
         else:
             crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})

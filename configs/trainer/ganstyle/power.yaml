@@ -1,7 +1,7 @@
 defaults:
 - critic: default
 
-max_epoch: 200
+max_epoch: 400
 sampling:
   num_bins: 1000
   num_spc: 256
@@ -14,12 +14,12 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.00
 watch_freq: 100
-metrics: {"clsloss": 1, "acc": 1, "rob": 5, "viz": 20, "fid": 20}
+metrics: {"clsloss": 1, "acc": 1, "rob": 5, "viz": 40, "fid": 1}
 retrain_crit: "acc"
 tolerance: 0.75
 stop_crit: "fid"
 retrain:
-  max_epoch: 40
+  max_epoch: 100
   batch_size: 256 # samples loaded per categorisation step for all classes involved
   criterion: 
     name: "negative log-likelihood"

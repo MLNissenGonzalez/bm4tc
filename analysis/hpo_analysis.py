@@ -54,7 +54,7 @@ DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
 EXPERIMENT_PATTERN = "lrwdbs_hpo"  # Regex pattern to match run groups
-DATASET_NAME = None  # e.g., "spirals_4k", "moons_4k", or None for all
+DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
