@@ -35,6 +35,12 @@ else:
 
 sys.path.insert(0, str(project_root))
 
+# Check for command line argument to override LOCAL_SWEEP_DIR
+_CLI_SWEEP_DIR = None
+if len(sys.argv) > 1:
+    _CLI_SWEEP_DIR = sys.argv[1]
+    print(f"Using sweep dir from command line: {_CLI_SWEEP_DIR}")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -48,7 +54,7 @@ import warnings
 # =============================================================================
 
 # Data source: "wandb" or "local"
-DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
+DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
@@ -58,7 +64,8 @@ DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
-LOCAL_SWEEP_DIR = "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
+# Can be overridden by command line argument: python -m analysis.hpo_analysis outputs/sweep_name
+LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
 
 # --- ANALYSIS SETTINGS ---
 # HPO parameters that were optimized (column names after fetching)
@@ -244,6 +251,25 @@ def is_log_scale_param(param: str) -> bool:
 
 
 # %% [markdown]
+# ## Setup Output Directory
+#
+# All outputs (images, best results txt) go to outputs/sweep_name/.
+
+# %%
+# Determine sweep name from LOCAL_SWEEP_DIR or DATASET_NAME
+if DATA_SOURCE == "local":
+    sweep_name = Path(LOCAL_SWEEP_DIR).name
+else:
+    sweep_name = DATASET_NAME if DATASET_NAME else EXPERIMENT_PATTERN
+sweep_name = sweep_name.replace("/", "_")  # sanitize for filenames
+
+# Create output directory inside outputs/sweep_name/
+output_dir = project_root / "outputs" / sweep_name
+output_dir.mkdir(parents=True, exist_ok=True)
+
+print(f"Output directory: {output_dir}")
+
+# %% [markdown]
 # ## 1. Parameter vs Metric Scatter Plots
 #
 # For each optimized parameter, show scatter plots against each validation metric.
@@ -355,7 +381,7 @@ if not df.empty:
 
     fig = plot_all_param_metric_combinations(df, params=HPO_PARAMS, metrics=all_metrics)
     if fig:
-        output_path = project_root / "analysis" / "param_metric_scatter.png"
+        output_path = output_dir / "param_metric_scatter.png"
         plt.savefig(output_path, bbox_inches="tight")
         print(f"Saved to: {output_path}")
         plt.show()
@@ -462,7 +488,7 @@ if not df.empty:
         fig.tight_layout()
 
         metric_name = metric.split("/")[-1].replace(" ", "_")
-        output_path = project_root / "analysis" / f"param_hist_{metric_name}.png"
+        output_path = output_dir / f"param_hist_{metric_name}.png"
         plt.savefig(output_path, bbox_inches="tight")
         print(f"Saved to: {output_path}")
         plt.show()
@@ -569,7 +595,7 @@ if not df.empty:
 
             fig, ax = create_contour_plot(df, lr_col, wd_col, metric_col, title=title)
             if fig:
-                output_path = project_root / "analysis" / f"contour_lr_wd_{metric_name}.png"
+                output_path = output_dir / f"contour_lr_wd_{metric_name}.png"
                 plt.savefig(output_path, bbox_inches="tight")
                 print(f"Saved contour plot to: {output_path}")
                 plt.show()
@@ -736,7 +762,7 @@ if not df.empty:
 
             fig = plot_marginal_importance(importance_df, metric_col)
             if fig:
-                output_path = project_root / "analysis" / "marginal_importance.png"
+                output_path = output_dir / "marginal_importance.png"
                 plt.savefig(output_path, bbox_inches="tight")
                 print(f"\nSaved to: {output_path}")
                 plt.show()
@@ -871,7 +897,7 @@ if not df.empty:
             if fig:
                 p1_name = param1.split("/")[-1]
                 p2_name = param2.split("/")[-1]
-                output_path = project_root / "analysis" / f"interaction_{p1_name}_{p2_name}.png"
+                output_path = output_dir / f"interaction_{p1_name}_{p2_name}.png"
                 plt.savefig(output_path, bbox_inches="tight")
                 print(f"Saved interaction plot to: {output_path}")
                 plt.show()
@@ -1078,7 +1104,7 @@ if not df.empty and PARETO_METRICS and len(PARETO_METRICS) >= 2:
     if fig:
         m1_name = metric1.split("/")[-1]
         m2_name = metric2.split("/")[-1]
-        output_path = project_root / "analysis" / f"pareto_{m1_name}_vs_{m2_name}.png"
+        output_path = output_dir / f"pareto_{m1_name}_vs_{m2_name}.png"
         plt.savefig(output_path, bbox_inches="tight")
         print(f"Saved Pareto frontier to: {output_path}")
         plt.show()
@@ -1318,7 +1344,7 @@ if not df.empty:
 
         fig = plot_correlation_heatmap(param_metric_corr, title="Parameter-Metric Correlations")
         if fig:
-            output_path = project_root / "analysis" / "param_metric_correlations.png"
+            output_path = output_dir / "param_metric_correlations.png"
             plt.savefig(output_path, bbox_inches="tight")
             print(f"\nSaved to: {output_path}")
             plt.show()
@@ -1332,7 +1358,7 @@ if not df.empty:
 
         fig = plot_correlation_heatmap(metric_metric_corr, title="Metric-Metric Correlations")
         if fig:
-            output_path = project_root / "analysis" / "metric_metric_correlations.png"
+            output_path = output_dir / "metric_metric_correlations.png"
             plt.savefig(output_path, bbox_inches="tight")
             print(f"\nSaved to: {output_path}")
             plt.show()
@@ -1342,7 +1368,7 @@ if not df.empty:
         if len(key_metrics) >= 2:
             fig = plot_metric_scatter_matrix(df, key_metrics)
             if fig:
-                output_path = project_root / "analysis" / "metric_scatter_matrix.png"
+                output_path = output_dir / "metric_scatter_matrix.png"
                 plt.savefig(output_path, bbox_inches="tight")
                 print(f"Saved scatter matrix to: {output_path}")
                 plt.show()
@@ -1352,25 +1378,11 @@ if not df.empty:
 
 # %%
 if not df.empty:
-    output_dir = project_root / "analysis" / "outputs"
-    output_dir.mkdir(exist_ok=True)
-
-    # Save processed dataframe
-    csv_path = output_dir / "hpo_runs.csv"
-    df.to_csv(csv_path, index=False)
-    print(f"\nSaved processed data to: {csv_path}")
-
-    # Save correlation matrices
-    if "param_metric_corr" in dir() and not param_metric_corr.empty:
-        param_metric_corr.to_csv(output_dir / "param_metric_correlations.csv")
-
-    if "metric_metric_corr" in dir() and not metric_metric_corr.empty:
-        metric_metric_corr.to_csv(output_dir / "metric_metric_correlations.csv")
-
-    # Save best runs summary
+    # Save best runs summary to output_dir (already set up earlier)
     summary_path = output_dir / "best_runs_summary.txt"
     with open(summary_path, "w") as f:
         f.write("HPO Best Runs Summary\n")
+        f.write(f"Sweep: {sweep_name}\n")
         f.write(f"Data source: {DATA_SOURCE}\n")
         f.write("=" * 60 + "\n\n")
 
