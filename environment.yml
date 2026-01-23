@@ -21,3 +21,4 @@ dependencies:
       - hydra-core                                                                                                                                                                    
       - hydra-optuna-sweeper                                                                                                                                                          
       - wandb 
+      - pandas
