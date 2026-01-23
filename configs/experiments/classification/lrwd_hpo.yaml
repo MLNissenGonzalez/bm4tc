@@ -17,6 +17,9 @@ trainer:
 
 hydra:
   sweeper:
+    storage: "sqlite:///outputs/${experiment}_study.db"
+    study_name: "${experiment}"
+
     sampler:
       _target_: optuna.samplers.TPESampler
       seed: 42
