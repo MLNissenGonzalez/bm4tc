@@ -20,7 +20,6 @@ trainer:
 
 hydra:
   sweeper:
-    storage: "sqlite:////home/ubuntu/adversarial_training_mps/outputs/${experiment}_study.db"
     study_name: "${experiment}"
 
     sampler:
