@@ -216,7 +216,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     This function ensures that the dataset specified in the configuration exists
     in the local data directory. If not present, it triggers dataset generation
-    via `_generate_or_download`. The loaded data are wrapped into a 
+    via `_generate_or_download`. The loaded data are wrapped into a
     `LabelledDataset` dataclass for convenient access to features, labels, and
     dataset metadata.
 
@@ -225,6 +225,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     cfg : DatasetConfig
         Dataset configuration object. Must include:
         - `gen_dow_kwargs.name`: str — dataset name (e.g., "moons", "circles").
+        - `overwrite`: bool — if True, regenerate even if file exists.
         The dataset file is expected under `_DATA_DIR/<canonical>/<variant>.npz`.
 
     Returns
@@ -254,7 +255,10 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     dataset_dir = os.path.join(_DATA_DIR, canonical)
     dataset_file = os.path.join(dataset_dir, f"{variant}.npz")
 
-    if not os.path.exists(dataset_file):
+    # Check overwrite flag (default False for backward compatibility)
+    overwrite = getattr(cfg, 'overwrite', False)
+
+    if overwrite or not os.path.exists(dataset_file):
         _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
     data = np.load(dataset_file)
 
