@@ -44,15 +44,23 @@ load_local_hpo_runs() → DataFrame
 analysis/
 ├── GUIDE.md                 # This file
 ├── __init__.py
-├── hpo_analysis.py          # Main analysis notebook (.py with #%% cells)
+├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
+├── mia_analysis.py          # MIA privacy analysis notebook
 ├── outputs/                 # Generated analysis outputs (git-ignored)
 │   ├── hpo_runs.csv        # Processed HPO run data
 │   ├── param_metric_correlations.csv
 │   ├── metric_metric_correlations.csv
-│   └── best_runs_summary.txt
+│   ├── best_runs_summary.txt
+│   └── mia/                # MIA analysis outputs
+│       ├── feature_importance.png
+│       ├── threshold_attacks.png
+│       ├── feature_distributions.png
+│       └── mia_summary.txt
 └── utils/
     ├── __init__.py
-    └── wandb_fetcher.py     # Data loading utilities (wandb + local)
+    ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
+    ├── mia.py               # MIA evaluation classes
+    └── mia_utils.py         # Config loading utilities
 ```
 
 ## Quick Start
@@ -258,6 +266,118 @@ Required Python packages:
 - `numpy` - Numerical operations
 - `pyyaml` - Config file loading (for local)
 - `omegaconf` - Hydra config loading (optional, for local)
+
+## MIA Privacy Analysis
+
+The analysis module includes **Membership Inference Attack (MIA)** evaluation for assessing model privacy.
+
+### What is MIA?
+
+Membership inference attacks attempt to determine whether a specific sample was used to train a model. If an attacker can reliably distinguish training samples from test samples, it indicates the model has "memorized" training data, which is a privacy concern.
+
+### Running MIA Analysis
+
+**In VS Code** (recommended):
+```
+1. Open analysis/mia_analysis.py
+2. Edit RUN_DIR to point to your trained model's output directory
+3. Use "Run Cell" (Ctrl+Enter) to execute each #%% cell interactively
+```
+
+**As a script**:
+```bash
+cd /path/to/project
+python -m analysis.mia_analysis
+```
+
+### Configuration
+
+Edit the configuration section in `mia_analysis.py`:
+
+```python
+# Data source: "local" or "wandb"
+DATA_SOURCE = "local"
+
+# --- LOCAL SETTINGS ---
+RUN_DIR = "outputs/classification_2024_01_15"  # Path to trained model
+
+# --- MIA SETTINGS ---
+MIA_FEATURES = {
+    "max_prob": True,       # Maximum class probability
+    "entropy": True,        # Prediction entropy
+    "correct_prob": True,   # Probability of correct class
+    "loss": True,           # Cross-entropy loss
+    "margin": True,         # Difference between top two probabilities
+    "modified_entropy": True,  # Normalized confidence
+}
+```
+
+### MIA Features
+
+The attack uses features derived from model class probabilities p(c|x):
+
+| Feature | Formula | Intuition |
+|---------|---------|-----------|
+| `max_prob` | `probs.max(dim=-1)` | Models are more confident on training data |
+| `entropy` | `-sum(p * log(p))` | Lower entropy = more confident |
+| `correct_prob` | `probs[i, labels[i]]` | Higher for seen samples |
+| `loss` | `-log(correct_prob)` | Lower loss on training data |
+| `margin` | `top_prob - second_prob` | Larger margin = more confident |
+| `modified_entropy` | `1 - entropy / log(num_classes)` | Normalized confidence |
+
+### Privacy Assessment Thresholds
+
+| AUC-ROC | Assessment |
+|---------|------------|
+| < 0.55 | Excellent privacy preservation |
+| 0.55 - 0.60 | Good privacy |
+| 0.60 - 0.70 | Moderate leakage |
+| >= 0.70 | Significant leakage |
+
+### Output Files
+
+After running MIA analysis, check `analysis/outputs/mia/`:
+
+| File | Description |
+|------|-------------|
+| `feature_importance.png` | Bar chart of attack model coefficients |
+| `threshold_attacks.png` | Per-feature AUC-ROC comparison |
+| `feature_distributions.png` | Train vs test histograms |
+| `mia_summary.txt` | Text summary with all metrics |
+
+### API Reference
+
+```python
+from analysis.utils import MIAEvaluation, MIAFeatureConfig, load_run_config, find_model_checkpoint
+
+# Load config and checkpoint
+cfg = load_run_config("outputs/my_run")
+checkpoint = find_model_checkpoint("outputs/my_run")
+bornmachine = BornMachine.load(str(checkpoint))
+
+# Setup data
+datahandler = DataHandler(cfg.dataset)
+datahandler.load()
+datahandler.split_and_rescale(bornmachine)
+datahandler.get_classification_loaders()
+
+# Run MIA evaluation
+feature_config = MIAFeatureConfig(max_prob=True, entropy=True, ...)
+mia_eval = MIAEvaluation(feature_config=feature_config)
+results = mia_eval.evaluate(
+    bornmachine,
+    datahandler.classification["train"],
+    datahandler.classification["test"],
+    device
+)
+
+# Access results
+print(f"Attack AUC-ROC: {results.auc_roc}")
+print(f"Privacy: {results.privacy_assessment()}")
+print(results.summary())
+```
+
+---
 
 ## Adding New Analyses
 

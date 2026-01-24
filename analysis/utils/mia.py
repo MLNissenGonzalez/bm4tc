@@ -1,0 +1,476 @@
+"""
+Membership Inference Attack (MIA) evaluation for BornClassifier models.
+
+This module provides tools to evaluate the privacy leakage of trained models
+by attempting to distinguish training samples from test samples based on
+model outputs (class probabilities).
+
+The attack uses features derived from p(c|x) to train a binary classifier
+that predicts whether a sample was in the training set.
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MIAFeatureConfig:
+    """Configuration for which features to extract from model outputs.
+
+    Each feature captures a different aspect of model confidence that may
+    reveal membership information (whether the sample was in training set).
+
+    Attributes:
+        max_prob: Use maximum class probability (models more confident on training data).
+        entropy: Use prediction entropy (lower = more confident).
+        correct_prob: Use probability assigned to the correct label.
+        loss: Use negative log-likelihood loss (lower on training data).
+        margin: Use difference between top and second probability.
+        modified_entropy: Use normalized confidence (1 - entropy / log(num_classes)).
+    """
+    max_prob: bool = True
+    entropy: bool = True
+    correct_prob: bool = True
+    loss: bool = True
+    margin: bool = True
+    modified_entropy: bool = True
+
+    def enabled_features(self) -> List[str]:
+        """Return list of enabled feature names."""
+        features = []
+        if self.max_prob:
+            features.append("max_prob")
+        if self.entropy:
+            features.append("entropy")
+        if self.correct_prob:
+            features.append("correct_prob")
+        if self.loss:
+            features.append("loss")
+        if self.margin:
+            features.append("margin")
+        if self.modified_entropy:
+            features.append("modified_entropy")
+        return features
+
+
+class MIAFeatureExtractor:
+    """Extract membership inference features from class probabilities.
+
+    Features are computed from p(c|x) outputs and the true labels to capture
+    different aspects of model confidence that may reveal membership.
+    """
+
+    def __init__(self, config: MIAFeatureConfig):
+        """Initialize with feature configuration.
+
+        Args:
+            config: Specifies which features to extract.
+        """
+        self.config = config
+
+    def extract(
+        self,
+        probs: torch.Tensor,
+        labels: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        """Extract MIA features from class probabilities.
+
+        Args:
+            probs: Class probabilities of shape (batch_size, num_classes).
+            labels: True labels of shape (batch_size,).
+
+        Returns:
+            Dictionary mapping feature names to tensors of shape (batch_size,).
+        """
+        features = {}
+        eps = 1e-10  # For numerical stability
+        num_classes = probs.shape[-1]
+
+        # Clamp probabilities to avoid log(0)
+        probs_clamped = probs.clamp(min=eps, max=1.0 - eps)
+
+        if self.config.max_prob:
+            features["max_prob"] = probs.max(dim=-1)[0]
+
+        if self.config.entropy:
+            entropy = -(probs_clamped * torch.log(probs_clamped)).sum(dim=-1)
+            features["entropy"] = entropy
+
+        if self.config.correct_prob:
+            batch_indices = torch.arange(probs.shape[0], device=probs.device)
+            features["correct_prob"] = probs[batch_indices, labels]
+
+        if self.config.loss:
+            batch_indices = torch.arange(probs.shape[0], device=probs.device)
+            correct_probs = probs_clamped[batch_indices, labels]
+            features["loss"] = -torch.log(correct_probs)
+
+        if self.config.margin:
+            sorted_probs, _ = probs.sort(dim=-1, descending=True)
+            features["margin"] = sorted_probs[:, 0] - sorted_probs[:, 1]
+
+        if self.config.modified_entropy:
+            entropy = -(probs_clamped * torch.log(probs_clamped)).sum(dim=-1)
+            max_entropy = np.log(num_classes)
+            features["modified_entropy"] = 1.0 - entropy / max_entropy
+
+        return features
+
+    def extract_batch(
+        self,
+        probs: torch.Tensor,
+        labels: torch.Tensor
+    ) -> np.ndarray:
+        """Extract features and concatenate into a single array.
+
+        Args:
+            probs: Class probabilities of shape (batch_size, num_classes).
+            labels: True labels of shape (batch_size,).
+
+        Returns:
+            Feature array of shape (batch_size, num_features).
+        """
+        features = self.extract(probs, labels)
+        enabled = self.config.enabled_features()
+
+        # Stack features in consistent order
+        feature_list = [features[name].cpu().numpy().reshape(-1, 1) for name in enabled]
+        return np.hstack(feature_list)
+
+
+@dataclass
+class MIAResults:
+    """Results from membership inference attack evaluation.
+
+    Attributes:
+        attack_accuracy: Classification accuracy of the attack model.
+        auc_roc: Area under ROC curve (0.5 = random, 1.0 = perfect attack).
+        precision_at_low_fpr: Precision at various false positive rates.
+        feature_importance: Importance score for each feature (logistic regression coefficients).
+        threshold_metrics: Per-feature threshold attack results.
+        train_features: Feature array for training samples.
+        test_features: Feature array for test samples.
+        feature_names: Names of features used.
+    """
+    attack_accuracy: float
+    auc_roc: float
+    precision_at_low_fpr: Dict[float, float]
+    feature_importance: Dict[str, float]
+    threshold_metrics: Dict[str, Dict[str, float]]
+    train_features: np.ndarray
+    test_features: np.ndarray
+    feature_names: List[str] = field(default_factory=list)
+
+    def privacy_assessment(self) -> str:
+        """Return a privacy assessment based on AUC-ROC.
+
+        Returns:
+            String describing the privacy level based on attack success.
+        """
+        if self.auc_roc < 0.55:
+            return "Excellent privacy preservation"
+        elif self.auc_roc < 0.60:
+            return "Good privacy"
+        elif self.auc_roc < 0.70:
+            return "Moderate leakage"
+        else:
+            return "Significant leakage"
+
+    def summary(self) -> str:
+        """Return a formatted summary of the MIA results."""
+        lines = [
+            "=" * 60,
+            "Membership Inference Attack Results",
+            "=" * 60,
+            f"Attack Accuracy: {self.attack_accuracy:.4f}",
+            f"AUC-ROC: {self.auc_roc:.4f}",
+            f"Privacy Assessment: {self.privacy_assessment()}",
+            "",
+            "Precision at Low FPR:",
+        ]
+        for fpr, precision in sorted(self.precision_at_low_fpr.items()):
+            lines.append(f"  FPR={fpr:.2%}: Precision={precision:.4f}")
+
+        lines.extend(["", "Feature Importance (|coefficient|):"])
+        sorted_importance = sorted(
+            self.feature_importance.items(),
+            key=lambda x: abs(x[1]),
+            reverse=True
+        )
+        for name, importance in sorted_importance:
+            lines.append(f"  {name}: {importance:.4f}")
+
+        lines.extend(["", "Per-Feature Threshold Attacks (AUC-ROC):"])
+        sorted_thresh = sorted(
+            self.threshold_metrics.items(),
+            key=lambda x: x[1].get("auc_roc", 0),
+            reverse=True
+        )
+        for name, metrics in sorted_thresh:
+            lines.append(f"  {name}: {metrics.get('auc_roc', 0):.4f}")
+
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
+
+class MIAEvaluation:
+    """Main class for running membership inference attack evaluation.
+
+    This class computes MIA features from model outputs and trains an attack
+    classifier to distinguish training samples from test samples.
+
+    Example:
+        >>> mia_eval = MIAEvaluation()
+        >>> results = mia_eval.evaluate(bornmachine, train_loader, test_loader, device)
+        >>> print(results.summary())
+    """
+
+    def __init__(
+        self,
+        feature_config: Optional[MIAFeatureConfig] = None,
+        attack_model: str = "logistic",
+        test_split: float = 0.3,
+        random_state: int = 42,
+    ):
+        """Initialize MIA evaluation.
+
+        Args:
+            feature_config: Configuration for feature extraction. Uses defaults if None.
+            attack_model: Type of attack classifier ("logistic" supported).
+            test_split: Fraction of data to use for attack model evaluation.
+            random_state: Random seed for reproducibility.
+        """
+        self.feature_config = feature_config or MIAFeatureConfig()
+        self.attack_model = attack_model
+        self.test_split = test_split
+        self.random_state = random_state
+        self.extractor = MIAFeatureExtractor(self.feature_config)
+
+    def _extract_all_features(
+        self,
+        model,
+        data_loader: DataLoader,
+        device: torch.device,
+    ) -> np.ndarray:
+        """Extract MIA features for all samples in a data loader.
+
+        Args:
+            model: BornMachine or model with class_probabilities method.
+            data_loader: DataLoader yielding (data, labels) tuples.
+            device: Device to run inference on.
+
+        Returns:
+            Feature array of shape (num_samples, num_features).
+        """
+        all_features = []
+
+        model.to(device)
+
+        with torch.no_grad():
+            for batch_data, batch_labels in data_loader:
+                batch_data = batch_data.to(device)
+                batch_labels = batch_labels.to(device)
+
+                # Get class probabilities
+                probs = model.class_probabilities(batch_data)
+
+                # Extract features
+                features = self.extractor.extract_batch(probs, batch_labels)
+                all_features.append(features)
+
+        return np.vstack(all_features)
+
+    def _compute_threshold_metrics(
+        self,
+        train_features: np.ndarray,
+        test_features: np.ndarray,
+        feature_names: List[str],
+    ) -> Dict[str, Dict[str, float]]:
+        """Compute per-feature threshold attack metrics.
+
+        For each feature, compute how well a simple threshold on that single
+        feature can distinguish train from test samples.
+
+        Args:
+            train_features: Features for training samples.
+            test_features: Features for test samples.
+            feature_names: Names of the features.
+
+        Returns:
+            Dictionary mapping feature names to their threshold attack metrics.
+        """
+        results = {}
+
+        # Labels: 1 for train (members), 0 for test (non-members)
+        labels = np.concatenate([
+            np.ones(len(train_features)),
+            np.zeros(len(test_features))
+        ])
+
+        for i, name in enumerate(feature_names):
+            feature_values = np.concatenate([
+                train_features[:, i],
+                test_features[:, i]
+            ])
+
+            # For loss and entropy, lower means more likely to be in training
+            # For others, higher means more likely to be in training
+            if name in ["loss", "entropy"]:
+                scores = -feature_values  # Flip so higher = more likely training
+            else:
+                scores = feature_values
+
+            try:
+                auc = roc_auc_score(labels, scores)
+            except ValueError:
+                auc = 0.5  # If only one class present
+
+            results[name] = {
+                "auc_roc": auc,
+                "train_mean": float(train_features[:, i].mean()),
+                "train_std": float(train_features[:, i].std()),
+                "test_mean": float(test_features[:, i].mean()),
+                "test_std": float(test_features[:, i].std()),
+            }
+
+        return results
+
+    def _compute_precision_at_fpr(
+        self,
+        y_true: np.ndarray,
+        y_scores: np.ndarray,
+        target_fprs: List[float] = [0.01, 0.05, 0.10],
+    ) -> Dict[float, float]:
+        """Compute precision at specified false positive rates.
+
+        Args:
+            y_true: True binary labels.
+            y_scores: Predicted scores/probabilities.
+            target_fprs: Target false positive rates.
+
+        Returns:
+            Dictionary mapping FPR to precision at that FPR.
+        """
+        precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+
+        results = {}
+        n_neg = (y_true == 0).sum()
+        n_pos = (y_true == 1).sum()
+
+        for target_fpr in target_fprs:
+            # Find threshold that gives approximately target FPR
+            # FPR = FP / (FP + TN) = FP / N_neg
+            # At each threshold, count how many negatives exceed it
+            best_precision = 0.0
+            for thresh in thresholds:
+                fp = ((y_scores >= thresh) & (y_true == 0)).sum()
+                tp = ((y_scores >= thresh) & (y_true == 1)).sum()
+                fpr = fp / n_neg if n_neg > 0 else 0
+                if fpr <= target_fpr + 0.01:  # Allow small tolerance
+                    prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    best_precision = max(best_precision, prec)
+
+            results[target_fpr] = best_precision
+
+        return results
+
+    def evaluate(
+        self,
+        model,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        device: torch.device,
+    ) -> MIAResults:
+        """Run the membership inference attack evaluation.
+
+        Args:
+            model: BornMachine or model with class_probabilities method.
+            train_loader: DataLoader for training data (members).
+            test_loader: DataLoader for test data (non-members).
+            device: Device to run inference on.
+
+        Returns:
+            MIAResults containing attack metrics and extracted features.
+        """
+        logger.info("Extracting features from training samples...")
+        train_features = self._extract_all_features(model, train_loader, device)
+
+        logger.info("Extracting features from test samples...")
+        test_features = self._extract_all_features(model, test_loader, device)
+
+        logger.info(f"Train features shape: {train_features.shape}")
+        logger.info(f"Test features shape: {test_features.shape}")
+
+        # Create binary classification problem
+        # Label 1 = training sample (member), 0 = test sample (non-member)
+        X = np.vstack([train_features, test_features])
+        y = np.concatenate([
+            np.ones(len(train_features)),
+            np.zeros(len(test_features))
+        ])
+
+        # Split for attack model training and evaluation
+        from sklearn.model_selection import train_test_split
+        X_train, X_eval, y_train, y_eval = train_test_split(
+            X, y,
+            test_size=self.test_split,
+            random_state=self.random_state,
+            stratify=y
+        )
+
+        # Train attack model
+        logger.info("Training attack classifier...")
+        if self.attack_model == "logistic":
+            attack_clf = LogisticRegression(
+                random_state=self.random_state,
+                max_iter=1000,
+                class_weight="balanced"
+            )
+        else:
+            raise ValueError(f"Unknown attack model: {self.attack_model}")
+
+        attack_clf.fit(X_train, y_train)
+
+        # Evaluate attack
+        y_pred = attack_clf.predict(X_eval)
+        y_proba = attack_clf.predict_proba(X_eval)[:, 1]
+
+        attack_accuracy = accuracy_score(y_eval, y_pred)
+        auc_roc = roc_auc_score(y_eval, y_proba)
+
+        logger.info(f"Attack accuracy: {attack_accuracy:.4f}")
+        logger.info(f"Attack AUC-ROC: {auc_roc:.4f}")
+
+        # Compute feature importance from logistic regression coefficients
+        feature_names = self.feature_config.enabled_features()
+        feature_importance = {
+            name: float(coef)
+            for name, coef in zip(feature_names, attack_clf.coef_[0])
+        }
+
+        # Compute per-feature threshold attacks
+        threshold_metrics = self._compute_threshold_metrics(
+            train_features, test_features, feature_names
+        )
+
+        # Compute precision at low FPR
+        precision_at_low_fpr = self._compute_precision_at_fpr(y_eval, y_proba)
+
+        return MIAResults(
+            attack_accuracy=attack_accuracy,
+            auc_roc=auc_roc,
+            precision_at_low_fpr=precision_at_low_fpr,
+            feature_importance=feature_importance,
+            threshold_metrics=threshold_metrics,
+            train_features=train_features,
+            test_features=test_features,
+            feature_names=feature_names,
+        )
