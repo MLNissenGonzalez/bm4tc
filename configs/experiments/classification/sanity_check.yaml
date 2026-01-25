@@ -1,6 +1,7 @@
 # @package _global_
-# HPO for learning rate only, with no weight decay
-experiment: lr_hpo
+# Sanity check experiment: reproduce October results with fixed lr=5e-3
+# Sweeps over random seeds (tracking, dataset generation, and split) to verify consistency
+experiment: sanity_check
 
 defaults:
   - override /born: d30D18
@@ -13,12 +14,16 @@ defaults:
 
 trainer:
   classification:
+    max_epoch: 1000
+    patience: 500
     save: True
     optimizer:
       kwargs:
         weight_decay: 0.0
         lr: 5e-3
 
+dataset:
+  overwrite: true  # Regenerate dataset for each trial (different seeds)
 
 tracking:
   sampling:
@@ -39,5 +44,8 @@ hydra:
     n_jobs: 1
 
     params:
+      # Vary all seeds for full reproducibility check
       tracking.seed: range(1,100)
       tracking.random_state: range(1,100)
+      dataset.gen_dow_kwargs.seed: range(1,100)
+      dataset.split_seed: range(1,100)

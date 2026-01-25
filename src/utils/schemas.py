@@ -112,11 +112,17 @@ class DatasetConfig:
         Parameters for data generation/download.
     split : Tuple[float, float, float]
         Ratios for train, validation, and test splits (must sum to 1).
+    split_seed : int
+        Random seed for train/validation/test split.
+    overwrite : bool
+        If True, regenerate dataset even if it already exists on disk.
+        Useful for seed sweep experiments where each run needs fresh data.
     """
     name: str
     gen_dow_kwargs: DataGenDowConfig
     split: Tuple[float, float, float]
     split_seed: int
+    overwrite: bool = False
 
 cs.store(group="dataset", name="schema", node=DatasetConfig)
 

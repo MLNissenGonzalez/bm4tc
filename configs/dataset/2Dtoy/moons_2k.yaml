@@ -6,3 +6,4 @@ gen_dow_kwargs:
   noise: 0.1
 split: [0.8, 0.1, 0.1] # train, val, test
 split_seed: 11
+overwrite: false
