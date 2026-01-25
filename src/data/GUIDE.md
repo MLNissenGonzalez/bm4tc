@@ -134,7 +134,10 @@ gen_dow_kwargs:
   dow_link: null       # For downloads
 split: [0.7, 0.15, 0.15]
 split_seed: 42
+overwrite: false       # Set to true to regenerate dataset on each run
 ```
+
+**Note on `overwrite`**: When `overwrite: true`, the dataset is regenerated even if it already exists on disk. This is useful for seed sweep experiments where each trial needs fresh data with different random seeds.
 
 ### Loading Process
 

@@ -176,8 +176,10 @@ gen_dow_kwargs:
   noise: 0.05          # Noise level
 split: [0.5, 0.25, 0.25]  # Train/valid/test
 split_seed: 11
+overwrite: false       # Regenerate dataset even if cached (for seed sweeps)
 ```
 - `dataset: 2Dtoy/moons_4k` (do not forget the subfolder)
+- Set `overwrite: true` when sweeping over dataset seeds to ensure fresh data each run
 
 ### trainer/classification/ — Classifier Training
 
