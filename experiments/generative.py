@@ -60,7 +60,7 @@ def main(cfg: schemas.Config):
         # Preprocessing
         datahandler.split_and_rescale(bornmachine)
         # Classification pretraining (optional)
-        if cfg.trainer.classification is not None:
+        if getattr(cfg.trainer, 'classification', None) is not None:
             logger.info("Running classification pretraining.")
             pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
             pre_trainer.train()
