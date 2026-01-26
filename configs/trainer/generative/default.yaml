@@ -6,7 +6,7 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.00
 criterion:
-  name: "generative-nll"  # User must implement and pass GenerativeNLL subclass
+  name: "nll"
   kwargs:
     eps: 1e-8
 patience: 50

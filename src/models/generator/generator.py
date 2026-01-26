@@ -461,7 +461,7 @@ class BornGenerator(tk.models.MPS):
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
         data_embs = self.embedding(data, self.in_dim) # (batch_size, data_dim, physical_dim)
-        class_embs = tk.embeddings.basis(labels, self.num_cls) # (batch_size, num_classes)
+        class_embs = tk.embeddings.basis(labels, self.num_cls).float() # (batch_size, num_classes)
         embs = {}
         # TODO: Can this be vectorized?
         for site in range(self.n_features):

@@ -51,16 +51,13 @@ class ClassificationNLL(nn.Module):
 
 class GenerativeNLL(nn.Module):
     """
-    Abstract base for generative NLL losses.
+    Generative NLL loss for joint distribution p(x,c).
 
-    Computes: -log(p(x|c)) = -log(|psi(x,c)|^2) + log(Z_c)
+    Computes: -log(p(x,c)) = -log(|psi(x,c)|^2) + log(Z)
 
     where:
     - |psi(x,c)|^2 is the unnormalized probability from the MPS
-    - Z_c is the partition function (normalization constant) for class c
-
-    User must subclass and implement both abstract methods with their
-    chosen normalization approach.
+    - Z is the global partition function (normalization constant)
 
     Args:
         eps: Small constant for numerical stability in log computations.
@@ -77,7 +74,7 @@ class GenerativeNLL(nn.Module):
             labels: torch.Tensor
     ) -> torch.Tensor:
         """
-        Compute mean NLL: -mean(log(p(x|c))).
+        Compute mean NLL: -mean(log(p(x,c))).
 
         Args:
             bornmachine: BornMachine instance.
@@ -92,7 +89,7 @@ class GenerativeNLL(nn.Module):
             born.unnormalized_prob(data, labels)
             .clamp(min=self.eps)
         )
-        log_Z: torch.Tensor = born.log_partition_function(labels)
+        log_Z: torch.Tensor = born.log_partition_function()
         log_prob = log_unnorm - log_Z
         return -log_prob.mean()
 
