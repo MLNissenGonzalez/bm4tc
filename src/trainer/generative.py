@@ -259,6 +259,7 @@ class Trainer:
 
         # Prepare generator and optimizer
         self.bornmachine.generator.reset()
+        self.bornmachine.generator.out_features = []
         self.bornmachine.to(self.device)
         self.optimizer = get.optimizer(self.bornmachine.parameters(mode="generator"),
                                        self.train_cfg.optimizer)
@@ -275,6 +276,9 @@ class Trainer:
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
             record(results=self.valid_perf, stage=self.stage, set="valid")
 
+            # In the evaluation step, could be that we sampled,
+            # thus bornmachine.in_features might not be all? 
+            # (actually, last step is conditioned on all inputs, thus in_featues is all)
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
 

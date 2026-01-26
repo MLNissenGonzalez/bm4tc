@@ -422,7 +422,7 @@ class BornGenerator(tk.models.MPS):
             input_nodes=copied_nodes,
             inline_input=True)
         
-        # Contract resultant matrices
+        # Contract resultant matrices (inline mats explicitly here)
         log_Z = 0
         result_node = mats_out_env[0]
         log_Z += result_node.norm().log()
@@ -460,14 +460,17 @@ class BornGenerator(tk.models.MPS):
         Returns:
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
-        data_embs = self.embedding(data, self.in_dim) # (batch_size, data_dim, physical_dim)
-        class_embs = tk.embeddings.basis(labels, self.num_cls).float() # (batch_size, num_classes)
-        embs = {}
-        # TODO: Can this be vectorized?
-        for site in range(self.n_features):
-            if site == self.cls_pos:
-                embs[site] = class_embs # (batch_size, num_classes)
-            else:
-                offset = int(site > self.cls_pos)
-                embs[site] = data_embs[:, site - offset, :] # (batch_size, physical_dim)
-        return self.sequential(embs) # batch_size
+        data_embs = self.embedding(data, self.in_dim)
+        class_embs = tk.embeddings.basis(labels, self.num_cls).float()
+
+        # start with data embeddings as a list
+        embs = [data_embs[:, i, :] for i in range(data_embs.shape[1])]
+
+        # insert class embedding at cls_pos
+        embs.insert(self.cls_pos, class_embs)
+
+        # Compute amplitude
+        amplitude = self.forward(
+                data=embs, inline_input=True, inline_mats=True)  # prob. amplitude
+
+        return torch.square(amplitude)
