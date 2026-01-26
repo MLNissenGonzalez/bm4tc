@@ -20,11 +20,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
-from src.utils import schemas, set_seed
+# Think about initializing the generative loss in the trainer?
+from src.utils import schemas, set_seed, get
 from src.data import DataHandler
 from src.models import BornMachine
 from src.trainer import ClassificationTrainer, GenerativeTrainer
-from src.utils.generative_losses import GenerativeNLL
 import torch
 
 logger = logging.getLogger(__name__)
@@ -73,9 +73,7 @@ def main(cfg: schemas.Config):
     gen_trainer = None
     if cfg.trainer.generative is not None:
         logger.info("Starting generative training.")
-        # Create criterion (GenerativeNLL with default normalization)
-        criterion = GenerativeNLL(eps=cfg.trainer.generative.criterion.kwargs.get("eps", 1e-12))
-        gen_trainer = GenerativeTrainer(bornmachine, cfg, datahandler, criterion, device)
+        gen_trainer = GenerativeTrainer(bornmachine, cfg, datahandler, device)
         gen_trainer.train()
     else:
         logger.error("No generative training config provided!")

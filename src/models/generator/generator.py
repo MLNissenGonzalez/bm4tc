@@ -44,6 +44,16 @@ class BornGenerator(tk.models.MPS):
             self.cls_embs.append(emb.to(device))
         self.device = device
 
+        # Initialise the virtual tensorkrowch MPS for computing the partition function
+        # Needs to share the exact same tensors as self
+        # But we need a seperate instance to avoid problems whith the computational graph
+        # Since mps.norm() does a full contraction with itself, which is achieved by changing the 
+        # virtual node structure. THis is another virtual node structure than the one used for 
+        # A simple forward pass to compute amplitudes.
+        # Maybe it is better to copy like it is done inside .norm()?
+
+        self.virtual_mps = self.copy(share_tensors=True)
+
     def prepare(self):
         """Reset MPS state and clear data nodes for a fresh sampling pass."""
         self.reset()
@@ -315,3 +325,149 @@ class BornGenerator(tk.models.MPS):
         
         return samples
     
+    def log_partition_function(self) -> torch.FloatTensor:
+        """
+        Computes the log partition function of the BornMachine. (without embedding matrix).
+        Is basically a copied from tensorkrowch.MPS.norm() method with log_scale=True
+        and without the sqrt. Also, removed the option of complex tensors.
+        
+        Think about setting up the contraction network (copying of nodes etc) once at the start.
+        Such that we init the virtual structure only once.
+        
+        This method internally removes all data nodes in the MPS, if any, and
+        contracts the nodes with themselves. Therefore, this may alter the
+        usual behaviour of :meth:`contract` if the MPS is not
+        :meth:`~tensorkrowch.TensorNetwork.reset` afterwards. Also, if the MPS
+        was contracted before with other arguments, it should be ``reset``
+        before calling ``norm`` to avoid undesired behaviour.
+        
+        Since the norm is computed by contracting the MPS, it means one can
+        take gradients of it with respect to the MPS tensors, if it is needed.
+        
+        """
+        if self.virtual_mps._data_nodes:
+            self.virtual_mps.unset_data_nodes()
+        
+        # All nodes belong to the output region
+        all_nodes = self.virtual_mps.mats_env[:]
+        
+        if self.virtual_mps._boundary == 'obc':
+            all_nodes[0] = self.virtual_mps._left_node @ all_nodes[0]
+            all_nodes[-1] = all_nodes[-1] @ self.virtual_mps._right_node
+        
+        # Check if nodes are already connected to copied nodes
+        create_copies = []
+        for node in all_nodes:
+            neighbour = node.neighbours('input')
+            if neighbour is None:
+                create_copies.append(True)
+            else:
+                if 'virtual_result_copy' not in neighbour.name:
+                    raise ValueError(
+                        f'Node {node} is already connected to another node '
+                        'at axis "input". Disconnect the node or reset the '
+                        'network before calling `norm`')
+                else:
+                    create_copies.append(False)
+        
+        if any(create_copies) and not all(create_copies):
+            raise ValueError(
+                'There are some nodes connected and some disconnected at axis '
+                '"input". Disconnect all of them before calling `norm`')
+        
+        create_copies = any(create_copies)
+        
+        # Copy output nodes sharing tensors
+        if create_copies:
+            copied_nodes = []
+            for node in all_nodes:
+                copied_node = node.__class__(shape=node._shape,
+                                             axes_names=node.axes_names,
+                                             name='virtual_result_copy',
+                                             network=self.virtual_mps,
+                                             virtual=True)
+                copied_node.set_tensor_from(node)
+                copied_nodes.append(copied_node)
+                
+                # Change batch names so that they not coincide with
+                # original batches, which gives dupliicate output batches
+                for ax in copied_node.axes:
+                    if ax._batch:
+                        ax.name = ax.name + '_copy'
+            
+            # Connect copied nodes with neighbours
+            for i in range(len(copied_nodes)):
+                if (i == 0) and (self.virtual_mps._boundary == 'pbc'):
+                    if all_nodes[i - 1].is_connected_to(all_nodes[i]):
+                        copied_nodes[i - 1]['right'] ^ copied_nodes[i]['left']
+                elif i > 0:
+                    copied_nodes[i - 1]['right'] ^ copied_nodes[i]['left']
+            
+            # Reattach input edges of resultant output nodes and connect
+            # with copied nodes
+            for node, copied_node in zip(all_nodes, copied_nodes):
+                # Reattach input edges
+                node.reattach_edges(axes=['input'])
+                
+                # Connect copies directly to output nodes
+                copied_node['input'] ^ node['input']
+        else:
+            copied_nodes = []
+            for node in all_nodes:
+                copied_nodes.append(node.neighbours('input'))
+            
+        # Contract output nodes with copies
+        mats_out_env = self.virtual_mps._input_contraction(
+            nodes_env=all_nodes,
+            input_nodes=copied_nodes,
+            inline_input=True)
+        
+        # Contract resultant matrices
+        log_Z = 0
+        result_node = mats_out_env[0]
+        log_Z += result_node.norm().log()
+        result_node = result_node.renormalize()
+                
+        for node in mats_out_env[1:]:
+            result_node @= node
+            log_Z += result_node.norm().log()
+            result_node = result_node.renormalize()
+        
+        # Contract periodic edge
+        if result_node.is_connected_to(result_node):
+            result_node @= result_node
+            log_Z += result_node.norm().log()
+            result_node = result_node.renormalize()
+
+        return log_Z
+    
+    def unnormalized_prob(
+            self,
+            data: torch.Tensor,
+            labels: torch.Tensor
+    ) -> torch.FloatTensor:
+        """
+        Compute log(|psi(x,c)|^2) for each sample.
+
+        This should use the generator's sequential method with full contraction
+        (because on internal tensorkrowch stuff) to compute the squared amplitude for each (data, label) pair.
+
+        Args:
+            bornmachine: BornMachine instance with generator view.
+            data: Input tensor of shape (batch_size, data_dim).
+            labels: Class labels of shape (batch_size,).
+
+        Returns:
+            Tensor of shape (batch_size,) with log unnormalized probabilities.
+        """
+        data_embs = self.embedding(data, self.in_dim) # (batch_size, data_dim, physical_dim)
+        class_embs = tk.embeddings.basis(labels, self.num_cls) # (batch_size, num_classes)
+        embs = {}
+        # TODO: Can this be vectorized?
+        for site in range(self.n_features):
+            if site == self.cls_pos:
+                embs[site] = class_embs # (batch_size, num_classes)
+            else:
+                offset = int(site > self.cls_pos)
+                embs[site] = data_embs[:, site - offset, :] # (batch_size, physical_dim)
+        return self.sequential(embs) # batch_size

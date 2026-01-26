@@ -6,7 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
-from src.utils import get, schemas, set_seed
+from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
 from src.trainer import ClassificationTrainer
