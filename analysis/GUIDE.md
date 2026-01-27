@@ -59,6 +59,7 @@ analysis/
 └── utils/
     ├── __init__.py
     ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
+    ├── resolve.py           # HPO regime/param resolver (NEW)
     ├── mia.py               # MIA evaluation classes
     └── mia_utils.py         # Config loading utilities
 ```
@@ -71,17 +72,27 @@ Edit the configuration section at the top of `hpo_analysis.py`:
 
 ```python
 # Data source: "wandb" or "local"
-DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
+DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
 
-# --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
-WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
-WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "lrwdbs_hpo"  # Regex pattern to match run groups
-DATASET_NAME = None  # e.g., "spirals_4k", or None for all
-
-# --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
+# --- LOCAL SETTINGS ---
 LOCAL_SWEEP_DIR = "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
+
+# --- HPO CONFIGURATION (simplified) ---
+# Training regime: "pre", "gen", "adv", "gan"
+REGIME = "pre"
+
+# Parameters to analyze (shorthand names)
+PARAM_SHORTHANDS = ["lr", "weight-decay", "batch-size"]
+
+# Auto-detect varied params (excludes single-value params)
+AUTO_DETECT_VARIED = True
 ```
+
+That's it! The resolver automatically:
+- Maps shorthand names to full config paths
+- Sets up metric columns for the regime
+- Auto-detects robustness metric strengths
+- Filters out parameters that didn't vary in the sweep
 
 ### 2. Run the Analysis
 
@@ -102,6 +113,62 @@ python -m analysis.hpo_analysis
 pip install jupytext
 jupytext --to notebook analysis/hpo_analysis.py
 jupyter notebook analysis/hpo_analysis.ipynb
+```
+
+## Training Regimes
+
+| Regime | Description | Config Prefix | Typical HPO Params |
+|--------|-------------|---------------|-------------------|
+| `pre` | Classification pretraining | `trainer.classification.*` | lr, weight-decay, batch-size |
+| `gen` | Generative NLL training | `trainer.generative.*` | lr, weight-decay, batch-size |
+| `adv` | Adversarial training | `trainer.adversarial.*` | lr, weight-decay, epsilon, trades-beta |
+| `gan` | GAN-style training | `trainer.ganstyle.*` | lr, critic-lr, r-real |
+
+## Parameter Shorthand Reference
+
+| Shorthand | Aliases | Description |
+|-----------|---------|-------------|
+| `lr` | `learning-rate`, `learning_rate` | Learning rate |
+| `weight-decay` | `wd`, `weight_decay` | Weight decay |
+| `batch-size` | `bs`, `batch_size` | Batch size |
+| `bond-dim` | `bond_dim` | MPS bond dimension |
+| `in-dim` | `in_dim` | MPS input dimension |
+| `seed` | - | Random seed |
+| `data-seed` | `data_seed` | Dataset generation seed |
+| `epsilon` | `strength`, `eps` | Adversarial perturbation (adv only) |
+| `trades-beta` | `trades_beta`, `beta` | TRADES trade-off (adv only) |
+| `clean-weight` | `clean_weight` | Clean example weight (adv only) |
+| `critic-lr` | `critic_lr` | Critic learning rate (gan only) |
+| `critic-wd` | `critic_wd` | Critic weight decay (gan only) |
+| `r-real` | `r_real` | Real/synthetic ratio (gan only) |
+| `num-spc` | `num_spc` | Samples per class (gan only) |
+| `num-bins` | `num_bins` | Sampling bins (gan only) |
+
+## Resolver Output
+
+When you run the analysis, the resolver prints a summary:
+
+```
+============================================================
+Resolved Configuration
+============================================================
+
+Regime: pre (Classification pretraining)
+
+Parameters (3 varied, 2 excluded):
+  + lr               -> trainer.classification.optimizer.kwargs.lr
+  + weight-decay     -> trainer.classification.optimizer.kwargs.weight_decay
+  + batch-size       -> trainer.classification.batch_size
+  - bond-dim         (excluded: single value)
+  - in-dim           (excluded: single value)
+
+Metrics:
+  Validation: acc, loss
+  Robustness: rob/0.1, rob/0.3 (auto-detected)
+  Test:       acc, loss
+
+Pretrained Model: None detected
+============================================================
 ```
 
 ## Analysis Features
@@ -127,13 +194,49 @@ Lists the top N runs for each metric with their hyperparameters.
 ### 5. Parameter-Metric Correlations
 Heatmap showing Pearson correlations between (log-transformed) parameters and metrics.
 
-### 6. Metric-Metric Correlations (NEW)
+### 6. Metric-Metric Correlations
 Shows how different metrics correlate with each other:
 - Heatmap of all metric pairs
 - Scatter matrix with correlation coefficients
 - Useful for understanding trade-offs (e.g., accuracy vs robustness)
 
 ## API Reference
+
+### Resolver Functions
+
+```python
+from analysis.utils import (
+    resolve_params,
+    resolve_metrics,
+    filter_varied_params,
+    format_resolved_config,
+    config_path_to_column,
+    get_available_params,
+    get_available_regimes,
+)
+
+# Resolve parameter shorthand to full config paths
+params = resolve_params("pre", ["lr", "weight-decay"])
+# Returns: {"lr": "trainer.classification.optimizer.kwargs.lr", ...}
+
+# Get metrics for regime (auto-detects robustness strengths from df)
+metrics = resolve_metrics("pre", df)
+# Returns: {"validation": [...], "robustness": [...], "test": [...]}
+
+# Convert full path to DataFrame column name
+col = config_path_to_column("trainer.classification.optimizer.kwargs.lr")
+# Returns: "config/lr"
+
+# Filter to only params that varied in the sweep
+varied, excluded = filter_varied_params(df, ["config/lr", "config/weight_decay"])
+
+# Get available params/regimes
+params = get_available_params("adv")  # ["lr", "weight-decay", "epsilon", ...]
+regimes = get_available_regimes()  # ["pre", "gen", "adv", "gan"]
+
+# Format resolved config for display
+print(format_resolved_config(regime, params, varied, excluded, metrics))
+```
 
 ### WandbFetcher Class
 

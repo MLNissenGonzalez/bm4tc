@@ -42,6 +42,38 @@ except ImportError:
     OMEGACONF_AVAILABLE = False
 
 
+def _get_default_config_keys(regime: Optional[str] = None) -> List[str]:
+    """
+    Get default config keys for HPO analysis.
+
+    Args:
+        regime: Optional training regime ("pre", "gen", "adv", "gan").
+                If provided, uses regime-specific params from resolve module.
+                If None, uses legacy classification params.
+
+    Returns:
+        List of full config paths to extract
+    """
+    if regime is not None:
+        try:
+            from analysis.utils.resolve import REGIME_PARAM_MAP
+            if regime in REGIME_PARAM_MAP:
+                return list(REGIME_PARAM_MAP[regime].values())
+        except ImportError:
+            pass
+
+    # Legacy default keys (classification-focused)
+    return [
+        "trainer.classification.optimizer.kwargs.lr",
+        "trainer.classification.optimizer.kwargs.weight_decay",
+        "trainer.classification.batch_size",
+        "born.init_kwargs.bond_dim",
+        "born.init_kwargs.in_dim",
+        "dataset.name",
+        "experiment",
+    ]
+
+
 @dataclass
 class WandbFetcher:
     """
@@ -142,16 +174,7 @@ class WandbFetcher:
             # Extract config
             config = run.config
             if config_keys is None:
-                # Auto-extract common HPO parameters
-                config_keys_to_use = [
-                    "trainer.classification.optimizer.kwargs.lr",
-                    "trainer.classification.optimizer.kwargs.weight_decay",
-                    "trainer.classification.batch_size",
-                    "born.init_kwargs.bond_dim",
-                    "born.init_kwargs.in_dim",
-                    "dataset.name",
-                    "experiment",
-                ]
+                config_keys_to_use = _get_default_config_keys()
             else:
                 config_keys_to_use = config_keys
 
@@ -412,15 +435,7 @@ def load_local_run(
 
     # Extract config values
     if config_keys is None:
-        config_keys = [
-            "trainer.classification.optimizer.kwargs.lr",
-            "trainer.classification.optimizer.kwargs.weight_decay",
-            "trainer.classification.batch_size",
-            "born.init_kwargs.bond_dim",
-            "born.init_kwargs.in_dim",
-            "dataset.name",
-            "experiment",
-        ]
+        config_keys = _get_default_config_keys()
 
     for key in config_keys:
         value = _get_nested_value(config, key)
