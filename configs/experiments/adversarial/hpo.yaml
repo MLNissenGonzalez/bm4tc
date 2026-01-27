@@ -1,0 +1,128 @@
+# @package _global_
+# Adversarial Training HPO (PGD-AT with curriculum)
+#
+# Optimizes: lr, weight_decay, clean_weight
+# Uses strong PGD attack with curriculum training (epsilon: 0.01 -> 0.15)
+#
+# Usage:
+#   # Run for moons dataset (100 trials overnight)
+#   python -m experiments.adversarial --multirun +experiments=adversarial/hpo dataset=2Dtoy/moons_4k
+#
+#   # Run for spirals dataset
+#   python -m experiments.adversarial --multirun +experiments=adversarial/hpo dataset=2Dtoy/spirals_4k
+#
+#   # Run for circles dataset
+#   python -m experiments.adversarial --multirun +experiments=adversarial/hpo dataset=2Dtoy/circles_4k
+#
+#   # Quick test (fewer trials)
+#   python -m experiments.adversarial --multirun +experiments=adversarial/hpo dataset=2Dtoy/moons_4k \
+#       hydra.sweeper.n_trials=5 trainer.adversarial.max_epoch=50
+
+experiment: adversarial_hpo_${dataset.name}
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: 2Dtoy/moons_4k  # Override on command line: dataset=2Dtoy/spirals_4k
+  - override /trainer/classification: adam500_loss
+  - override /trainer/adversarial: pgd_at
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+# W&B settings
+tracking:
+  project: adversarial_hpo
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15]
+    num_steps: 20
+    step_size: null
+    random_start: true
+
+# Classification pretraining (fixed hyperparameters from best classification HPO)
+# Override with better values if you have them from W&B
+trainer:
+  classification:
+    max_epoch: 500
+    batch_size: 64
+    patience: 250
+    stop_crit: "clsloss"
+    watch_freq: 1000
+    save: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.004598462567376982
+        weight_decay: 0
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-08
+    metrics: {'acc': 1, 'rob': 50, 'viz': 50, 'clsloss': 1}
+
+  # Adversarial training settings
+  adversarial:
+    max_epoch: 500
+    batch_size: 64
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 200
+    watch_freq: 2000
+    # Evaluate clean and robust accuracy every epoch
+    # FID, genloss, viz every 50 epochs (expensive)
+    metrics: {"clsloss": 1, "acc": 1, "rob": 1, "fid": 50, "genloss": 50, "viz": 50}
+
+    # Attack settings (strong PGD attack)
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+        kwargs:
+          eps: 1e-8
+      strengths: [0.15]
+      num_steps: 20
+      step_size: null
+      random_start: true
+
+    # Curriculum: ramp epsilon from 0.01 to 0.15 over first 300 epochs
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 300
+
+    save: false
+    auto_stack: true
+    auto_unbind: false
+
+# Optuna HPO configuration
+hydra:
+  sweeper:
+    # Storage set to null = in-memory (or override on command line)
+    storage: null
+    study_name: "adversarial_hpo"
+
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 15
+
+    direction: minimize  # Minimizing -rob_acc (negated in entry point)
+    n_trials: 100
+    n_jobs: 1
+
+    # Search space
+    params:
+      # Learning rate (log scale, inspired by classification HPO range)
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-5, 1e-2))
+      # Weight decay (log scale)
+      trainer.adversarial.optimizer.kwargs.weight_decay: tag(log, interval(1e-9, 1e-3))
+      # Clean weight: 0 = pure adversarial, 0.5 = half clean/half adversarial
+      trainer.adversarial.clean_weight: interval(0.0, 0.5)
+      # Random seed for reproducibility analysis
+      tracking.seed: range(1, 1000)

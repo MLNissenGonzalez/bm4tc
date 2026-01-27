@@ -7,6 +7,12 @@ from .wandb_fetcher import (
     load_local_hpo_runs,
     load_local_run,
     find_local_sweep_dirs,
+    # Best run fetching for downstream training
+    fetch_best_classification_run,
+    extract_classification_config,
+    extract_born_config,
+    get_best_classification_config,
+    print_classification_config_yaml,
 )
 
 from .mia import (
@@ -49,6 +55,12 @@ __all__ = [
     "load_local_hpo_runs",
     "load_local_run",
     "find_local_sweep_dirs",
+    # Best run fetching for downstream training
+    "fetch_best_classification_run",
+    "extract_classification_config",
+    "extract_born_config",
+    "get_best_classification_config",
+    "print_classification_config_yaml",
     # MIA evaluation
     "MIAFeatureConfig",
     "MIAFeatureExtractor",

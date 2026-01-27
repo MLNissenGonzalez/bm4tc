@@ -558,3 +558,260 @@ def find_local_sweep_dirs(
             sweep_dirs.append(d)
 
     return sorted(sweep_dirs)
+
+
+# =============================================================================
+# BEST RUN FETCHING (for downstream training)
+# =============================================================================
+
+def fetch_best_classification_run(
+    entity: str,
+    project: str,
+    group: str,
+    dataset_name: Optional[str] = None,
+    metric: str = "pre/valid/acc",
+    minimize: bool = False,
+) -> Optional[Any]:
+    """
+    Fetch the best classification run from W&B for a given group.
+
+    Args:
+        entity: W&B entity (username or team name).
+        project: W&B project name.
+        group: W&B group name (experiment name) to filter by. Required.
+        dataset_name: Optional dataset to filter by (e.g., "spirals_4k").
+        metric: Summary metric to sort by (default: "pre/valid/acc").
+        minimize: If True, sort ascending (for loss metrics). Default False.
+
+    Returns:
+        The best wandb Run object, or None if no runs found.
+
+    Example:
+        >>> run = fetch_best_classification_run(
+        ...     entity="my-entity",
+        ...     project="gan_train",
+        ...     group="sanity_check_moons_4k_27Jan25",
+        ...     dataset_name="moons_4k"
+        ... )
+        >>> if run:
+        ...     print(f"Best run: {run.name}, acc: {run.summary.get('pre/valid/acc')}")
+    """
+    if not WANDB_AVAILABLE:
+        raise ImportError("wandb is required. Install with: pip install wandb")
+
+    fetcher = WandbFetcher(entity=entity, project=project)
+    order = f"summary_metrics.{metric}" if minimize else f"-summary_metrics.{metric}"
+
+    # Build filter
+    filters = {
+        "group": {"$regex": f".*{group}.*"},
+        "state": "finished"
+    }
+
+    if dataset_name:
+        filters["config.dataset.name"] = dataset_name
+
+    try:
+        runs = fetcher.fetch_runs(filters=filters, order=order)
+        if runs:
+            return runs[0]
+    except Exception:
+        pass
+
+    return None
+
+
+def extract_classification_config(run: Any) -> Dict[str, Any]:
+    """
+    Extract classification training config from a W&B run.
+
+    Args:
+        run: A wandb Run object.
+
+    Returns:
+        Dict containing classification trainer config suitable for use
+        in adversarial training HPO experiments.
+
+    Example:
+        >>> run = fetch_best_classification_run(...)
+        >>> cls_config = extract_classification_config(run)
+        >>> print(cls_config["optimizer"]["kwargs"]["lr"])
+    """
+    config = run.config
+    cls_config = _get_nested_value(config, "trainer.classification", {})
+
+    return {
+        "max_epoch": cls_config.get("max_epoch", 500),
+        "batch_size": cls_config.get("batch_size", 64),
+        "optimizer": cls_config.get("optimizer", {
+            "name": "adam",
+            "kwargs": {"lr": 5e-3, "weight_decay": 0.0}
+        }),
+        "criterion": cls_config.get("criterion", {
+            "name": "negative log-likelihood",
+            "kwargs": {"eps": 1e-8}
+        }),
+        "patience": cls_config.get("patience", 250),
+        "stop_crit": cls_config.get("stop_crit", "clsloss"),
+        "watch_freq": cls_config.get("watch_freq", 1000),
+        "metrics": cls_config.get("metrics", {"clsloss": 1, "acc": 1}),
+        "save": False,  # Don't save intermediate models in HPO
+        "auto_stack": cls_config.get("auto_stack", True),
+        "auto_unbind": cls_config.get("auto_unbind", False),
+    }
+
+
+def extract_born_config(run: Any) -> Dict[str, Any]:
+    """
+    Extract Born machine config from a W&B run.
+
+    Args:
+        run: A wandb Run object.
+
+    Returns:
+        Dict containing Born machine configuration.
+    """
+    config = run.config
+    born_config = _get_nested_value(config, "born", {})
+
+    return {
+        "init_kwargs": {
+            "in_dim": _get_nested_value(born_config, "init_kwargs.in_dim", 30),
+            "bond_dim": _get_nested_value(born_config, "init_kwargs.bond_dim", 18),
+            "boundary": _get_nested_value(born_config, "init_kwargs.boundary", "obc"),
+            "init_method": _get_nested_value(born_config, "init_kwargs.init_method", "randn_eye"),
+            "std": _get_nested_value(born_config, "init_kwargs.std", 1e-9),
+        },
+        "embedding": born_config.get("embedding", "fourier"),
+    }
+
+
+def print_classification_config_yaml(
+    entity: str,
+    project: str,
+    group: str,
+    dataset_name: Optional[str] = None,
+) -> None:
+    """
+    Fetch and print best classification config in copy-pasteable YAML format.
+
+    Args:
+        entity: W&B entity.
+        project: W&B project name.
+        group: W&B group name (experiment name) to filter by.
+        dataset_name: Optional dataset to filter by.
+
+    Example:
+        >>> print_classification_config_yaml(
+        ...     entity="my-entity",
+        ...     project="gan_train",
+        ...     group="sanity_check_moons_4k_27Jan25"
+        ... )
+        # Output: YAML that can be pasted into experiment configs
+    """
+    config = get_best_classification_config(entity, project, group, dataset_name)
+
+    print(f"# Best classification config from W&B")
+    print(f"# Group: {config['group']}")
+    print(f"# Run ID: {config['run_id']}")
+    print(f"# Run Name: {config['run_name']}")
+    if config['metrics']:
+        print(f"# Valid Acc: {config['metrics'].get('valid_acc')}")
+        print(f"# Test Acc: {config['metrics'].get('test_acc')}")
+    print()
+    print("trainer:")
+    print("  classification:")
+
+    cls = config['cls_config']
+    print(f"    max_epoch: {cls['max_epoch']}")
+    print(f"    batch_size: {cls['batch_size']}")
+    print(f"    patience: {cls['patience']}")
+    print(f"    stop_crit: \"{cls['stop_crit']}\"")
+    print(f"    watch_freq: {cls['watch_freq']}")
+    print(f"    save: {str(cls['save']).lower()}")
+    print("    optimizer:")
+    print(f"      name: \"{cls['optimizer']['name']}\"")
+    print("      kwargs:")
+    print(f"        lr: {cls['optimizer']['kwargs']['lr']}")
+    print(f"        weight_decay: {cls['optimizer']['kwargs']['weight_decay']}")
+    print("    criterion:")
+    print(f"      name: \"{cls['criterion']['name']}\"")
+    if cls['criterion'].get('kwargs'):
+        print("      kwargs:")
+        for k, v in cls['criterion']['kwargs'].items():
+            print(f"        {k}: {v}")
+    print(f"    metrics: {cls['metrics']}")
+
+
+def get_best_classification_config(
+    entity: str,
+    project: str,
+    group: str,
+    dataset_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch the best classification config from a specific W&B group.
+
+    Args:
+        entity: W&B entity.
+        project: W&B project name.
+        group: W&B group name (experiment name) to filter by. Required.
+        dataset_name: Optional dataset to filter by.
+
+    Returns:
+        Dict containing: {"run_id", "run_name", "group", "cls_config", "born_config", "metrics"}.
+
+    Example:
+        >>> config = get_best_classification_config(
+        ...     entity="my-entity",
+        ...     project="gan_train",
+        ...     group="sanity_check_moons_4k_27Jan25"
+        ... )
+        >>> print(f"lr={config['cls_config']['optimizer']['kwargs']['lr']}")
+    """
+    run = fetch_best_classification_run(
+        entity=entity,
+        project=project,
+        group=group,
+        dataset_name=dataset_name,
+    )
+
+    if run:
+        summary = run.summary._json_dict if hasattr(run.summary, '_json_dict') else {}
+        return {
+            "run_id": run.id,
+            "run_name": run.name,
+            "group": run.group,
+            "cls_config": extract_classification_config(run),
+            "born_config": extract_born_config(run),
+            "metrics": {
+                "valid_acc": summary.get("pre/valid/acc"),
+                "valid_loss": summary.get("pre/valid/loss"),
+                "test_acc": summary.get("pre/test/acc"),
+            }
+        }
+    else:
+        # Default fallback config
+        return {
+            "run_id": None,
+            "run_name": "default_fallback",
+            "group": group,
+            "cls_config": {
+                "max_epoch": 500,
+                "batch_size": 64,
+                "optimizer": {"name": "adam", "kwargs": {"lr": 5e-3, "weight_decay": 0.0}},
+                "criterion": {"name": "negative log-likelihood", "kwargs": {"eps": 1e-8}},
+                "patience": 250,
+                "stop_crit": "clsloss",
+                "watch_freq": 1000,
+                "metrics": {"clsloss": 1, "acc": 1},
+                "save": False,
+                "auto_stack": True,
+                "auto_unbind": False,
+            },
+            "born_config": {
+                "init_kwargs": {"in_dim": 30, "bond_dim": 18, "boundary": "obc"},
+                "embedding": "fourier",
+            },
+            "metrics": None,
+        }
