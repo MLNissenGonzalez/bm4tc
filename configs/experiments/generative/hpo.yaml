@@ -16,7 +16,7 @@ trainer:
     max_epoch: 500
     patience: 150
     stop_crit: "genloss"
-    watch_freq: 200
+    watch_freq: 2000
     metrics: {"genloss": 1, "acc": 20, "rob": 20, "fid": 50, "viz": 50}
     save: false
 

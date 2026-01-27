@@ -47,6 +47,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from scipy.interpolate import griddata
 import warnings
+from typing import *
 
 # %%
 # =============================================================================
@@ -54,12 +55,12 @@ import warnings
 # =============================================================================
 
 # Data source: "wandb" or "local"
-DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
+DATA_SOURCE = "wandb"  # Change to "wandb" to fetch from Weights & Biases
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "lrwdbs_hpo"  # Regex pattern to match run groups
+EXPERIMENT_PATTERN = "generative_hpo"  # Regex pattern to match run groups
 DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
@@ -69,33 +70,52 @@ LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/lrwdbs_hpo_spir
 
 # --- ANALYSIS SETTINGS ---
 # HPO parameters that were optimized (column names after fetching)
+type_key : str | List[str] = "gen"
+
+TRAINING_TYPES = {
+    "gen": "generative",
+    "pre": "classification",
+    "gan": "ganstyle",
+    "adv": "adversarial",
+}
+
+# TODO: Change this such that when I say "lr" below, this resolves to
+#       something like "config/trainer/generative/optimizer/lr" automatically
+#       when type_key is "gen" in this case.
+
+def resolve_param_and_metric_name(key: str | List[str]) -> Tuple[List[str]]:
+    """
+    Should return basically HPO_PARAMS,  and the .._METRICS lists
+    """
+    return NotImplementedError
+
 HPO_PARAMS = [
-    "config/lr",
+    "config/trainer/generative/optimizer/lr",
     "config/weight_decay",
     "config/batch_size",
 ]
 
 # Metrics to analyze (will auto-detect available columns)
 VALIDATION_METRICS = [
-    "summary/pre/valid/acc",
-    "summary/pre/valid/loss",
+    f"summary/{type_key}/valid/acc",
+    f"summary/{type_key}/valid/genloss",
 ]
 
 # Robustness metrics (check your wandb/local data for exact names)
 ROBUSTNESS_METRICS = [
-    "summary/pre/valid/rob/0.1",
-    "summary/pre/valid/rob/0.3",
+    f"summary/{type_key}/valid/rob/0.1",
+    f"summary/{type_key}/valid/rob/0.3",
 ]
 
 # Test metrics (for final evaluation)
 TEST_METRICS = [
-    "summary/pre/test/acc",
-    "summary/pre/test/loss",
+    f"summary/{type_key}/test/acc",
+    f"summary/{type_key}/test/genloss",
 ]
 
 # --- IMPORTANCE & INTERACTION SETTINGS ---
 # Primary metric for marginal importance analysis (higher is better if minimize=False)
-PRIMARY_METRIC = "summary/pre/valid/acc"
+PRIMARY_METRIC = f"summary/{type_key}/valid/acc"
 PRIMARY_METRIC_MINIMIZE = False  # Set True if lower is better (e.g., loss)
 
 # Parameter pairs for interaction effect analysis
@@ -110,8 +130,8 @@ INTERACTION_PAIRS = [
 # Metrics for Pareto frontier analysis (trade-off visualization)
 # Format: (metric, maximize) where maximize=True means higher is better
 PARETO_METRICS = [
-    ("summary/pre/valid/acc", True),       # Clean accuracy (maximize)
-    ("summary/pre/valid/rob/0.1", True),   # Robust accuracy (maximize)
+    (f"summary/{type}/valid/acc", True),       # Clean accuracy (maximize)
+    (f"summary/{type}/valid/rob/0.1", True),   # Robust accuracy (maximize)
 ]
 
 # Plot settings
