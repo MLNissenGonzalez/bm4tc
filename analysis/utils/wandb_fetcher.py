@@ -686,6 +686,33 @@ def extract_born_config(run: Any) -> Dict[str, Any]:
     }
 
 
+def extract_dataset_config(run: Any) -> Dict[str, Any]:
+    """
+    Extract dataset config from a W&B run.
+
+    Args:
+        run: A wandb Run object.
+
+    Returns:
+        Dict containing dataset configuration (name, split_seed, split,
+        and gen_dow_kwargs fields).
+    """
+    config = run.config
+    dataset_config = _get_nested_value(config, "dataset", {})
+
+    return {
+        "name": dataset_config.get("name"),
+        "split_seed": dataset_config.get("split_seed"),
+        "split": dataset_config.get("split"),
+        "gen_dow_kwargs": {
+            "seed": _get_nested_value(dataset_config, "gen_dow_kwargs.seed"),
+            "name": _get_nested_value(dataset_config, "gen_dow_kwargs.name"),
+            "size": _get_nested_value(dataset_config, "gen_dow_kwargs.size"),
+            "noise": _get_nested_value(dataset_config, "gen_dow_kwargs.noise"),
+        },
+    }
+
+
 def print_classification_config_yaml(
     entity: str,
     project: str,
@@ -718,7 +745,32 @@ def print_classification_config_yaml(
     if config['metrics']:
         print(f"# Valid Acc: {config['metrics'].get('valid_acc')}")
         print(f"# Test Acc: {config['metrics'].get('test_acc')}")
+    if config.get('tracking_seed') is not None:
+        print(f"# Tracking seed: {config['tracking_seed']}")
+    ds_cfg = config.get('dataset_config')
+    if ds_cfg is not None:
+        print(f"# Dataset: {ds_cfg.get('name')}")
+        print(f"# Dataset split_seed: {ds_cfg.get('split_seed')}")
+        gen_seed = _get_nested_value(ds_cfg, "gen_dow_kwargs.seed")
+        print(f"# Dataset gen seed: {gen_seed}")
     print()
+
+    # Tracking section
+    if config.get('tracking_seed') is not None:
+        print("tracking:")
+        print(f"  seed: {config['tracking_seed']}")
+        print()
+
+    # Dataset section
+    if ds_cfg is not None and ds_cfg.get('split_seed') is not None:
+        print("dataset:")
+        print(f"  split_seed: {ds_cfg['split_seed']}")
+        gen_kwargs = ds_cfg.get('gen_dow_kwargs', {})
+        if gen_kwargs and gen_kwargs.get('seed') is not None:
+            print("  gen_dow_kwargs:")
+            print(f"    seed: {gen_kwargs['seed']}")
+        print()
+
     print("trainer:")
     print("  classification:")
 
@@ -742,6 +794,20 @@ def print_classification_config_yaml(
             print(f"        {k}: {v}")
     print(f"    metrics: {cls['metrics']}")
 
+    # Born config section
+    born = config.get('born_config')
+    if born is not None:
+        print()
+        print("born:")
+        init_kwargs = born.get('init_kwargs', {})
+        if init_kwargs:
+            print("  init_kwargs:")
+            for k, v in init_kwargs.items():
+                print(f"    {k}: {v}")
+        embedding = born.get('embedding')
+        if embedding is not None:
+            print(f"  embedding: \"{embedding}\"")
+
 
 def get_best_classification_config(
     entity: str,
@@ -759,7 +825,8 @@ def get_best_classification_config(
         dataset_name: Optional dataset to filter by.
 
     Returns:
-        Dict containing: {"run_id", "run_name", "group", "cls_config", "born_config", "metrics"}.
+        Dict containing: {"run_id", "run_name", "group", "cls_config",
+        "born_config", "dataset_config", "tracking_seed", "metrics"}.
 
     Example:
         >>> config = get_best_classification_config(
@@ -778,12 +845,15 @@ def get_best_classification_config(
 
     if run:
         summary = run.summary._json_dict if hasattr(run.summary, '_json_dict') else {}
+        tracking_seed = _get_nested_value(run.config, "tracking.seed")
         return {
             "run_id": run.id,
             "run_name": run.name,
             "group": run.group,
             "cls_config": extract_classification_config(run),
             "born_config": extract_born_config(run),
+            "dataset_config": extract_dataset_config(run),
+            "tracking_seed": tracking_seed,
             "metrics": {
                 "valid_acc": summary.get("pre/valid/acc"),
                 "valid_loss": summary.get("pre/valid/loss"),
@@ -813,5 +883,7 @@ def get_best_classification_config(
                 "init_kwargs": {"in_dim": 30, "bond_dim": 18, "boundary": "obc"},
                 "embedding": "fourier",
             },
+            "dataset_config": None,
+            "tracking_seed": None,
             "metrics": None,
         }

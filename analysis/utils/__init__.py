@@ -11,6 +11,7 @@ from .wandb_fetcher import (
     fetch_best_classification_run,
     extract_classification_config,
     extract_born_config,
+    extract_dataset_config,
     get_best_classification_config,
     print_classification_config_yaml,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "fetch_best_classification_run",
     "extract_classification_config",
     "extract_born_config",
+    "extract_dataset_config",
     "get_best_classification_config",
     "print_classification_config_yaml",
     # MIA evaluation

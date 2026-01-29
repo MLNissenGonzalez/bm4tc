@@ -482,6 +482,95 @@ print(results.summary())
 
 ---
 
+## Best Classification Config Fetching
+
+### `get_best_classification_config()`
+
+Fetches the best classification run from W&B and returns a dict with everything needed to reproduce the pretraining or set up downstream training.
+
+```python
+from analysis.utils import get_best_classification_config
+
+config = get_best_classification_config(
+    entity="my-entity",
+    project="gan_train",
+    group="sanity_check_moons_4k_27Jan25"
+)
+```
+
+**Return structure:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `run_id` | `str` | W&B run ID |
+| `run_name` | `str` | W&B run name |
+| `group` | `str` | W&B group name |
+| `cls_config` | `dict` | Classification trainer config (optimizer, criterion, etc.) |
+| `born_config` | `dict` | Born machine config (init_kwargs, embedding) |
+| `dataset_config` | `dict` | Dataset config (name, split_seed, split, gen_dow_kwargs) |
+| `tracking_seed` | `int` | Tracking seed used in the run |
+| `metrics` | `dict` | Summary metrics (valid_acc, valid_loss, test_acc) |
+
+### `extract_dataset_config()`
+
+Extracts dataset configuration from a W&B run object.
+
+```python
+from analysis.utils import extract_dataset_config
+
+run = fetch_best_classification_run(...)
+ds_config = extract_dataset_config(run)
+# Returns: {"name": "moons_4k", "split_seed": 11, "split": [0.5, 0.25, 0.25],
+#           "gen_dow_kwargs": {"seed": 25, "name": "moons_4k", "size": 4000, "noise": 0.05}}
+```
+
+### `print_classification_config_yaml()`
+
+Prints the best classification config in copy-pasteable YAML format, including `tracking`, `dataset`, `trainer.classification`, and `born` sections.
+
+```python
+from analysis.utils import print_classification_config_yaml
+
+print_classification_config_yaml(
+    entity="my-entity",
+    project="gan_train",
+    group="sanity_check_moons_4k_27Jan25"
+)
+```
+
+## Adversarial HPO with Pretrained Models
+
+### Workflow
+
+To avoid re-running classification pretraining for every adversarial HPO trial:
+
+1. **Pretrain once** using the standard classification experiment, save the model.
+2. **Fetch the best config** using `print_classification_config_yaml()` to verify the split seed and born config.
+3. **Run adversarial HPO** using `hpo_moons.yaml`, which loads the pretrained model:
+
+```bash
+python -m experiments.adversarial --multirun \
+    +experiments=adversarial/hpo_moons \
+    model_path=/path/to/pretrained/best_cls_loss_moons_4k.pt
+```
+
+### Split Reproducibility
+
+The data split is governed by `dataset.split_seed` (passed as `random_state` to sklearn's `train_test_split`), which is independent of `tracking.seed`. As long as both pretraining and adversarial HPO use the same dataset config (same `split_seed`, `split` ratios, and data file), the train/valid/test split is identical.
+
+The `hpo_moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
+
+### Key Differences from `hpo.yaml`
+
+| Setting | `hpo.yaml` (old) | `hpo_moons.yaml` (new) |
+|---------|-------------------|------------------------|
+| Classification trainer | `adam500_loss` | `null` (skipped) |
+| Model source | Created from scratch | `model_path: ???` (required) |
+| `tracking.seed` | Swept (`range(1, 1000)`) | Fixed (`42`) |
+| `dataset.split_seed` | Inherited from dataset config | Explicitly set to `11` |
+
+---
+
 ## Adding New Analyses
 
 1. Create a new `.py` file with `# %%` cells
