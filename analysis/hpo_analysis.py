@@ -54,106 +54,143 @@ import warnings
 # =============================================================================
 
 # Data source: "wandb" or "local"
-DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
+DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "lrwdbs_hpo"  # Regex pattern to match run groups
-DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
+EXPERIMENT_PATTERN = "generative_hpo"  # Regex pattern to match run groups
+DATASET_NAME = "circles_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
 # Can be overridden by command line argument: python -m analysis.hpo_analysis outputs/sweep_name
 LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
 
-# --- ANALYSIS SETTINGS ---
-# HPO parameters that were optimized (column names after fetching)
-HPO_PARAMS = [
-    "config/lr",
-    "config/weight_decay",
-    "config/batch_size",
-]
+# =============================================================================
+# HPO CONFIGURATION (simplified interface)
+# =============================================================================
 
-# Metrics to analyze (will auto-detect available columns)
-VALIDATION_METRICS = [
-    "summary/pre/valid/acc",
-    "summary/pre/valid/loss",
-]
+# Training regime: "pre", "gen", "adv", "gan"
+#   - "pre": Classification pretraining (trainer.classification.*)
+#   - "gen": Generative NLL training (trainer.generative.*)
+#   - "adv": Adversarial training (trainer.adversarial.*)
+#   - "gan": GAN-style training (trainer.ganstyle.*)
+REGIME = "gen"
 
-# Robustness metrics (check your wandb/local data for exact names)
-ROBUSTNESS_METRICS = [
-    "summary/pre/valid/rob/0.1",
-    "summary/pre/valid/rob/0.3",
-]
+# Parameter shorthand names to analyze
+# Common: "lr", "weight-decay" (or "wd"), "batch-size" (or "bs"), "bond-dim", "in-dim", "seed"
+# For "adv": also "epsilon", "trades-beta", "clean-weight"
+# For "gan": also "critic-lr", "r-real", "num-spc"
+# Set to None to use regime defaults
+PARAM_SHORTHANDS = ["lr", "weight-decay", "batch-size"]
 
-# Test metrics (for final evaluation)
-TEST_METRICS = [
-    "summary/pre/test/acc",
-    "summary/pre/test/loss",
-]
+# Auto-detect varied parameters: only analyze params that actually varied in the sweep
+# Non-varied params are automatically excluded from analysis
+AUTO_DETECT_VARIED = True
 
-# --- IMPORTANCE & INTERACTION SETTINGS ---
-# Primary metric for marginal importance analysis (higher is better if minimize=False)
-PRIMARY_METRIC = "summary/pre/valid/acc"
-PRIMARY_METRIC_MINIMIZE = False  # Set True if lower is better (e.g., loss)
+# =============================================================================
+# ADVANCED SETTINGS (usually don't need to change)
+# =============================================================================
 
-# Parameter pairs for interaction effect analysis
-# Each tuple is (param1, param2) - set to None or [] to analyze all pairs
-INTERACTION_PAIRS = [
-    ("config/lr", "config/weight_decay"),
-    # ("config/lr", "config/batch_size"),  # Uncomment to include
-    # ("config/weight_decay", "config/batch_size"),
-]
+# Primary metric for importance analysis (None = auto from regime: validation accuracy)
+PRIMARY_METRIC = None
 
-# --- PARETO FRONTIER SETTINGS ---
-# Metrics for Pareto frontier analysis (trade-off visualization)
-# Format: (metric, maximize) where maximize=True means higher is better
-PARETO_METRICS = [
-    ("summary/pre/valid/acc", True),       # Clean accuracy (maximize)
-    ("summary/pre/valid/rob/0.1", True),   # Robust accuracy (maximize)
-]
+# Whether to minimize primary metric (False for acc, True for loss)
+PRIMARY_METRIC_MINIMIZE = False
+
+# Parameter pairs for interaction analysis
+# None = auto from first two varied params
+# Or specify as list of tuples: [("lr", "weight-decay")]
+INTERACTION_PAIRS = None
+
+# Pareto frontier metrics
+# None = auto (validation accuracy vs first robustness metric)
+# Or specify as: [(metric_col, maximize), (metric_col, maximize)]
+PARETO_METRICS = None
 
 # Plot settings
 FIGSIZE = (10, 6)
 DPI = 100
 
+# =============================================================================
+# RESOLVED SETTINGS (auto-populated from resolver)
+# =============================================================================
+# These are set by the resolver below. Only override if you need manual control.
+HPO_PARAMS = None  # Will be set by resolver
+VALIDATION_METRICS = None  # Will be set by resolver
+ROBUSTNESS_METRICS = None  # Will be set by resolver
+TEST_METRICS = None  # Will be set by resolver
+
 # %% [markdown]
 # ## Load Data
+#
+# Data loading is regime-aware: it uses the REGIME setting to determine which
+# config paths to extract from wandb/local runs.
 
 # %%
-def load_data(source: str = DATA_SOURCE) -> pd.DataFrame:
+def load_data(source: str = DATA_SOURCE, regime: str = REGIME) -> pd.DataFrame:
     """
     Load HPO experiment data from configured source.
 
     Args:
         source: "wandb" or "local"
+        regime: Training regime to determine which config keys to extract
 
     Returns:
         DataFrame with config parameters and summary metrics
     """
+    # Get regime-specific config keys
+    from analysis.utils import resolve_params, REGIME_PARAM_MAP
+
+    # Get all config keys for this regime
+    if regime in REGIME_PARAM_MAP:
+        config_keys = list(REGIME_PARAM_MAP[regime].values())
+        # Add common keys that aren't regime-specific
+        config_keys.extend([
+            "dataset.name",
+            "experiment",
+        ])
+    else:
+        config_keys = None  # Fall back to defaults
+
     if source == "wandb":
-        from analysis.utils import fetch_hpo_runs
+        from analysis.utils import WandbFetcher
 
         print(f"Fetching runs from wandb: {WANDB_ENTITY}/{WANDB_PROJECT}")
         print(f"Experiment pattern: {EXPERIMENT_PATTERN}")
+        print(f"Regime: {regime} (using regime-specific config keys)")
         if DATASET_NAME:
             print(f"Dataset filter: {DATASET_NAME}")
 
-        df = fetch_hpo_runs(
-            entity=WANDB_ENTITY,
-            project=WANDB_PROJECT,
-            experiment_pattern=EXPERIMENT_PATTERN,
-            dataset_name=DATASET_NAME,
-        )
+        fetcher = WandbFetcher(entity=WANDB_ENTITY, project=WANDB_PROJECT)
+
+        # Build filter
+        filters = {"state": "finished"}
+        if "*" in EXPERIMENT_PATTERN or "." in EXPERIMENT_PATTERN:
+            filters["group"] = {"$regex": EXPERIMENT_PATTERN}
+        else:
+            filters["group"] = {"$regex": f".*{EXPERIMENT_PATTERN}.*"}
+        if DATASET_NAME:
+            filters["config.dataset.name"] = DATASET_NAME
+
+        runs = fetcher.fetch_runs(filters=filters)
+
+        if not runs:
+            print(f"No runs found matching pattern: {EXPERIMENT_PATTERN}")
+            return pd.DataFrame()
+
+        print(f"Found {len(runs)} runs")
+        df = fetcher.runs_to_dataframe(runs, config_keys=config_keys)
 
     elif source == "local":
         from analysis.utils import load_local_hpo_runs
 
         sweep_path = project_root / LOCAL_SWEEP_DIR
         print(f"Loading runs from local directory: {sweep_path}")
+        print(f"Regime: {regime} (using regime-specific config keys)")
 
-        df = load_local_hpo_runs(sweep_path)
+        df = load_local_hpo_runs(sweep_path, config_keys=config_keys)
 
     else:
         raise ValueError(f"Unknown data source: {source}. Use 'wandb' or 'local'.")
@@ -204,6 +241,102 @@ if not df.empty:
             print(f"  {col}: {valid} values, range [{df[col].min():.4f}, {df[col].max():.4f}]")
     if len(summary_cols) > 20:
         print(f"  ... and {len(summary_cols) - 20} more")
+
+# %% [markdown]
+# ## Resolve Configuration
+#
+# Convert shorthand regime/param names to full config paths and metric names.
+# Auto-detect which parameters actually varied in the sweep.
+
+# %%
+from analysis.utils import (
+    resolve_params,
+    resolve_metrics,
+    filter_varied_params,
+    format_resolved_config,
+    config_path_to_column,
+    detect_pretrained_info,
+)
+
+# Resolve params and metrics based on regime
+_resolved_params = resolve_params(REGIME, PARAM_SHORTHANDS)
+_resolved_metrics = resolve_metrics(REGIME, df if not df.empty else None)
+
+# Get DataFrame column names for params
+_param_columns = [config_path_to_column(p) for p in _resolved_params.values()]
+
+# Create reverse mapping: column name -> shorthand
+_col_to_short = {config_path_to_column(v): k for k, v in _resolved_params.items()}
+
+# Filter to varied params if enabled
+if AUTO_DETECT_VARIED and not df.empty:
+    _varied_cols, _excluded_cols = filter_varied_params(df, _param_columns)
+    _varied_shorthands = [_col_to_short.get(c, c) for c in _varied_cols]
+    _excluded_shorthands = [_col_to_short.get(c, c) for c in _excluded_cols]
+else:
+    _varied_cols = _param_columns
+    _excluded_cols = []
+    _varied_shorthands = list(_resolved_params.keys())
+    _excluded_shorthands = []
+
+# Check for pretrained model info
+_pretrained_info = detect_pretrained_info(df) if not df.empty else None
+
+# Display resolved configuration
+print(format_resolved_config(
+    regime=REGIME,
+    params=_resolved_params,
+    varied_params=_varied_shorthands,
+    excluded_params=_excluded_shorthands,
+    metrics=_resolved_metrics,
+    pretrained_info=_pretrained_info,
+))
+
+# %%
+# Set global variables for rest of analysis (if not manually overridden)
+if HPO_PARAMS is None:
+    HPO_PARAMS = _varied_cols
+
+if VALIDATION_METRICS is None:
+    VALIDATION_METRICS = _resolved_metrics["validation"]
+
+if ROBUSTNESS_METRICS is None:
+    ROBUSTNESS_METRICS = _resolved_metrics["robustness"]
+
+if TEST_METRICS is None:
+    TEST_METRICS = _resolved_metrics["test"]
+
+# Auto-set primary metric if not specified
+if PRIMARY_METRIC is None:
+    PRIMARY_METRIC = VALIDATION_METRICS[0] if VALIDATION_METRICS else None
+
+# Auto-set interaction pairs if not specified (use column names, not shorthands)
+if INTERACTION_PAIRS is None and len(_varied_cols) >= 2:
+    INTERACTION_PAIRS = [(_varied_cols[0], _varied_cols[1])]
+elif INTERACTION_PAIRS is not None:
+    # Convert shorthand pairs to column names if needed
+    _new_pairs = []
+    for p1, p2 in INTERACTION_PAIRS:
+        # Check if it's a shorthand or already a column name
+        c1 = config_path_to_column(_resolved_params.get(p1, "")) if p1 in _resolved_params else p1
+        c2 = config_path_to_column(_resolved_params.get(p2, "")) if p2 in _resolved_params else p2
+        _new_pairs.append((c1, c2))
+    INTERACTION_PAIRS = _new_pairs
+
+# Auto-set Pareto metrics if not specified
+if PARETO_METRICS is None:
+    _acc_col = next((m for m in VALIDATION_METRICS if "acc" in m), None)
+    _rob_col = ROBUSTNESS_METRICS[0] if ROBUSTNESS_METRICS else None
+    if _acc_col and _rob_col:
+        PARETO_METRICS = [(_acc_col, True), (_rob_col, True)]
+    elif _acc_col:
+        PARETO_METRICS = []  # Can't do Pareto with only one metric
+
+print(f"\nAnalysis will use:")
+print(f"  HPO_PARAMS: {HPO_PARAMS}")
+print(f"  PRIMARY_METRIC: {PRIMARY_METRIC}")
+print(f"  INTERACTION_PAIRS: {INTERACTION_PAIRS}")
+print(f"  PARETO_METRICS: {PARETO_METRICS}")
 
 # %% [markdown]
 # ## Utility Functions

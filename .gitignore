@@ -55,3 +55,5 @@ analysis/*.png
 .github/
 .github
 /mathqi/mnissen/adversarial_training_mps/.github
+.claude/
+.vscode/

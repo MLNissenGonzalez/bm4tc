@@ -7,6 +7,13 @@ from .wandb_fetcher import (
     load_local_hpo_runs,
     load_local_run,
     find_local_sweep_dirs,
+    # Best run fetching for downstream training
+    fetch_best_classification_run,
+    extract_classification_config,
+    extract_born_config,
+    extract_dataset_config,
+    get_best_classification_config,
+    print_classification_config_yaml,
 )
 
 from .mia import (
@@ -23,6 +30,24 @@ from .mia_utils import (
     download_wandb_checkpoint,
 )
 
+from .resolve import (
+    resolve_params,
+    resolve_metrics,
+    filter_varied_params,
+    format_resolved_config,
+    config_path_to_column,
+    detect_robustness_strengths,
+    detect_pretrained_info,
+    normalize_param,
+    get_available_params,
+    get_available_regimes,
+    REGIME_PARAM_MAP,
+    REGIME_DESCRIPTIONS,
+    REGIME_METRIC_PREFIX,
+    REGIME_DEFAULT_PARAMS,
+    PARAM_ALIASES,
+)
+
 __all__ = [
     # Wandb/HPO utilities
     "WandbFetcher",
@@ -31,6 +56,13 @@ __all__ = [
     "load_local_hpo_runs",
     "load_local_run",
     "find_local_sweep_dirs",
+    # Best run fetching for downstream training
+    "fetch_best_classification_run",
+    "extract_classification_config",
+    "extract_born_config",
+    "extract_dataset_config",
+    "get_best_classification_config",
+    "print_classification_config_yaml",
     # MIA evaluation
     "MIAFeatureConfig",
     "MIAFeatureExtractor",
@@ -41,4 +73,20 @@ __all__ = [
     "load_run_config_from_wandb",
     "find_model_checkpoint",
     "download_wandb_checkpoint",
+    # HPO resolver utilities
+    "resolve_params",
+    "resolve_metrics",
+    "filter_varied_params",
+    "format_resolved_config",
+    "config_path_to_column",
+    "detect_robustness_strengths",
+    "detect_pretrained_info",
+    "normalize_param",
+    "get_available_params",
+    "get_available_regimes",
+    "REGIME_PARAM_MAP",
+    "REGIME_DESCRIPTIONS",
+    "REGIME_METRIC_PREFIX",
+    "REGIME_DEFAULT_PARAMS",
+    "PARAM_ALIASES",
 ]

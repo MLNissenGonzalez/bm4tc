@@ -1,0 +1,45 @@
+# @package _global_
+experiment: best_spirals
+
+defaults:
+  - override /born: d30D18        
+  - override /dataset: 2Dtoy/spirals_4k
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 2
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  classification:
+    max_epoch: 500
+    batch_size: 64
+    patience: 250
+    stop_crit: "clsloss"
+    watch_freq: 1000
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.007705829890219126
+        weight_decay: 0
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-08
+    metrics: {'acc': 1, 'fid': 50, 'rob': 50, 'viz': 50, 'clsloss': 1}
+
+born:
+  init_kwargs:
+    in_dim: 30
+    bond_dim: 18
+    boundary: obc
+    init_method: randn_eye
+    std: 1e-09
+  embedding: "fourier"

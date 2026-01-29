@@ -59,6 +59,7 @@ analysis/
 └── utils/
     ├── __init__.py
     ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
+    ├── resolve.py           # HPO regime/param resolver (NEW)
     ├── mia.py               # MIA evaluation classes
     └── mia_utils.py         # Config loading utilities
 ```
@@ -71,17 +72,27 @@ Edit the configuration section at the top of `hpo_analysis.py`:
 
 ```python
 # Data source: "wandb" or "local"
-DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
+DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
 
-# --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
-WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
-WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "lrwdbs_hpo"  # Regex pattern to match run groups
-DATASET_NAME = None  # e.g., "spirals_4k", or None for all
-
-# --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
+# --- LOCAL SETTINGS ---
 LOCAL_SWEEP_DIR = "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
+
+# --- HPO CONFIGURATION (simplified) ---
+# Training regime: "pre", "gen", "adv", "gan"
+REGIME = "pre"
+
+# Parameters to analyze (shorthand names)
+PARAM_SHORTHANDS = ["lr", "weight-decay", "batch-size"]
+
+# Auto-detect varied params (excludes single-value params)
+AUTO_DETECT_VARIED = True
 ```
+
+That's it! The resolver automatically:
+- Maps shorthand names to full config paths
+- Sets up metric columns for the regime
+- Auto-detects robustness metric strengths
+- Filters out parameters that didn't vary in the sweep
 
 ### 2. Run the Analysis
 
@@ -102,6 +113,62 @@ python -m analysis.hpo_analysis
 pip install jupytext
 jupytext --to notebook analysis/hpo_analysis.py
 jupyter notebook analysis/hpo_analysis.ipynb
+```
+
+## Training Regimes
+
+| Regime | Description | Config Prefix | Typical HPO Params |
+|--------|-------------|---------------|-------------------|
+| `pre` | Classification pretraining | `trainer.classification.*` | lr, weight-decay, batch-size |
+| `gen` | Generative NLL training | `trainer.generative.*` | lr, weight-decay, batch-size |
+| `adv` | Adversarial training | `trainer.adversarial.*` | lr, weight-decay, epsilon, trades-beta |
+| `gan` | GAN-style training | `trainer.ganstyle.*` | lr, critic-lr, r-real |
+
+## Parameter Shorthand Reference
+
+| Shorthand | Aliases | Description |
+|-----------|---------|-------------|
+| `lr` | `learning-rate`, `learning_rate` | Learning rate |
+| `weight-decay` | `wd`, `weight_decay` | Weight decay |
+| `batch-size` | `bs`, `batch_size` | Batch size |
+| `bond-dim` | `bond_dim` | MPS bond dimension |
+| `in-dim` | `in_dim` | MPS input dimension |
+| `seed` | - | Random seed |
+| `data-seed` | `data_seed` | Dataset generation seed |
+| `epsilon` | `strength`, `eps` | Adversarial perturbation (adv only) |
+| `trades-beta` | `trades_beta`, `beta` | TRADES trade-off (adv only) |
+| `clean-weight` | `clean_weight` | Clean example weight (adv only) |
+| `critic-lr` | `critic_lr` | Critic learning rate (gan only) |
+| `critic-wd` | `critic_wd` | Critic weight decay (gan only) |
+| `r-real` | `r_real` | Real/synthetic ratio (gan only) |
+| `num-spc` | `num_spc` | Samples per class (gan only) |
+| `num-bins` | `num_bins` | Sampling bins (gan only) |
+
+## Resolver Output
+
+When you run the analysis, the resolver prints a summary:
+
+```
+============================================================
+Resolved Configuration
+============================================================
+
+Regime: pre (Classification pretraining)
+
+Parameters (3 varied, 2 excluded):
+  + lr               -> trainer.classification.optimizer.kwargs.lr
+  + weight-decay     -> trainer.classification.optimizer.kwargs.weight_decay
+  + batch-size       -> trainer.classification.batch_size
+  - bond-dim         (excluded: single value)
+  - in-dim           (excluded: single value)
+
+Metrics:
+  Validation: acc, loss
+  Robustness: rob/0.1, rob/0.3 (auto-detected)
+  Test:       acc, loss
+
+Pretrained Model: None detected
+============================================================
 ```
 
 ## Analysis Features
@@ -127,13 +194,49 @@ Lists the top N runs for each metric with their hyperparameters.
 ### 5. Parameter-Metric Correlations
 Heatmap showing Pearson correlations between (log-transformed) parameters and metrics.
 
-### 6. Metric-Metric Correlations (NEW)
+### 6. Metric-Metric Correlations
 Shows how different metrics correlate with each other:
 - Heatmap of all metric pairs
 - Scatter matrix with correlation coefficients
 - Useful for understanding trade-offs (e.g., accuracy vs robustness)
 
 ## API Reference
+
+### Resolver Functions
+
+```python
+from analysis.utils import (
+    resolve_params,
+    resolve_metrics,
+    filter_varied_params,
+    format_resolved_config,
+    config_path_to_column,
+    get_available_params,
+    get_available_regimes,
+)
+
+# Resolve parameter shorthand to full config paths
+params = resolve_params("pre", ["lr", "weight-decay"])
+# Returns: {"lr": "trainer.classification.optimizer.kwargs.lr", ...}
+
+# Get metrics for regime (auto-detects robustness strengths from df)
+metrics = resolve_metrics("pre", df)
+# Returns: {"validation": [...], "robustness": [...], "test": [...]}
+
+# Convert full path to DataFrame column name
+col = config_path_to_column("trainer.classification.optimizer.kwargs.lr")
+# Returns: "config/lr"
+
+# Filter to only params that varied in the sweep
+varied, excluded = filter_varied_params(df, ["config/lr", "config/weight_decay"])
+
+# Get available params/regimes
+params = get_available_params("adv")  # ["lr", "weight-decay", "epsilon", ...]
+regimes = get_available_regimes()  # ["pre", "gen", "adv", "gan"]
+
+# Format resolved config for display
+print(format_resolved_config(regime, params, varied, excluded, metrics))
+```
 
 ### WandbFetcher Class
 
@@ -376,6 +479,95 @@ print(f"Attack AUC-ROC: {results.auc_roc}")
 print(f"Privacy: {results.privacy_assessment()}")
 print(results.summary())
 ```
+
+---
+
+## Best Classification Config Fetching
+
+### `get_best_classification_config()`
+
+Fetches the best classification run from W&B and returns a dict with everything needed to reproduce the pretraining or set up downstream training.
+
+```python
+from analysis.utils import get_best_classification_config
+
+config = get_best_classification_config(
+    entity="my-entity",
+    project="gan_train",
+    group="sanity_check_moons_4k_27Jan25"
+)
+```
+
+**Return structure:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `run_id` | `str` | W&B run ID |
+| `run_name` | `str` | W&B run name |
+| `group` | `str` | W&B group name |
+| `cls_config` | `dict` | Classification trainer config (optimizer, criterion, etc.) |
+| `born_config` | `dict` | Born machine config (init_kwargs, embedding) |
+| `dataset_config` | `dict` | Dataset config (name, split_seed, split, gen_dow_kwargs) |
+| `tracking_seed` | `int` | Tracking seed used in the run |
+| `metrics` | `dict` | Summary metrics (valid_acc, valid_loss, test_acc) |
+
+### `extract_dataset_config()`
+
+Extracts dataset configuration from a W&B run object.
+
+```python
+from analysis.utils import extract_dataset_config
+
+run = fetch_best_classification_run(...)
+ds_config = extract_dataset_config(run)
+# Returns: {"name": "moons_4k", "split_seed": 11, "split": [0.5, 0.25, 0.25],
+#           "gen_dow_kwargs": {"seed": 25, "name": "moons_4k", "size": 4000, "noise": 0.05}}
+```
+
+### `print_classification_config_yaml()`
+
+Prints the best classification config in copy-pasteable YAML format, including `tracking`, `dataset`, `trainer.classification`, and `born` sections.
+
+```python
+from analysis.utils import print_classification_config_yaml
+
+print_classification_config_yaml(
+    entity="my-entity",
+    project="gan_train",
+    group="sanity_check_moons_4k_27Jan25"
+)
+```
+
+## Adversarial HPO with Pretrained Models
+
+### Workflow
+
+To avoid re-running classification pretraining for every adversarial HPO trial:
+
+1. **Pretrain once** using the standard classification experiment, save the model.
+2. **Fetch the best config** using `print_classification_config_yaml()` to verify the split seed and born config.
+3. **Run adversarial HPO** using `hpo_moons.yaml`, which loads the pretrained model:
+
+```bash
+python -m experiments.adversarial --multirun \
+    +experiments=adversarial/hpo_moons \
+    model_path=/path/to/pretrained/best_cls_loss_moons_4k.pt
+```
+
+### Split Reproducibility
+
+The data split is governed by `dataset.split_seed` (passed as `random_state` to sklearn's `train_test_split`), which is independent of `tracking.seed`. As long as both pretraining and adversarial HPO use the same dataset config (same `split_seed`, `split` ratios, and data file), the train/valid/test split is identical.
+
+The `hpo_moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
+
+### Key Differences from `hpo.yaml`
+
+| Setting | `hpo.yaml` (old) | `hpo_moons.yaml` (new) |
+|---------|-------------------|------------------------|
+| Classification trainer | `adam500_loss` | `null` (skipped) |
+| Model source | Created from scratch | `model_path: ???` (required) |
+| `tracking.seed` | Swept (`range(1, 1000)`) | Fixed (`42`) |
+| `dataset.split_seed` | Inherited from dataset config | Explicitly set to `11` |
 
 ---
 

@@ -10,13 +10,11 @@ from pathlib import Path
 import time
 import torch
 from typing import Dict
-import src.utils.schemas as schemas
-import src.utils.get as get
+from src.utils import schemas, get
 import wandb
 from src.tracking import PerformanceEvaluator, record, log_grads
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.utils.generative_losses import GenerativeNLL
 
 import logging
 logger = logging.getLogger(__name__)
@@ -43,7 +41,6 @@ class Trainer:
             bornmachine: BornMachine,
             cfg: schemas.Config,
             datahandler: DataHandler,
-            criterion: GenerativeNLL,
             device: torch.device
     ):
         """
@@ -57,7 +54,7 @@ class Trainer:
             device: Torch device for training.
         """
         self.datahandler = datahandler
-        if self.datahandler.classification is None:
+        if getattr(self.datahandler, "classification", None) is None:
             self.datahandler.get_classification_loaders()
 
         self.device = device
@@ -65,8 +62,8 @@ class Trainer:
         self.stage = "gen"
         self.train_cfg = cfg.trainer.generative
 
-        # User-provided criterion (must be GenerativeNLL subclass)
-        self.criterion = criterion
+        # Config-provided criterion
+        self.criterion = get.criterion("generative", self.train_cfg.criterion)
 
         wandb.define_metric(f"{self.stage}/train/loss", summary="none")
         self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, self.device)
@@ -262,6 +259,7 @@ class Trainer:
 
         # Prepare generator and optimizer
         self.bornmachine.generator.reset()
+        self.bornmachine.generator.out_features = []
         self.bornmachine.to(self.device)
         self.optimizer = get.optimizer(self.bornmachine.parameters(mode="generator"),
                                        self.train_cfg.optimizer)
@@ -278,6 +276,9 @@ class Trainer:
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
             record(results=self.valid_perf, stage=self.stage, set="valid")
 
+            # In the evaluation step, could be that we sampled,
+            # thus bornmachine.in_features might not be all? 
+            # (actually, last step is conditioned on all inputs, thus in_featues is all)
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
 
