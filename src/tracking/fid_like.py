@@ -143,7 +143,7 @@ class FIDEvaluation:
         # Threshold condition: small data_dim => feasible to compute full covariance
         if datahandler.data_dim < 1e2:
             self.toEval = True
-            self.stat_r = datahandler.means, datahandler.covs
+            self.stat_r = list(zip(datahandler.means, datahandler.covs))
             self.fid_like = FIDLike()
         else:
             logger.info("FID evaluation skipped: data_dim too large for classwise covariance computation.")

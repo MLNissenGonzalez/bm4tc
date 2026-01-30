@@ -46,16 +46,19 @@ analysis/
 ├── __init__.py
 ├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
 ├── mia_analysis.py          # MIA privacy analysis notebook
+├── visualize_distributions.py  # Distribution visualization notebook
 ├── outputs/                 # Generated analysis outputs (git-ignored)
 │   ├── hpo_runs.csv        # Processed HPO run data
 │   ├── param_metric_correlations.csv
 │   ├── metric_metric_correlations.csv
 │   ├── best_runs_summary.txt
-│   └── mia/                # MIA analysis outputs
-│       ├── feature_importance.png
-│       ├── threshold_attacks.png
-│       ├── feature_distributions.png
-│       └── mia_summary.txt
+│   ├── mia/                # MIA analysis outputs
+│   │   ├── feature_importance.png
+│   │   ├── threshold_attacks.png
+│   │   ├── feature_distributions.png
+│   │   └── mia_summary.txt
+│   └── distributions/      # Distribution visualization outputs
+│       └── distributions.png
 └── utils/
     ├── __init__.py
     ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
@@ -479,6 +482,83 @@ print(f"Attack AUC-ROC: {results.auc_roc}")
 print(f"Privacy: {results.privacy_assessment()}")
 print(results.summary())
 ```
+
+---
+
+## Distribution Visualization
+
+The analysis module includes **distribution visualization** for inspecting the learned probability distributions p(c|x) and p(x,c) of a trained BornMachine over the 2D input space.
+
+### What it Shows
+
+- **Row 1:** p(c|x) conditional class probability heatmaps per class + decision boundary (argmax)
+- **Row 2:** p(x,c) joint probability heatmaps per class + marginal p(x) = sum_c p(x,c)
+- **Data overlay:** Training data points overlaid on all subplots for verification
+
+### Running Distribution Visualization
+
+**In VS Code** (recommended):
+```
+1. Open analysis/visualize_distributions.py
+2. Edit RUN_DIR to point to your trained model's output directory
+3. Use "Run Cell" (Ctrl+Enter) to execute each #%% cell interactively
+```
+
+**As a script**:
+```bash
+cd /path/to/project
+python -m analysis.visualize_distributions
+```
+
+### Configuration
+
+Edit the configuration section in `visualize_distributions.py`:
+
+```python
+RUN_DIR = "outputs/classification_example"  # Path to trained model
+RESOLUTION = 150       # Grid resolution (150x150 = 22,500 points)
+NORMALIZE_JOINT = True # Normalize p(x,c) by partition function
+SHOW_DATA = True       # Overlay training data points
+DEVICE = "cuda"        # or "cpu"
+SAVE_DIR = "analysis/outputs/distributions/"
+```
+
+### Programmatic API
+
+```python
+from analysis.visualize_distributions import (
+    visualize_from_run_dir,
+    make_grid,
+    compute_conditional_probs,
+    compute_joint_probs,
+    plot_distributions,
+)
+
+# High-level: one call does everything
+fig = visualize_from_run_dir(
+    run_dir="outputs/my_run",
+    resolution=150,
+    normalize_joint=True,
+    show_data=True,
+    device="cuda",
+    save_dir="analysis/outputs/distributions/",
+)
+
+# Or use individual functions for more control
+grid_x1, grid_x2, grid_points = make_grid(input_range=(0, 1), resolution=150)
+conditional = compute_conditional_probs(bm, grid_points, device)
+joint = compute_joint_probs(bm, grid_points, device, normalize=True)
+fig = plot_distributions(conditional, joint, grid_x1, grid_x2,
+                         train_data=data, train_labels=labels)
+```
+
+### Output Files
+
+After running, check `analysis/outputs/distributions/`:
+
+| File | Description |
+|------|-------------|
+| `distributions.png` | Combined heatmap figure with conditional, joint, and decision boundary |
 
 ---
 
