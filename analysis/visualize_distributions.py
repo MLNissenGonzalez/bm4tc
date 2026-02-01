@@ -35,6 +35,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import logging
+from analysis.utils import load_run_config, find_model_checkpoint
+from src.data.handler import DataHandler
+from src.models import BornMachine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,7 +48,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Path to run directory (contains .hydra/config.yaml and models/)
-RUN_DIR = "outputs/classification_example"  # Change to your run directory
+RUN_DIR = "outputs/lrwdbs_hpo_circles_4k_18Jan26/41"  # Change to your run directory
 
 # Grid resolution for heatmaps (resolution x resolution points)
 RESOLUTION = 150
@@ -327,9 +330,7 @@ def visualize_from_run_dir(
     Returns:
         Matplotlib Figure object.
     """
-    from analysis.utils import load_run_config, find_model_checkpoint
-    from src.data import DataHandler
-    from src.models import BornMachine
+    
 
     device = torch.device(device)
     run_dir = Path(run_dir)
