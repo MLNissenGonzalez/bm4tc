@@ -36,8 +36,8 @@ import matplotlib.pyplot as plt
 import torch
 import logging
 from analysis.utils import load_run_config, find_model_checkpoint
+from src.models import BornMachine  # must import before src.data to avoid circular import
 from src.data.handler import DataHandler
-from src.models import BornMachine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

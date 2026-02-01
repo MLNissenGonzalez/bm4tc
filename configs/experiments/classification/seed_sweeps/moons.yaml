@@ -1,0 +1,51 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: d30D18        
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+
+tracking:
+  evasion: 
+    method: "PGD"
+    norm: 2
+    criterion: 
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15] # not relative, default for dataspaces [0,1]^n\
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  classification:
+    max_epoch: 500
+    batch_size: 64
+    patience: 250
+    stop_crit: "clsloss"
+    watch_freq: 1000
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.004598462567376982
+        weight_decay: 0
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-08
+    metrics: {'acc': 1, 'fid': 50, 'rob': 10, 'viz': 50, 'clsloss': 1, 'genloss': 1}
+
+
+hydra:
+  sweeper:
+    params:
+      tracking.random_state: choice(324, 16, 6532, 314, 12)
+      tracking.seed: choice(123, 245, 124, 356, 23)
