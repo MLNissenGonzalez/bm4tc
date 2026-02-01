@@ -1,0 +1,53 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: 2Dtoy/spirals_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: default
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  evasion: 
+    method: "PGD"
+    norm: 2
+    criterion: 
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15] # not relative, default for dataspaces [0,1]^n\
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  max_epoch: 500
+  batch_size: 128
+  optimizer:
+    name: "adam"
+    kwargs:
+      lr: 0.0013951693152704535
+      weight_decay: 0.00000001136779839858
+  criterion:
+    name: "nll"
+    kwargs:
+      eps: 1e-8
+  patience: 150
+  stop_crit: "genloss"
+  watch_freq: 3000
+  metrics: {"genloss": 1, acc": 1, "fid": 50, "viz": 50, "rob": 10}
+  save: true
+  auto_stack: true
+  auto_unbind: false
+
+
+hydra:
+  sweeper:
+    params:
+      tracking.random_state: choice(324, 16, 6532, 314, 12)
+      tracking.seed: choice(123, 245, 124, 356, 23)
