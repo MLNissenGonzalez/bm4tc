@@ -26,24 +26,25 @@ dataset:
     seed: 25
 
 trainer:
-  max_epoch: 500
-  batch_size: 128
-  optimizer:
-    name: "adam"
-    kwargs:
-      lr: 0.0013951693152704535
-      weight_decay: 0.00000001136779839858
-  criterion:
-    name: "nll"
-    kwargs:
-      eps: 1e-8
-  patience: 150
-  stop_crit: "genloss"
-  watch_freq: 3000
-  metrics: {"genloss": 1, acc": 1, "fid": 50, "viz": 50, "rob": 10}
-  save: true
-  auto_stack: true
-  auto_unbind: false
+  generative:
+    max_epoch: 500
+    batch_size: 128
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0013951693152704535
+        weight_decay: 0.00000001136779839858
+    criterion:
+      name: "nll"
+      kwargs:
+        eps: 1e-8
+    patience: 150
+    stop_crit: "genloss"
+    watch_freq: 3000
+    metrics: {"genloss": 1, "acc": 1, "fid": 50, "viz": 50, "rob": 10}
+    save: true
+    auto_stack: true
+    auto_unbind: false
 
 
 hydra:
