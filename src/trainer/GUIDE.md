@@ -168,32 +168,25 @@ This triggers a `ClassificationTrainer` run to recover discriminative performanc
 
 ## GenerativeTrainer (`generative.py`)
 
-Trains the BornMachine generator using NLL minimization on p(x|c).
+Trains the BornMachine generator using NLL minimization on p(x,c).
 
 ### Initialization
 
 ```python
-from src.utils.generative_losses import GenerativeNLL
-
-# User must implement their own criterion subclass
-class MyGenerativeNLL(GenerativeNLL):
-    def compute_unnormalized_log_prob(self, bornmachine, data, labels):
-        # Implement: log(|psi(x,c)|^2)
-        pass
-
-    def compute_log_partition(self, bornmachine, labels):
-        # Implement: log(Z_c) normalization
-        pass
-
-criterion = MyGenerativeNLL()
+from src.trainer import GenerativeTrainer
 
 trainer = GenerativeTrainer(
     bornmachine=bm,
     cfg=cfg,
+    stage="gen",         # Training stage identifier
     datahandler=dh,
-    criterion=criterion,  # User-implemented criterion
     device=device
 )
+```
+
+The trainer uses `GenerativeNLL` criterion (from `src/utils/criterions.py`) which computes:
+```
+NLL = -log(p(x,c)) = -log(|psi(x,c)|^2) + log(Z)
 ```
 
 ### Training Flow
@@ -221,8 +214,9 @@ The criterion takes the full BornMachine (not just probabilities):
 loss = self.criterion(self.bornmachine, data, labels)
 ```
 
-This allows the criterion to access the generator's internal state for computing
-unnormalized probabilities and partition functions.
+This allows the `GenerativeNLL` criterion to:
+1. Call `bornmachine.generator.unnormalized_prob()` for the amplitude squared
+2. Call `bornmachine.generator.log_partition_function()` for normalization
 
 ## AdversarialTrainer (`adversarial.py`)
 
@@ -344,13 +338,13 @@ save: false
 max_epoch: 100
 batch_size: 64
 criterion:
-  name: "generative-nll"   # User implements GenerativeNLL subclass
+  name: "nll"              # Uses GenerativeNLL from criterions.py
   kwargs: {eps: 1e-8}
 optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
 patience: 50
-stop_crit: "acc"           # "genloss", "acc", or "fid"
+stop_crit: "genloss"       # "genloss", "acc", or "fid"
 watch_freq: 100
 metrics: {genloss: 1, acc: 1, fid: 10, viz: 10}
 save: false

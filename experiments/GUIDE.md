@@ -17,16 +17,16 @@ This directory contains the entry point scripts for running experiments.
 
 ```bash
 # Classification experiment
-python -m experiments.classification +experiments=pretraining/D18
+python -m experiments.classification +experiments=classification/D18
 
 # GAN-style experiment
 python -m experiments.ganstyle +experiments=ganstyle/default
 
 # Adversarial training experiment
-python -m experiments.adversarial +experiments=tests/adversarial
+python -m experiments.adversarial +experiments=adversarial/hpo/moons
 
 # Generative training experiment
-python -m experiments.generative trainer/generative=default
+python -m experiments.generative +experiments=generative/hpo
 
 # Quick test run
 python -m experiments.classification +experiments=tests/classification
@@ -51,32 +51,32 @@ python -m experiments.classification +experiments=tests/classification \
 ### Multirun (Grid Sweep)
 
 ```bash
-python -m experiments.classification --multirun +experiments=pretraining/D18_sweep
+python -m experiments.classification --multirun +experiments=classification/D18_sweep
 ```
 
 ### Hyperparameter Optimization (Optuna)
 
 **Option 1**: Specify sweeper in experiment config (recommended):
 ```yaml
-# configs/experiments/hpo/my_hpo.yaml
+# configs/experiments/classification/hpo/lrwd_hpo.yaml
 defaults:
   - override /hydra/sweeper: optuna
 ```
 ```bash
-python -m experiments.classification --multirun +experiments=hpo/my_hpo
+python -m experiments.classification --multirun +experiments=classification/hpo/lrwd_hpo
 ```
 
 **Option 2**: Specify sweeper on command line:
 ```bash
 python -m experiments.classification --multirun \
     hydra/sweeper=optuna \
-    +experiments=pretraining/D18
+    +experiments=classification/D18
 ```
 
 **Override HPO settings from command line**:
 ```bash
 python -m experiments.classification --multirun \
-    +experiments=hpo/my_hpo \
+    +experiments=classification/hpo/lrwd_hpo \
     hydra.sweeper.n_trials=100 \
     hydra.sweeper.n_jobs=4
 ```

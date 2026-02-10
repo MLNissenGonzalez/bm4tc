@@ -47,6 +47,8 @@ analysis/
 ├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
 ├── mia_analysis.py          # MIA privacy analysis notebook
 ├── visualize_distributions.py  # Distribution visualization notebook
+├── run_statistics.py        # Basic sweep statistics notebook
+├── config_fetcher.ipynb     # Jupyter notebook for fetching best configs
 ├── outputs/                 # Generated analysis outputs (git-ignored)
 │   ├── hpo_runs.csv        # Processed HPO run data
 │   ├── param_metric_correlations.csv
@@ -62,7 +64,7 @@ analysis/
 └── utils/
     ├── __init__.py
     ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
-    ├── resolve.py           # HPO regime/param resolver (NEW)
+    ├── resolve.py           # HPO regime/param resolver
     ├── mia.py               # MIA evaluation classes
     └── mia_utils.py         # Config loading utilities
 ```
@@ -559,6 +561,41 @@ After running, check `analysis/outputs/distributions/`:
 | File | Description |
 |------|-------------|
 | `distributions.png` | Combined heatmap figure with conditional, joint, and decision boundary |
+
+---
+
+## Run Statistics
+
+The analysis module includes **run_statistics.py** for computing basic statistics and visualizations for any sweep (Hydra multirun or W&B group).
+
+### What it Shows
+
+1. **Histogram of accuracy** — with optional inclusion of robust and MIA accuracy
+2. **Mean accuracies with std error bars**
+3. **Scatter plot** — (clean, rob, MIA) accuracy against validation loss
+4. **Best run summary** — by validation loss with corresponding accuracies
+5. **Final table** — best, mean, and std of accuracies across all runs
+
+### Running Run Statistics
+
+**In VS Code** (recommended):
+```
+1. Open analysis/run_statistics.py
+2. Configure DATA_SOURCE ("wandb" or "local") and sweep directory/group
+3. Use "Run Cell" (Ctrl+Enter) to execute each #%% cell interactively
+```
+
+**As a script**:
+```bash
+cd /path/to/project
+python -m analysis.run_statistics
+```
+
+### Features
+
+- **Flexible data sources**: Works with both W&B API and local Hydra multirun outputs
+- **Std correction**: Allows correction for smaller effective number of independent runs (e.g., when sweeping over a dead hyperparameter like `tracking.random_state`)
+- **Imports from other analysis modules**: Reuses visualization and MIA calculation code from `visualize_distributions.py` and `mia_analysis.py`
 
 ---
 

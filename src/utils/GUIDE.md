@@ -9,9 +9,10 @@ src/utils/
 ├── GUIDE.md              # This file
 ├── __init__.py           # Exports: get, schemas, set_seed
 ├── schemas.py            # Hydra config dataclasses (CRITICAL)
-├── get.py                # Factory functions for embeddings, optimizers, losses
+├── get.py                # Factory functions for optimizers (re-exports embeddings, criterions)
+├── embeddings.py         # Embedding functions (fourier, legendre, poly)
+├── criterions.py         # Loss functions (ClassificationNLL, GenerativeNLL)
 ├── _utils.py             # Misc utilities (seed setting, sample QC)
-├── generative_losses.py  # Abstract base for generative NLL losses
 └── evasion/
     ├── __init__.py
     └── minimal.py        # Adversarial attack implementations (FGM, PGD)
@@ -75,7 +76,7 @@ class ClassificationConfig:
     new_option: bool = False  # NEW
 
 # 2. Add to YAML configs
-# configs/trainer/classification/adam_b64e300.yaml
+# configs/trainer/classification/adam500_loss.yaml
 new_option: false
 
 # 3. Update code that uses it
@@ -96,11 +97,9 @@ cs.store(group="model/born", name="schema", node=BornMachineConfig)
 cs.store(name="base_config", node=Config)
 ```
 
-## get.py — Factory Functions
+## embeddings.py — Embedding Functions
 
-Provides lookup functions for embeddings, optimizers, and loss functions.
-
-### Embeddings
+Provides embedding functions for mapping input data to higher-dimensional spaces.
 
 ```python
 from src.utils.get import embedding, range_from_embedding
@@ -116,9 +115,21 @@ input_range = range_from_embedding("fourier")  # (0.0, 1.0)
 **Available Embeddings:**
 | Name | Range | Description |
 |------|-------|-------------|
-| `"fourier"` | (0, 1) | Fourier basis functions |
-| `"poly"` / `"polynomial"` | varies | Polynomial embedding |
-| `"legendre"` | (-1, 1) | Legendre polynomials |
+| `"fourier"` | (0, 1) | Fourier basis functions (tensorkrowch) |
+| `"poly"` / `"polynomial"` | varies | Polynomial embedding (tensorkrowch) |
+| `"legendre"` | (-1, 1) | Legendre polynomials (custom implementation) |
+
+**Legendre Embedding** (`embeddings.py:11-49`):
+Uses the standard recursive formula for Legendre polynomials:
+```
+P_0(x) = 1
+P_1(x) = x
+P_n(x) = ((2n-1) x P_{n-1}(x) - (n-1) P_{n-2}(x)) / n
+```
+
+## get.py — Optimizer Factory
+
+Provides optimizer instantiation and re-exports embedding/criterion functions.
 
 ### Optimizers
 
@@ -132,7 +143,20 @@ opt = optimizer(model.parameters(), cfg.optimizer)
 **Available Optimizers:**
 `sgd`, `adam`, `adamw`, `rmsprop`, `adagrad`, `adamax`, `nadam`
 
-### Loss Functions / Criteria
+### Helper Functions
+
+```python
+from src.utils.get import indim_and_ncls
+
+# Extract in_dim and num_classes from an MPS model
+in_dim, n_cls = indim_and_ncls(mps)
+```
+
+## criterions.py — Loss Functions
+
+Provides loss functions suitable for BornMachines (which output amplitudes/probabilities, not logits).
+
+### Classification Loss
 
 ```python
 from src.utils.get import criterion
@@ -143,14 +167,9 @@ loss_fn = criterion("classification", cfg.criterion)
 loss = loss_fn(probabilities, labels)
 ```
 
-**Available Classification Losses:**
-| Name | Aliases | Description |
-|------|---------|-------------|
-| `"nll"` | `"nlll"`, `"negativeloglikelihood"` | Negative log-likelihood |
-
-**MPSNLLL Implementation** (`get.py:202-233`):
+**ClassificationNLL** (`criterions.py:16-47`):
 ```python
-class MPSNLLL(nn.Module):
+class ClassificationNLL(nn.Module):
     """Custom NLL loss for MPS classifiers."""
     def forward(self, p, t):
         p = p.clamp(min=self.eps)
@@ -158,6 +177,27 @@ class MPSNLLL(nn.Module):
 ```
 
 Note: This expects **probabilities** (already squared and normalized), not raw amplitudes!
+
+### Generative Loss
+
+```python
+from src.utils.get import criterion
+
+loss_fn = criterion("generative", cfg.criterion)
+loss = loss_fn(bornmachine, data, labels)
+```
+
+**GenerativeNLL** (`criterions.py:52-94`):
+Computes NLL for the joint distribution p(x,c):
+```
+-log(p(x,c)) = -log(|psi(x,c)|^2) + log(Z)
+```
+
+**Available Loss Functions:**
+| Mode | Name | Aliases | Description |
+|------|------|---------|-------------|
+| `"classification"` | `"nll"` | `"nlll"`, `"negativeloglikelihood"` | Classification NLL |
+| `"generative"` | `"nll"` | `"nlll"`, `"negativeloglikelihood"` | Generative NLL |
 
 ## _utils.py — Miscellaneous Utilities
 
@@ -304,60 +344,12 @@ _METHOD_MAP = {
 
 3. Update `EvasionConfig` in `schemas.py` if needed
 
-## generative_losses.py — Generative NLL Losses
-
-Abstract base class for computing negative log-likelihood for generative training.
-
-### GenerativeNLL
-
-```python
-from src.utils.generative_losses import GenerativeNLL
-
-class MyGenerativeNLL(GenerativeNLL):
-    """Custom implementation for normalization."""
-
-    def compute_unnormalized_log_prob(self, bornmachine, data, labels):
-        # Compute log(|psi(x,c)|^2) for each sample
-        # Default implementation uses sequential contraction
-        ...
-        return log_probs  # shape: (batch_size,)
-
-    def compute_log_partition(self, bornmachine):
-        # Compute log(Z) - the partition function
-        # Default implementation uses norm() method
-        ...
-        return log_Z  # shape: (1,)
-
-# Usage
-criterion = MyGenerativeNLL(eps=1e-12)
-loss = criterion(bornmachine, data, labels)
-```
-
-**Loss Formula:**
-```
-NLL = -log(p(x|c)) = -log(|psi(x,c)|^2) + log(Z)
-    = -log_unnorm + log_Z
-```
-
-**Key Methods:**
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `compute_unnormalized_log_prob()` | `(batch,)` | log(|ψ(x,c)|²) for each sample |
-| `compute_log_partition()` | `(1,)` | log(Z) normalization constant |
-| `forward()` | scalar | Mean NLL over batch |
-
-**Implementation Notes:**
-- Default implementations exist but are marked `@abstractmethod` for documentation
-- `compute_unnormalized_log_prob` uses `bornmachine.generator.sequential()` for contraction
-- `compute_log_partition` uses `bornmachine.generator.norm()` (squared for partition function)
-- Contains TODOs for discussion with tensorkrowch developer regarding gradient flow
-
 ## Key Patterns
 
 ### Adding a New Embedding
 
 ```python
-# In get.py:
+# In embeddings.py:
 
 # 1. Implement embedding function
 def my_embedding(data: torch.Tensor, degree: int, axis: int = -1):
@@ -380,7 +372,7 @@ _EMBEDDING_TO_RANGE = {
 ### Adding a New Loss Function
 
 ```python
-# In get.py:
+# In criterions.py:
 
 # 1. Implement loss class
 class MyLoss(nn.Module):
@@ -389,8 +381,13 @@ class MyLoss(nn.Module):
     def forward(self, p, t):
         ...
 
-# 2. Add to classification losses
+# 2. Add to appropriate loss map
 _CLASSIFICATION_LOSSES = {
+    ...
+    "myloss": MyLoss,
+}
+# Or for generative losses:
+_GENERATIVE_LOSSES = {
     ...
     "myloss": MyLoss,
 }
@@ -410,7 +407,7 @@ _CLASSIFICATION_LOSSES = {
 
 1. **Config struct mode**: Hydra configs are "struct" by default, meaning you can't add fields dynamically. Use `OmegaConf.set_struct(cfg, False)` temporarily if needed.
 
-2. **Loss expects probabilities**: `MPSNLLL` expects already-normalized probabilities, not raw amplitudes.
+2. **Loss expects probabilities**: `ClassificationNLL` expects already-normalized probabilities, not raw amplitudes.
 
 3. **Embedding range matters**: The data must be scaled to match the embedding's expected range.
 
@@ -425,7 +422,8 @@ _CLASSIFICATION_LOSSES = {
 | File | Lines | Key Functions/Classes |
 |------|-------|----------------------|
 | `schemas.py` | ~370 | All `*Config` dataclasses |
-| `get.py` | ~290 | `embedding`, `optimizer`, `criterion`, `MPSNLLL` |
+| `get.py` | ~80 | `optimizer`, `indim_and_ncls` (re-exports from embeddings/criterions) |
+| `embeddings.py` | ~115 | `embedding`, `range_from_embedding`, `legendre_embedding` |
+| `criterions.py` | ~165 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
 | `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
-| `generative_losses.py` | ~120 | `GenerativeNLL` abstract base class |
 | `evasion/minimal.py` | ~290 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |

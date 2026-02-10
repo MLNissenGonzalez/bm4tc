@@ -129,15 +129,19 @@ adversarial_training_mps/
 │   ├── config.yaml            # Main config with defaults
 │   ├── born/                  # BornMachine configs (bond_dim, in_dim, embedding)
 │   ├── dataset/               # Dataset configs (organized by type)
-│   │   ├── 2Dtoy/            # 2D toy datasets (moons, circles, spirals)
-│   │   ├── mnist/            # MNIST configs (planned)
-│   │   └── timeseries/       # Time series configs (planned)
+│   │   └── 2Dtoy/            # 2D toy datasets (moons, circles, spirals)
 │   ├── trainer/               # Training configs
 │   │   ├── classification/    # Classifier training configs
 │   │   ├── ganstyle/          # GAN-style training configs
-│   │   └── adversarial/       # Adversarial training configs
+│   │   ├── generative/        # Generative NLL training configs
+│   │   └── adversarial/       # Adversarial training configs (PGD-AT, TRADES)
 │   ├── tracking/              # W&B tracking configs
 │   ├── experiments/           # Full experiment configs (override defaults)
+│   │   ├── classification/   # Classification experiments (incl. hpo/, best/, seed_sweeps/)
+│   │   ├── adversarial/      # Adversarial training experiments (incl. hpo/)
+│   │   ├── generative/       # Generative NLL experiments (incl. seed_sweep/)
+│   │   ├── ganstyle/         # GAN-style experiments
+│   │   └── tests/            # Quick test experiments
 │   └── hydra/                 # Hydra-specific configs
 │       └── job_logging/      # Logging configs
 ├── experiments/               # Entry point scripts
@@ -150,10 +154,13 @@ adversarial_training_mps/
 │   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
 │   ├── tracking/             # Evaluation & logging
 │   ├── data/                 # Data loading & preprocessing
-│   └── utils/                # Utilities, schemas, embeddings
+│   └── utils/                # Utilities, schemas, embeddings, criterions
 ├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
-│   └── utils/               # W&B API utilities
+│   ├── mia_analysis.py      # MIA privacy analysis notebook
+│   ├── visualize_distributions.py  # Distribution visualization
+│   ├── run_statistics.py    # Basic sweep statistics
+│   └── utils/               # W&B API utilities, MIA utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -171,15 +178,15 @@ adversarial_training_mps/
 1. Create/modify an experiment config in `configs/experiments/`
 2. Run with `+experiments=<path>` to apply it
 
-**Example experiment config** (`configs/experiments/pretraining/D18.yaml`):
+**Example experiment config** (`configs/experiments/classification/D18.yaml`):
 ```yaml
 # @package _global_
-experiment: pretraining_D18
+experiment: classification_D18
 
 defaults:
   - override /born: d30D18
-  - override /dataset: moons_4k
-  - override /trainer/classification: adam_b64e300
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: adam500_loss
   - override /tracking: online
   - override /trainer/ganstyle: null      # Disable GAN training
   - override /trainer/adversarial: null   # Disable adversarial training
@@ -189,13 +196,13 @@ defaults:
 
 ```bash
 # Run with experiment config (RECOMMENDED)
-python -m experiments.classification +experiments=pretraining/D18
+python -m experiments.classification +experiments=classification/D18
 
 # Run GAN-style experiment
 python -m experiments.ganstyle +experiments=ganstyle/default
 
 # Multirun sweep (define sweep params in experiment config)
-python -m experiments.classification --multirun +experiments=pretraining/D18_sweep
+python -m experiments.classification --multirun +experiments=classification/D18_sweep
 ```
 
 **Command-line overrides** are useful for quick tests but not for production experiments:
@@ -297,10 +304,13 @@ conda env create -f environment.yml
 conda activate <env_name>
 
 # Run classification experiment (using experiment config)
-python -m experiments.classification +experiments=pretraining/D18
+python -m experiments.classification +experiments=classification/D18
 
 # Run GAN-style experiment
 python -m experiments.ganstyle +experiments=ganstyle/default
+
+# Run generative NLL experiment
+python -m experiments.generative +experiments=generative/hpo
 
 # Quick test run
 python -m experiments.classification +experiments=tests/classification
@@ -312,10 +322,13 @@ python -m experiments.classification +experiments=tests/classification tracking.
 python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
 
 # PGD-AT training
-python -m experiments.adversarial trainer/adversarial=pgd_at dataset=moons_2k
+python -m experiments.adversarial trainer/adversarial=pgd_at dataset=2Dtoy/moons_2k
 
 # TRADES training
-python -m experiments.adversarial trainer/adversarial=trades dataset=moons_2k
+python -m experiments.adversarial trainer/adversarial=trades dataset=2Dtoy/moons_2k
+
+# Adversarial HPO on moons dataset
+python -m experiments.adversarial --multirun +experiments=adversarial/hpo/moons
 
 # Check W&B dashboard
 # Visit: https://wandb.ai/<entity>/<project>

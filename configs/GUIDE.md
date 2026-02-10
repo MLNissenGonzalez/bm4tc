@@ -16,21 +16,21 @@ This directory contains all Hydra configuration files for experiments.
 
 **Example:**
 ```yaml
-# configs/experiments/pretraining/my_experiment.yaml
+# configs/experiments/classification/my_experiment.yaml
 # @package _global_
 experiment: my_experiment_name
 
 defaults:
   - override /born: d30D18
-  - override /dataset: moons_4k
-  - override /trainer/classification: adam_b64e300
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: adam500_loss
   - override /tracking: online
   - override /trainer/ganstyle: null      # Disable
   - override /trainer/adversarial: null   # Disable
 ```
 
 ```bash
-python -m experiments.classification +experiments=pretraining/my_experiment
+python -m experiments.classification +experiments=classification/my_experiment
 ```
 
 ## Directory Structure
@@ -60,39 +60,81 @@ configs/
 │   # Future: mnist/, timeseries/
 ├── trainer/
 │   ├── classification/        # Classifier training configs
-│   │   ├── adam_b64e300.yaml # Adam, batch 64, 300 epochs
-│   │   ├── adam_b64e500.yaml # Adam, batch 64, 500 epochs
+│   │   ├── adam500_loss.yaml # Adam, 500 epochs, stop on loss
+│   │   ├── adam500_rob.yaml  # Adam, 500 epochs, stop on robustness
 │   │   ├── test.yaml         # Minimal test
-│   │   ├── test2.yaml
-│   │   └── test3.yaml
+│   │   └── archive/          # Old/deprecated configs
 │   ├── ganstyle/             # GAN training configs
 │   │   ├── default.yaml      # Default GAN config
 │   │   ├── test.yaml         # Test config
+│   │   ├── power.yaml        # Power training config
 │   │   └── critic/           # Critic architecture configs (Hydra config group)
 │   │       ├── default.yaml  # Default critic (4 layers, width 8)
 │   │       ├── test.yaml     # Test critic (smaller)
-│   │       ├── d2.yaml       # 2 hidden layers
+│   │       ├── d2w8.yaml     # 2 layers, width 8
 │   │       ├── d3.yaml       # 3 hidden layers
 │   │       ├── d4.yaml       # 4 hidden layers
-│   │       └── d5.yaml       # 5 hidden layers
-│   ├── generative/           # Generative training configs
+│   │       ├── d5w8.yaml     # 5 layers, width 8
+│   │       ├── d5w12.yaml    # 5 layers, width 12
+│   │       ├── d5w20.yaml    # 5 layers, width 20
+│   │       ├── d6w8.yaml     # 6 layers, width 8
+│   │       ├── wgan1.yaml    # WGAN-GP, lambda=1
+│   │       ├── wgan10.yaml   # WGAN-GP, lambda=10
+│   │       └── wgan25.yaml   # WGAN-GP, lambda=25
+│   ├── generative/           # Generative NLL training configs
 │   │   ├── default.yaml      # Default generative config
 │   │   └── test.yaml         # Test config
 │   └── adversarial/          # Adversarial training configs
-│       └── test.yaml         # Placeholder
+│       ├── test.yaml         # Test config
+│       ├── pgd_at.yaml       # PGD-AT (Madry et al.)
+│       └── trades.yaml       # TRADES (Zhang et al.)
 ├── tracking/                  # W&B and evaluation configs
 │   ├── online.yaml           # Online W&B logging
 │   └── test.yaml             # Test config
 ├── experiments/              # Full experiment configs
-│   ├── pretraining/          # Classification-only experiments
-│   │   ├── D18.yaml
-│   │   └── D18_sweep.yaml
+│   ├── classification/       # Classification experiments
+│   │   ├── D18.yaml         # Classification with D=18
+│   │   ├── D18_sweep.yaml   # Sweep over architectures
+│   │   ├── best/            # Best configs per dataset
+│   │   │   ├── circles_4k.yaml
+│   │   │   ├── moons_4k.yaml
+│   │   │   └── spirals_4k.yaml
+│   │   ├── hpo/             # HPO experiments
+│   │   │   ├── lr_hpo.yaml
+│   │   │   ├── lrwd_hpo.yaml
+│   │   │   └── sanity_check.yaml
+│   │   └── seed_sweeps/     # Seed sweep experiments
+│   │       ├── circles.yaml
+│   │       ├── moons.yaml
+│   │       └── spirals.yaml
+│   ├── adversarial/          # Adversarial training experiments
+│   │   └── hpo/             # HPO experiments
+│   │       ├── circles.yaml
+│   │       ├── moons.yaml
+│   │       ├── spirals.yaml
+│   │       └── hpo_test.yaml
+│   ├── generative/           # Generative NLL experiments
+│   │   ├── hpo.yaml
+│   │   └── seed_sweep/      # Seed sweep experiments
+│   │       ├── circles.yaml
+│   │       ├── moons.yaml
+│   │       └── spirals.yaml
 │   ├── ganstyle/             # GAN experiments
-│   │   └── default.yaml
+│   │   ├── default.yaml
+│   │   ├── hpo.yaml
+│   │   ├── no_retrain.yaml
+│   │   ├── critic_sweep.yaml
+│   │   └── wgan_sweep.yaml
 │   └── tests/                # Test experiments
 │       ├── classification.yaml
+│       ├── classification_hpo.yaml
 │       ├── classifications.yaml
-│       └── ganstyle.yaml
+│       ├── ganstyle.yaml
+│       ├── ganstyle_hpo.yaml
+│       ├── ganstyles.yaml
+│       ├── adversarial.yaml
+│       ├── generative.yaml
+│       └── generative_hpo.yaml
 └── hydra/                    # Hydra-specific configs
     └── job_logging/
         ├── debug.yaml        # Verbose logging
@@ -106,10 +148,11 @@ experiment: default
 
 defaults:
   - _self_                              # Allow overrides
-  - dataset: circles_2k                 # Default dataset
+  - dataset: 2Dtoy/circles_2k           # Default dataset (note subfolder!)
   - born: d4D3                          # Default model
   - trainer/classification: test        # Default classifier training
   - trainer/ganstyle: test              # Default GAN training
+  - trainer/generative: null            # Generative training disabled by default
   - trainer/adversarial: test           # Default adversarial training
   - tracking: test                      # Default tracking
   - override hydra/job_logging: stream_only
@@ -184,8 +227,8 @@ overwrite: false       # Regenerate dataset even if cached (for seed sweeps)
 ### trainer/classification/ — Classifier Training
 
 ```yaml
-# trainer/classification/adam_b64e300.yaml
-max_epoch: 300
+# trainer/classification/adam500_loss.yaml
+max_epoch: 500
 batch_size: 64
 criterion:
   name: "negative log-likelihood"
@@ -193,14 +236,21 @@ criterion:
 optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
-patience: 40           # Early stopping patience
-stop_crit: "acc"       # Monitored metric ("clsloss", "genloss", "acc", "fid", "rob")
+patience: 50           # Early stopping patience
+stop_crit: "clsloss"   # Monitored metric ("clsloss", "genloss", "acc", "fid", "rob")
 watch_freq: 1000       # Gradient logging frequency
 metrics: {"clsloss": 1, "acc": 1, "viz": 30, "fid": 30, "rob": 30}
 save: true
 auto_stack: true       # tensorkrowch setting
 auto_unbind: false     # tensorkrowch setting
 ```
+
+**Available classification configs:**
+| Config | Epochs | Stop Criterion | Description |
+|--------|--------|----------------|-------------|
+| `adam500_loss` | 500 | `clsloss` | Stop on validation loss |
+| `adam500_rob` | 500 | `rob` | Stop on robustness |
+| `test` | 10 | `clsloss` | Quick test config |
 
 ### trainer/ganstyle/ — GAN Training
 
@@ -287,10 +337,10 @@ optimizer:
   name: "adam"
   kwargs: {lr: 1e-4, weight_decay: 0.0}
 criterion:
-  name: "generative-nll"  # User must implement GenerativeNLL subclass
+  name: "nll"             # Uses GenerativeNLL from criterions.py
   kwargs: {eps: 1e-8}
 patience: 50
-stop_crit: "acc"
+stop_crit: "genloss"      # Monitor generative NLL loss
 watch_freq: 100
 metrics: {"genloss": 1, "acc": 1, "fid": 10, "viz": 10}
 save: false
@@ -325,7 +375,12 @@ evasion:                        # Robustness evaluation config
 
 ### experiments/ — Full Experiments
 
-Experiment configs override defaults:
+Experiment configs override defaults. The main experiment directories are:
+- `classification/` — Classification-only experiments
+- `adversarial/` — Adversarial training experiments
+- `generative/` — Generative NLL training experiments
+- `ganstyle/` — GAN-style training experiments
+- `tests/` — Quick test experiments
 
 ```yaml
 # experiments/tests/classification.yaml
@@ -339,6 +394,23 @@ defaults:
 
 The `# @package _global_` directive makes overrides apply at the root level.
 
+**Best configs** (`experiments/classification/best/`):
+Store validated best configurations for each dataset:
+```yaml
+# experiments/classification/best/moons_4k.yaml
+# @package _global_
+experiment: best_moons_4k
+
+defaults:
+  - override /born: d30D18
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: adam500_loss
+  # ... validated hyperparameters
+```
+
+**Seed sweeps** (`experiments/classification/seed_sweeps/`):
+Run the same config with different random seeds for statistical analysis.
+
 ## Running Experiments
 
 See `experiments/GUIDE.md` for detailed usage and bash commands.
@@ -348,7 +420,7 @@ See `experiments/GUIDE.md` for detailed usage and bash commands.
 Define sweep parameters in an experiment config:
 
 ```yaml
-# configs/experiments/pretraining/D18_sweep.yaml
+# configs/experiments/classification/D18_sweep.yaml
 # @package _global_
 experiment: D18_sweep
 
@@ -376,14 +448,14 @@ defaults:
 
 **HPO Experiment Config Example**:
 ```yaml
-# configs/experiments/hpo/classification_hpo.yaml
+# configs/experiments/classification/hpo/lrwd_hpo.yaml
 # @package _global_
 experiment: classification_hpo
 
 defaults:
   - override /born: d10D4
   - override /dataset: 2Dtoy/moons_4k
-  - override /trainer/classification: adam_b64e300
+  - override /trainer/classification: adam500_loss
   - override /tracking: online
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
