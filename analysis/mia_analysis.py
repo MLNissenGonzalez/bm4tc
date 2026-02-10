@@ -53,7 +53,7 @@ DATA_SOURCE = "local"
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to run directory (contains .hydra/config.yaml and models/)
-RUN_DIR = "outputs/classification_example"  # Change to your run directory
+RUN_DIR = "outputs/gen_seed_sweep_circles_4k_02Feb26/1"  # Change to your run directory
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "your-entity"
@@ -103,8 +103,9 @@ def load_model_and_data(source: str = DATA_SOURCE):
         load_run_config_from_wandb,
         find_model_checkpoint,
     )
-    from src.data import DataHandler
+
     from src.models import BornMachine
+    from src.data import DataHandler
 
     device = torch.device(DEVICE)
     logger.info(f"Using device: {device}")
