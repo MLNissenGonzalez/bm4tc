@@ -10,11 +10,12 @@
 #
 # **Visualizations:**
 # 1. Histogram of accuracy (clean, robust, MIA if available)
-# 2. Mean accuracies with std error bars
+# 2. Mean accuracies with std dev bars
 # 3. Scatter plot of accuracy vs validation loss
-# 4. Best run summary by validation loss
-# 5. Final summary table (best, mean, std of accuracies)
-# 6. Distribution visualization for best run
+# 4. Scatter plot of accuracy vs stopping criterion
+# 5. Best run summary by validation loss
+# 6. Final summary table (best, mean, std of accuracies)
+# 7. Distribution visualization for best run
 #
 # **Features:**
 # - Regime-aware metric resolution
@@ -93,6 +94,13 @@ EFFECTIVE_N = 5
 FIGSIZE = (10, 6)
 DPI = 100
 
+REGIME_TRAINER_PREFIX = {
+    "pre": "trainer.classification",
+    "gen": "trainer.generative",
+    "adv": "trainer.adversarial",
+    "gan": "trainer.ganstyle",
+}
+
 # %% [markdown]
 # ## Data Loading
 
@@ -117,6 +125,8 @@ def load_data(source: str = DATA_SOURCE, regime: str = REGIME) -> pd.DataFrame:
             "dataset.name",
             "experiment",
         ])
+        if regime in REGIME_TRAINER_PREFIX:
+            config_keys.append(f"{REGIME_TRAINER_PREFIX[regime]}.stop_crit")
     else:
         config_keys = None
 
@@ -208,6 +218,39 @@ if not df.empty:
 
     print(f"\nTotal runs: {len(df)}")
 
+# %%
+# Resolve stopping criterion metric
+from analysis.utils import REGIME_METRIC_PREFIX
+
+STOP_CRIT_COL = None
+STOP_CRIT_LABEL = None
+
+if not df.empty and "config/stop_crit" in df.columns:
+    unique = df["config/stop_crit"].dropna().unique()
+    if len(unique) == 1:
+        stop_name = unique[0]
+        prefix = REGIME_METRIC_PREFIX[REGIME]
+
+        if stop_name == "rob":
+            # Average robustness columns (how the trainer uses it)
+            valid_rob = [c for c in ROB_COLS if c in df.columns]
+            if valid_rob:
+                df["_avg_rob_acc"] = df[valid_rob].mean(axis=1)
+                STOP_CRIT_COL = "_avg_rob_acc"
+                STOP_CRIT_LABEL = "Avg Robust Accuracy (stop crit)"
+        else:
+            candidate = f"summary/{prefix}/valid/{stop_name}"
+            if candidate in df.columns:
+                STOP_CRIT_COL = candidate
+                STOP_CRIT_LABEL = f"{stop_name} (stop crit)"
+
+        if STOP_CRIT_COL:
+            print(f"  Stop criterion: {stop_name} -> {STOP_CRIT_COL}")
+        else:
+            print(f"  Stop criterion '{stop_name}' column not found in data — skipping")
+    else:
+        print(f"  Multiple stopping criteria found: {list(unique)} — skipping stop crit plot")
+
 # %% [markdown]
 # ## Setup Output Directory
 
@@ -231,14 +274,14 @@ print(f"Output directory: {output_dir}")
 # %%
 def compute_mia_for_run(run_path: str, device: str = DEVICE) -> float:
     """
-    Compute MIA AUC-ROC for a single run.
+    Compute MIA attack accuracy for a single run.
 
     Args:
         run_path: Path to the run directory
         device: Torch device string
 
     Returns:
-        MIA AUC-ROC score
+        MIA attack accuracy score
     """
     from analysis.utils import load_run_config, find_model_checkpoint
     from analysis.utils import MIAEvaluation
@@ -282,7 +325,7 @@ def compute_mia_for_run(run_path: str, device: str = DEVICE) -> float:
         mia_eval = MIAEvaluation()
         results = mia_eval.evaluate(bm, train_loader, test_loader, device_obj)
 
-        return results.auc_roc
+        return results.attack_accuracy
 
     except Exception as e:
         print(f"  Warning: MIA computation failed for {run_path}: {e}")
@@ -291,14 +334,14 @@ def compute_mia_for_run(run_path: str, device: str = DEVICE) -> float:
 
 def compute_mia_for_all_runs(df: pd.DataFrame, device: str = DEVICE) -> pd.Series:
     """
-    Compute MIA AUC-ROC for all runs in the DataFrame.
+    Compute MIA attack accuracy for all runs in the DataFrame.
 
     Args:
         df: DataFrame with run_path column
         device: Torch device string
 
     Returns:
-        Series of MIA AUC-ROC scores indexed by DataFrame index
+        Series of MIA attack accuracy scores indexed by DataFrame index
     """
     mia_scores = []
 
@@ -313,7 +356,7 @@ def compute_mia_for_all_runs(df: pd.DataFrame, device: str = DEVICE) -> pd.Serie
         print(f"  [{i+1}/{len(df)}] Processing {Path(run_path).name}...")
         score = compute_mia_for_run(run_path, device)
         mia_scores.append(score)
-        print(f"    MIA AUC-ROC: {score:.4f}" if not np.isnan(score) else "    MIA: failed")
+        print(f"    MIA Accuracy: {score:.4f}" if not np.isnan(score) else "    MIA: failed")
 
     return pd.Series(mia_scores, index=df.index)
 
@@ -326,12 +369,12 @@ if COMPUTE_MIA and not df.empty:
     print("Computing MIA for all runs (this may take a while)...")
     print("=" * 60)
 
-    df["mia_auc_roc"] = compute_mia_for_all_runs(df, DEVICE)
-    MIA_COL = "mia_auc_roc"
+    df["mia_accuracy"] = compute_mia_for_all_runs(df, DEVICE)
+    MIA_COL = "mia_accuracy"
 
-    valid_mia = df["mia_auc_roc"].notna().sum()
+    valid_mia = df["mia_accuracy"].notna().sum()
     print(f"\nMIA computed for {valid_mia}/{len(df)} runs")
-    print(f"Mean MIA AUC-ROC: {df['mia_auc_roc'].mean():.4f}")
+    print(f"Mean MIA Accuracy: {df['mia_accuracy'].mean():.4f}")
 
 # %% [markdown]
 # ## Statistical Utility Functions
@@ -477,10 +520,9 @@ def plot_accuracy_histogram(
         if len(values) > 0:
             ax.hist(values, bins=15, color="purple", edgecolor="white", alpha=0.8)
             ax.axvline(values.mean(), color="red", linestyle="--", label=f"Mean: {values.mean():.4f}")
-            ax.axvline(0.5, color="gray", linestyle=":", label="Random (0.5)")
-            ax.set_xlabel("MIA AUC-ROC")
+            ax.set_xlabel("MIA Accuracy")
             ax.set_ylabel("Count")
-            ax.set_title("MIA AUC-ROC")
+            ax.set_title("MIA Accuracy")
             ax.legend()
             ax.grid(True, alpha=0.3)
 
@@ -515,19 +557,17 @@ def plot_mean_accuracies_with_errorbars(
     acc_col: str,
     rob_cols: list = None,
     mia_col: str = None,
-    effective_n: int = None,
     title: str = "Mean Accuracies",
     figsize: tuple = FIGSIZE,
 ) -> plt.Figure:
     """
-    Plot mean accuracies with standard error bars.
+    Plot mean accuracies with standard deviation bars.
 
     Args:
         df: DataFrame with accuracy columns
         acc_col: Column name for clean accuracy
         rob_cols: List of column names for robustness metrics
         mia_col: Column name for MIA accuracy (optional)
-        effective_n: Override for sample size in stderr calculation
         title: Plot title
         figsize: Figure size
 
@@ -536,34 +576,34 @@ def plot_mean_accuracies_with_errorbars(
     """
     metrics = []
     means = []
-    stderrs = []
+    stds = []
     colors = []
 
     # Clean accuracy
     if acc_col in df.columns:
-        stats = compute_statistics(df, acc_col, effective_n)
+        stats = compute_statistics(df, acc_col)
         metrics.append("Clean\nAccuracy")
         means.append(stats["mean"])
-        stderrs.append(stats["stderr"])
+        stds.append(stats["std"])
         colors.append("steelblue")
 
     # Robustness metrics
     if rob_cols:
         for rob_col in rob_cols:
             if rob_col in df.columns:
-                stats = compute_statistics(df, rob_col, effective_n)
+                stats = compute_statistics(df, rob_col)
                 strength = rob_col.split("/")[-1]
                 metrics.append(f"Robust\n(ε={strength})")
                 means.append(stats["mean"])
-                stderrs.append(stats["stderr"])
+                stds.append(stats["std"])
                 colors.append("orange")
 
     # MIA
     if mia_col and mia_col in df.columns:
-        stats = compute_statistics(df, mia_col, effective_n)
-        metrics.append("MIA\nAUC-ROC")
+        stats = compute_statistics(df, mia_col)
+        metrics.append("MIA\nAccuracy")
         means.append(stats["mean"])
-        stderrs.append(stats["stderr"])
+        stds.append(stats["std"])
         colors.append("purple")
 
     if not metrics:
@@ -573,13 +613,13 @@ def plot_mean_accuracies_with_errorbars(
     fig, ax = plt.subplots(figsize=figsize, dpi=DPI)
 
     x = np.arange(len(metrics))
-    bars = ax.bar(x, means, yerr=stderrs, capsize=5, color=colors, edgecolor="white", alpha=0.8)
+    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, edgecolor="white", alpha=0.8)
 
     # Add value labels on bars
-    for bar, mean, stderr in zip(bars, means, stderrs):
+    for bar, mean, std in zip(bars, means, stds):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + stderr + 0.01,
+            bar.get_height() + std + 0.01,
             f"{mean:.4f}",
             ha="center", va="bottom", fontsize=10
         )
@@ -589,15 +629,6 @@ def plot_mean_accuracies_with_errorbars(
     ax.set_xticks(x)
     ax.set_xticklabels(metrics)
     ax.grid(True, alpha=0.3, axis="y")
-
-    # Add note about effective N if used
-    if effective_n is not None:
-        ax.text(
-            0.02, 0.98, f"Effective N = {effective_n}",
-            transform=ax.transAxes, fontsize=9,
-            verticalalignment="top",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5)
-        )
 
     fig.tight_layout()
     return fig
@@ -612,8 +643,7 @@ if not df.empty:
         acc_col=ACC_COL,
         rob_cols=ROB_COLS,
         mia_col=MIA_COL,
-        effective_n=EFFECTIVE_N,
-        title=f"Mean Accuracies with Std Error ({sweep_name})",
+        title=f"Mean Accuracies \u00b1 Std Dev ({sweep_name})",
     )
 
     if fig:
@@ -713,12 +743,10 @@ def plot_accuracy_vs_loss_scatter(
         if valid_mask.sum() > 0:
             ax.scatter(loss[valid_mask], df.loc[valid_mask, mia_col],
                        alpha=0.6, c="purple", edgecolors="white", s=50)
-            ax.axhline(0.5, color="gray", linestyle=":", alpha=0.5, label="Random")
             ax.set_xlabel("Validation Loss")
-            ax.set_ylabel("MIA AUC-ROC")
-            ax.set_title("MIA AUC-ROC")
+            ax.set_ylabel("MIA Accuracy")
+            ax.set_title("MIA Accuracy")
             ax.grid(True, alpha=0.3)
-            ax.legend(loc="best")
 
             if valid_mask.sum() > 2:
                 corr = np.corrcoef(loss[valid_mask], df.loc[valid_mask, mia_col])[0, 1]
@@ -750,6 +778,133 @@ if not df.empty:
         plt.show()
 
 # %% [markdown]
+# ## Visualization 4: Accuracy vs Stopping Criterion
+
+# %%
+def plot_accuracy_vs_stop_crit_scatter(
+    df: pd.DataFrame,
+    stop_crit_col: str,
+    acc_col: str,
+    rob_cols: list = None,
+    mia_col: str = None,
+    stop_crit_label: str = "Stop Criterion",
+    title: str = "Accuracy vs Stopping Criterion",
+    figsize: tuple = FIGSIZE,
+) -> plt.Figure:
+    """
+    Plot accuracy metrics against the stopping criterion metric.
+
+    Args:
+        df: DataFrame with metric columns
+        stop_crit_col: Column name for stopping criterion metric
+        acc_col: Column name for clean accuracy
+        rob_cols: List of column names for robustness metrics
+        mia_col: Column name for MIA accuracy (optional)
+        stop_crit_label: Label for the x-axis
+        title: Plot title
+        figsize: Figure size
+
+    Returns:
+        Matplotlib Figure
+    """
+    if stop_crit_col not in df.columns:
+        print(f"Stop criterion column '{stop_crit_col}' not found")
+        return None
+
+    # Count number of metrics to plot
+    n_plots = 1
+    if rob_cols:
+        n_plots += len([c for c in rob_cols if c in df.columns])
+    if mia_col and mia_col in df.columns:
+        n_plots += 1
+
+    fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4), dpi=DPI, squeeze=False)
+    axes = axes.flatten()
+
+    plot_idx = 0
+    stop_vals = df[stop_crit_col]
+
+    # Clean accuracy
+    if acc_col in df.columns:
+        ax = axes[plot_idx]
+        valid_mask = stop_vals.notna() & df[acc_col].notna()
+        ax.scatter(stop_vals[valid_mask], df.loc[valid_mask, acc_col],
+                   alpha=0.6, c="steelblue", edgecolors="white", s=50)
+        ax.set_xlabel(stop_crit_label)
+        ax.set_ylabel("Accuracy")
+        ax.set_title("Clean Accuracy")
+        ax.grid(True, alpha=0.3)
+
+        if valid_mask.sum() > 2:
+            corr = np.corrcoef(stop_vals[valid_mask], df.loc[valid_mask, acc_col])[0, 1]
+            ax.text(0.05, 0.95, f"r = {corr:.3f}", transform=ax.transAxes,
+                    fontsize=10, verticalalignment="top")
+        plot_idx += 1
+
+    # Robustness metrics
+    if rob_cols:
+        for rob_col in rob_cols:
+            if rob_col in df.columns:
+                ax = axes[plot_idx]
+                valid_mask = stop_vals.notna() & df[rob_col].notna()
+                if valid_mask.sum() > 0:
+                    ax.scatter(stop_vals[valid_mask], df.loc[valid_mask, rob_col],
+                               alpha=0.6, c="orange", edgecolors="white", s=50)
+                    strength = rob_col.split("/")[-1]
+                    ax.set_xlabel(stop_crit_label)
+                    ax.set_ylabel("Robust Accuracy")
+                    ax.set_title(f"Robust Acc (ε={strength})")
+                    ax.grid(True, alpha=0.3)
+
+                    if valid_mask.sum() > 2:
+                        corr = np.corrcoef(stop_vals[valid_mask], df.loc[valid_mask, rob_col])[0, 1]
+                        ax.text(0.05, 0.95, f"r = {corr:.3f}", transform=ax.transAxes,
+                                fontsize=10, verticalalignment="top")
+                plot_idx += 1
+
+    # MIA
+    if mia_col and mia_col in df.columns:
+        ax = axes[plot_idx]
+        valid_mask = stop_vals.notna() & df[mia_col].notna()
+        if valid_mask.sum() > 0:
+            ax.scatter(stop_vals[valid_mask], df.loc[valid_mask, mia_col],
+                       alpha=0.6, c="purple", edgecolors="white", s=50)
+            ax.set_xlabel(stop_crit_label)
+            ax.set_ylabel("MIA Accuracy")
+            ax.set_title("MIA Accuracy")
+            ax.grid(True, alpha=0.3)
+
+            if valid_mask.sum() > 2:
+                corr = np.corrcoef(stop_vals[valid_mask], df.loc[valid_mask, mia_col])[0, 1]
+                ax.text(0.05, 0.95, f"r = {corr:.3f}", transform=ax.transAxes,
+                        fontsize=10, verticalalignment="top")
+
+    fig.suptitle(title, fontsize=12, y=1.02)
+    fig.tight_layout()
+    return fig
+
+
+# %%
+if not df.empty and STOP_CRIT_COL is not None:
+    print("\n=== Creating Accuracy vs Stop Criterion Scatter ===")
+
+    fig = plot_accuracy_vs_stop_crit_scatter(
+        df,
+        stop_crit_col=STOP_CRIT_COL,
+        acc_col=ACC_COL,
+        rob_cols=ROB_COLS,
+        mia_col=MIA_COL,
+        stop_crit_label=STOP_CRIT_LABEL,
+        title=f"Accuracy vs Stopping Criterion ({sweep_name})",
+    )
+
+    if fig:
+        output_path = output_dir / "accuracy_vs_stop_crit_scatter.png"
+        plt.savefig(output_path, bbox_inches="tight")
+        print(f"Saved to: {output_path}")
+        plt.show()
+
+# %% [markdown]
 # ## Best Run Selection + Distribution Visualization
 
 # %%
@@ -769,7 +924,7 @@ if not df.empty:
                 print(f"  Robust Accuracy (ε={strength}): {best_run.get(rob_col, np.nan):.4f}")
 
         if MIA_COL and MIA_COL in best_run.index:
-            print(f"  MIA AUC-ROC: {best_run.get(MIA_COL, np.nan):.4f}")
+            print(f"  MIA Accuracy: {best_run.get(MIA_COL, np.nan):.4f}")
 
         # Distribution visualization for best run
         best_run_path = best_run.get("run_path")
@@ -860,7 +1015,7 @@ def create_summary_table(
     if mia_col and mia_col in df.columns:
         stats = compute_statistics(df, mia_col, effective_n)
         rows.append({
-            "Metric": "MIA AUC-ROC",
+            "Metric": "MIA Accuracy",
             "Best": stats["best"],
             "Mean": stats["mean"],
             "Std": stats["std"],
@@ -948,13 +1103,14 @@ if not df.empty:
                     f.write(f"Robust Accuracy (ε={strength}): {best_run.get(rob_col, np.nan):.4f}\n")
 
             if MIA_COL and MIA_COL in best_run.index:
-                f.write(f"MIA AUC-ROC: {best_run.get(MIA_COL, np.nan):.4f}\n")
+                f.write(f"MIA Accuracy: {best_run.get(MIA_COL, np.nan):.4f}\n")
 
         f.write("\n" + "=" * 60 + "\n")
         f.write("Generated outputs:\n")
         f.write("  - accuracy_histogram.png\n")
         f.write("  - mean_accuracies_errorbars.png\n")
         f.write("  - accuracy_vs_loss_scatter.png\n")
+        f.write("  - accuracy_vs_stop_crit_scatter.png\n")
         f.write("  - best_run_distributions.png\n")
         f.write("  - summary_statistics.csv\n")
         f.write("  - run_statistics_summary.txt\n")
