@@ -47,5 +47,4 @@ trainer:
 hydra:
   sweeper:
     params:
-      tracking.random_state: choice(324, 16, 6532, 314, 12)
       tracking.seed: choice(123, 245, 124, 356, 23)

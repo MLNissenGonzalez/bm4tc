@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Path to run directory (contains .hydra/config.yaml and models/)
-RUN_DIR = "outputs/seed_sweep_moons_4k_01Feb26/15"  # Change to your run directory
+RUN_DIR = "outputs/gen_seed_sweep_moons_4k_02Feb26/8"  # Change to your run directory
 
 # Grid resolution for heatmaps (resolution x resolution points)
 RESOLUTION = 150
