@@ -59,7 +59,7 @@ DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "cls_seed_sweep"  # Regex pattern to match run groups
+EXPERIMENT_PATTERN = "adv_hpo"  # Regex pattern to match run groups
 DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
@@ -76,7 +76,7 @@ LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/lrwdbs_hpo_spir
 #   - "gen": Generative NLL training (trainer.generative.*)
 #   - "adv": Adversarial training (trainer.adversarial.*)
 #   - "gan": GAN-style training (trainer.ganstyle.*)
-REGIME = "pre"
+REGIME = "adv"
 
 # Parameter shorthand names to analyze
 # Common: "lr", "weight-decay" (or "wd"), "batch-size" (or "bs"), "bond-dim", "in-dim", "seed"

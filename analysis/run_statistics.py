@@ -58,18 +58,18 @@ import warnings
 # =============================================================================
 
 # Data source: "wandb" or "local"
-DATA_SOURCE = "local"  # Change to "wandb" to fetch from W&B
+DATA_SOURCE = "wandb"  # Change to "wandb" to fetch from W&B
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
-EXPERIMENT_PATTERN = "cls_seed_sweep"  # Regex pattern to match run groups
-DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
+EXPERIMENT_PATTERN = "adv_hpo"  # Regex pattern to match run groups
+DATASET_NAME = "spirals_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
 # Can be overridden by command line argument: python -m analysis.run_statistics outputs/sweep_name
-LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/gen_seed_sweep_spirals_4k_02Feb26"
+LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/cls_seed_sweep_circles_4k_10Feb26"
 
 # --- REGIME SETTINGS ---
 # Training regime: "pre", "gen", "adv", "gan"
@@ -77,18 +77,18 @@ LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/gen_seed_sweep_
 #   - "gen": Generative NLL training (trainer.generative.*)
 #   - "adv": Adversarial training (trainer.adversarial.*)
 #   - "gan": GAN-style training (trainer.ganstyle.*)
-REGIME = "gen"
+REGIME = "adv"
 
 # --- MIA SETTINGS ---
 # MIA computation is expensive - it loads each model and runs inference
-COMPUTE_MIA = True  # Set to True to compute MIA for all runs
+COMPUTE_MIA = False  # Set to True to compute MIA for all runs
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- STATISTICS SETTINGS ---
 # Manual override for effective N (number of independent runs)
 # Set to None to use actual run count, or set to a number if some runs
 # are not truly independent (e.g., tracking.random_state doesn't affect training)
-EFFECTIVE_N = 5
+EFFECTIVE_N = None
 
 # --- PLOT SETTINGS ---
 FIGSIZE = (10, 6)
