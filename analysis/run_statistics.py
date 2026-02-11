@@ -87,7 +87,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # --- STATISTICS SETTINGS ---
 # Manual override for effective N (number of independent runs)
 # Set to None to use actual run count, or set to a number if some runs
-# are not truly independent (e.g., tracking.random_state doesn't affect training)
+# are not truly independent (e.g., old sweeps included the dead tracking.random_state param)
 EFFECTIVE_N = None
 
 # --- PLOT SETTINGS ---

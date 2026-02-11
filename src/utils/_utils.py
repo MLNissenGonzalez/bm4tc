@@ -18,15 +18,18 @@ logger = logging.getLogger(__name__)
 
 def set_seed(seed: int):
     """
-    Set random seeds across Python, NumPy, and PyTorch for reproducible results.
+    Set random seeds across Python, NumPy, and PyTorch for reproducible
+    *training* randomness (model init, DataLoader shuffling, PGD, sampling).
 
-    This function ensures that experiments are deterministic to the extent
-    possible, including behavior on GPU and multi-GPU setups.
+    Must be called **after** data loading and **before** model creation.
+    Data pipeline seeds (``gen_dow_kwargs.seed``, ``dataset.split_seed``)
+    are handled independently by their respective functions.
 
     Parameters
     ----------
     seed : int
         Integer value used to seed all random number generators.
+        Corresponds to ``tracking.seed`` in the Hydra config.
 
     Notes
     -----

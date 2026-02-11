@@ -25,26 +25,29 @@ def main(cfg: schemas.Config):
     # Initialising wandb and device
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    set_seed(cfg.tracking.seed)
 
-    # DataHandler
+    # DataHandler (uses gen_dow_kwargs.seed and split_seed only)
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
+
+    # Seed training randomness (model init, DataLoader shuffling, PGD, sampling)
+    set_seed(cfg.tracking.seed)
 
     # BornMachine
     model_path = getattr(cfg, "model_path", None)
     if model_path is not None:
-        logger.info(f"Loading BornMachine from {cfg.model_path}")
-        bornmachine = BornMachine.load(cfg.model_path)
+        logger.info(f"Loading BornMachine from {model_path}")
+        bornmachine = BornMachine.load(model_path)
         bornmachine.to(device)
-        # Preprocessing
-        datahandler.split_and_rescale(bornmachine)
         pre_trainer = None
     else:
         logger.info("Creating and training new BornMachine.")
         bornmachine = BornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
-        # Preprocessing
-        datahandler.split_and_rescale(bornmachine)
+
+    # Preprocessing (uses split_seed, independent of tracking.seed)
+    datahandler.split_and_rescale(bornmachine)
+
+    if model_path is None:
         # Pretrain
         pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
         pre_trainer.train()

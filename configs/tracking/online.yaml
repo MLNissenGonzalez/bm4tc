@@ -2,7 +2,6 @@ project: gan_train # choose your own project name if you like
 entity: martin-nissen-gonzalez-heidelberg-university # add here your wandb entity
 mode: online # set to "online" to enable logging to wandb
 seed: 42
-random_state: 42
 sampling:
   num_bins: 200
   num_spc: 1024

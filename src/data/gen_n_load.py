@@ -112,21 +112,22 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
         return X, t
 
     elif canonical == "spirals":
-        theta = np.sqrt(np.random.rand(cfg.size))*2*np.pi
+        rng = np.random.RandomState(cfg.seed)
+        theta = np.sqrt(rng.rand(cfg.size))*2*np.pi
 
         r_1 = 2*theta + np.pi
         data_1 = np.array([np.cos(theta)*r_1, np.sin(theta)*r_1]).T
-        x_1 = data_1 + cfg.noise * np.random.randn(cfg.size, 2)
+        x_1 = data_1 + cfg.noise * rng.randn(cfg.size, 2)
 
         r_2 = -2*theta - np.pi
         data_2 = np.array([np.cos(theta)*r_2, np.sin(theta)*r_2]).T
-        x_2 = data_2 + cfg.noise * np.random.randn(cfg.size, 2)
+        x_2 = data_2 + cfg.noise * rng.randn(cfg.size, 2)
 
         res_1 = np.append(x_1, np.zeros((cfg.size, 1)), axis=1)
         res_2 = np.append(x_2, np.ones((cfg.size, 1)), axis=1)
 
         res = np.append(res_1, res_2, axis=0)
-        np.random.shuffle(res)
+        rng.shuffle(res)
         X, t = res[:, :-1], res[:, -1]
         return X, t
 

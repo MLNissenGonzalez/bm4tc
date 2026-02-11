@@ -24,16 +24,18 @@ def main(cfg: schemas.Config):
     # Initialising wandb and device
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    set_seed(cfg.tracking.seed)
 
-    # DataHandler
+    # DataHandler (uses gen_dow_kwargs.seed and split_seed only)
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
+
+    # Seed training randomness (model init, DataLoader shuffling, PGD, sampling)
+    set_seed(cfg.tracking.seed)
 
     # BornMachine
     bornmachine = BornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
 
-    # Preprocessing
+    # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
 
     # Trainer

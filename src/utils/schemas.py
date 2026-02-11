@@ -394,7 +394,6 @@ class TrackingConfig:
     entity: str
     mode: str # Literal['online', 'offline', 'disabled', 'shared'] | None
     seed: int
-    random_state: int
     sampling: SamplingConfig
     evasion: EvasionConfig
 

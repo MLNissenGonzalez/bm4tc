@@ -206,8 +206,12 @@ Computes NLL for the joint distribution p(x,c):
 ```python
 from src.utils import set_seed
 
-set_seed(42)  # Sets random seeds for reproducibility
+set_seed(42)  # Seeds training randomness (model init, shuffling, PGD)
 ```
+
+Called **after** data loading and **before** model creation in every entry point.
+Controls training randomness only — data pipeline seeds (`gen_dow_kwargs.seed`,
+`dataset.split_seed`) are handled independently by their respective functions.
 
 Sets seeds for:
 - Python `random`

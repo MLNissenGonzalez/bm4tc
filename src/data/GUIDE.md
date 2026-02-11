@@ -128,14 +128,18 @@ name: "moons_4k"
 gen_dow_kwargs:
   name: "moons_4k"
   size: 2000           # Per class
-  seed: 42
+  seed: 42             # Data generation seed (independent of tracking.seed)
   noise: 0.1           # Noise level
   circ_factor: null    # Only for circles
   dow_link: null       # For downloads
 split: [0.7, 0.15, 0.15]
-split_seed: 42
+split_seed: 42         # Train/valid/test split seed (independent of tracking.seed)
 overwrite: false       # Set to true to regenerate dataset on each run
 ```
+
+**Seed independence**: `gen_dow_kwargs.seed` and `split_seed` are fully independent of
+`tracking.seed`. Changing `tracking.seed` does not affect data generation or splits —
+it only affects training randomness (model init, DataLoader shuffling, PGD, sampling).
 
 **Note on `overwrite`**: When `overwrite: true`, the dataset is regenerated even if it already exists on disk. This is useful for seed sweep experiments where each trial needs fresh data with different random seeds.
 

@@ -594,7 +594,7 @@ python -m analysis.run_statistics
 ### Features
 
 - **Flexible data sources**: Works with both W&B API and local Hydra multirun outputs
-- **Std correction**: Allows correction for smaller effective number of independent runs (e.g., when sweeping over a dead hyperparameter like `tracking.random_state`)
+- **Std correction**: Allows correction for smaller effective number of independent runs (e.g., old sweeps that included the now-removed dead `tracking.random_state` parameter)
 - **Imports from other analysis modules**: Reuses visualization and MIA calculation code from `visualize_distributions.py` and `mia_analysis.py`
 
 ---

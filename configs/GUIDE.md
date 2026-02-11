@@ -355,8 +355,7 @@ auto_unbind: false
 project: gan_train              # W&B project
 entity: your-wandb-entity       # W&B entity
 mode: online                    # online, offline, disabled
-seed: 42                        # Global seed
-random_state: 42
+seed: 42                        # Training seed (model init, shuffling, PGD)
 sampling:                       # Evaluation sampling config
   num_bins: 200
   num_spc: 2048
@@ -548,5 +547,5 @@ Every config file corresponds to a dataclass in `src/utils/schemas.py`:
 ## Tips
 
 - **W&B offline**: Set `tracking.mode=offline` for no network access
-- **Reproducibility**: Always set `tracking.seed` and `dataset.split_seed`
+- **Reproducibility**: `tracking.seed` controls training randomness (model init, shuffling, PGD); `dataset.split_seed` and `gen_dow_kwargs.seed` control data pipeline randomness independently
 - See `experiments/GUIDE.md` for output directory structure and bash commands

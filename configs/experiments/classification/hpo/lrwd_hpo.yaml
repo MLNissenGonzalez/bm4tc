@@ -33,4 +33,3 @@ hydra:
       trainer.classification.optimizer.kwargs.lr: tag(log, interval(1e-4, 5e-2))
       trainer.classification.optimizer.kwargs.weight_decay: tag(log, interval(1e-9, 1e-3))
       tracking.seed: range(1,100)
-      tracking.random_state: range(1,100)
