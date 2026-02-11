@@ -11,7 +11,7 @@ src/trainer/
 ├── classification.py     # Discriminative classifier training
 ├── ganstyle.py          # GAN-style generative training
 ├── generative.py        # Generative NLL training
-└── adversarial.py       # Adversarial robustness training (stub)
+└── adversarial.py       # Adversarial robustness training (PGD-AT, TRADES)
 ```
 
 ## Training Pipeline Overview
@@ -41,9 +41,15 @@ src/trainer/
 │     │   - If yes: run ClassificationTrainer        │        │
 │     └──────────────────────────────────────────────┘        │
 │                          ↓                                   │
-│  3. Adversarial Training (AdversarialTrainer) [planned]     │
+│  3. Adversarial Training (AdversarialTrainer) [optional]    │
 │     ┌──────────────────────────────────────────────┐        │
-│     │ Not yet implemented                          │        │
+│     │ For each epoch:                               │        │
+│     │   - Get epsilon (curriculum if enabled)       │        │
+│     │   - Generate adversarial examples (PGD/FGM)  │        │
+│     │   - PGD-AT: train on adv examples            │        │
+│     │   - TRADES: clean loss + β·KL(p||p_adv)      │        │
+│     │   - Evaluate on validation set               │        │
+│     │   - Early stopping check                     │        │
 │     └──────────────────────────────────────────────┘        │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
@@ -78,7 +84,7 @@ def train(self, goal: Dict[str, float] | None = None):
     """
 ```
 
-**Flow (`classification.py:183-210`):**
+**Flow (`classification.py:235`):**
 1. Prepare classifier (`bm.classifier.prepare()`)
 2. Initialize criterion (NLL) and optimizer
 3. For each epoch:
@@ -97,7 +103,7 @@ def train(self, goal: Dict[str, float] | None = None):
 | `_summarise_training()` | Restore best model, test eval, save checkpoint |
 | `_best_perf_factory()` | Initialize tracking for best metric values |
 
-### Training Loop Detail (`classification.py:65-84`)
+### Training Loop Detail (`classification.py:87`)
 
 ```python
 def _train_epoch(self):
@@ -113,7 +119,7 @@ def _train_epoch(self):
         self.optimizer.step()
 ```
 
-### Early Stopping (`classification.py:86-126`)
+### Early Stopping (`classification.py:109`)
 
 Monitors a metric on validation set:
 - **Metric options**: `"acc"`, `"loss"`, `"rob"`, `"fid"`
@@ -137,7 +143,7 @@ trainer = GANStyleTrainer(
 )
 ```
 
-### Training Flow (`ganstyle.py:101-161`)
+### Training Flow (`ganstyle.py:204`)
 
 ```
 For each epoch:
@@ -296,7 +302,7 @@ adv_trainer.train()
 
 ## Configuration
 
-### ClassificationConfig (`schemas.py:208-220`)
+### ClassificationConfig (`schemas.py:219`)
 
 ```yaml
 max_epoch: 300
@@ -316,7 +322,7 @@ auto_stack: true           # tensorkrowch option
 auto_unbind: false         # tensorkrowch option
 ```
 
-### GANStyleConfig (`schemas.py:225-270`)
+### GANStyleConfig (`schemas.py:236`)
 
 ```yaml
 max_epoch: 100
@@ -332,7 +338,7 @@ retrain: {...}             # ClassificationConfig for retraining
 save: false
 ```
 
-### GenerativeConfig (`schemas.py:289-307`)
+### GenerativeConfig (`schemas.py:358`)
 
 ```yaml
 max_epoch: 100
@@ -352,7 +358,7 @@ auto_stack: true
 auto_unbind: false
 ```
 
-### AdversarialConfig (`schemas.py:277-344`)
+### AdversarialConfig (`schemas.py:288`)
 
 ```yaml
 max_epoch: 100

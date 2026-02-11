@@ -421,9 +421,9 @@ _GENERATIVE_LOSSES = {
 
 | File | Lines | Key Functions/Classes |
 |------|-------|----------------------|
-| `schemas.py` | ~370 | All `*Config` dataclasses |
-| `get.py` | ~80 | `optimizer`, `indim_and_ncls` (re-exports from embeddings/criterions) |
-| `embeddings.py` | ~115 | `embedding`, `range_from_embedding`, `legendre_embedding` |
-| `criterions.py` | ~165 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
+| `schemas.py` | ~434 | All `*Config` dataclasses |
+| `get.py` | ~75 | `optimizer`, `indim_and_ncls` (re-exports from embeddings/criterions) |
+| `embeddings.py` | ~114 | `embedding`, `range_from_embedding`, `legendre_embedding` |
+| `criterions.py` | ~163 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
 | `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
-| `evasion/minimal.py` | ~290 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |
+| `evasion/minimal.py` | ~291 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |

@@ -74,7 +74,7 @@ The `BornGenerator` uses **sequential contraction** (not parallel like the class
 **Training Pipeline:**
 1. **Classification Training** — Train MPS as discriminative classifier first
 2. **GAN-style Training** (optional) — Improve generative capabilities using adversarial training with a critic/discriminator
-3. **Adversarial Training** (planned) — Train for robustness against adversarial examples
+3. **Adversarial Training** (optional) — Train for robustness against adversarial examples (PGD-AT or TRADES)
 
 **Generative Training (GAN-style):**
 - Uses standard GAN loss or Wasserstein distance with gradient penalty
@@ -274,11 +274,11 @@ embedding: "fourier"
 
 ### Critical code sections to understand:
 
-1. **`BornMachine.__init__`** (`src/models/born.py:19-67`) — How classifier and generator share tensors
-2. **`BornClassifier.parallel`** (`src/models/classifier.py:54-87`) — Forward pass with Born rule
-3. **`BornGenerator._single_class`** (`src/models/generator/generator.py:122-199`) — Sequential sampling
-4. **`os_secant`** (`src/models/generator/differential_sampling.py:46-79`) — Differentiable sampling
-5. **`Trainer.train`** (`src/trainer/classification.py:183-210`) — Main training loop
+1. **`BornMachine.__init__`** (`src/models/born.py:19`) — How classifier and generator share tensors
+2. **`BornClassifier.parallel`** (`src/models/classifier.py:80`) — Forward pass with Born rule
+3. **`BornGenerator._single_class`** (`src/models/generator/generator.py:143`) — Sequential sampling
+4. **`os_secant`** (`src/models/generator/differential_sampling.py:46`) — Differentiable sampling
+5. **`Trainer.train`** (`src/trainer/classification.py:235`) — Main training loop
 
 ## Known Issues & Gotchas
 

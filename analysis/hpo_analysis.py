@@ -228,10 +228,12 @@ if not df.empty:
     print(f"\nConfig columns:")
     config_cols = [c for c in df.columns if c.startswith("config/")]
     for col in config_cols:
-        unique_vals = df[col].nunique()
+        # Convert lists to tuples so pandas can hash them for nunique/unique
+        col_hashable = df[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+        unique_vals = col_hashable.nunique()
         print(f"  {col}: {unique_vals} unique values")
         if unique_vals <= 5:
-            print(f"    Values: {sorted(df[col].dropna().unique())}")
+            print(f"    Values: {sorted(col_hashable.dropna().unique())}")
 
     print(f"\nSummary metric columns:")
     summary_cols = [c for c in df.columns if c.startswith("summary/")]

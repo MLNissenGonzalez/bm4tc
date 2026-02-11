@@ -50,7 +50,7 @@ class BornMachine:
     """
 ```
 
-**Tensor Synchronization** (`born.py:100-114`):
+**Tensor Synchronization** (`born.py:126`):
 ```python
 def sync_tensors(self, after: str, verify: bool=False):
     """
@@ -87,7 +87,7 @@ Born Rule: |amplitude|² / Σ|amplitudes|² = p(c|x)
 | `probabilities(data)` | `(batch, D)` | `(batch, num_cls)` | End-to-end: data → p(c|x) |
 | `prepare(...)` | — | — | Reset and prepare for training |
 
-**CRITICAL WARNING** (`classifier.py:86`):
+**CRITICAL WARNING** (`classifier.py:112`):
 ```python
 # The forward() method returns AMPLITUDES, not probabilities!
 # To get probabilities, use:
@@ -118,7 +118,7 @@ For i = 0 to D-1:                          Contract all features at once:
   condition on sampled xᵢ
 ```
 
-**Sampling Process** (`_single_class`, lines 122-199):
+**Sampling Process** (`_single_class`, line 143):
 ```
 For each feature site i (in order):
   1. Build partial embedding dict: {cls_pos: cls_emb, 0: x₀_emb, ..., i-1: xᵢ₋₁_emb, i: grid_emb}
@@ -128,7 +128,7 @@ For each feature site i (in order):
   5. Embed sampled xᵢ and add to conditioning set
 ```
 
-**The `sequential()` Method** (lines 58-120):
+**The `sequential()` Method** (line 79):
 
 This is the workhorse that handles both full contraction and marginalization:
 
@@ -372,10 +372,10 @@ bm.sync_tensors(after="gan", verify=True)
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `born.py` | 147 | `BornMachine` |
-| `classifier.py` | 96 | `BornClassifier` |
-| `generator/generator.py` | 288 | `BornGenerator` |
-| `generator/differential_sampling.py` | 133 | `os_secant`, `main` |
-| `discriminator/discriminator.py` | 275 | `Critic` |
-| `discriminator/backbones.py` | 105 | `BackBone`, `MLP`, `get_backbone` |
-| `discriminator/heads.py` | 165 | `AwareHead`, `AgnosticHead`, `get_head` |
+| `born.py` | ~200 | `BornMachine` |
+| `classifier.py` | ~132 | `BornClassifier` |
+| `generator/generator.py` | ~475 | `BornGenerator` |
+| `generator/differential_sampling.py` | ~132 | `os_secant`, `main` |
+| `discriminator/discriminator.py` | ~281 | `Critic` |
+| `discriminator/backbones.py` | ~102 | `BackBone`, `MLP`, `get_backbone` |
+| `discriminator/heads.py` | ~164 | `AwareHead`, `AgnosticHead`, `get_head` |

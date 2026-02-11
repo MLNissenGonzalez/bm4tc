@@ -366,7 +366,9 @@ def filter_varied_params(
             excluded.append(col)
             continue
 
-        n_unique = df[col].nunique(dropna=True)
+        # Convert lists to tuples so pandas can hash them for nunique
+        col_hashable = df[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+        n_unique = col_hashable.nunique(dropna=True)
         if n_unique >= min_unique:
             varied.append(col)
         else:

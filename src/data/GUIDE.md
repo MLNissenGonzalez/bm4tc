@@ -292,5 +292,5 @@ elif canonical in _NIST_DATA:
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `handler.py` | 158 | `DataHandler` |
-| `gen_n_load.py` | 262 | `LabelledDataset`, `load_dataset`, `_two_dim_generator` |
+| `handler.py` | ~195 | `DataHandler` |
+| `gen_n_load.py` | ~275 | `LabelledDataset`, `load_dataset`, `_two_dim_generator` |

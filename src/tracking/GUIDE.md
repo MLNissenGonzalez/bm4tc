@@ -126,7 +126,7 @@ class MyMetric(BaseMetric):
         return value
 ```
 
-2. **Register in MetricFactory** (`evaluator.py:182-197`):
+2. **Register in MetricFactory** (`evaluator.py:239`):
 ```python
 class MetricFactory:
     @staticmethod
@@ -344,7 +344,7 @@ class FIDEvaluation:
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `evaluator.py` | 261 | `BaseMetric`, `*Metric`, `PerformanceEvaluator` |
-| `wandb_utils.py` | 185 | `init_wandb`, `record`, `log_grads` |
-| `visualisation.py` | 69 | `visualise_samples`, `create_2d_scatter` |
-| `fid_like.py` | 181 | `MatrixSquareRoot`, `FIDLike`, `FIDEvaluation` |
+| `evaluator.py` | ~328 | `BaseMetric`, `*Metric`, `PerformanceEvaluator` |
+| `wandb_utils.py` | ~187 | `init_wandb`, `record`, `log_grads` |
+| `visualisation.py` | ~68 | `visualise_samples`, `create_2d_scatter` |
+| `fid_like.py` | ~181 | `MatrixSquareRoot`, `FIDLike`, `FIDEvaluation` |
