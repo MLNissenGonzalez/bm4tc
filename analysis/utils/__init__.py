@@ -33,6 +33,7 @@ from .mia_utils import (
 from .resolve import (
     resolve_params,
     resolve_metrics,
+    resolve_primary_metric,
     filter_varied_params,
     format_resolved_config,
     config_path_to_column,
@@ -76,6 +77,7 @@ __all__ = [
     # HPO resolver utilities
     "resolve_params",
     "resolve_metrics",
+    "resolve_primary_metric",
     "filter_varied_params",
     "format_resolved_config",
     "config_path_to_column",

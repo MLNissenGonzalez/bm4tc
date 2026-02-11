@@ -317,6 +317,81 @@ def resolve_metrics(
     }
 
 
+def resolve_primary_metric(
+    shorthand: str,
+    validation_metrics: List[str],
+    robustness_metrics: List[str],
+    test_metrics: List[str],
+) -> Tuple[Optional[str], bool]:
+    """
+    Resolve a PRIMARY_METRIC shorthand to a full column name.
+
+    Shorthand mapping:
+      - "rob" / "robustness"   -> first robustness metric (maximize)
+      - "acc" / "accuracy"     -> first validation metric containing "acc" (maximize)
+      - "loss"                 -> first validation metric containing "loss" (minimize)
+      - "test-acc" / "test_acc"-> first test metric containing "acc" (maximize)
+      - "test-loss"/ "test_loss"-> first test metric containing "loss" (minimize)
+      - substring match (e.g. "rob/0.15") -> matching metric from all pools
+      - full column name       -> pass through
+
+    Args:
+        shorthand: User-provided metric shorthand or column name
+        validation_metrics: List of validation metric column names
+        robustness_metrics: List of robustness metric column names
+        test_metrics: List of test metric column names
+
+    Returns:
+        (resolved_column_name, minimize_flag) or (None, False) on failure
+    """
+    all_metrics = validation_metrics + robustness_metrics + test_metrics
+    key = shorthand.strip().lower()
+
+    # Direct shorthands
+    if key in ("rob", "robustness"):
+        if robustness_metrics:
+            return robustness_metrics[0], False  # maximize
+        return None, False
+
+    if key in ("acc", "accuracy"):
+        match = next((m for m in validation_metrics if "acc" in m), None)
+        if match:
+            return match, False  # maximize
+        return None, False
+
+    if key == "loss":
+        match = next((m for m in validation_metrics if "loss" in m), None)
+        if match:
+            return match, True  # minimize
+        return None, False
+
+    if key in ("test-acc", "test_acc"):
+        match = next((m for m in test_metrics if "acc" in m), None)
+        if match:
+            return match, False  # maximize
+        return None, False
+
+    if key in ("test-loss", "test_loss"):
+        match = next((m for m in test_metrics if "loss" in m), None)
+        if match:
+            return match, True  # minimize
+        return None, False
+
+    # Exact match (full column name already)
+    if shorthand in all_metrics:
+        minimize = "loss" in shorthand
+        return shorthand, minimize
+
+    # Substring match across all pools
+    matches = [m for m in all_metrics if shorthand in m]
+    if matches:
+        resolved = matches[0]
+        minimize = "loss" in resolved
+        return resolved, minimize
+
+    return None, False
+
+
 def detect_robustness_strengths(df: pd.DataFrame, prefix: str) -> List[float]:
     """
     Auto-detect robustness metric strengths from DataFrame columns.

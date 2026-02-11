@@ -93,10 +93,21 @@ AUTO_DETECT_VARIED = True
 # ADVANCED SETTINGS (usually don't need to change)
 # =============================================================================
 
-# Primary metric for importance analysis (None = auto from regime: validation accuracy)
+# Primary metric for importance analysis and best-run ranking.
+# Accepts shorthands:
+#   "rob" / "robustness" -> first robustness metric (maximize)
+#   "acc" / "accuracy"   -> validation accuracy for the regime (maximize)
+#   "loss"               -> validation loss for the regime (minimize)
+#   "test-acc"           -> test accuracy (maximize)
+#   "test-loss"          -> test loss (minimize)
+#   substring match      -> e.g. "rob/0.15" matches the exact robustness column
+#   full column name     -> used as-is (e.g. "summary/adv/valid/rob/0.1")
+# None = auto-detect from regime (validation accuracy).
 PRIMARY_METRIC = None
 
-# Whether to minimize primary metric (False for acc, True for loss)
+# Whether to minimize primary metric.
+# Auto-detected when PRIMARY_METRIC is resolved from a shorthand
+# (False for acc/robustness, True for loss). Override here if needed.
 PRIMARY_METRIC_MINIMIZE = False
 
 # Parameter pairs for interaction analysis
@@ -104,9 +115,10 @@ PRIMARY_METRIC_MINIMIZE = False
 # Or specify as list of tuples: [("lr", "weight-decay")]
 INTERACTION_PAIRS = None
 
-# Pareto frontier metrics
+# Pareto frontier metrics for multi-objective trade-off analysis.
 # None = auto (validation accuracy vs first robustness metric)
 # Or specify as: [(metric_col, maximize), (metric_col, maximize)]
+# Pareto-optimal runs appear in the Best Runs Summary (Section 7) and export.
 PARETO_METRICS = None
 
 # Plot settings
@@ -254,6 +266,7 @@ if not df.empty:
 from analysis.utils import (
     resolve_params,
     resolve_metrics,
+    resolve_primary_metric,
     filter_varied_params,
     format_resolved_config,
     config_path_to_column,
@@ -308,9 +321,22 @@ if ROBUSTNESS_METRICS is None:
 if TEST_METRICS is None:
     TEST_METRICS = _resolved_metrics["test"]
 
-# Auto-set primary metric if not specified
+# Resolve primary metric: handle None, shorthands, and full column names
 if PRIMARY_METRIC is None:
     PRIMARY_METRIC = VALIDATION_METRICS[0] if VALIDATION_METRICS else None
+elif PRIMARY_METRIC not in ([] if df.empty else df.columns):
+    # Not a valid column — try resolving as shorthand
+    _resolved_pm, _resolved_minimize = resolve_primary_metric(
+        PRIMARY_METRIC, VALIDATION_METRICS, ROBUSTNESS_METRICS, TEST_METRICS
+    )
+    if _resolved_pm is not None:
+        print(f"Resolved PRIMARY_METRIC shorthand '{PRIMARY_METRIC}' -> '{_resolved_pm}'")
+        PRIMARY_METRIC = _resolved_pm
+        PRIMARY_METRIC_MINIMIZE = _resolved_minimize
+    else:
+        print(f"WARNING: PRIMARY_METRIC '{PRIMARY_METRIC}' could not be resolved. "
+              f"Falling back to first validation metric.")
+        PRIMARY_METRIC = VALIDATION_METRICS[0] if VALIDATION_METRICS else None
 
 # Auto-set interaction pairs if not specified (use column names, not shorthands)
 if INTERACTION_PAIRS is None and len(_varied_cols) >= 2:
@@ -1276,29 +1302,51 @@ if not df.empty:
     print("BEST RUNS SUMMARY")
     print("=" * 60)
 
-    # Validation accuracy (maximize)
-    acc_cols = get_available_columns(df, ["summary/pre/valid/acc"], verbose=False)
-    if acc_cols:
-        print(f"\n--- Best by Validation Accuracy (higher is better) ---")
-        best = get_best_runs(df, acc_cols[0], n_best=5, minimize=False)
+    _shown_metrics = set()
+
+    # 1. Best by PRIMARY_METRIC
+    if PRIMARY_METRIC:
+        pm_cols = get_available_columns(df, [PRIMARY_METRIC], verbose=False)
+        if pm_cols:
+            direction = "lower" if PRIMARY_METRIC_MINIMIZE else "higher"
+            print(f"\n--- Best by Primary Metric: {clean_column_name(pm_cols[0])} ({direction} is better) ---")
+            best = get_best_runs(df, pm_cols[0], n_best=5, minimize=PRIMARY_METRIC_MINIMIZE)
+            if not best.empty:
+                print(best.to_string(index=False))
+            _shown_metrics.add(pm_cols[0])
+
+    # 2. Best by each VALIDATION_METRICS entry (skip if same as PRIMARY_METRIC)
+    val_cols = get_available_columns(df, VALIDATION_METRICS, verbose=False)
+    for v_col in val_cols:
+        if v_col in _shown_metrics:
+            continue
+        minimize = "loss" in v_col
+        direction = "lower" if minimize else "higher"
+        print(f"\n--- Best by {clean_column_name(v_col)} ({direction} is better) ---")
+        best = get_best_runs(df, v_col, n_best=5, minimize=minimize)
         if not best.empty:
             print(best.to_string(index=False))
+        _shown_metrics.add(v_col)
 
-    # Validation loss (minimize)
-    loss_cols = get_available_columns(df, ["summary/pre/valid/loss"], verbose=False)
-    if loss_cols:
-        print(f"\n--- Best by Validation Loss (lower is better) ---")
-        best = get_best_runs(df, loss_cols[0], n_best=5, minimize=True)
-        if not best.empty:
-            print(best.to_string(index=False))
-
-    # Robustness (maximize)
+    # 3. Best by each ROBUSTNESS_METRICS entry (skip if same as PRIMARY_METRIC)
     rob_cols = get_available_columns(df, ROBUSTNESS_METRICS, verbose=False)
     for rob_col in rob_cols:
+        if rob_col in _shown_metrics:
+            continue
         print(f"\n--- Best by {clean_column_name(rob_col)} (higher is better) ---")
         best = get_best_runs(df, rob_col, n_best=5, minimize=False)
         if not best.empty:
             print(best.to_string(index=False))
+        _shown_metrics.add(rob_col)
+
+    # 4. Pareto-optimal runs
+    if PARETO_METRICS and len(PARETO_METRICS) >= 2:
+        _p_m1, _p_max1 = PARETO_METRICS[0]
+        _p_m2, _p_max2 = PARETO_METRICS[1]
+        pareto_df = get_pareto_runs(df, _p_m1, _p_m2, _p_max1, _p_max2)
+        if not pareto_df.empty:
+            print(f"\n--- Pareto-Optimal Runs ({clean_column_name(_p_m1)} vs {clean_column_name(_p_m2)}) ---")
+            print(pareto_df.to_string(index=False))
 
 # %% [markdown]
 # ## 8. Parameter-Metric Correlations
@@ -1519,17 +1567,55 @@ if not df.empty:
         f.write("HPO Best Runs Summary\n")
         f.write(f"Sweep: {sweep_name}\n")
         f.write(f"Data source: {DATA_SOURCE}\n")
+        f.write(f"Regime: {REGIME}\n")
+        f.write(f"Primary metric: {PRIMARY_METRIC}\n")
         f.write("=" * 60 + "\n\n")
 
-        for metric_col, minimize, label in [
-            (get_available_columns(df, ["summary/pre/valid/acc"], verbose=False), False, "Validation Accuracy"),
-            (get_available_columns(df, ["summary/pre/valid/loss"], verbose=False), True, "Validation Loss"),
-        ]:
-            if metric_col:
-                f.write(f"Best by {label}:\n")
-                best = get_best_runs(df, metric_col[0], n_best=10, minimize=minimize)
+        _export_shown = set()
+
+        # 1. Best by PRIMARY_METRIC
+        if PRIMARY_METRIC:
+            _pm_cols = get_available_columns(df, [PRIMARY_METRIC], verbose=False)
+            if _pm_cols:
+                direction = "lower" if PRIMARY_METRIC_MINIMIZE else "higher"
+                f.write(f"Best by Primary Metric: {clean_column_name(_pm_cols[0])} ({direction} is better):\n")
+                best = get_best_runs(df, _pm_cols[0], n_best=10, minimize=PRIMARY_METRIC_MINIMIZE)
                 if not best.empty:
                     f.write(best.to_string(index=False) + "\n\n")
+                _export_shown.add(_pm_cols[0])
+
+        # 2. Best by each VALIDATION_METRICS entry
+        _val_cols = get_available_columns(df, VALIDATION_METRICS, verbose=False)
+        for _v_col in _val_cols:
+            if _v_col in _export_shown:
+                continue
+            _minimize = "loss" in _v_col
+            direction = "lower" if _minimize else "higher"
+            f.write(f"Best by {clean_column_name(_v_col)} ({direction} is better):\n")
+            best = get_best_runs(df, _v_col, n_best=10, minimize=_minimize)
+            if not best.empty:
+                f.write(best.to_string(index=False) + "\n\n")
+            _export_shown.add(_v_col)
+
+        # 3. Best by each ROBUSTNESS_METRICS entry
+        _rob_cols = get_available_columns(df, ROBUSTNESS_METRICS, verbose=False)
+        for _r_col in _rob_cols:
+            if _r_col in _export_shown:
+                continue
+            f.write(f"Best by {clean_column_name(_r_col)} (higher is better):\n")
+            best = get_best_runs(df, _r_col, n_best=10, minimize=False)
+            if not best.empty:
+                f.write(best.to_string(index=False) + "\n\n")
+            _export_shown.add(_r_col)
+
+        # 4. Pareto-optimal runs
+        if PARETO_METRICS and len(PARETO_METRICS) >= 2:
+            _ep_m1, _ep_max1 = PARETO_METRICS[0]
+            _ep_m2, _ep_max2 = PARETO_METRICS[1]
+            _ep_pareto = get_pareto_runs(df, _ep_m1, _ep_m2, _ep_max1, _ep_max2)
+            if not _ep_pareto.empty:
+                f.write(f"Pareto-Optimal Runs ({clean_column_name(_ep_m1)} vs {clean_column_name(_ep_m2)}):\n")
+                f.write(_ep_pareto.to_string(index=False) + "\n\n")
 
     print(f"Saved best runs summary to: {summary_path}")
 
