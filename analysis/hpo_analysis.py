@@ -60,7 +60,7 @@ DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 WANDB_PROJECT = "gan_train"
 EXPERIMENT_PATTERN = "adv_hpo"  # Regex pattern to match run groups
-DATASET_NAME = "moons_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
+DATASET_NAME = "spirals_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
@@ -103,7 +103,7 @@ AUTO_DETECT_VARIED = True
 #   substring match      -> e.g. "rob/0.15" matches the exact robustness column
 #   full column name     -> used as-is (e.g. "summary/adv/valid/rob/0.1")
 # None = auto-detect from regime (validation accuracy).
-PRIMARY_METRIC = None
+PRIMARY_METRIC = "rob"
 
 # Whether to minimize primary metric.
 # Auto-detected when PRIMARY_METRIC is resolved from a shorthand
