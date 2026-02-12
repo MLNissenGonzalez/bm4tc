@@ -33,7 +33,7 @@ defaults:
   - override /hydra/sweeper: optuna
 
 # Pretrained model path (required — Hydra will error if not provided)
-model_path: /home/ubuntu/adversarial_training_mps/outputs/models/spirals
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/best_cls_loss_spirals_4k_180126.093
 
 # Ensure split matches pretraining
 dataset:
