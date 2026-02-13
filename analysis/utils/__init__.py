@@ -41,6 +41,7 @@ from .statistics import (
     plot_accuracy_histogram,
     plot_mean_with_std,
     plot_scatter_vs_metric,
+    plot_accuracy_vs_strength,
     plot_pareto_frontier,
     plot_correlation_heatmap,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "plot_accuracy_histogram",
     "plot_mean_with_std",
     "plot_scatter_vs_metric",
+    "plot_accuracy_vs_strength",
     "plot_pareto_frontier",
     "plot_correlation_heatmap",
     # Post-hoc evaluation

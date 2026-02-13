@@ -514,6 +514,79 @@ def plot_scatter_vs_metric(
     return fig
 
 
+def plot_accuracy_vs_strength(
+    runs: pd.DataFrame,
+    acc_col: str,
+    rob_cols: List[str],
+    run_labels: Optional[List[str]] = None,
+    title: str = "Accuracy vs Perturbation Strength",
+    figsize: Tuple[int, int] = (8, 5),
+    dpi: int = 100,
+) -> Optional[plt.Figure]:
+    """Plot (robust) accuracy as a function of attack strength for one or more runs.
+
+    Always includes zero strength (clean accuracy) as the first point.
+
+    Args:
+        runs: DataFrame where each row is a run to plot.
+        acc_col: Column for clean accuracy (used as the eps=0 point).
+        rob_cols: Columns for robustness at different strengths.
+            Strengths are parsed from column names like ``eval/test/rob/0.15``.
+        run_labels: Optional labels for each run (defaults to run_name or index).
+        title: Plot title.
+        figsize: Figure size.
+        dpi: Figure DPI.
+
+    Returns:
+        Matplotlib Figure, or None if insufficient data.
+    """
+    if acc_col not in runs.columns or not rob_cols:
+        return None
+
+    # Parse strengths from column names and sort
+    strength_col_pairs = []
+    for col in rob_cols:
+        try:
+            strength = float(col.split("/")[-1])
+            if col in runs.columns:
+                strength_col_pairs.append((strength, col))
+        except ValueError:
+            continue
+
+    if not strength_col_pairs:
+        return None
+
+    strength_col_pairs.sort(key=lambda sc: sc[0])
+    strengths = [0.0] + [s for s, _ in strength_col_pairs]
+    cols = [acc_col] + [c for _, c in strength_col_pairs]
+
+    # Build labels
+    if run_labels is None:
+        if "run_name" in runs.columns:
+            run_labels = [str(n) for n in runs["run_name"].values]
+        else:
+            run_labels = [str(i) for i in range(len(runs))]
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    cmap = plt.cm.tab10
+    for idx, (_, run) in enumerate(runs.iterrows()):
+        accs = [float(run[c]) if pd.notna(run[c]) else np.nan for c in cols]
+        color = cmap(idx % 10)
+        label = run_labels[idx] if idx < len(run_labels) else str(idx)
+        ax.plot(strengths, accs, "o-", color=color, label=f"Run {label}",
+                markersize=6, linewidth=1.5)
+
+    ax.set_xlabel("Perturbation Strength (epsilon)")
+    ax.set_ylabel("Accuracy")
+    ax.set_title(title)
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
 def plot_pareto_frontier(
     df: pd.DataFrame,
     metric1: str,

@@ -417,74 +417,70 @@ def load_model_and_data():
 
 
 # %%
-print("=" * 60)
-print("Loading model and data...")
-print("=" * 60)
-
-bm, datahandler, device, cfg = load_model_and_data()
-
-print(f"\nDataset: {cfg.dataset.name}")
-print(f"Train samples: {len(datahandler.data['train'])}")
-print(f"Number of classes: {datahandler.num_cls}")
-print(f"Input range: {bm.input_range}")
-
-# %% [markdown]
-# ## Compute Distributions
-
-# %%
-print("=" * 60)
-print("Computing distributions over input grid...")
-print("=" * 60)
-
-input_range = bm.input_range
-grid_x1, grid_x2, grid_points = make_grid(input_range, RESOLUTION)
-print(f"Grid: {RESOLUTION}x{RESOLUTION} = {grid_points.shape[0]} points")
-
-# %%
-print("\nComputing p(c|x)...")
-conditional = compute_conditional_probs(bm, grid_points, device)
-print(f"  Shape: {conditional.shape}")
-print(f"  Range: [{conditional.min():.4f}, {conditional.max():.4f}]")
-
-# %%
-print("\nComputing p(x,c)...")
-joint = compute_joint_probs(bm, grid_points, device, normalize=NORMALIZE_JOINT)
-print(f"  Shape: {joint.shape}")
-print(f"  Range: [{joint.min():.6f}, {joint.max():.6f}]")
-
-# %% [markdown]
-# ## Plot Distributions
-
-# %%
-# Prepare training data overlay
-train_data = datahandler.data["train"] if SHOW_DATA else None
-train_labels = datahandler.labels["train"] if SHOW_DATA else None
-
-# Setup output directory
-save_dir = Path(SAVE_DIR)
-if not save_dir.is_absolute():
-    save_dir = project_root / save_dir
-save_dir.mkdir(parents=True, exist_ok=True)
-save_path = save_dir / "distributions.png"
-
-print(f"\nOutput directory: {save_dir}")
-
-# %%
-fig = plot_distributions(
-    conditional, joint, grid_x1, grid_x2,
-    train_data=train_data, train_labels=train_labels,
-    input_range=input_range,
-    save_path=save_path,
-)
-plt.show()
-
-# %%
-print("\n" + "=" * 60)
-print("Distribution Visualization Complete")
-print("=" * 60)
-print(f"\nSaved figure: {save_path}")
-
-
-# %%
 if __name__ == "__main__":
-    pass  # All cells above execute when run as a script
+    print("=" * 60)
+    print("Loading model and data...")
+    print("=" * 60)
+
+    bm, datahandler, device, cfg = load_model_and_data()
+
+    print(f"\nDataset: {cfg.dataset.name}")
+    print(f"Train samples: {len(datahandler.data['train'])}")
+    print(f"Number of classes: {datahandler.num_cls}")
+    print(f"Input range: {bm.input_range}")
+
+    # %% [markdown]
+    # ## Compute Distributions
+
+    # %%
+    print("=" * 60)
+    print("Computing distributions over input grid...")
+    print("=" * 60)
+
+    input_range = bm.input_range
+    grid_x1, grid_x2, grid_points = make_grid(input_range, RESOLUTION)
+    print(f"Grid: {RESOLUTION}x{RESOLUTION} = {grid_points.shape[0]} points")
+
+    # %%
+    print("\nComputing p(c|x)...")
+    conditional = compute_conditional_probs(bm, grid_points, device)
+    print(f"  Shape: {conditional.shape}")
+    print(f"  Range: [{conditional.min():.4f}, {conditional.max():.4f}]")
+
+    # %%
+    print("\nComputing p(x,c)...")
+    joint = compute_joint_probs(bm, grid_points, device, normalize=NORMALIZE_JOINT)
+    print(f"  Shape: {joint.shape}")
+    print(f"  Range: [{joint.min():.6f}, {joint.max():.6f}]")
+
+    # %% [markdown]
+    # ## Plot Distributions
+
+    # %%
+    # Prepare training data overlay
+    train_data = datahandler.data["train"] if SHOW_DATA else None
+    train_labels = datahandler.labels["train"] if SHOW_DATA else None
+
+    # Setup output directory
+    save_dir = Path(SAVE_DIR)
+    if not save_dir.is_absolute():
+        save_dir = project_root / save_dir
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / "distributions.png"
+
+    print(f"\nOutput directory: {save_dir}")
+
+    # %%
+    fig = plot_distributions(
+        conditional, joint, grid_x1, grid_x2,
+        train_data=train_data, train_labels=train_labels,
+        input_range=input_range,
+        save_path=save_path,
+    )
+    plt.show()
+
+    # %%
+    print("\n" + "=" * 60)
+    print("Distribution Visualization Complete")
+    print("=" * 60)
+    print(f"\nSaved figure: {save_path}")

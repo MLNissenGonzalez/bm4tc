@@ -216,6 +216,22 @@ if not df.empty:
             if MIA_COL and MIA_COL in best_run.index:
                 print(f"  MIA Accuracy: {best_run[MIA_COL]:.4f}")
 
+# %%
+# Accuracy vs perturbation strength for best run
+from analysis.utils import plot_accuracy_vs_strength
+
+if not df.empty and ACC_COL and ROB_COLS and "best_run" in dir() and best_run is not None:
+    best_run_df = df[df["run_name"] == best_run["run_name"]]
+    fig = plot_accuracy_vs_strength(
+        best_run_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
+        title=f"Best Run ({best_run['run_name']}): Accuracy vs Perturbation Strength",
+        dpi=DPI,
+    )
+    if fig:
+        plt.savefig(output_dir / "best_run_acc_vs_strength.png", bbox_inches="tight")
+        print(f"Saved best_run_acc_vs_strength.png")
+        plt.show()
+
 # %% [markdown]
 # ### 3b. Accuracy Histogram
 
@@ -320,6 +336,39 @@ if not df.empty:
                 plt.savefig(output_dir / f"pareto_mia_vs_rob_{strength}.png", bbox_inches="tight")
                 print(f"Saved pareto_mia_vs_rob_{strength}.png")
                 plt.show()
+
+    # Accuracy vs strength curves for Pareto-optimal runs
+    if ACC_COL and ROB_COLS:
+        # Acc vs rob Pareto runs
+        for rob_col in ROB_COLS:
+            pareto_df = get_pareto_runs(df, ACC_COL, rob_col, True, True)
+            if not pareto_df.empty:
+                strength = rob_col.split("/")[-1]
+                fig = plot_accuracy_vs_strength(
+                    pareto_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
+                    title=f"Pareto Runs (Acc vs Rob/{strength}): Accuracy vs Perturbation Strength",
+                    dpi=DPI,
+                )
+                if fig:
+                    plt.savefig(output_dir / f"pareto_acc_rob_{strength}_acc_vs_strength.png", bbox_inches="tight")
+                    print(f"Saved pareto_acc_rob_{strength}_acc_vs_strength.png")
+                    plt.show()
+
+        # MIA vs rob Pareto runs
+        if MIA_COL:
+            for rob_col in ROB_COLS:
+                pareto_df = get_pareto_runs(df, MIA_COL, rob_col, False, True)
+                if not pareto_df.empty:
+                    strength = rob_col.split("/")[-1]
+                    fig = plot_accuracy_vs_strength(
+                        pareto_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
+                        title=f"Pareto Runs (MIA vs Rob/{strength}): Accuracy vs Perturbation Strength",
+                        dpi=DPI,
+                    )
+                    if fig:
+                        plt.savefig(output_dir / f"pareto_mia_rob_{strength}_acc_vs_strength.png", bbox_inches="tight")
+                        print(f"Saved pareto_mia_rob_{strength}_acc_vs_strength.png")
+                        plt.show()
 
 # %% [markdown]
 # ### 3g. Summary Statistics Table
