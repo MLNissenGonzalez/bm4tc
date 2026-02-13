@@ -7,6 +7,10 @@
 # - Ensuring data splits match each run's config (correct seeds)
 # - Consistent evaluation settings across all runs (e.g., same attack strengths)
 #
+# **Split policy:** Metrics are computed on both validation and test.
+# Model selection (best run, Pareto frontiers) uses **validation only**
+# to prevent label leakage. The summary reports both splits.
+#
 # **Sections:**
 # 1. Configuration
 # 2. Per-model evaluation
@@ -52,7 +56,7 @@ REGIME = "adv"
 COMPUTE_ACC = True
 COMPUTE_ROB = True
 COMPUTE_MIA = True
-COMPUTE_CLS_LOSS = False
+COMPUTE_CLS_LOSS = True
 COMPUTE_GEN_LOSS = False
 COMPUTE_FID = False
 
@@ -82,7 +86,9 @@ MIA_FEATURES = {
 }
 
 # --- EVALUATION SETTINGS ---
-EVAL_SPLITS = ["test"]
+# Always evaluate on both validation and test.
+# Validation is used for model selection; test is used for reporting.
+EVAL_SPLITS = ["valid", "test"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- STATISTICS SETTINGS ---
@@ -97,6 +103,7 @@ DPI = 100
 # Set to None or {} to skip sanity check.
 SANITY_CHECK_METRICS = {
     "eval/test/acc": "summary/adv/test/acc",
+    "eval/valid/clsloss": "summary/adv/valid/clsloss",
 }
 SANITY_CHECK_TOL = 1e-4
 
@@ -154,30 +161,40 @@ print(f"Output directory: {output_dir}")
 # ## 3. Statistics & Visualization
 
 # %%
-# Resolve metric column names for this evaluation
-ACC_COL = f"eval/{EVAL_SPLITS[0]}/acc" if COMPUTE_ACC else None
-ROB_COLS = [c for c in df.columns if c.startswith(f"eval/{EVAL_SPLITS[0]}/rob/")] if COMPUTE_ROB and not df.empty else []
-MIA_COL = "eval/mia_accuracy" if COMPUTE_MIA else None
-CLS_LOSS_COL = f"eval/{EVAL_SPLITS[0]}/clsloss" if COMPUTE_CLS_LOSS else None
+# Resolve metric columns per split.
+# Validation columns → model selection (best run, Pareto frontiers).
+# Test columns → reporting.
+VAL_ACC = "eval/valid/acc" if COMPUTE_ACC else None
+VAL_ROB = [c for c in df.columns if c.startswith("eval/valid/rob/")] if COMPUTE_ROB and not df.empty else []
+VAL_CLS_LOSS = "eval/valid/clsloss" if COMPUTE_CLS_LOSS else None
 
-print(f"ACC_COL: {ACC_COL}")
-print(f"ROB_COLS: {ROB_COLS}")
-print(f"MIA_COL: {MIA_COL}")
-print(f"CLS_LOSS_COL: {CLS_LOSS_COL}")
+TEST_ACC = "eval/test/acc" if COMPUTE_ACC else None
+TEST_ROB = [c for c in df.columns if c.startswith("eval/test/rob/")] if COMPUTE_ROB and not df.empty else []
+TEST_CLS_LOSS = "eval/test/clsloss" if COMPUTE_CLS_LOSS else None
+
+# MIA is split-agnostic (always uses train vs test internally)
+MIA_COL = "eval/mia_accuracy" if COMPUTE_MIA else None
+
+print(f"VAL_ACC:  {VAL_ACC}")
+print(f"VAL_ROB:  {VAL_ROB}")
+print(f"TEST_ACC: {TEST_ACC}")
+print(f"TEST_ROB: {TEST_ROB}")
+print(f"MIA_COL:  {MIA_COL}")
 
 # %% [markdown]
-# ### 3a. Best Model
+# ### 3a. Best Model (selected on validation)
 
 # %%
 from analysis.utils import get_best_run, resolve_stop_criterion, load_run_config
 from analysis.utils import REGIME_METRIC_PREFIX
 
-if not df.empty:
-    # Try to resolve stopping criterion from first run's config
-    STOP_CRIT_COL = None
-    STOP_CRIT_LABEL = None
-    STOP_CRIT_MINIMIZE = True
+STOP_CRIT_COL = None
+STOP_CRIT_LABEL = None
+STOP_CRIT_MINIMIZE = True
+best_run = None
 
+if not df.empty:
+    # Resolve stopping criterion from first run's config (on validation split)
     try:
         first_run = Path(df.iloc[0]["run_path"])
         first_cfg = load_run_config(first_run)
@@ -191,40 +208,41 @@ if not df.empty:
             stop_name = getattr(trainer_cfg, "stop_crit", None)
             if stop_name:
                 STOP_CRIT_COL, STOP_CRIT_MINIMIZE, STOP_CRIT_LABEL = resolve_stop_criterion(
-                    stop_name, df, EVAL_SPLITS[0],
+                    stop_name, df, "valid",
                 )
                 print(f"Stop criterion: {stop_name} -> column {STOP_CRIT_COL}")
     except Exception as e:
         print(f"Could not resolve stop criterion: {e}")
 
-    # Best run by stopping criterion (if available) or by accuracy
-    best_metric = STOP_CRIT_COL if STOP_CRIT_COL else ACC_COL
+    # Best run by stopping criterion (validation) or by validation accuracy
+    best_metric = STOP_CRIT_COL if STOP_CRIT_COL else VAL_ACC
     best_minimize = STOP_CRIT_MINIMIZE if STOP_CRIT_COL else False
 
     if best_metric:
         best_run = get_best_run(df, best_metric, minimize=best_minimize)
         if best_run is not None:
-            label = STOP_CRIT_LABEL if STOP_CRIT_COL else "Clean Accuracy"
-            print(f"\n=== Best Run (by {label}) ===")
+            label = STOP_CRIT_LABEL if STOP_CRIT_COL else "Valid Accuracy"
+            print(f"\n=== Best Run (by {label}, selected on valid) ===")
             print(f"Run: {best_run.get('run_name', 'unknown')}")
-            if ACC_COL and ACC_COL in best_run.index:
-                print(f"  Clean Accuracy: {best_run[ACC_COL]:.4f}")
-            for rob_col in ROB_COLS:
-                if rob_col in best_run.index:
-                    strength = rob_col.split("/")[-1]
-                    print(f"  Robust Accuracy (eps={strength}): {best_run[rob_col]:.4f}")
+            for split_label, acc_col, rob_cols in [("Valid", VAL_ACC, VAL_ROB), ("Test", TEST_ACC, TEST_ROB)]:
+                if acc_col and acc_col in best_run.index:
+                    print(f"  {split_label} Clean Accuracy: {best_run[acc_col]:.4f}")
+                for rob_col in rob_cols:
+                    if rob_col in best_run.index:
+                        strength = rob_col.split("/")[-1]
+                        print(f"  {split_label} Robust Accuracy (eps={strength}): {best_run[rob_col]:.4f}")
             if MIA_COL and MIA_COL in best_run.index:
                 print(f"  MIA Accuracy: {best_run[MIA_COL]:.4f}")
 
 # %%
-# Accuracy vs perturbation strength for best run
+# Accuracy vs perturbation strength for best run (test-set performance)
 from analysis.utils import plot_accuracy_vs_strength
 
-if not df.empty and ACC_COL and ROB_COLS and "best_run" in dir() and best_run is not None:
+if not df.empty and TEST_ACC and TEST_ROB and best_run is not None:
     best_run_df = df[df["run_name"] == best_run["run_name"]]
     fig = plot_accuracy_vs_strength(
-        best_run_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
-        title=f"Best Run ({best_run['run_name']}): Accuracy vs Perturbation Strength",
+        best_run_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
+        title=f"Best Run ({best_run['run_name']}): Accuracy vs Perturbation Strength (test)",
         dpi=DPI,
     )
     if fig:
@@ -233,30 +251,30 @@ if not df.empty and ACC_COL and ROB_COLS and "best_run" in dir() and best_run is
         plt.show()
 
 # %% [markdown]
-# ### 3b. Accuracy Histogram
+# ### 3b. Accuracy Histogram (test)
 
 # %%
 from analysis.utils import plot_accuracy_histogram
 
-if not df.empty and ACC_COL:
+if not df.empty and TEST_ACC:
     fig = plot_accuracy_histogram(
-        df, acc_col=ACC_COL, rob_cols=ROB_COLS, mia_col=MIA_COL,
-        title=f"Accuracy Distribution ({sweep_name})", dpi=DPI,
+        df, acc_col=TEST_ACC, rob_cols=TEST_ROB, mia_col=MIA_COL,
+        title=f"Accuracy Distribution — test ({sweep_name})", dpi=DPI,
     )
     plt.savefig(output_dir / "accuracy_histogram.png", bbox_inches="tight")
     print(f"Saved accuracy_histogram.png")
     plt.show()
 
 # %% [markdown]
-# ### 3c. Mean + Std Bar Plot
+# ### 3c. Mean + Std Bar Plot (test)
 
 # %%
 from analysis.utils import plot_mean_with_std
 
-if not df.empty and ACC_COL:
+if not df.empty and TEST_ACC:
     fig = plot_mean_with_std(
-        df, acc_col=ACC_COL, rob_cols=ROB_COLS, mia_col=MIA_COL,
-        title=f"Mean Accuracies \u00b1 Std Dev ({sweep_name})", dpi=DPI,
+        df, acc_col=TEST_ACC, rob_cols=TEST_ROB, mia_col=MIA_COL,
+        title=f"Mean Accuracies \u00b1 Std Dev — test ({sweep_name})", dpi=DPI,
     )
     if fig:
         plt.savefig(output_dir / "mean_accuracies_errorbars.png", bbox_inches="tight")
@@ -264,7 +282,7 @@ if not df.empty and ACC_COL:
         plt.show()
 
 # %% [markdown]
-# ### 3d. Metric-Metric Correlation Heatmap
+# ### 3d. Metric-Metric Correlation Heatmap (all splits)
 
 # %%
 from analysis.utils import compute_metric_correlations, plot_correlation_heatmap
@@ -283,16 +301,16 @@ if not df.empty:
                 plt.show()
 
 # %% [markdown]
-# ### 3e. Accuracy vs Stopping Criterion Scatter
+# ### 3e. Accuracy vs Stopping Criterion Scatter (valid)
 
 # %%
 from analysis.utils import plot_scatter_vs_metric
 
-if not df.empty and STOP_CRIT_COL and ACC_COL:
+if not df.empty and STOP_CRIT_COL and VAL_ACC:
     fig = plot_scatter_vs_metric(
-        df, x_col=STOP_CRIT_COL, acc_col=ACC_COL, rob_cols=ROB_COLS, mia_col=MIA_COL,
+        df, x_col=STOP_CRIT_COL, acc_col=VAL_ACC, rob_cols=VAL_ROB, mia_col=MIA_COL,
         x_label=STOP_CRIT_LABEL or "Stop Criterion",
-        title=f"Accuracy vs Stopping Criterion ({sweep_name})", dpi=DPI,
+        title=f"Accuracy vs Stopping Criterion — valid ({sweep_name})", dpi=DPI,
     )
     if fig:
         plt.savefig(output_dir / "accuracy_vs_stop_crit.png", bbox_inches="tight")
@@ -300,17 +318,17 @@ if not df.empty and STOP_CRIT_COL and ACC_COL:
         plt.show()
 
 # %% [markdown]
-# ### 3f. Pareto Frontiers
+# ### 3f. Pareto Frontiers (selected on valid)
 
 # %%
 from analysis.utils import plot_pareto_frontier, get_pareto_runs
 
 if not df.empty:
-    # Clean accuracy vs robust accuracy (both maximized)
-    if ACC_COL and ROB_COLS:
-        for rob_col in ROB_COLS:
+    # Clean accuracy vs robust accuracy (both maximized, on validation)
+    if VAL_ACC and VAL_ROB:
+        for rob_col in VAL_ROB:
             fig = plot_pareto_frontier(
-                df, ACC_COL, rob_col, maximize1=True, maximize2=True, dpi=DPI,
+                df, VAL_ACC, rob_col, maximize1=True, maximize2=True, dpi=DPI,
             )
             if fig:
                 strength = rob_col.split("/")[-1]
@@ -318,16 +336,16 @@ if not df.empty:
                 print(f"Saved pareto_acc_vs_rob_{strength}.png")
                 plt.show()
 
-                pareto_df = get_pareto_runs(df, ACC_COL, rob_col, True, True)
+                pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
                 if not pareto_df.empty:
-                    print(f"\nPareto-optimal runs (acc vs rob/{strength}):")
-                    display_cols = ["run_name", ACC_COL, rob_col]
+                    print(f"\nPareto-optimal runs (valid acc vs rob/{strength}):")
+                    display_cols = ["run_name", VAL_ACC, rob_col]
                     display_cols = [c for c in display_cols if c in pareto_df.columns]
                     print(pareto_df[display_cols].to_string(index=False))
 
-    # MIA accuracy vs robust accuracy (MIA minimized, rob maximized)
-    if MIA_COL and ROB_COLS:
-        for rob_col in ROB_COLS:
+    # MIA accuracy vs robust accuracy (MIA minimized, rob maximized, on validation)
+    if MIA_COL and VAL_ROB:
+        for rob_col in VAL_ROB:
             fig = plot_pareto_frontier(
                 df, MIA_COL, rob_col, maximize1=False, maximize2=True, dpi=DPI,
             )
@@ -337,16 +355,16 @@ if not df.empty:
                 print(f"Saved pareto_mia_vs_rob_{strength}.png")
                 plt.show()
 
-    # Accuracy vs strength curves for Pareto-optimal runs
-    if ACC_COL and ROB_COLS:
+    # Accuracy vs strength curves for Pareto-optimal runs (test-set performance)
+    if VAL_ACC and VAL_ROB and TEST_ACC and TEST_ROB:
         # Acc vs rob Pareto runs
-        for rob_col in ROB_COLS:
-            pareto_df = get_pareto_runs(df, ACC_COL, rob_col, True, True)
+        for rob_col in VAL_ROB:
+            pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
             if not pareto_df.empty:
                 strength = rob_col.split("/")[-1]
                 fig = plot_accuracy_vs_strength(
-                    pareto_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
-                    title=f"Pareto Runs (Acc vs Rob/{strength}): Accuracy vs Perturbation Strength",
+                    pareto_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
+                    title=f"Pareto Runs (Acc vs Rob/{strength}): Accuracy vs Strength (test)",
                     dpi=DPI,
                 )
                 if fig:
@@ -356,13 +374,13 @@ if not df.empty:
 
         # MIA vs rob Pareto runs
         if MIA_COL:
-            for rob_col in ROB_COLS:
+            for rob_col in VAL_ROB:
                 pareto_df = get_pareto_runs(df, MIA_COL, rob_col, False, True)
                 if not pareto_df.empty:
                     strength = rob_col.split("/")[-1]
                     fig = plot_accuracy_vs_strength(
-                        pareto_df, acc_col=ACC_COL, rob_cols=ROB_COLS,
-                        title=f"Pareto Runs (MIA vs Rob/{strength}): Accuracy vs Perturbation Strength",
+                        pareto_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
+                        title=f"Pareto Runs (MIA vs Rob/{strength}): Accuracy vs Strength (test)",
                         dpi=DPI,
                     )
                     if fig:
@@ -372,17 +390,35 @@ if not df.empty:
 
 # %% [markdown]
 # ### 3g. Summary Statistics Table
+#
+# Both validation and test metrics are reported.  The "Best" column shows
+# metrics from the single run selected on validation (stopping criterion).
 
 # %%
 from analysis.utils import create_summary_table
 
-if not df.empty and ACC_COL:
-    summary_df = create_summary_table(
-        df, acc_col=ACC_COL, rob_cols=ROB_COLS, mia_col=MIA_COL,
+if not df.empty and VAL_ACC:
+    # Validation summary (with Best from valid-selected run)
+    valid_summary = create_summary_table(
+        df, acc_col=VAL_ACC, rob_cols=VAL_ROB, mia_col=MIA_COL,
         effective_n=EFFECTIVE_N,
         stop_crit_col=STOP_CRIT_COL,
         stop_crit_minimize=STOP_CRIT_MINIMIZE if STOP_CRIT_COL else True,
     )
+    if not valid_summary.empty:
+        valid_summary.insert(0, "Split", "valid")
+
+    # Test summary (Best = test values of the same valid-selected run)
+    test_summary = create_summary_table(
+        df, acc_col=TEST_ACC, rob_cols=TEST_ROB, mia_col=MIA_COL,
+        effective_n=EFFECTIVE_N,
+        stop_crit_col=STOP_CRIT_COL,
+        stop_crit_minimize=STOP_CRIT_MINIMIZE if STOP_CRIT_COL else True,
+    )
+    if not test_summary.empty:
+        test_summary.insert(0, "Split", "test")
+
+    summary_df = pd.concat([valid_summary, test_summary], ignore_index=True)
 
     if not summary_df.empty:
         print(f"\nEffective N: {EFFECTIVE_N if EFFECTIVE_N else len(df)} (actual runs: {len(df)})")
@@ -443,61 +479,56 @@ if not df.empty and SANITY_CHECK_METRICS:
 # ## 5. Learned Distribution Visualization
 
 # %%
-if not df.empty and ACC_COL:
-    best_metric = STOP_CRIT_COL if STOP_CRIT_COL else ACC_COL
-    best_minimize = STOP_CRIT_MINIMIZE if STOP_CRIT_COL else False
-    best_run = get_best_run(df, best_metric, minimize=best_minimize)
+if not df.empty and best_run is not None:
+    best_run_path = best_run.get("run_path")
+    if best_run_path:
+        print(f"\n--- Visualizing distributions for best run ({best_run['run_name']}) ---")
 
-    if best_run is not None:
-        best_run_path = best_run.get("run_path")
-        if best_run_path:
-            print(f"\n--- Visualizing distributions for best run ({best_run['run_name']}) ---")
+        # Generated samples
+        try:
+            from src.tracking.visualisation import visualise_samples
+            from analysis.utils import find_model_checkpoint
+            from src.models import BornMachine
 
-            # Generated samples
-            try:
-                from src.tracking.visualisation import visualise_samples
-                from analysis.utils import find_model_checkpoint
-                from src.models import BornMachine
+            bm = BornMachine.load(str(find_model_checkpoint(best_run_path)))
+            bm.to(torch.device(DEVICE))
+            bm.sync_tensors(after="classification")
 
-                bm = BornMachine.load(str(find_model_checkpoint(best_run_path)))
-                bm.to(torch.device(DEVICE))
-                bm.sync_tensors(after="classification")
-
-                cfg = load_run_config(best_run_path)
-                with torch.no_grad():
-                    synths = bm.sample(cfg=cfg.tracking.sampling)
-                ax = visualise_samples(synths)
-                if ax is not None:
-                    fig = ax.get_figure()
-                    fig.savefig(output_dir / "best_run_samples.png", bbox_inches="tight", dpi=DPI)
-                    print(f"Saved best_run_samples.png")
-                    plt.show()
-
-                del bm
-                torch.cuda.empty_cache()
-            except Exception as e:
-                print(f"Warning: Could not generate samples: {e}")
-
-            # Distribution heatmaps
-            try:
-                from analysis.visualize_distributions import visualize_from_run_dir
-
-                fig = visualize_from_run_dir(
-                    run_dir=best_run_path,
-                    resolution=150,
-                    normalize_joint=True,
-                    show_data=True,
-                    device=DEVICE,
-                    save_dir=str(output_dir),
-                )
-                default_path = output_dir / "distributions.png"
-                final_path = output_dir / "best_run_distributions.png"
-                if default_path.exists():
-                    default_path.rename(final_path)
-                    print(f"Saved best_run_distributions.png")
+            cfg = load_run_config(best_run_path)
+            with torch.no_grad():
+                synths = bm.sample(cfg=cfg.tracking.sampling)
+            ax = visualise_samples(synths)
+            if ax is not None:
+                fig = ax.get_figure()
+                fig.savefig(output_dir / "best_run_samples.png", bbox_inches="tight", dpi=DPI)
+                print(f"Saved best_run_samples.png")
                 plt.show()
-            except Exception as e:
-                print(f"Warning: Could not generate distribution visualization: {e}")
+
+            del bm
+            torch.cuda.empty_cache()
+        except Exception as e:
+            print(f"Warning: Could not generate samples: {e}")
+
+        # Distribution heatmaps
+        try:
+            from analysis.visualize_distributions import visualize_from_run_dir
+
+            fig = visualize_from_run_dir(
+                run_dir=best_run_path,
+                resolution=150,
+                normalize_joint=True,
+                show_data=True,
+                device=DEVICE,
+                save_dir=str(output_dir),
+            )
+            default_path = output_dir / "distributions.png"
+            final_path = output_dir / "best_run_distributions.png"
+            if default_path.exists():
+                default_path.rename(final_path)
+                print(f"Saved best_run_distributions.png")
+            plt.show()
+        except Exception as e:
+            print(f"Warning: Could not generate distribution visualization: {e}")
 
 # %% [markdown]
 # ## 6. Summary Export
@@ -515,6 +546,7 @@ if not df.empty:
         f.write(f"Regime: {REGIME}\n")
         f.write(f"Total runs: {len(df)}\n")
         f.write(f"Eval splits: {EVAL_SPLITS}\n")
+        f.write(f"Selection split: valid\n")
         f.write(f"Device: {DEVICE}\n")
         if EFFECTIVE_N:
             f.write(f"Effective N: {EFFECTIVE_N}\n")
@@ -524,57 +556,59 @@ if not df.empty:
 
         # Metrics used
         f.write("Metrics computed:\n")
-        if ACC_COL:
-            f.write(f"  Accuracy: {ACC_COL}\n")
-        if ROB_COLS:
-            f.write(f"  Robustness: {ROB_COLS}\n")
+        if VAL_ACC:
+            f.write(f"  Accuracy: {VAL_ACC}, {TEST_ACC}\n")
+        if VAL_ROB:
+            f.write(f"  Robustness (valid): {VAL_ROB}\n")
+            f.write(f"  Robustness (test):  {TEST_ROB}\n")
         if MIA_COL:
             f.write(f"  MIA: {MIA_COL}\n")
-        if CLS_LOSS_COL:
-            f.write(f"  Cls Loss: {CLS_LOSS_COL}\n")
+        if VAL_CLS_LOSS:
+            f.write(f"  Cls Loss: {VAL_CLS_LOSS}, {TEST_CLS_LOSS}\n")
         f.write("\n")
 
         # Summary statistics
-        if ACC_COL and "summary_df" in dir() and not summary_df.empty:
+        if "summary_df" in dir() and not summary_df.empty:
             f.write("-" * 60 + "\n")
             f.write("Summary Statistics\n")
             f.write("-" * 60 + "\n\n")
             f.write(summary_df.to_string(index=False) + "\n\n")
 
-        # Best run
-        best_metric = STOP_CRIT_COL if STOP_CRIT_COL else ACC_COL
+        # Best run (selected on validation)
+        best_metric = STOP_CRIT_COL if STOP_CRIT_COL else VAL_ACC
         best_minimize = STOP_CRIT_MINIMIZE if STOP_CRIT_COL else False
         if best_metric:
             best_run_export = get_best_run(df, best_metric, minimize=best_minimize)
-            label = STOP_CRIT_LABEL if STOP_CRIT_COL else "Clean Accuracy"
+            label = STOP_CRIT_LABEL if STOP_CRIT_COL else "Valid Accuracy"
             f.write("-" * 60 + "\n")
-            f.write(f"Best Run (by {label})\n")
+            f.write(f"Best Run (by {label}, selected on valid)\n")
             f.write("-" * 60 + "\n\n")
 
             if best_run_export is not None:
                 f.write(f"Run: {best_run_export.get('run_name', 'unknown')}\n")
                 if "run_path" in best_run_export.index:
                     f.write(f"Path: {best_run_export['run_path']}\n")
-                if ACC_COL and ACC_COL in best_run_export.index:
-                    f.write(f"Clean Accuracy: {best_run_export[ACC_COL]:.4f}\n")
-                for rob_col in ROB_COLS:
-                    if rob_col in best_run_export.index:
-                        strength = rob_col.split("/")[-1]
-                        f.write(f"Robust Accuracy (eps={strength}): {best_run_export[rob_col]:.4f}\n")
+                for split_label, acc_col, rob_cols in [("Valid", VAL_ACC, VAL_ROB), ("Test", TEST_ACC, TEST_ROB)]:
+                    if acc_col and acc_col in best_run_export.index:
+                        f.write(f"{split_label} Clean Accuracy: {best_run_export[acc_col]:.4f}\n")
+                    for rob_col in rob_cols:
+                        if rob_col in best_run_export.index:
+                            strength = rob_col.split("/")[-1]
+                            f.write(f"{split_label} Robust Accuracy (eps={strength}): {best_run_export[rob_col]:.4f}\n")
                 if MIA_COL and MIA_COL in best_run_export.index:
                     f.write(f"MIA Accuracy: {best_run_export[MIA_COL]:.4f}\n")
 
-        # Pareto-optimal runs
-        if ACC_COL and ROB_COLS:
+        # Pareto-optimal runs (selected on validation)
+        if VAL_ACC and VAL_ROB:
             f.write("\n" + "-" * 60 + "\n")
-            f.write("Pareto-Optimal Runs\n")
+            f.write("Pareto-Optimal Runs (selected on valid)\n")
             f.write("-" * 60 + "\n\n")
-            for rob_col in ROB_COLS:
-                pareto_df = get_pareto_runs(df, ACC_COL, rob_col, True, True)
+            for rob_col in VAL_ROB:
+                pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
                 if not pareto_df.empty:
                     strength = rob_col.split("/")[-1]
-                    f.write(f"Acc vs Rob/{strength}:\n")
-                    display_cols = ["run_name", ACC_COL, rob_col]
+                    f.write(f"Valid Acc vs Rob/{strength}:\n")
+                    display_cols = ["run_name", VAL_ACC, rob_col]
                     display_cols = [c for c in display_cols if c in pareto_df.columns]
                     f.write(pareto_df[display_cols].to_string(index=False) + "\n\n")
 
