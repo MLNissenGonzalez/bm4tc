@@ -58,7 +58,7 @@ import warnings
 # =============================================================================
 
 # Data source: "wandb" or "local"
-DATA_SOURCE = "wandb"  # Change to "wandb" to fetch from W&B
+DATA_SOURCE = "local"  # Change to "wandb" to fetch from W&B
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
 WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
@@ -69,7 +69,7 @@ DATASET_NAME = "spirals_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
 # --- LOCAL SETTINGS (used if DATA_SOURCE == "local") ---
 # Path to sweep directory relative to project root
 # Can be overridden by command line argument: python -m analysis.run_statistics outputs/sweep_name
-LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/cls_seed_sweep_circles_4k_10Feb26"
+LOCAL_SWEEP_DIR = _CLI_SWEEP_DIR if _CLI_SWEEP_DIR else "outputs/adv_seed_sweep_moons_4k_12Feb26"
 
 # --- REGIME SETTINGS ---
 # Training regime: "pre", "gen", "adv", "gan"
@@ -81,7 +81,7 @@ REGIME = "adv"
 
 # --- MIA SETTINGS ---
 # MIA computation is expensive - it loads each model and runs inference
-COMPUTE_MIA = False  # Set to True to compute MIA for all runs
+COMPUTE_MIA = True  # Set to True to compute MIA for all runs
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- STATISTICS SETTINGS ---
