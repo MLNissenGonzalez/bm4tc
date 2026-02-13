@@ -134,7 +134,7 @@ def record(results: Dict[str, Any], stage: str, set: str, step: Optional[int] = 
         wandb.log(upload_dict, step=step)
 
 
-from models import BornClassifier, BornGenerator
+from src.models import BornClassifier, BornGenerator
 import numpy as np
 
 def log_grads(bm_view: BornClassifier | BornGenerator, step: int, watch_freq: int, stage: str):

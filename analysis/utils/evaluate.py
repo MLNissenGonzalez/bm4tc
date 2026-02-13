@@ -291,9 +291,7 @@ def evaluate_sweep(
             metrics = evaluate_run(run_dir, eval_cfg)
             row.update(metrics)
         except Exception as e:
-            import traceback
             print(f"    FAILED: {e}")
-            traceback.print_exc()
             logger.warning(f"Run {run_dir.name} failed: {e}")
 
         rows.append(row)
