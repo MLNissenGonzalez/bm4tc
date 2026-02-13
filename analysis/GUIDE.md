@@ -44,16 +44,21 @@ load_local_hpo_runs() → DataFrame
 analysis/
 ├── GUIDE.md                 # This file
 ├── __init__.py
+├── sweep_analysis.py        # Post-hoc sweep analysis notebook (loads models, recomputes metrics)
 ├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
 ├── mia_analysis.py          # MIA privacy analysis notebook
 ├── visualize_distributions.py  # Distribution visualization notebook
-├── run_statistics.py        # Basic sweep statistics notebook
 ├── config_fetcher.ipynb     # Jupyter notebook for fetching best configs
 ├── outputs/                 # Generated analysis outputs (git-ignored)
-│   ├── hpo_runs.csv        # Processed HPO run data
-│   ├── param_metric_correlations.csv
-│   ├── metric_metric_correlations.csv
-│   ├── best_runs_summary.txt
+│   ├── <sweep_name>/       # Per-sweep output directory
+│   │   ├── accuracy_histogram.png
+│   │   ├── mean_accuracies_errorbars.png
+│   │   ├── metric_correlations.png
+│   │   ├── pareto_acc_vs_rob_*.png
+│   │   ├── summary_statistics.csv
+│   │   ├── sweep_analysis_summary.txt
+│   │   ├── best_run_distributions.png
+│   │   └── best_run_samples.png
 │   ├── mia/                # MIA analysis outputs
 │   │   ├── feature_importance.png
 │   │   ├── threshold_attacks.png
@@ -65,6 +70,8 @@ analysis/
     ├── __init__.py
     ├── wandb_fetcher.py     # Data loading utilities (wandb + local)
     ├── resolve.py           # HPO regime/param resolver
+    ├── statistics.py        # Shared stats & visualization functions
+    ├── evaluate.py          # Post-hoc per-model evaluation
     ├── mia.py               # MIA evaluation classes
     └── mia_utils.py         # Config loading utilities
 ```
@@ -564,38 +571,87 @@ After running, check `analysis/outputs/distributions/`:
 
 ---
 
-## Run Statistics
+## Post-Hoc Sweep Analysis
 
-The analysis module includes **run_statistics.py** for computing basic statistics and visualizations for any sweep (Hydra multirun or W&B group).
+The analysis module includes **sweep_analysis.py** — a notebook that **loads each saved model** from a sweep directory and **recomputes metrics post-hoc**. This supersedes the old `run_statistics.py`.
+
+### Why Post-Hoc?
+
+- **Compute metrics that weren't tracked during training** (e.g., FID, generative loss)
+- **Ensure data splits match** each run's config (correct seeds via `dataset.overwrite = True`)
+- **Consistent evaluation** across all runs (e.g., same attack strengths via evasion override)
+- **Sanity check** post-hoc metrics against W&B summary metrics from training
 
 ### What it Shows
 
-1. **Histogram of accuracy** — with optional inclusion of robust and MIA accuracy
-2. **Mean accuracies with std error bars**
-3. **Scatter plot** — (clean, rob, MIA) accuracy against validation loss
-4. **Best run summary** — by validation loss with corresponding accuracies
-5. **Final table** — best, mean, and std of accuracies across all runs
+1. **Per-model evaluation** — loads each checkpoint and computes acc, rob, MIA, cls loss, gen loss, FID
+2. **Accuracy histogram** — distribution of clean, robust, and MIA accuracy
+3. **Mean + std bar plot** — error bars show standard deviation (not stderr)
+4. **Metric-metric correlation heatmap**
+5. **Accuracy vs stopping criterion scatter**
+6. **Pareto frontiers** — clean acc vs rob acc, MIA acc vs rob acc
+7. **Summary statistics table** — best (from best run by stop criterion), mean, std, stderr
+8. **Sanity check** — compare post-hoc metrics with W&B summary metrics
+9. **Distribution visualization** — for best model (heatmaps + generated samples)
+10. **Summary export** — text file with best model, stats table, Pareto-optimal runs
 
-### Running Run Statistics
+### Running Sweep Analysis
 
 **In VS Code** (recommended):
 ```
-1. Open analysis/run_statistics.py
-2. Configure DATA_SOURCE ("wandb" or "local") and sweep directory/group
+1. Open analysis/sweep_analysis.py
+2. Configure SWEEP_DIR, REGIME, metric toggles, overrides
 3. Use "Run Cell" (Ctrl+Enter) to execute each #%% cell interactively
 ```
 
 **As a script**:
 ```bash
 cd /path/to/project
-python -m analysis.run_statistics
+python -m analysis.sweep_analysis
 ```
 
-### Features
+### Configuration
 
-- **Flexible data sources**: Works with both W&B API and local Hydra multirun outputs
-- **Std correction**: Allows correction for smaller effective number of independent runs (e.g., old sweeps that included the now-removed dead `tracking.random_state` parameter)
-- **Imports from other analysis modules**: Reuses visualization and MIA calculation code from `visualize_distributions.py` and `mia_analysis.py`
+```python
+SWEEP_DIR = "outputs/adv_seed_sweep_moons_4k_12Feb26"
+REGIME = "adv"
+
+# Metric toggles
+COMPUTE_ACC = True
+COMPUTE_ROB = True
+COMPUTE_MIA = True
+COMPUTE_CLS_LOSS = False
+COMPUTE_GEN_LOSS = False
+COMPUTE_FID = False
+
+# Override evasion config for consistency across all runs
+EVASION_OVERRIDE = {"method": "PGD", "strengths": [0.05, 0.1], "num_steps": 20}
+# Or None to use each run's own evasion config
+
+EVAL_SPLITS = ["test"]
+DEVICE = "cuda"
+```
+
+### Shared Utility Modules
+
+Functions used by both `sweep_analysis.py` and `hpo_analysis.py` are in `analysis/utils/`:
+
+- **`statistics.py`**: `compute_statistics`, `get_best_run`, `create_summary_table`, `compute_pareto_frontier`, `plot_pareto_frontier`, `get_pareto_runs`, `compute_metric_correlations`, `plot_correlation_heatmap`, `plot_accuracy_histogram`, `plot_mean_with_std`, `plot_scatter_vs_metric`, `clean_column_name`
+- **`evaluate.py`**: `EvalConfig`, `evaluate_run`, `evaluate_sweep`, `resolve_stop_criterion`
+
+### Programmatic API
+
+```python
+from analysis.utils import EvalConfig, evaluate_sweep
+
+eval_cfg = EvalConfig(
+    compute_acc=True, compute_rob=True, compute_mia=True,
+    splits=["test"], device="cuda",
+    evasion_override={"method": "PGD", "strengths": [0.1]},
+)
+
+df = evaluate_sweep("outputs/my_sweep", eval_cfg, config_keys=["tracking.seed"])
+```
 
 ---
 

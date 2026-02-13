@@ -30,6 +30,28 @@ from .mia_utils import (
     download_wandb_checkpoint,
 )
 
+from .statistics import (
+    clean_column_name,
+    compute_statistics,
+    get_best_run,
+    create_summary_table,
+    compute_pareto_frontier,
+    get_pareto_runs,
+    compute_metric_correlations,
+    plot_accuracy_histogram,
+    plot_mean_with_std,
+    plot_scatter_vs_metric,
+    plot_pareto_frontier,
+    plot_correlation_heatmap,
+)
+
+from .evaluate import (
+    EvalConfig,
+    evaluate_run,
+    evaluate_sweep,
+    resolve_stop_criterion,
+)
+
 from .resolve import (
     resolve_params,
     resolve_metrics,
@@ -91,4 +113,22 @@ __all__ = [
     "REGIME_METRIC_PREFIX",
     "REGIME_DEFAULT_PARAMS",
     "PARAM_ALIASES",
+    # Statistics & visualization
+    "clean_column_name",
+    "compute_statistics",
+    "get_best_run",
+    "create_summary_table",
+    "compute_pareto_frontier",
+    "get_pareto_runs",
+    "compute_metric_correlations",
+    "plot_accuracy_histogram",
+    "plot_mean_with_std",
+    "plot_scatter_vs_metric",
+    "plot_pareto_frontier",
+    "plot_correlation_heatmap",
+    # Post-hoc evaluation
+    "EvalConfig",
+    "evaluate_run",
+    "evaluate_sweep",
+    "resolve_stop_criterion",
 ]
