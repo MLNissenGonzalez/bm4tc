@@ -439,6 +439,27 @@ def get_best_run_by_loss(df: pd.DataFrame, loss_col: str) -> pd.Series:
     return df.loc[best_idx]
 
 
+def get_best_run(df: pd.DataFrame, metric_col: str, minimize: bool = True) -> pd.Series:
+    """
+    Get the run with the best value of a given metric.
+
+    Args:
+        df: DataFrame with metric column
+        metric_col: Column name for the metric to optimize
+        minimize: If True, select the run with the lowest value; otherwise highest
+
+    Returns:
+        Series representing the best run, or None if no valid data
+    """
+    if metric_col not in df.columns:
+        return None
+    valid_df = df[df[metric_col].notna()]
+    if valid_df.empty:
+        return None
+    best_idx = valid_df[metric_col].idxmin() if minimize else valid_df[metric_col].idxmax()
+    return df.loc[best_idx]
+
+
 def clean_column_name(col: str) -> str:
     """Convert column name to readable label."""
     name = col.replace("config/", "").replace("summary/", "")
@@ -968,9 +989,15 @@ def create_summary_table(
     rob_cols: list = None,
     mia_col: str = None,
     effective_n: int = None,
+    stop_crit_col: str = None,
+    stop_crit_minimize: bool = True,
 ) -> pd.DataFrame:
     """
     Create a summary table with best, mean, std, and stderr for all metrics.
+
+    The "Best" column shows the metric values from the single run that achieved
+    the best stopping criterion value, rather than independently-best values
+    per metric. Falls back to per-column best when stop_crit_col is not provided.
 
     Args:
         df: DataFrame with metric columns
@@ -978,10 +1005,23 @@ def create_summary_table(
         rob_cols: List of column names for robustness metrics
         mia_col: Column name for MIA accuracy (optional)
         effective_n: Override for sample size in stderr calculation
+        stop_crit_col: Column used as stopping criterion to select the best run
+        stop_crit_minimize: Whether to minimize (True) or maximize (False) the stop criterion
 
     Returns:
         Summary DataFrame
     """
+    # Find the single best run by stopping criterion
+    best_run = None
+    if stop_crit_col and stop_crit_col in df.columns:
+        best_run = get_best_run(df, stop_crit_col, minimize=stop_crit_minimize)
+
+    def _best_val(metric_col, stats):
+        """Get best value from the single best run, or fall back to per-column best."""
+        if best_run is not None and metric_col in best_run.index and pd.notna(best_run[metric_col]):
+            return best_run[metric_col]
+        return stats["best"]
+
     rows = []
 
     # Clean accuracy
@@ -989,7 +1029,7 @@ def create_summary_table(
         stats = compute_statistics(df, acc_col, effective_n)
         rows.append({
             "Metric": "Clean Accuracy",
-            "Best": stats["best"],
+            "Best": _best_val(acc_col, stats),
             "Mean": stats["mean"],
             "Std": stats["std"],
             "Std Error": stats["stderr"],
@@ -1004,7 +1044,7 @@ def create_summary_table(
                 strength = rob_col.split("/")[-1]
                 rows.append({
                     "Metric": f"Robust Accuracy (ε={strength})",
-                    "Best": stats["best"],
+                    "Best": _best_val(rob_col, stats),
                     "Mean": stats["mean"],
                     "Std": stats["std"],
                     "Std Error": stats["stderr"],
@@ -1016,7 +1056,7 @@ def create_summary_table(
         stats = compute_statistics(df, mia_col, effective_n)
         rows.append({
             "Metric": "MIA Accuracy",
-            "Best": stats["best"],
+            "Best": _best_val(mia_col, stats),
             "Mean": stats["mean"],
             "Std": stats["std"],
             "Std Error": stats["stderr"],
@@ -1030,12 +1070,21 @@ def create_summary_table(
 if not df.empty:
     print("\n=== Summary Statistics ===")
 
+    # Determine whether the stopping criterion should be minimized or maximized
+    stop_crit_minimize = True  # default for loss-like metrics
+    if not df.empty and "config/stop_crit" in df.columns:
+        unique = df["config/stop_crit"].dropna().unique()
+        if len(unique) == 1 and unique[0] in ("acc", "rob"):
+            stop_crit_minimize = False
+
     summary_df = create_summary_table(
         df,
         acc_col=ACC_COL,
         rob_cols=ROB_COLS,
         mia_col=MIA_COL,
         effective_n=EFFECTIVE_N,
+        stop_crit_col=STOP_CRIT_COL,
+        stop_crit_minimize=stop_crit_minimize,
     )
 
     if not summary_df.empty:
@@ -1084,26 +1133,32 @@ if not df.empty:
         f.write("-" * 60 + "\n\n")
         f.write(summary_df.to_string(index=False) + "\n\n")
 
-        # Best run details
+        # Best run details (by stopping criterion if available, else by validation loss)
+        if STOP_CRIT_COL:
+            best_run_export = get_best_run(df, STOP_CRIT_COL, minimize=stop_crit_minimize)
+            best_run_label = f"Best Run (by {STOP_CRIT_LABEL})"
+        else:
+            best_run_export = get_best_run_by_loss(df, LOSS_COL)
+            best_run_label = "Best Run (by Validation Loss)"
+
         f.write("-" * 60 + "\n")
-        f.write("Best Run (by Validation Loss)\n")
+        f.write(best_run_label + "\n")
         f.write("-" * 60 + "\n\n")
 
-        best_run = get_best_run_by_loss(df, LOSS_COL)
-        if not best_run.empty:
-            f.write(f"Run: {best_run.get('run_name', best_run.get('run_id', 'unknown'))}\n")
-            if "run_path" in best_run.index:
-                f.write(f"Path: {best_run.get('run_path')}\n")
-            f.write(f"Validation Loss: {best_run.get(LOSS_COL, np.nan):.6f}\n")
-            f.write(f"Clean Accuracy: {best_run.get(ACC_COL, np.nan):.4f}\n")
+        if best_run_export is not None and (isinstance(best_run_export, pd.Series) and not best_run_export.empty):
+            f.write(f"Run: {best_run_export.get('run_name', best_run_export.get('run_id', 'unknown'))}\n")
+            if "run_path" in best_run_export.index:
+                f.write(f"Path: {best_run_export.get('run_path')}\n")
+            f.write(f"Validation Loss: {best_run_export.get(LOSS_COL, np.nan):.6f}\n")
+            f.write(f"Clean Accuracy: {best_run_export.get(ACC_COL, np.nan):.4f}\n")
 
             for rob_col in ROB_COLS:
-                if rob_col in best_run.index:
+                if rob_col in best_run_export.index:
                     strength = rob_col.split("/")[-1]
-                    f.write(f"Robust Accuracy (ε={strength}): {best_run.get(rob_col, np.nan):.4f}\n")
+                    f.write(f"Robust Accuracy (ε={strength}): {best_run_export.get(rob_col, np.nan):.4f}\n")
 
-            if MIA_COL and MIA_COL in best_run.index:
-                f.write(f"MIA Accuracy: {best_run.get(MIA_COL, np.nan):.4f}\n")
+            if MIA_COL and MIA_COL in best_run_export.index:
+                f.write(f"MIA Accuracy: {best_run_export.get(MIA_COL, np.nan):.4f}\n")
 
         f.write("\n" + "=" * 60 + "\n")
         f.write("Generated outputs:\n")
