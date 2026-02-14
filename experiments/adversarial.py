@@ -27,6 +27,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
+from src.tracking import evaluate_loaded_model
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
@@ -69,6 +70,9 @@ def main(cfg: schemas.Config):
 
     # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
+
+    if model_path is not None:
+        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
 
     if model_path is None:
         # Classification pretraining

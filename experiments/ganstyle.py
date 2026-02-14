@@ -10,7 +10,7 @@ from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine, Critic
 from src.trainer import ClassificationTrainer, GANStyleTrainer
-from src.tracking import PerformanceEvaluator
+from src.tracking import PerformanceEvaluator, evaluate_loaded_model
 import torch
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,9 @@ def main(cfg: schemas.Config):
 
     # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
+
+    if model_path is not None:
+        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
 
     if model_path is None:
         # Pretrain

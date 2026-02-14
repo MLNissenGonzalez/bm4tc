@@ -1,5 +1,6 @@
 import src.utils.schemas as schemas
 import torch
+from types import SimpleNamespace
 from typing import *
 import logging
 from src.models.born import BornMachine
@@ -327,3 +328,22 @@ class PerformanceEvaluator:
                 else:
                     logger.warning(f"Skipping logging for metric '{name}' - unsupported type: {type(result)}")
         return results
+
+
+def evaluate_loaded_model(
+        cfg: schemas.Config,
+        bornmachine: BornMachine,
+        datahandler: DataHandler,
+        device: torch.device
+):
+    """Evaluate a loaded model before training begins, logging diagnostics to W&B under 'loaded' stage."""
+    from .wandb_utils import record
+
+    train_cfg = SimpleNamespace(
+        metrics={"clsloss": 1, "genloss": 1, "acc": 1, "viz": 1},
+        stop_crit=None,
+    )
+    evaluator = PerformanceEvaluator(cfg, datahandler, train_cfg, device)
+    results = evaluator.evaluate(bornmachine, split="valid", step=0)
+    record(results, stage="loaded", set="valid")
+    return results
