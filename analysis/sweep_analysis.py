@@ -282,23 +282,62 @@ if not df.empty and TEST_ACC:
         plt.show()
 
 # %% [markdown]
-# ### 3d. Metric-Metric Correlation Heatmap (all splits)
+# ### 3d. Metric-Metric Correlation Heatmaps (per split) & Cross-Split Consistency
 
 # %%
 from analysis.utils import compute_metric_correlations, plot_correlation_heatmap
+from scipy.stats import pearsonr
 
 if not df.empty:
-    all_eval_metrics = [c for c in df.columns if c.startswith("eval/")]
-    if len(all_eval_metrics) >= 2:
-        corr_df = compute_metric_correlations(df, all_eval_metrics)
-        if not corr_df.empty:
-            print("\nMetric-Metric Correlations:")
-            print(corr_df.round(3).to_string())
-            fig = plot_correlation_heatmap(corr_df, title="Metric-Metric Correlations", dpi=DPI)
+    # --- Valid-only heatmap ---
+    valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL] if c] + list(VAL_ROB)
+    valid_metrics = [c for c in valid_metrics if c in df.columns]
+
+    if len(valid_metrics) >= 2:
+        corr_valid = compute_metric_correlations(df, valid_metrics)
+        if not corr_valid.empty:
+            print("\nMetric-Metric Correlations (valid):")
+            print(corr_valid.round(3).to_string())
+            fig = plot_correlation_heatmap(corr_valid, title="Metric Correlations — valid", dpi=DPI)
             if fig:
-                plt.savefig(output_dir / "metric_correlations.png", bbox_inches="tight")
-                print(f"Saved metric_correlations.png")
+                plt.savefig(output_dir / "metric_correlations_valid.png", bbox_inches="tight")
+                print("Saved metric_correlations_valid.png")
                 plt.show()
+
+    # --- Test-only heatmap ---
+    test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL] if c] + list(TEST_ROB)
+    test_metrics = [c for c in test_metrics if c in df.columns]
+
+    if len(test_metrics) >= 2:
+        corr_test = compute_metric_correlations(df, test_metrics)
+        if not corr_test.empty:
+            print("\nMetric-Metric Correlations (test):")
+            print(corr_test.round(3).to_string())
+            fig = plot_correlation_heatmap(corr_test, title="Metric Correlations — test", dpi=DPI)
+            if fig:
+                plt.savefig(output_dir / "metric_correlations_test.png", bbox_inches="tight")
+                print("Saved metric_correlations_test.png")
+                plt.show()
+
+    # --- Cross-split consistency ---
+    valid_cols = [c for c in df.columns if c.startswith("eval/valid/")]
+    cross_rows = []
+    for vc in valid_cols:
+        tc = vc.replace("eval/valid/", "eval/test/")
+        if tc in df.columns:
+            valid_vals = df[vc].dropna()
+            test_vals = df[tc].dropna()
+            common = valid_vals.index.intersection(test_vals.index)
+            if len(common) >= 3:
+                r, _ = pearsonr(df.loc[common, vc], df.loc[common, tc])
+                cross_rows.append({"valid_col": vc, "test_col": tc, "pearson_r": r})
+
+    if cross_rows:
+        cross_df = pd.DataFrame(cross_rows)
+        mean_r = cross_df["pearson_r"].mean()
+        print("\nCross-Split Consistency (valid vs test, Pearson r across runs):")
+        print(cross_df.to_string(index=False))
+        print(f"Mean cross-split r: {mean_r:.4f}")
 
 # %% [markdown]
 # ### 3e. Accuracy vs Stopping Criterion Scatter (valid)
