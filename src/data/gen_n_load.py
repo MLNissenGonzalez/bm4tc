@@ -261,6 +261,9 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     if overwrite or not os.path.exists(dataset_file):
         _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
+        logger.info(f"Generated dataset '{variant}' and saved to {dataset_file}")
+    else:
+        logger.info(f"Loaded dataset from {dataset_file}")
     data = np.load(dataset_file)
 
     X: npt.NDArray[np.float32] = data["X"]  # shape: (size, n_feat)

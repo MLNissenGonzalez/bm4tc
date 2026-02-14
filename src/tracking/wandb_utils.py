@@ -134,6 +134,23 @@ def record(results: Dict[str, Any], stage: str, set: str, step: Optional[int] = 
         wandb.log(upload_dict, step=step)
 
 
+def log_dataset_viz(datahandler):
+    """Log a scatter plot of the full (rescaled) dataset to W&B under 'dataset/all'."""
+    if datahandler.data_dim != 2:
+        logger.debug(f"Skipping dataset viz for data_dim={datahandler.data_dim} (only 2D supported)")
+        return
+
+    from src.tracking.visualisation import visualise_samples
+    import torch
+
+    all_data = torch.cat([datahandler.data[s] for s in ("train", "valid", "test")], dim=0)
+    all_labels = torch.cat([datahandler.labels[s] for s in ("train", "valid", "test")])
+    ax = visualise_samples(all_data, all_labels)
+    fig = ax.figure
+    wandb.log({"dataset/all": wandb.Image(fig)})
+    plt.close(fig)
+
+
 from src.models import BornClassifier, BornGenerator
 import numpy as np
 
