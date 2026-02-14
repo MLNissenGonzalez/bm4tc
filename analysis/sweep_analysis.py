@@ -58,12 +58,16 @@ COMPUTE_ROB = True
 COMPUTE_MIA = True
 COMPUTE_CLS_LOSS = True
 COMPUTE_GEN_LOSS = False
-COMPUTE_FID = False
+COMPUTE_FID = True
 
 # --- EVASION OVERRIDE ---
 # Set to a dict to override evasion config across ALL runs for consistency.
 # Set to None to use each run's own evasion config.
-EVASION_OVERRIDE = None
+EVASION_OVERRIDE = {
+    "method": "PGD",
+    "strengths": [0.1, 0.2, 0.3, 0.4],
+    "num_steps": 20,
+}
 # Example:
 # EVASION_OVERRIDE = {
 #     "method": "PGD",
@@ -101,7 +105,7 @@ DPI = 100
 # --- PARETO SETTINGS ---
 # Robustness strength for Pareto frontier selection.
 # Set to None to auto-select the weakest non-zero strength.
-PARETO_ROB_STRENGTH = None
+PARETO_ROB_STRENGTH = 0.15
 
 # --- SANITY CHECK ---
 # Map eval column -> W&B summary column for comparison.
