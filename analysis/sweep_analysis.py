@@ -124,6 +124,19 @@ CONFIG_KEYS = [
 # ## 2. Per-Model Evaluation
 
 # %%
+# Ensure PARETO_ROB_STRENGTH is in the evasion strengths
+if PARETO_ROB_STRENGTH is not None and COMPUTE_ROB:
+    if EVASION_OVERRIDE is not None:
+        if "strengths" not in EVASION_OVERRIDE:
+            EVASION_OVERRIDE["strengths"] = [PARETO_ROB_STRENGTH]
+        elif PARETO_ROB_STRENGTH not in EVASION_OVERRIDE["strengths"]:
+            EVASION_OVERRIDE["strengths"].append(PARETO_ROB_STRENGTH)
+    else:
+        print(f"Note: PARETO_ROB_STRENGTH={PARETO_ROB_STRENGTH} is set but "
+              f"EVASION_OVERRIDE is None. Ensure each run's evasion config "
+              f"includes eps={PARETO_ROB_STRENGTH}.")
+
+# %%
 from analysis.utils import EvalConfig, evaluate_sweep
 
 eval_cfg = EvalConfig(
@@ -252,6 +265,13 @@ if not df.empty:
                     stop_name, df, "valid",
                 )
                 print(f"Stop criterion: {stop_name} -> column {STOP_CRIT_COL}")
+                # If stop crit is "rob", prefer the Pareto strength over averaging
+                if stop_name == "rob" and PARETO_VAL_ROB_COL and PARETO_VAL_ROB_COL in df.columns:
+                    STOP_CRIT_COL = PARETO_VAL_ROB_COL
+                    _s = PARETO_VAL_ROB_COL.split("/")[-1]
+                    STOP_CRIT_LABEL = f"Robust Accuracy eps={_s} (stop crit)"
+                    STOP_CRIT_MINIMIZE = False
+                    print(f"  -> Overridden to Pareto strength: {STOP_CRIT_COL}")
     except Exception as e:
         print(f"Could not resolve stop criterion: {e}")
 
