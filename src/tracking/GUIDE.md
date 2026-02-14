@@ -7,7 +7,7 @@ This module handles experiment tracking, evaluation metrics, visualization, and 
 ```
 src/tracking/
 ├── GUIDE.md              # This file
-├── __init__.py           # Exports: init_wandb, log_grads, record, PerformanceEvaluator
+├── __init__.py           # Exports: init_wandb, log_grads, record, log_dataset_viz, PerformanceEvaluator, evaluate_loaded_model
 ├── evaluator.py          # Metric classes and PerformanceEvaluator
 ├── wandb_utils.py        # W&B initialization and logging utilities
 ├── visualisation.py      # Sample visualization (2D scatter plots)
@@ -188,6 +188,28 @@ if metric_name == "viz":
     upload_dict["samples/pre"] = wandb.Image(fig)
 ```
 
+### Dataset Visualization
+
+```python
+from src.tracking import log_dataset_viz
+
+# Log a scatter plot of the full rescaled dataset to W&B
+log_dataset_viz(datahandler)
+# Logs as: "dataset/all" (only for 2D data)
+```
+
+### Loaded Model Diagnostics
+
+```python
+from src.tracking import evaluate_loaded_model
+
+# Evaluate a pretrained model before training begins
+# Logs metrics under "loaded/valid/" stage in W&B
+results = evaluate_loaded_model(cfg, bornmachine, datahandler, device)
+```
+
+This is used by entry points (e.g., `experiments/adversarial.py`) when loading a pretrained model via `model_path` to verify its performance before fine-tuning.
+
 ## Context Caching
 
 The evaluator uses a `context` dict to cache expensive computations:
@@ -344,7 +366,7 @@ class FIDEvaluation:
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `evaluator.py` | ~328 | `BaseMetric`, `*Metric`, `PerformanceEvaluator` |
-| `wandb_utils.py` | ~187 | `init_wandb`, `record`, `log_grads` |
+| `evaluator.py` | ~348 | `BaseMetric`, `*Metric`, `PerformanceEvaluator`, `evaluate_loaded_model` |
+| `wandb_utils.py` | ~204 | `init_wandb`, `record`, `log_grads`, `log_dataset_viz` |
 | `visualisation.py` | ~68 | `visualise_samples`, `create_2d_scatter` |
 | `fid_like.py` | ~181 | `MatrixSquareRoot`, `FIDLike`, `FIDEvaluation` |

@@ -108,11 +108,19 @@ configs/
 │   │       ├── moons.yaml
 │   │       └── spirals.yaml
 │   ├── adversarial/          # Adversarial training experiments
-│   │   └── hpo/             # HPO experiments
+│   │   ├── hpo/             # HPO experiments
+│   │   │   ├── circles.yaml
+│   │   │   ├── moons.yaml
+│   │   │   ├── spirals.yaml
+│   │   │   ├── hpo_test.yaml
+│   │   │   └── best/        # Best HPO configs per dataset
+│   │   │       ├── circles.yaml
+│   │   │       ├── moons.yaml
+│   │   │       └── spirals.yaml
+│   │   └── seed_sweeps/     # Seed sweep experiments
 │   │       ├── circles.yaml
 │   │       ├── moons.yaml
-│   │       ├── spirals.yaml
-│   │       └── hpo_test.yaml
+│   │       └── spirals.yaml
 │   ├── generative/           # Generative NLL experiments
 │   │   ├── hpo.yaml
 │   │   └── seed_sweep/      # Seed sweep experiments
@@ -308,15 +316,15 @@ criterion:
 **Available critic configs:**
 | Config | Hidden Layers | Description |
 |--------|---------------|-------------|
-| `d2` | `[8.0, 8.0]` | Shallow, 2 layers |
+| `d2w8` | `[8.0, 8.0]` | Shallow, 2 layers, width 8 |
 | `d3` | `[8.0, 8.0, 8.0]` | Medium, 3 layers |
 | `d4` | `[8.0, 8.0, 8.0, 8.0]` | Deep, 4 layers |
-| `d5` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers |
+| `d5w8` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers, width 8 |
 
 **Sweeping over critic architectures:**
 ```bash
 # Command line multirun
-python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2,d3,d4,d5'
+python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2w8,d3,d4,d5w8'
 ```
 
 ```yaml
@@ -324,7 +332,7 @@ python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2,d3,d4,d5'
 hydra:
   sweeper:
     params:
-      trainer/ganstyle/critic: d2, d3, d4, d5
+      trainer/ganstyle/critic: d2w8, d3, d4, d5w8
 ```
 
 ### trainer/generative/ — Generative Training

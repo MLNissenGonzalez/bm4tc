@@ -636,7 +636,7 @@ DEVICE = "cuda"
 
 Functions used by both `sweep_analysis.py` and `hpo_analysis.py` are in `analysis/utils/`:
 
-- **`statistics.py`**: `compute_statistics`, `get_best_run`, `create_summary_table`, `compute_pareto_frontier`, `plot_pareto_frontier`, `get_pareto_runs`, `compute_metric_correlations`, `plot_correlation_heatmap`, `plot_accuracy_histogram`, `plot_mean_with_std`, `plot_scatter_vs_metric`, `clean_column_name`
+- **`statistics.py`**: `compute_statistics`, `get_best_run`, `create_summary_table`, `compute_pareto_frontier`, `plot_pareto_frontier`, `get_pareto_runs`, `compute_metric_correlations`, `plot_correlation_heatmap`, `plot_accuracy_histogram`, `plot_mean_with_std`, `plot_scatter_vs_metric`, `plot_accuracy_vs_strength`, `plot_accuracy_vs_strength_band`, `clean_column_name`
 - **`evaluate.py`**: `EvalConfig`, `evaluate_run`, `evaluate_sweep`, `resolve_stop_criterion`
 
 ### Programmatic API
@@ -719,11 +719,11 @@ To avoid re-running classification pretraining for every adversarial HPO trial:
 
 1. **Pretrain once** using the standard classification experiment, save the model.
 2. **Fetch the best config** using `print_classification_config_yaml()` to verify the split seed and born config.
-3. **Run adversarial HPO** using `hpo_moons.yaml`, which loads the pretrained model:
+3. **Run adversarial HPO** using `adversarial/hpo/moons.yaml`, which loads the pretrained model:
 
 ```bash
 python -m experiments.adversarial --multirun \
-    +experiments=adversarial/hpo_moons \
+    +experiments=adversarial/hpo/moons \
     model_path=/path/to/pretrained/best_cls_loss_moons_4k.pt
 ```
 
@@ -731,15 +731,15 @@ python -m experiments.adversarial --multirun \
 
 The data split is governed by `dataset.split_seed` (passed as `random_state` to sklearn's `train_test_split`), which is independent of `tracking.seed`. As long as both pretraining and adversarial HPO use the same dataset config (same `split_seed`, `split` ratios, and data file), the train/valid/test split is identical.
 
-The `hpo_moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
+The `adversarial/hpo/moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
 
 ### Key Differences from `hpo.yaml`
 
-| Setting | `hpo.yaml` (old) | `hpo_moons.yaml` (new) |
+| Setting | `hpo.yaml` (old) | `adversarial/hpo/moons.yaml` (new) |
 |---------|-------------------|------------------------|
 | Classification trainer | `adam500_loss` | `null` (skipped) |
-| Model source | Created from scratch | `model_path: ???` (required) |
-| `tracking.seed` | Swept (`range(1, 1000)`) | Fixed (`42`) |
+| Model source | Created from scratch | `model_path` (hardcoded or override) |
+| `tracking.seed` | Swept (`range(1, 1000)`) | Fixed (`71`) |
 | `dataset.split_seed` | Inherited from dataset config | Explicitly set to `11` |
 
 ---

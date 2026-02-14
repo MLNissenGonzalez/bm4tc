@@ -159,7 +159,7 @@ adversarial_training_mps/
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
 │   ├── mia_analysis.py      # MIA privacy analysis notebook
 │   ├── visualize_distributions.py  # Distribution visualization
-│   ├── run_statistics.py    # Basic sweep statistics
+│   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
 │   └── utils/               # W&B API utilities, MIA utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
