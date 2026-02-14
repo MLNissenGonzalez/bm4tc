@@ -135,6 +135,7 @@ if PARETO_ROB_STRENGTH is not None and COMPUTE_ROB:
             EVASION_OVERRIDE["strengths"] = [PARETO_ROB_STRENGTH]
         elif PARETO_ROB_STRENGTH not in EVASION_OVERRIDE["strengths"]:
             EVASION_OVERRIDE["strengths"].append(PARETO_ROB_STRENGTH)
+            EVASION_OVERRIDE["strengths"].sort() 
     else:
         print(f"Note: PARETO_ROB_STRENGTH={PARETO_ROB_STRENGTH} is set but "
               f"EVASION_OVERRIDE is None. Ensure each run's evasion config "
