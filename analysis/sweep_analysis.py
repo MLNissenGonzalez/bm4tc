@@ -98,6 +98,11 @@ EFFECTIVE_N = None  # Override for stderr calc (None = use actual N)
 FIGSIZE = (10, 6)
 DPI = 100
 
+# --- PARETO SETTINGS ---
+# Robustness strength for Pareto frontier selection.
+# Set to None to auto-select the weakest non-zero strength.
+PARETO_ROB_STRENGTH = None
+
 # --- SANITY CHECK ---
 # Map eval column -> W&B summary column for comparison.
 # Set to None or {} to skip sanity check.
@@ -180,6 +185,42 @@ print(f"VAL_ROB:  {VAL_ROB}")
 print(f"TEST_ACC: {TEST_ACC}")
 print(f"TEST_ROB: {TEST_ROB}")
 print(f"MIA_COL:  {MIA_COL}")
+
+# Resolve single robustness strength for Pareto frontier selection
+PARETO_VAL_ROB_COL = None
+PARETO_TEST_ROB_COL = None
+
+if VAL_ROB:
+    # Parse available non-zero strengths from VAL_ROB column names
+    _strength_map = {}
+    for col in VAL_ROB:
+        try:
+            s = float(col.split("/")[-1])
+            if s > 0:
+                _strength_map[s] = col
+        except ValueError:
+            continue
+
+    if _strength_map:
+        if PARETO_ROB_STRENGTH is not None:
+            if PARETO_ROB_STRENGTH in _strength_map:
+                _chosen = PARETO_ROB_STRENGTH
+            else:
+                print(f"WARNING: PARETO_ROB_STRENGTH={PARETO_ROB_STRENGTH} not in evaluated "
+                      f"strengths {sorted(_strength_map.keys())}. Falling back to weakest.")
+                _chosen = min(_strength_map.keys())
+        else:
+            _chosen = min(_strength_map.keys())
+
+        PARETO_VAL_ROB_COL = _strength_map[_chosen]
+        # Derive matching test column
+        _test_candidate = PARETO_VAL_ROB_COL.replace("eval/valid/", "eval/test/")
+        if _test_candidate in (TEST_ROB or []):
+            PARETO_TEST_ROB_COL = _test_candidate
+
+        print(f"\nPareto robustness strength: eps={_chosen}")
+        print(f"  PARETO_VAL_ROB_COL: {PARETO_VAL_ROB_COL}")
+        print(f"  PARETO_TEST_ROB_COL: {PARETO_TEST_ROB_COL}")
 
 # %% [markdown]
 # ### 3a. Best Model (selected on validation)
@@ -360,72 +401,49 @@ if not df.empty and STOP_CRIT_COL and VAL_ACC:
 # ### 3f. Pareto Frontiers (selected on valid)
 
 # %%
-from analysis.utils import plot_pareto_frontier, get_pareto_runs
+from analysis.utils import plot_pareto_frontier, get_pareto_runs, plot_accuracy_vs_strength_band
 
-if not df.empty:
+if not df.empty and PARETO_VAL_ROB_COL:
+    _pareto_strength = PARETO_VAL_ROB_COL.split("/")[-1]
+
     # Clean accuracy vs robust accuracy (both maximized, on validation)
-    if VAL_ACC and VAL_ROB:
-        for rob_col in VAL_ROB:
-            fig = plot_pareto_frontier(
-                df, VAL_ACC, rob_col, maximize1=True, maximize2=True, dpi=DPI,
-            )
-            if fig:
-                strength = rob_col.split("/")[-1]
-                plt.savefig(output_dir / f"pareto_acc_vs_rob_{strength}.png", bbox_inches="tight")
-                print(f"Saved pareto_acc_vs_rob_{strength}.png")
-                plt.show()
+    if VAL_ACC:
+        fig = plot_pareto_frontier(
+            df, VAL_ACC, PARETO_VAL_ROB_COL, maximize1=True, maximize2=True, dpi=DPI,
+        )
+        if fig:
+            plt.savefig(output_dir / f"pareto_acc_vs_rob_{_pareto_strength}.png", bbox_inches="tight")
+            print(f"Saved pareto_acc_vs_rob_{_pareto_strength}.png")
+            plt.show()
 
-                pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
-                if not pareto_df.empty:
-                    print(f"\nPareto-optimal runs (valid acc vs rob/{strength}):")
-                    display_cols = ["run_name", VAL_ACC, rob_col]
-                    display_cols = [c for c in display_cols if c in pareto_df.columns]
-                    print(pareto_df[display_cols].to_string(index=False))
+            pareto_df = get_pareto_runs(df, VAL_ACC, PARETO_VAL_ROB_COL, True, True)
+            if not pareto_df.empty:
+                print(f"\nPareto-optimal runs (valid acc vs rob/{_pareto_strength}):")
+                display_cols = ["run_name", VAL_ACC, PARETO_VAL_ROB_COL]
+                display_cols = [c for c in display_cols if c in pareto_df.columns]
+                print(pareto_df[display_cols].to_string(index=False))
 
     # MIA accuracy vs robust accuracy (MIA minimized, rob maximized, on validation)
-    if MIA_COL and VAL_ROB:
-        for rob_col in VAL_ROB:
-            fig = plot_pareto_frontier(
-                df, MIA_COL, rob_col, maximize1=False, maximize2=True, dpi=DPI,
-            )
-            if fig:
-                strength = rob_col.split("/")[-1]
-                plt.savefig(output_dir / f"pareto_mia_vs_rob_{strength}.png", bbox_inches="tight")
-                print(f"Saved pareto_mia_vs_rob_{strength}.png")
-                plt.show()
+    if MIA_COL:
+        fig = plot_pareto_frontier(
+            df, MIA_COL, PARETO_VAL_ROB_COL, maximize1=False, maximize2=True, dpi=DPI,
+        )
+        if fig:
+            plt.savefig(output_dir / f"pareto_mia_vs_rob_{_pareto_strength}.png", bbox_inches="tight")
+            print(f"Saved pareto_mia_vs_rob_{_pareto_strength}.png")
+            plt.show()
 
-    # Accuracy vs strength curves for Pareto-optimal runs (test-set performance)
-    if VAL_ACC and VAL_ROB and TEST_ACC and TEST_ROB:
-        # Acc vs rob Pareto runs
-        for rob_col in VAL_ROB:
-            pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
-            if not pareto_df.empty:
-                strength = rob_col.split("/")[-1]
-                fig = plot_accuracy_vs_strength(
-                    pareto_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
-                    title=f"Pareto Runs (Acc vs Rob/{strength}): Accuracy vs Strength (test)",
-                    dpi=DPI,
-                )
-                if fig:
-                    plt.savefig(output_dir / f"pareto_acc_rob_{strength}_acc_vs_strength.png", bbox_inches="tight")
-                    print(f"Saved pareto_acc_rob_{strength}_acc_vs_strength.png")
-                    plt.show()
-
-        # MIA vs rob Pareto runs
-        if MIA_COL:
-            for rob_col in VAL_ROB:
-                pareto_df = get_pareto_runs(df, MIA_COL, rob_col, False, True)
-                if not pareto_df.empty:
-                    strength = rob_col.split("/")[-1]
-                    fig = plot_accuracy_vs_strength(
-                        pareto_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
-                        title=f"Pareto Runs (MIA vs Rob/{strength}): Accuracy vs Strength (test)",
-                        dpi=DPI,
-                    )
-                    if fig:
-                        plt.savefig(output_dir / f"pareto_mia_rob_{strength}_acc_vs_strength.png", bbox_inches="tight")
-                        print(f"Saved pareto_mia_rob_{strength}_acc_vs_strength.png")
-                        plt.show()
+    # Mean +/- std band plot across all runs (test-set performance)
+    if TEST_ACC and TEST_ROB:
+        fig = plot_accuracy_vs_strength_band(
+            df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
+            title=f"Mean Accuracy vs Perturbation Strength — test ({sweep_name})",
+            dpi=DPI,
+        )
+        if fig:
+            plt.savefig(output_dir / "mean_acc_vs_strength_band.png", bbox_inches="tight")
+            print(f"Saved mean_acc_vs_strength_band.png")
+            plt.show()
 
 # %% [markdown]
 # ### 3g. Summary Statistics Table
@@ -638,18 +656,17 @@ if not df.empty:
                     f.write(f"MIA Accuracy: {best_run_export[MIA_COL]:.4f}\n")
 
         # Pareto-optimal runs (selected on validation)
-        if VAL_ACC and VAL_ROB:
+        if VAL_ACC and PARETO_VAL_ROB_COL:
             f.write("\n" + "-" * 60 + "\n")
             f.write("Pareto-Optimal Runs (selected on valid)\n")
             f.write("-" * 60 + "\n\n")
-            for rob_col in VAL_ROB:
-                pareto_df = get_pareto_runs(df, VAL_ACC, rob_col, True, True)
-                if not pareto_df.empty:
-                    strength = rob_col.split("/")[-1]
-                    f.write(f"Valid Acc vs Rob/{strength}:\n")
-                    display_cols = ["run_name", VAL_ACC, rob_col]
-                    display_cols = [c for c in display_cols if c in pareto_df.columns]
-                    f.write(pareto_df[display_cols].to_string(index=False) + "\n\n")
+            pareto_df = get_pareto_runs(df, VAL_ACC, PARETO_VAL_ROB_COL, True, True)
+            if not pareto_df.empty:
+                strength = PARETO_VAL_ROB_COL.split("/")[-1]
+                f.write(f"Valid Acc vs Rob/{strength}:\n")
+                display_cols = ["run_name", VAL_ACC, PARETO_VAL_ROB_COL]
+                display_cols = [c for c in display_cols if c in pareto_df.columns]
+                f.write(pareto_df[display_cols].to_string(index=False) + "\n\n")
 
         f.write("\n" + "=" * 60 + "\n")
 

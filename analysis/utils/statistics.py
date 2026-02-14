@@ -587,6 +587,77 @@ def plot_accuracy_vs_strength(
     return fig
 
 
+def plot_accuracy_vs_strength_band(
+    df: pd.DataFrame,
+    acc_col: str,
+    rob_cols: List[str],
+    n_sigma: float = 2.0,
+    title: str = "Mean Accuracy vs Perturbation Strength",
+    figsize: Tuple[int, int] = (8, 5),
+    dpi: int = 100,
+) -> Optional[plt.Figure]:
+    """Plot mean accuracy +/- n*std as a shaded band across perturbation strengths.
+
+    Args:
+        df: DataFrame where each row is a run.
+        acc_col: Column for clean accuracy (used as eps=0 point).
+        rob_cols: Columns for robustness at different strengths.
+        n_sigma: Number of standard deviations for the band.
+        title: Plot title.
+        figsize: Figure size.
+        dpi: Figure DPI.
+
+    Returns:
+        Matplotlib Figure, or None if insufficient data.
+    """
+    if acc_col not in df.columns or not rob_cols:
+        return None
+
+    # Parse strengths from column names and sort
+    strength_col_pairs = []
+    for col in rob_cols:
+        try:
+            strength = float(col.split("/")[-1])
+            if col in df.columns:
+                strength_col_pairs.append((strength, col))
+        except ValueError:
+            continue
+
+    if not strength_col_pairs:
+        return None
+
+    strength_col_pairs.sort(key=lambda sc: sc[0])
+    strengths = [0.0] + [s for s, _ in strength_col_pairs]
+    cols = [acc_col] + [c for _, c in strength_col_pairs]
+
+    # Compute mean and std at each strength
+    means = []
+    stds = []
+    for col in cols:
+        vals = df[col].dropna()
+        means.append(vals.mean() if len(vals) > 0 else np.nan)
+        stds.append(vals.std() if len(vals) > 1 else 0.0)
+
+    means = np.array(means)
+    stds = np.array(stds)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    ax.plot(strengths, means, "o-", color="steelblue", linewidth=2, markersize=6, label="Mean")
+    ax.fill_between(
+        strengths, means - n_sigma * stds, means + n_sigma * stds,
+        alpha=0.25, color="steelblue", label=f"\u00b1{n_sigma:.0f}\u03c3",
+    )
+
+    ax.set_xlabel("Perturbation Strength (epsilon)")
+    ax.set_ylabel("Accuracy")
+    ax.set_title(title)
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
 def plot_pareto_frontier(
     df: pd.DataFrame,
     metric1: str,
