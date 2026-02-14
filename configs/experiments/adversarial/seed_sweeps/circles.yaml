@@ -15,7 +15,6 @@ experiment: adv_seed_sweep
 
 defaults:
   - override /born: d30D18
-  - override /dataset: 2Dtoy/circles_4k
   - override /trainer/classification: null  # Skip pretraining — use model_path
   - override /trainer/adversarial: pgd_at
   - override /trainer/ganstyle: null
@@ -23,13 +22,20 @@ defaults:
   - override /tracking: online
 
 # Pretrained model path (required — Hydra will error if not provided)
-model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/best_cls_loss_circles_4k_180126.040
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/cls_seed_sweep_circles_4k_10Feb26/2/models/circles_4k_pre_mps_bd18_fourier30_500adamlr0.005669446758159133wd
 
 # Ensure split matches pretraining
 dataset:
-  split_seed: 11
+  name: "circles_4k"
   gen_dow_kwargs:
+    name: "circles_4k"
+    size: 4000
     seed: 25
+    noise: 0.05
+    circ_factor: 0.3
+  split: [0.5, 0.25, 0.25] # train, val, test
+  split_seed: 11
+  overwrite: True
 
 # W&B settings
 tracking:

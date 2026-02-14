@@ -14,7 +14,6 @@ experiment: adv_seed_sweep
 
 defaults:
   - override /born: d30D18
-  - override /dataset: 2Dtoy/spirals_4k
   - override /trainer/classification: null  # Skip pretraining — use model_path
   - override /trainer/adversarial: pgd_at
   - override /trainer/ganstyle: null
@@ -26,9 +25,15 @@ model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/b
 
 # Ensure split matches pretraining
 dataset:
-  split_seed: 11
+  name: "spirals_4k"
   gen_dow_kwargs:
+    name: "spirals_4k"
+    size: 4000
     seed: 25
+    noise: 0.5
+  split: [0.5, 0.25, 0.25] # train, val, test
+  split_seed: 11
+  overwrite: True
 
 # W&B settings
 tracking:
