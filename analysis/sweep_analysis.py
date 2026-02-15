@@ -323,8 +323,10 @@ if not df.empty and TEST_ACC and TEST_ROB and best_run is not None:
 from analysis.utils import plot_accuracy_histogram
 
 if not df.empty and TEST_ACC:
+    # Use only the Pareto robustness strength (the band plot shows all strengths)
+    _hist_rob = [PARETO_TEST_ROB_COL] if PARETO_TEST_ROB_COL else []
     fig = plot_accuracy_histogram(
-        df, acc_col=TEST_ACC, rob_cols=TEST_ROB, mia_col=MIA_COL,
+        df, acc_col=TEST_ACC, rob_cols=_hist_rob, mia_col=MIA_COL,
         title=f"Accuracy Distribution — test ({sweep_name})", dpi=DPI,
     )
     plt.savefig(output_dir / "accuracy_histogram.png", bbox_inches="tight")
@@ -338,8 +340,10 @@ if not df.empty and TEST_ACC:
 from analysis.utils import plot_mean_with_std
 
 if not df.empty and TEST_ACC:
+    # Use only the Pareto robustness strength (the band plot shows all strengths)
+    _bar_rob = [PARETO_TEST_ROB_COL] if PARETO_TEST_ROB_COL else []
     fig = plot_mean_with_std(
-        df, acc_col=TEST_ACC, rob_cols=TEST_ROB, mia_col=MIA_COL,
+        df, acc_col=TEST_ACC, rob_cols=_bar_rob, mia_col=MIA_COL,
         title=f"Mean Accuracies \u00b1 Std Dev — test ({sweep_name})", dpi=DPI,
     )
     if fig:

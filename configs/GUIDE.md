@@ -534,6 +534,11 @@ See `experiments/GUIDE.md` for running HPO experiments.
                   Command line (final overrides)
 ```
 
+**IMPORTANT — Defaults List Ordering:**
+In Hydra, the **last entry for a config group** in the `defaults` list wins. In `config.yaml`, defaults from the main file are appended *after* the experiment's defaults. This means that the non-override entries in `config.yaml` (e.g., `- dataset: 2Dtoy/circles_2k`) will silently override any `- override /dataset: ...` in your experiment config, because the `config.yaml` entry comes last.
+
+For example, this was the root cause of a bug where adversarial training always reverted to the `circles_2k` dataset: the experiment config had `- override /dataset: 2Dtoy/moons_4k`, but `config.yaml` listed `- dataset: 2Dtoy/circles_2k` after it, which took precedence. The fix is to use `override` in `config.yaml` itself (which is already done for Hydra logging entries) or to ensure your experiment config entries are not silently shadowed.
+
 ## Schema ↔ Config Mapping
 
 Every config file corresponds to a dataclass in `src/utils/schemas.py`:
