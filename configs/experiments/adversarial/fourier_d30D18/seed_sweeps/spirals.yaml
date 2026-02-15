@@ -8,7 +8,7 @@
 # pretraining (moons_4k default: 11) to ensure identical train/valid/test splits.
 #
 # Usage:
-#   python -m experiments.adversarial --multirun +experiments=adversarial/seed_sweeps/[dataset_name]
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/seed_sweeps/[dataset_name]
 
 experiment: adv_seed_sweep
 

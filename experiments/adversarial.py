@@ -15,6 +15,9 @@ Usage:
     # Fine-tune a pretrained model
     python -m experiments.adversarial trainer/adversarial=pgd_at model_path=/path/to/model
 
+    # HPO on moons dataset (fourier d30D18 architecture)
+    python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/moons
+
     # Quick test
     python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
 """

@@ -6,7 +6,7 @@ Optionally performs classification pretraining first.
 
 Usage:
     # Train generative model (with classification pretraining)
-    python -m experiments.generative +experiments=generative/default
+    python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
 
     # Quick test
     python -m experiments.generative +experiments=tests/generative tracking.mode=disabled

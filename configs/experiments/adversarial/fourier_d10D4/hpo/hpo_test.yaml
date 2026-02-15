@@ -2,7 +2,7 @@
 # Quick test config for adversarial HPO (validates setup before overnight run)
 #
 # Usage:
-#   python -m experiments.adversarial --multirun +experiments=adversarial/hpo_test
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d10D4/hpo/hpo_test
 
 experiment: adversarial_hpo_test
 

@@ -137,10 +137,10 @@ adversarial_training_mps/
 │   │   └── adversarial/       # Adversarial training configs (PGD-AT, TRADES)
 │   ├── tracking/              # W&B tracking configs
 │   ├── experiments/           # Full experiment configs (override defaults)
-│   │   ├── classification/   # Classification experiments (incl. hpo/, best/, seed_sweeps/)
-│   │   ├── adversarial/      # Adversarial training experiments (incl. hpo/)
-│   │   ├── generative/       # Generative NLL experiments (incl. seed_sweep/)
-│   │   ├── ganstyle/         # GAN-style experiments
+│   │   ├── classification/   # Classification experiments (by architecture, then phase)
+│   │   ├── adversarial/      # Adversarial training experiments (by architecture, then phase)
+│   │   ├── generative/       # Generative NLL experiments (by architecture, then phase)
+│   │   ├── ganstyle/         # GAN-style experiments (by architecture)
 │   │   └── tests/            # Quick test experiments
 │   └── hydra/                 # Hydra-specific configs
 │       └── job_logging/      # Logging configs
@@ -178,7 +178,7 @@ adversarial_training_mps/
 1. Create/modify an experiment config in `configs/experiments/`
 2. Run with `+experiments=<path>` to apply it
 
-**Example experiment config** (`configs/experiments/classification/D18.yaml`):
+**Example experiment config** (`configs/experiments/classification/fourier_d30D18/D18.yaml`):
 ```yaml
 # @package _global_
 experiment: classification_D18
@@ -196,13 +196,13 @@ defaults:
 
 ```bash
 # Run with experiment config (RECOMMENDED)
-python -m experiments.classification +experiments=classification/D18
+python -m experiments.classification +experiments=classification/fourier_d30D18/D18
 
 # Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/default
+python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
 
 # Multirun sweep (define sweep params in experiment config)
-python -m experiments.classification --multirun +experiments=classification/D18_sweep
+python -m experiments.classification --multirun +experiments=classification/fourier_d30D18/D18_sweep
 ```
 
 **Command-line overrides** are useful for quick tests but not for production experiments:
@@ -304,13 +304,13 @@ conda env create -f environment.yml
 conda activate <env_name>
 
 # Run classification experiment (using experiment config)
-python -m experiments.classification +experiments=classification/D18
+python -m experiments.classification +experiments=classification/fourier_d30D18/D18
 
 # Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/default
+python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
 
 # Run generative NLL experiment
-python -m experiments.generative +experiments=generative/hpo
+python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
 
 # Quick test run
 python -m experiments.classification +experiments=tests/classification
@@ -328,7 +328,7 @@ python -m experiments.adversarial trainer/adversarial=pgd_at dataset=2Dtoy/moons
 python -m experiments.adversarial trainer/adversarial=trades dataset=2Dtoy/moons_2k
 
 # Adversarial HPO on moons dataset
-python -m experiments.adversarial --multirun +experiments=adversarial/hpo/moons
+python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/moons
 
 # Check W&B dashboard
 # Visit: https://wandb.ai/<entity>/<project>

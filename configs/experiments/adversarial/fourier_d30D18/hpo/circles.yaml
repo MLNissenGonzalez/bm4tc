@@ -7,21 +7,33 @@
 # IMPORTANT: dataset.split_seed must match the split_seed used during
 # pretraining (moons_4k default: 11) to ensure identical train/valid/test splits.
 #
+# Optimizes: lr, weight_decay, clean_weight
+# Uses strong PGD attack with curriculum training (epsilon: 0.01 -> 0.15)
+#
 # Usage:
-#   python -m experiments.adversarial --multirun +experiments=adversarial/seed_sweeps/[dataset_name]
-experiment: adv_seed_sweep
+#   # Run for circles dataset (100 trials overnight)
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/circles \
+#       model_path=/path/to/pretrained/model.pt
+#
+#   # Quick test (fewer trials)
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/circles \
+#       model_path=/path/to/pretrained/model.pt \
+#       hydra.sweeper.n_trials=5 trainer.adversarial.max_epoch=50
+
+experiment: adv_hpo
 
 defaults:
   - override /born: d30D18
-  - override /dataset: 2Dtoy/moons_4k
+  - override /dataset: 2Dtoy/circles_4k
   - override /trainer/classification: null  # Skip pretraining — use model_path
   - override /trainer/adversarial: pgd_at
   - override /trainer/ganstyle: null
   - override /trainer/generative: null
   - override /tracking: online
+  - override /hydra/sweeper: optuna
 
 # Pretrained model path (required — Hydra will error if not provided)
-model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/best_cls_loss_moons_4k_180126.086
+model_path: /home/ubuntu/adversarial_training_mps/outputs/models/circles
 
 # Ensure split matches pretraining
 dataset:
@@ -31,7 +43,7 @@ dataset:
 
 # W&B settings
 tracking:
-  seed: 71 # needs to be adjusted to match pretraining
+  seed: 88 # needs to be adjusted to match pretraining
   evasion:
     method: "PGD"
     norm: "inf"
@@ -66,7 +78,7 @@ trainer:
         kwargs:
           eps: 1e-8
       strengths: [0.15]
-      num_steps: 10
+      num_steps: 20
       step_size: null
       random_start: true
 
@@ -75,18 +87,31 @@ trainer:
     curriculum_start: 0.01
     curriculum_end_epoch: 300
 
-    save: true
+    save: false
     auto_stack: true
     auto_unbind: false
 
-    # Optimizer pareto optimal:
-    optimizer:
-      kwargs:
-        lr: 0.000082
-        weight_decay: 3.855074e-09
-      clean_weight: 0.342117
-
+# Optuna HPO configuration
 hydra:
   sweeper:
+    # Storage set to null = in-memory (or override on command line)
+    storage: null
+    study_name: "adversarial_hpo_moons"
+
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 15
+
+    direction: minimize  # Minimizing -rob_acc (negated in entry point)
+    n_trials: 100
+    n_jobs: 1
+
+    # Search space (no tracking.seed — fixed since pretraining is not re-run)
     params:
-      tracking.seed: choice(123, 245, 124, 356, 23)
+      # Learning rate (log scale, inspired by classification HPO range)
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-5, 1e-2))
+      # Weight decay (log scale)
+      trainer.adversarial.optimizer.kwargs.weight_decay: tag(log, interval(1e-9, 1e-3))
+      # Clean weight: 0 = pure adversarial, 0.5 = half clean/half adversarial
+      trainer.adversarial.clean_weight: interval(0.0, 0.5)

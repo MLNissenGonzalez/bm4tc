@@ -719,11 +719,11 @@ To avoid re-running classification pretraining for every adversarial HPO trial:
 
 1. **Pretrain once** using the standard classification experiment, save the model.
 2. **Fetch the best config** using `print_classification_config_yaml()` to verify the split seed and born config.
-3. **Run adversarial HPO** using `adversarial/hpo/moons.yaml`, which loads the pretrained model:
+3. **Run adversarial HPO** using `adversarial/fourier_d30D18/hpo/moons.yaml`, which loads the pretrained model:
 
 ```bash
 python -m experiments.adversarial --multirun \
-    +experiments=adversarial/hpo/moons \
+    +experiments=adversarial/fourier_d30D18/hpo/moons \
     model_path=/path/to/pretrained/best_cls_loss_moons_4k.pt
 ```
 
@@ -731,11 +731,11 @@ python -m experiments.adversarial --multirun \
 
 The data split is governed by `dataset.split_seed` (passed as `random_state` to sklearn's `train_test_split`), which is independent of `tracking.seed`. As long as both pretraining and adversarial HPO use the same dataset config (same `split_seed`, `split` ratios, and data file), the train/valid/test split is identical.
 
-The `adversarial/hpo/moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
+The `adversarial/fourier_d30D18/hpo/moons.yaml` config explicitly sets `dataset.split_seed: 11` to match the default in `moons_4k.yaml`.
 
 ### Key Differences from `hpo.yaml`
 
-| Setting | `hpo.yaml` (old) | `adversarial/hpo/moons.yaml` (new) |
+| Setting | `hpo.yaml` (old) | `adversarial/fourier_d30D18/hpo/moons.yaml` (new) |
 |---------|-------------------|------------------------|
 | Classification trainer | `adam500_loss` | `null` (skipped) |
 | Model source | Created from scratch | `model_path` (hardcoded or override) |

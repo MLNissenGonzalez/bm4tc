@@ -91,49 +91,61 @@ configs/
 ├── tracking/                  # W&B and evaluation configs
 │   ├── online.yaml           # Online W&B logging
 │   └── test.yaml             # Test config
-├── experiments/              # Full experiment configs
+├── experiments/              # Full experiment configs (organized by task/architecture/phase)
 │   ├── classification/       # Classification experiments
-│   │   ├── D18.yaml         # Classification with D=18
-│   │   ├── D18_sweep.yaml   # Sweep over architectures
-│   │   ├── best/            # Best configs per dataset
-│   │   │   ├── circles_4k.yaml
-│   │   │   ├── moons_4k.yaml
-│   │   │   └── spirals_4k.yaml
-│   │   ├── hpo/             # HPO experiments
-│   │   │   ├── lr_hpo.yaml
-│   │   │   ├── lrwd_hpo.yaml
-│   │   │   └── sanity_check.yaml
-│   │   └── seed_sweeps/     # Seed sweep experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       └── spirals.yaml
-│   ├── adversarial/          # Adversarial training experiments
-│   │   ├── hpo/             # HPO experiments
-│   │   │   ├── circles.yaml
-│   │   │   ├── moons.yaml
-│   │   │   ├── spirals.yaml
-│   │   │   ├── hpo_test.yaml
-│   │   │   └── best/        # Best HPO configs per dataset
+│   │   ├── fourier_d30D18/  # Fourier embedding, in_dim=30, bond_dim=18
+│   │   │   ├── D18.yaml
+│   │   │   ├── D18_sweep.yaml
+│   │   │   ├── best/        # Best configs per dataset
+│   │   │   │   ├── circles.yaml
+│   │   │   │   ├── moons.yaml
+│   │   │   │   └── spirals.yaml
+│   │   │   ├── hpo/         # HPO experiments
+│   │   │   │   ├── lr_hpo.yaml
+│   │   │   │   ├── lrwd_hpo.yaml
+│   │   │   │   └── sanity_check.yaml
+│   │   │   └── seed_sweeps/ # Seed sweep experiments
 │   │   │       ├── circles.yaml
 │   │   │       ├── moons.yaml
 │   │   │       └── spirals.yaml
-│   │   └── seed_sweeps/     # Seed sweep experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       └── spirals.yaml
+│   │   └── fourier_d4D3/    # Fourier embedding, in_dim=4, bond_dim=3
+│   │       └── hpo/
+│   │           ├── circles.yaml
+│   │           ├── moons.yaml
+│   │           └── spirals.yaml
+│   ├── adversarial/          # Adversarial training experiments
+│   │   ├── fourier_d30D18/  # Fourier embedding, in_dim=30, bond_dim=18
+│   │   │   ├── hpo/         # HPO experiments
+│   │   │   │   ├── circles.yaml
+│   │   │   │   ├── moons.yaml
+│   │   │   │   └── spirals.yaml
+│   │   │   ├── best/        # Best HPO configs per dataset
+│   │   │   │   ├── circles.yaml
+│   │   │   │   ├── moons.yaml
+│   │   │   │   └── spirals.yaml
+│   │   │   └── seed_sweeps/ # Seed sweep experiments
+│   │   │       ├── circles.yaml
+│   │   │       ├── moons.yaml
+│   │   │       └── spirals.yaml
+│   │   └── fourier_d10D4/   # Fourier embedding, in_dim=10, bond_dim=4
+│   │       └── hpo/
+│   │           └── hpo_test.yaml
 │   ├── generative/           # Generative NLL experiments
-│   │   ├── hpo.yaml
-│   │   └── seed_sweep/      # Seed sweep experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       └── spirals.yaml
+│   │   └── fourier_d30D18/
+│   │       ├── hpo/
+│   │       │   └── hpo.yaml
+│   │       └── seed_sweeps/
+│   │           ├── circles.yaml
+│   │           ├── moons.yaml
+│   │           └── spirals.yaml
 │   ├── ganstyle/             # GAN experiments
-│   │   ├── default.yaml
-│   │   ├── hpo.yaml
-│   │   ├── no_retrain.yaml
-│   │   ├── critic_sweep.yaml
-│   │   └── wgan_sweep.yaml
-│   └── tests/                # Test experiments
+│   │   └── fourier_d30D18/
+│   │       ├── critic_sweep.yaml
+│   │       ├── default.yaml
+│   │       ├── hpo.yaml
+│   │       ├── no_retrain.yaml
+│   │       └── wgan_sweep.yaml
+│   └── tests/                # Test experiments (unchanged)
 │       ├── classification.yaml
 │       ├── classification_hpo.yaml
 │       ├── classifications.yaml
@@ -401,10 +413,10 @@ defaults:
 
 The `# @package _global_` directive makes overrides apply at the root level.
 
-**Best configs** (`experiments/classification/best/`):
+**Best configs** (`experiments/classification/fourier_d30D18/best/`):
 Store validated best configurations for each dataset:
 ```yaml
-# experiments/classification/best/moons_4k.yaml
+# experiments/classification/fourier_d30D18/best/moons.yaml
 # @package _global_
 experiment: best_moons_4k
 
@@ -415,7 +427,7 @@ defaults:
   # ... validated hyperparameters
 ```
 
-**Seed sweeps** (`experiments/classification/seed_sweeps/`):
+**Seed sweeps** (`experiments/classification/fourier_d30D18/seed_sweeps/`):
 Run the same config with different random seeds for statistical analysis.
 
 ## Running Experiments
@@ -455,7 +467,7 @@ defaults:
 
 **HPO Experiment Config Example**:
 ```yaml
-# configs/experiments/classification/hpo/lrwd_hpo.yaml
+# configs/experiments/classification/fourier_d30D18/hpo/lrwd_hpo.yaml
 # @package _global_
 experiment: classification_hpo
 
