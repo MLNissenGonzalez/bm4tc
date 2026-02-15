@@ -1,5 +1,5 @@
 # @package _global_
-experiment: cls_size_hpo
+experiment: size_hpo
 
 defaults:
   - override /born: d4D3

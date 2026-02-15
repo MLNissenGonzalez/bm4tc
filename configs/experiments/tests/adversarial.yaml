@@ -1,6 +1,6 @@
 # @package _global_
 # Test configuration for adversarial training experiments
-experiment: adversarial_test
+experiment: test
 
 defaults:
   - override /born: test

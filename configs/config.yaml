@@ -15,11 +15,11 @@ defaults:
 hydra:
   run:
     # For single runs
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y_%I%p%M} 
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m_%H%M}
 
   sweep:
     # For multiruns
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y}
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m}
     subdir: ${hydra.job.num}
 
   output_subdir: .hydra

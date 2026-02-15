@@ -20,7 +20,7 @@
 #       model_path=/path/to/pretrained/model.pt \
 #       hydra.sweeper.n_trials=5 trainer.adversarial.max_epoch=50
 
-experiment: adv_hpo
+experiment: hpo
 
 defaults:
   - override /born: d30D18
@@ -96,7 +96,7 @@ hydra:
   sweeper:
     # Storage set to null = in-memory (or override on command line)
     storage: null
-    study_name: "adversarial_hpo_moons"
+    study_name: "${experiment}_${dataset.name}"
 
     sampler:
       _target_: optuna.samplers.TPESampler

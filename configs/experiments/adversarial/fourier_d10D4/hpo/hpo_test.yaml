@@ -4,7 +4,7 @@
 # Usage:
 #   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d10D4/hpo/hpo_test
 
-experiment: adversarial_hpo_test
+experiment: hpo_test
 
 defaults:
   - override /born: d10D4

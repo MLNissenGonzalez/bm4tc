@@ -87,7 +87,7 @@ Edit the configuration section at the top of `hpo_analysis.py`:
 DATA_SOURCE = "local"  # Change to "wandb" to fetch from Weights & Biases
 
 # --- LOCAL SETTINGS ---
-LOCAL_SWEEP_DIR = "outputs/lrwdbs_hpo_spirals_4k_22Jan26"
+LOCAL_SWEEP_DIR = "outputs/lrwd_hpo_cls_d30D18fourier_spirals_4k_2201"
 
 # --- HPO CONFIGURATION (simplified) ---
 # Training regime: "pre", "gen", "adv", "gan"
@@ -276,12 +276,12 @@ from analysis.utils import fetch_hpo_runs, load_local_hpo_runs, find_local_sweep
 df = fetch_hpo_runs(
     entity="my-entity",
     project="gan_train",
-    experiment_pattern="lrwdbs_hpo",
+    experiment_pattern="lrwd_hpo",
     dataset_name="spirals_4k",  # optional
 )
 
 # From local directory
-df = load_local_hpo_runs("outputs/lrwdbs_hpo_spirals_4k_22Jan26")
+df = load_local_hpo_runs("outputs/lrwd_hpo_cls_d30D18fourier_spirals_4k_2201")
 
 # Find all sweep directories
 sweeps = find_local_sweep_dirs(outputs_dir="outputs", pattern="*hpo*")
@@ -291,7 +291,7 @@ sweeps = find_local_sweep_dirs(outputs_dir="outputs", pattern="*hpo*")
 
 ```python
 # By experiment group (exact)
-filters = {"group": "lrwdbs_hpo_spirals_4k_22Jan26"}
+filters = {"group": "lrwd_hpo_cls_d30D18fourier_spirals_4k_2201"}
 
 # By group pattern (regex)
 filters = {"group": {"$regex": ".*hpo.*"}}
@@ -613,7 +613,7 @@ python -m analysis.sweep_analysis
 ### Configuration
 
 ```python
-SWEEP_DIR = "outputs/adv_seed_sweep_moons_4k_12Feb26"
+SWEEP_DIR = "outputs/seed_sweep_adv_d30D18fourier_moons_4k_1202"
 REGIME = "adv"
 
 # Metric toggles
@@ -667,7 +667,7 @@ from analysis.utils import get_best_classification_config
 config = get_best_classification_config(
     entity="my-entity",
     project="gan_train",
-    group="sanity_check_moons_4k_27Jan25"
+    group="sanity_check_cls_d30D18fourier_moons_4k_2701"
 )
 ```
 
@@ -707,7 +707,7 @@ from analysis.utils import print_classification_config_yaml
 print_classification_config_yaml(
     entity="my-entity",
     project="gan_train",
-    group="sanity_check_moons_4k_27Jan25"
+    group="sanity_check_cls_d30D18fourier_moons_4k_2701"
 )
 ```
 

@@ -181,7 +181,7 @@ adversarial_training_mps/
 **Example experiment config** (`configs/experiments/classification/fourier_d30D18/D18.yaml`):
 ```yaml
 # @package _global_
-experiment: classification_D18
+experiment: default
 
 defaults:
   - override /born: d30D18

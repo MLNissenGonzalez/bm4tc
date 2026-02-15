@@ -153,8 +153,8 @@ run = init_wandb(cfg)
 # Creates W&B run with:
 # - Project: cfg.tracking.project
 # - Entity: cfg.tracking.entity
-# - Group: "{experiment}_{dataset}_{date}"
-# - Name: "job{n}/{total}_D{bond_dim}-d{in_dim}pre{epochs}..."
+# - Group: "{experiment}_{regime}_{archinfo}_{dataset}_{date}"
+# - Name: "{job_num}" (0-indexed)
 ```
 
 ### Logging

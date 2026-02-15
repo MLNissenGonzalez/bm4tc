@@ -1,5 +1,5 @@
 # @package _global_
-experiment: lrwdbs_hpo
+experiment: lrwd_hpo
 
 defaults:
   - override /born: d30D18

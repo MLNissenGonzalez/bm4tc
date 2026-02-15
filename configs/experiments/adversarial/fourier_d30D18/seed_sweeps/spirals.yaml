@@ -10,7 +10,7 @@
 # Usage:
 #   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/seed_sweeps/[dataset_name]
 
-experiment: adv_seed_sweep
+experiment: seed_sweep
 
 defaults:
   - override /born: d30D18

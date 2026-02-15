@@ -18,7 +18,7 @@ This directory contains all Hydra configuration files for experiments.
 ```yaml
 # configs/experiments/classification/my_experiment.yaml
 # @package _global_
-experiment: my_experiment_name
+experiment: my_experiment
 
 defaults:
   - override /born: d30D18
@@ -180,9 +180,9 @@ defaults:
 
 hydra:
   run:
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y_%I%p%M}
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m_%H%M}
   sweep:
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y}
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m}
     subdir: ${hydra.job.num}
   output_subdir: .hydra
 ```
@@ -404,7 +404,7 @@ Experiment configs override defaults. The main experiment directories are:
 ```yaml
 # experiments/tests/classification.yaml
 # @package _global_
-experiment: classification_test
+experiment: test
 
 defaults:
   - override /trainer/ganstyle: null      # Disable GAN training
@@ -418,7 +418,7 @@ Store validated best configurations for each dataset:
 ```yaml
 # experiments/classification/fourier_d30D18/best/moons.yaml
 # @package _global_
-experiment: best_moons_4k
+experiment: best
 
 defaults:
   - override /born: d30D18
@@ -441,7 +441,7 @@ Define sweep parameters in an experiment config:
 ```yaml
 # configs/experiments/classification/D18_sweep.yaml
 # @package _global_
-experiment: D18_sweep
+experiment: lrwd_grid
 
 defaults:
   - override /born: d30D18
@@ -469,7 +469,7 @@ defaults:
 ```yaml
 # configs/experiments/classification/fourier_d30D18/hpo/lrwd_hpo.yaml
 # @package _global_
-experiment: classification_hpo
+experiment: lrwd_hpo
 
 defaults:
   - override /born: d10D4

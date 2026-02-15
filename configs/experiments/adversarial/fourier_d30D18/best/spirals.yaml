@@ -14,7 +14,7 @@
 #   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/best/spirals \
 #       model_path=/path/to/pretrained/model.pt
 
-experiment: adv_hpo
+experiment: best
 
 defaults:
   - override /born: d30D18

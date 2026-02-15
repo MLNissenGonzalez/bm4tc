@@ -87,7 +87,7 @@ Each run creates an output directory:
 
 ```
 outputs/
-└── {experiment}_{dataset}_{date}/
+└── {experiment}_{regime}_{archinfo}_{dataset}_{DDMM_HHMM}/
     ├── .hydra/
     │   ├── config.yaml       # Resolved config (all values)
     │   ├── hydra.yaml        # Hydra settings
@@ -101,14 +101,21 @@ outputs/
 For multirun/sweep:
 ```
 outputs/
-└── {experiment}_{dataset}_{date}/
-    ├── 0/                    # First trial
+└── {experiment}_{regime}_{archinfo}_{dataset}_{DDMM}/
+    ├── 0/                    # First trial (job_num=0)
     │   ├── .hydra/
     │   └── ...
-    ├── 1/                    # Second trial
+    ├── 1/                    # Second trial (job_num=1)
     │   └── ...
     └── multirun.yaml         # Sweep configuration
 ```
+
+**Naming components:**
+- `{experiment}`: purpose-only label (e.g. `hpo`, `best`, `seed_sweep`)
+- `{regime}`: concatenation of active trainer codes (`cls`, `gen`, `adv`, `gan`)
+- `{archinfo}`: `d{in_dim}D{bond_dim}{embedding}` (e.g. `d30D18fourier`)
+- `{dataset}`: dataset name (e.g. `moons_4k`)
+- `{date}`: `DDMM` for multiruns, `DDMM_HHMM` for single runs
 
 ## Useful Commands
 

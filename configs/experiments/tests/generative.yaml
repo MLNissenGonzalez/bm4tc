@@ -1,5 +1,5 @@
 # @package _global_
-experiment: generative_test
+experiment: test
 
 defaults:
   - override /trainer/classification: null

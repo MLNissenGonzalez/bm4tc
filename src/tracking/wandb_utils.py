@@ -1,6 +1,5 @@
 import src.utils.schemas as schemas
 import wandb
-import omegaconf
 import hydra
 from datetime import datetime
 from pathlib import Path
@@ -19,35 +18,32 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     runtime information (e.g. run directory, mode, job index), and generating a
     descriptive group and run name for both single and multi-run jobs.
 
-    Behavior
-    --------
-    - Supports both single and multirun Hydra modes.
-    - Constructs descriptive `group` and `name` fields that encode dataset,
-      experiment name, date, and key model hyperparameters.
-    - Ensures that runs are properly reinitialized when multiple jobs are spawned
-      in the same process (via `reinit="finish_previous"`).
+    Naming Convention
+    -----------------
+    - **Group**: ``{experiment}_{regime}_{archinfo}_{dataset}_{date}``
+      e.g. ``hpo_adv_d30D18fourier_moons_4k_1502`` (multirun)
+      or   ``default_cls_d30D18fourier_moons_4k_1502_1430`` (single run)
+    - **Run name**: ``{job_num}`` (0-indexed), e.g. ``0``, ``1``, ``2``
+    - **regime**: concatenation of trainer codes (cls, gen, adv, gan)
+      for each non-null trainer section.
+    - **archinfo**: ``d{in_dim}D{bond_dim}{embedding}``
 
     Parameters
     ----------
     cfg : schemas.Config
         Full experiment configuration object (Hydra/OmegaConf structured config).
         Must include the following nested sections:
-        - `cfg.experiment` (experiment identifier)
-        - `cfg.dataset.name`
-        - `cfg.model.mps.init_kwargs` (contains `bond_dim`, `in_dim`)
-        - `cfg.pretrain.mps.max_epoch`
-        - `cfg.gantrain.max_epoch`
-        - `cfg.wandb` (contains `project`, `entity`, `mode`)
+        - ``cfg.experiment`` (purpose-only label, e.g. "hpo", "best", "seed_sweep")
+        - ``cfg.dataset.name``
+        - ``cfg.born.init_kwargs`` (contains ``bond_dim``, ``in_dim``)
+        - ``cfg.born.embedding``
+        - ``cfg.tracking`` (contains ``project``, ``entity``, ``mode``)
+        - ``cfg.trainer.*`` (classification, generative, adversarial, ganstyle)
 
     Returns
     -------
     wandb.Run
         The active wandb run instance.
-
-    Raises
-    ------
-    TypeError
-        If any Hydra sweeper parameter group has an unexpected type.
     """
 
     # Convert only loggable types
@@ -56,44 +52,26 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     # Job Info
     runtime_cfg = hydra.core.hydra_config.HydraConfig.get()
     run_dir = Path(runtime_cfg.runtime.output_dir)
-    job_num = int(runtime_cfg.job.get("num", 0)) + 1
+    job_num = int(runtime_cfg.job.get("num", 0))
 
-    # Job Mode
+    # Regime
+    regime_parts = []
+    for key, code in [("trainer.classification", "cls"), ("trainer.generative", "gen"),
+                       ("trainer.adversarial", "adv"), ("trainer.ganstyle", "gan")]:
+        if OmegaConf.select(cfg, key) is not None:
+            regime_parts.append(code)
+    regime = "".join(regime_parts) or "none"
+
+    # Architecture
+    archinfo = f"d{cfg.born.init_kwargs.in_dim}D{cfg.born.init_kwargs.bond_dim}{cfg.born.embedding}"
+
+    # Date
     mode = runtime_cfg.mode.value
-    total_num = 1
-    if mode == 1:  # single run
-        now = datetime.now().strftime("%d%b%y_%I%p%M")
-    else:  # multirun
-        now = datetime.now().strftime("%d%b%y")
-        params = runtime_cfg.sweeper.params
-        for group in params.values():
-            # handle both list and string forms
-            if isinstance(group, (list, tuple, omegaconf.ListConfig)):
-                options = group
-            elif isinstance(group, str):
-                options = group.split(",")
-            else:
-                raise TypeError(
-                    f"Unexpected sweeper param type: {type(group)} ({group})")
-            total_num *= len(options)
+    now = datetime.now()
+    date_str = now.strftime("%d%m_%H%M") if mode == 1 else now.strftime("%d%m")
 
-    # Group (folder) and run name
-    group_key = f"{cfg.experiment}_{cfg.dataset.name}_{now}"
-    job_num_name = f"job{job_num}/{total_num}"
-    born_name = f"_D{cfg.born.init_kwargs.bond_dim}-d{cfg.born.init_kwargs.in_dim}"
-    trainer_name = ""
-    
-    if OmegaConf.select(cfg, "trainer.classification.max_epoch") is not None:
-      trainer_name = trainer_name + f"pre{cfg.trainer.classification.max_epoch}"
-    if OmegaConf.select(cfg, "trainer.ganstyle.max_epoch") is not None:
-        trainer_name = trainer_name + f"gan{cfg.trainer.ganstyle.max_epoch}"
-    if OmegaConf.select(cfg, "trainer.generative.max_epoch") is not None:
-        trainer_name = trainer_name + f"gen{cfg.trainer.generative.max_epoch}"
-    if OmegaConf.select(cfg, "trainer.adversarial.max_epoch") is not None:
-        trainer_name = trainer_name + f"adv{cfg.trainer.adversarial.max_epoch}"
-
-
-    run_name = job_num_name + born_name + trainer_name
+    group_key = f"{cfg.experiment}_{regime}_{archinfo}_{cfg.dataset.name}_{date_str}"
+    run_name = str(job_num)
 
     # Initializing the wandb object
     run = wandb.init(

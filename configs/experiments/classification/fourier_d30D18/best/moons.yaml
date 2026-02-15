@@ -1,5 +1,5 @@
 # @package _global_
-experiment: best_moons
+experiment: best
 
 defaults:
   - override /born: d30D18        

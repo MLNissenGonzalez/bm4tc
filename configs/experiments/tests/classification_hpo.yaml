@@ -1,5 +1,5 @@
 # @package _global_
-experiment: test_classification_hpo
+experiment: test_hpo
 
 defaults:
   - override /born: d10D4

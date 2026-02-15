@@ -1,5 +1,5 @@
 # @package _global_
-experiment: D18_sweep
+experiment: lrwd_grid
 
 defaults:
   - override /born: d30D18
