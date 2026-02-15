@@ -47,7 +47,7 @@ import torch
 # =============================================================================
 
 # Path to sweep directory (contains numbered sub-dirs with .hydra/config.yaml)
-SWEEP_DIR = "outputs/adv_seed_sweep_moons_4k_12Feb26"
+SWEEP_DIR = "outputs/adv_seed_sweep_spirals_4k_14Feb26"
 
 # Training regime: "pre", "gen", "adv", "gan"
 REGIME = "adv"

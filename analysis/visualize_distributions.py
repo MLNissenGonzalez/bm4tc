@@ -115,7 +115,7 @@ def compute_conditional_probs(bm, grid_points, device, batch_size=10000):
     return torch.cat(all_probs, dim=0)
 
 
-def compute_joint_probs(bm, grid_points, device, normalize=True, batch_size=10000):
+def compute_joint_probs(bm: BornMachine, grid_points, device, normalize=True, batch_size=10000):
     """Compute p(x,c) = |psi(x,c)|^2 [/ Z] over grid points.
 
     For each class c, computes the unnormalized joint probability using the
