@@ -280,15 +280,19 @@ class PerformanceEvaluator:
 
         self.metrics = {}
         self.update_freq = 1
-        # Only metrics in the config get initialized.
+        # Only metrics with a truthy freq get initialized.
+        # Setting a metric to null/0 in an experiment config disables it
+        # (useful to counteract Hydra's deep-merge of dict values).
         for metric_name, freq in train_cfg.metrics.items():
+            if not freq:
+                continue
             metric : BaseMetric = MetricFactory.create(
                 metric_name=metric_name, freq=freq,
                 cfg=cfg, datahandler=datahandler, device=device
             )
             self.metrics[metric_name] = metric
             stop_crit = getattr(train_cfg, 'stop_crit', None)
-            if stop_crit and metric_name == stop_crit: 
+            if stop_crit and metric_name == stop_crit:
                 metric.freq = 1
             self.update_freq = max(self.update_freq, freq)
             

@@ -551,6 +551,13 @@ In Hydra, the **last entry for a config group** in the `defaults` list wins. In 
 
 For example, this was the root cause of a bug where adversarial training always reverted to the `circles_2k` dataset: the experiment config had `- override /dataset: 2Dtoy/moons_4k`, but `config.yaml` listed `- dataset: 2Dtoy/circles_2k` after it, which took precedence. The fix is to use `override` in `config.yaml` itself (which is already done for Hydra logging entries) or to ensure your experiment config entries are not silently shadowed.
 
+**IMPORTANT — Dict Deep-Merge:**
+Hydra/OmegaConf **deep-merges** dicts rather than replacing them. If the base trainer config has `metrics: {"clsloss": 1, "acc": 1, "rob": 1}` and your experiment config sets `metrics: {"clsloss": 1}`, the result is `{"clsloss": 1, "acc": 1, "rob": 1}` — the keys from the base survive. To disable unwanted metrics, explicitly set them to `null`:
+```yaml
+metrics: {"clsloss": 1, "acc": null, "rob": null}
+```
+The `PerformanceEvaluator` skips metrics with null/falsy freq values.
+
 ## Schema ↔ Config Mapping
 
 Every config file corresponds to a dataclass in `src/utils/schemas.py`:

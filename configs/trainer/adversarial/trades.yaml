@@ -2,7 +2,7 @@
 # Loss = L(x, y) + beta * KL(p(x) || p(x_adv))
 # Better accuracy/robustness trade-off than PGD-AT
 max_epoch: 100
-batch_size: 64
+batch_size: 256
 method: "trades"
 
 optimizer:

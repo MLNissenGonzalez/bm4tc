@@ -28,7 +28,7 @@ dataset:
 trainer:
   generative:
     max_epoch: 500
-    batch_size: 128
+    batch_size: 256
     optimizer:
       name: "adam"
       kwargs:

@@ -1,5 +1,5 @@
 max_epoch: 500
-batch_size: 64 # samples loaded per categorisation step for all classes involved
+batch_size: 256 # samples loaded per categorisation step for all classes involved
 criterion: 
   name: "negative log-likelihood"
   kwargs:

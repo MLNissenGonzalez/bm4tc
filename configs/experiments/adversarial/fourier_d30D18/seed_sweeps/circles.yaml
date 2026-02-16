@@ -55,7 +55,7 @@ tracking:
 trainer:
   adversarial:
     max_epoch: 500
-    batch_size: 64
+    batch_size: 256
     method: "pgd_at"
     stop_crit: "rob"
     patience: 200

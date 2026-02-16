@@ -1,7 +1,7 @@
 # PGD Adversarial Training (Madry et al.)
 # Trains on adversarial examples: Loss = L(x_adv, y)
 max_epoch: 100
-batch_size: 64
+batch_size: 256
 method: "pgd_at"
 
 optimizer:
