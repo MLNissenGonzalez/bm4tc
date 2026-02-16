@@ -8,28 +8,30 @@ import tensorkrowch as tk
 from typing import * 
 
 
-def legendre_embedding(data: torch.Tensor, degree: int = 2, axis: int = -1):
+def legendre_embedding(data: torch.Tensor, dim: int = 2, axis: int = -1):
     """
     Compute Legendre polynomial embedding of input data.
 
-    Generates Legendre polynomials up to the specified degree for each
-    element along the given axis, stacking them along the same axis.
+    Generates Legendre polynomials P_0 through P_{dim-1} for each element,
+    producing exactly ``dim`` components to match the MPS physical dimension.
+    This follows the same convention as tensorkrowch's fourier/poly embeddings,
+    where the second argument is the output dimension, not the degree.
 
     Parameters
     ----------
     data : torch.Tensor
         Input tensor of arbitrary shape, e.g., (batch_size, n_features).
         Each element is a scalar value in [-1, 1] (typical for Legendre polynomials).
-    degree : int, default=2
-        Maximum degree of Legendre polynomials.
+    dim : int, default=2
+        Number of embedding components (= max degree + 1).
     axis : int, default=-1
         Axis along which to stack polynomial values. Can be negative.
 
     Returns
     -------
     torch.Tensor
-        Tensor of shape `(degree+1, ...)` where polynomials are stacked along
-        `axis`. Output dtype matches input `data.dtype`.
+        Tensor with ``dim`` polynomials stacked along ``axis``.
+        Output dtype matches input ``data.dtype``.
 
     Notes
     -----
@@ -43,10 +45,10 @@ def legendre_embedding(data: torch.Tensor, degree: int = 2, axis: int = -1):
         raise TypeError('`data` should be torch.Tensor type')
 
     polies = [torch.ones_like(data), data]
-    for i in range(2, degree + 1):
+    for i in range(2, dim):
         p_i = ((2*i-1) * data * polies[-1] - (i-1)*polies[-2]) / i
         polies.append(p_i)
-    return torch.stack(polies, dim=axis)
+    return torch.stack(polies[:dim], dim=axis)
 
 
 _EMBEDDING_MAP = {
