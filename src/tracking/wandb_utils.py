@@ -123,7 +123,7 @@ def log_dataset_viz(datahandler):
 
     all_data = torch.cat([datahandler.data[s] for s in ("train", "valid", "test")], dim=0)
     all_labels = torch.cat([datahandler.labels[s] for s in ("train", "valid", "test")])
-    ax = visualise_samples(all_data, all_labels)
+    ax = visualise_samples(all_data, all_labels, input_range=datahandler.input_range)
     fig = ax.figure
     wandb.log({"dataset/all": wandb.Image(fig)})
     plt.close(fig)

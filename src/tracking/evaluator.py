@@ -163,7 +163,7 @@ class VisualizationMetric(BaseMetric):
 
     def evaluate(self, bornmachine: BornMachine, split, context):
         self._generate(bornmachine, context)
-        ax = visualise_samples(context["synths"])
+        ax = visualise_samples(context["synths"], input_range=self.datahandler.input_range)
         return ax
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------

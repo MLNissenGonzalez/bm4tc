@@ -583,7 +583,7 @@ if not df.empty and best_run is not None:
             cfg = load_run_config(best_run_path)
             with torch.no_grad():
                 synths = bm.sample(cfg=cfg.tracking.sampling)
-            ax = visualise_samples(synths)
+            ax = visualise_samples(synths, input_range=bm.input_range)
             if ax is not None:
                 fig = ax.get_figure()
                 fig.savefig(output_dir / "best_run_samples.png", bbox_inches="tight", dpi=DPI)
