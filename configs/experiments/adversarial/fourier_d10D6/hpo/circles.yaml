@@ -40,7 +40,7 @@ trainer:
     stop_crit: "rob"
     patience: 300
     watch_freq: 10000
-    metrics: {"rob": 1, "clsloss": null, "acc": null}
+    metrics: {"rob": 1, "acc": 1}
 
     evasion:
       method: "PGD"

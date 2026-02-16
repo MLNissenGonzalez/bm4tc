@@ -40,7 +40,7 @@ trainer:
       name: "nll"
       kwargs:
         eps: 1e-8
-    metrics: {"genloss": 1}
+    metrics: {"genloss": 1, "acc": 1}
 
 hydra:
   sweeper:

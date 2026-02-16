@@ -33,7 +33,7 @@ trainer:
       name: "negative log-likelihood"
       kwargs:
         eps: 1e-8
-    metrics: {"clsloss": 1}
+    metrics: {"clsloss": 1, "acc": 1}
 
 hydra:
   sweeper:
