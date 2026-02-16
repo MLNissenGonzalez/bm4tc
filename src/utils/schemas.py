@@ -70,6 +70,32 @@ class EvasionConfig:
     step_size: float | None = None  # defaults to 2.5 * strength / num_steps if None
     random_start: bool = True
 
+@dataclass
+class PurificationConfig:
+    """Configuration for likelihood-based purification of adversarial examples.
+
+    Parameters
+    ----------
+    norm : int | str
+        Lp norm for perturbation ball ("inf" or int >= 1).
+    num_steps : int
+        Number of gradient descent iterations for purification.
+    step_size : float | None
+        Step size per iteration. If None, defaults to 2.5 * radius / num_steps.
+    random_start : bool
+        Whether to start from random point within the radius ball.
+    radii : list
+        List of purification radii to evaluate (like strengths in EvasionConfig).
+    eps : float
+        Clamping floor for numerical stability in log p(x).
+    """
+    norm: int | str = "inf"
+    num_steps: int = 20
+    step_size: float | None = None
+    random_start: bool = False
+    radii: list = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    eps: float = 1e-12
+
 
 # --- Data config ---
 @dataclass

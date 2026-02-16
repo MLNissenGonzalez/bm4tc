@@ -154,13 +154,14 @@ adversarial_training_mps/
 │   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
 │   ├── tracking/             # Evaluation & logging
 │   ├── data/                 # Data loading & preprocessing
-│   └── utils/                # Utilities, schemas, embeddings, criterions
+│   └── utils/                # Utilities, schemas, embeddings, criterions, purification
 ├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
 │   ├── mia_analysis.py      # MIA privacy analysis notebook
+│   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
 │   ├── visualize_distributions.py  # Distribution visualization
 │   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
-│   └── utils/               # W&B API utilities, MIA utils, resolver
+│   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -269,6 +270,9 @@ embedding: "fourier"
 | Add new dataset | `src/data/gen_n_load.py` |
 | Configure experiments | `configs/` directory |
 | Add adversarial attack | `src/utils/evasion/minimal.py` |
+| Purify adversarial examples | `src/utils/purification/minimal.py` |
+| Compute marginal p(x) | `src/models/born.py` (`marginal_log_probability`) |
+| UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
 | Analyze HPO results | `analysis/hpo_analysis.py` |
 | Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
@@ -279,6 +283,7 @@ embedding: "fourier"
 3. **`BornGenerator._single_class`** (`src/models/generator/generator.py:143`) — Sequential sampling
 4. **`os_secant`** (`src/models/generator/differential_sampling.py:46`) — Differentiable sampling
 5. **`Trainer.train`** (`src/trainer/classification.py:235`) — Main training loop
+6. **`BornMachine.marginal_log_probability`** (`src/models/born.py`) — Marginal p(x) for UQ
 
 ## Known Issues & Gotchas
 
@@ -292,9 +297,10 @@ embedding: "fourier"
 
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
 2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
-3. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
-4. **MPS as discriminator backbone**: Using MPS features as input to critic
-5. **More datasets**: Univariate time series dataset planned (`configs/dataset/timeseries/`)
+3. ~~**Uncertainty quantification**: Marginal p(x) for detection and purification~~ — **DONE**: `src/models/born.py` (marginal_log_probability), `src/utils/purification/` (LikelihoodPurification), `analysis/utils/uq.py` (UQEvaluation)
+4. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
+5. **MPS as discriminator backbone**: Using MPS features as input to critic
+6. **More datasets**: Univariate time series dataset planned (`configs/dataset/timeseries/`)
 
 ## Quick Reference: Common Commands
 

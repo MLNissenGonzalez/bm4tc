@@ -61,6 +61,25 @@ def sync_tensors(self, after: str, verify: bool=False):
     """
 ```
 
+**Uncertainty Quantification Methods:**
+
+| Method | Input | Output | Description |
+|--------|-------|--------|-------------|
+| `cache_log_Z()` | — | `float` | Compute and cache log partition function |
+| `marginal_log_probability(data, eps)` | `(batch, D)` | `(batch,)` | Log marginal p(x) = log(sum_c |psi(x,c)|^2) - log(Z) |
+
+**How `marginal_log_probability` works:**
+```python
+embs = self.classifier.embed(data)             # (batch, D, in_dim)
+amplitudes = self.classifier.forward(data=embs) # (batch, num_classes) — single contraction
+unnorm_px = torch.square(amplitudes).sum(dim=-1)  # (batch,) — sum_c |psi(x,c)|^2
+log_px = log(unnorm_px) - log_Z                   # normalized log p(x)
+```
+
+**Differentiability:** Differentiable w.r.t. input data (for purification) but NOT w.r.t. model parameters (`_log_Z` is a detached constant). This is correct for purification (which optimizes over inputs, not model params).
+
+**log Z caching:** `_log_Z` is computed once via `generator.log_partition_function()` and stored as a Python float. It is persisted in checkpoints via `save()`/`load()`. Call `cache_log_Z()` to recompute after model parameter changes.
+
 ### BornClassifier (`classifier.py`)
 
 Extends `tensorkrowch.models.MPSLayer` for classification using the Born rule.
@@ -367,6 +386,52 @@ bm.sync_tensors(after="gan", verify=True)
    loss.backward()  # Should not error
    assert bm.generator.tensors[0].grad is not None
    ```
+
+## Debugging: Uncertainty Quantification
+
+### Verify marginal_log_probability
+```python
+# 1. Verify marginal_log_probability produces valid values
+bm = BornMachine.load("path/to/checkpoint.pt")
+bm.to(device)
+bm.cache_log_Z()
+print(f"log Z = {bm._log_Z}")  # Should be a finite positive number
+
+# Load test data
+data = datahandler.data["test"].to(device)
+log_px = bm.marginal_log_probability(data)
+print(f"log p(x) range: [{log_px.min():.2f}, {log_px.max():.2f}]")
+assert torch.isfinite(log_px).all(), "Non-finite log probabilities detected"
+assert (log_px <= 0).all(), "Log probabilities should be <= 0 (probabilities <= 1)"
+
+# 2. Verify partition function consistency
+# On a fine grid over input_range, sum of p(x) * dx should approximate 1.0
+grid = torch.linspace(*bm.input_range, 200, device=device)
+grid_2d = torch.stack(torch.meshgrid(grid, grid, indexing='ij'), dim=-1).reshape(-1, 2)
+log_px_grid = bm.marginal_log_probability(grid_2d)
+dx = (bm.input_range[1] - bm.input_range[0]) / 200
+integral = torch.exp(log_px_grid).sum() * dx**2
+print(f"Integral of p(x) over grid: {integral:.4f}")  # Should be close to 1.0
+
+# 3. Verify gradient flow for purification
+data_sample = data[:5].clone().requires_grad_(True)
+log_px = bm.marginal_log_probability(data_sample)
+(-log_px.sum()).backward()
+assert data_sample.grad is not None, "No gradient on input data"
+print(f"Gradient norm: {data_sample.grad.norm():.4e}")  # Should be non-zero
+
+# 4. Verify purification moves points toward higher likelihood
+from src.utils.purification.minimal import LikelihoodPurification
+purifier = LikelihoodPurification(norm="inf", num_steps=20)
+# Add noise to create low-likelihood inputs
+noisy = data[:10] + 0.1 * torch.randn_like(data[:10])
+noisy = noisy.clamp(*bm.input_range)
+log_px_before = bm.marginal_log_probability(noisy).detach()
+purified, log_px_after = purifier.purify(bm, noisy, radius=0.15, device=device)
+print(f"Mean log p(x) before: {log_px_before.mean():.2f}")
+print(f"Mean log p(x) after:  {log_px_after.mean():.2f}")
+assert (log_px_after >= log_px_before - 1e-6).all(), "Purification should not decrease likelihood"
+```
 
 ## File-by-File Reference
 

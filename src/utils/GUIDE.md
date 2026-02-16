@@ -16,6 +16,9 @@ src/utils/
 └── evasion/
     ├── __init__.py
     └── minimal.py        # Adversarial attack implementations (FGM, PGD)
+└── purification/
+    ├── __init__.py
+    └── minimal.py        # Likelihood-based purification (LikelihoodPurification)
 ```
 
 ## schemas.py — Configuration Schemas
@@ -348,6 +351,62 @@ _METHOD_MAP = {
 
 3. Update `EvasionConfig` in `schemas.py` if needed
 
+## purification/minimal.py — Likelihood Purification
+
+Implements likelihood-based purification of adversarial examples using the Born Machine's marginal probability p(x).
+
+### LikelihoodPurification
+
+```python
+from src.utils.purification.minimal import LikelihoodPurification
+
+purifier = LikelihoodPurification(
+    norm="inf",           # L-infinity norm (also supports p-norms)
+    num_steps=20,         # Gradient descent iterations
+    step_size=None,       # Auto: 2.5 * radius / num_steps
+    random_start=False,   # Start from original input
+    eps=1e-12,            # Log clamping floor
+)
+
+purified, log_px = purifier.purify(
+    born=bornmachine,
+    data=adversarial_data,   # Inputs to purify
+    radius=0.15,              # Maximum perturbation radius
+    device=device
+)
+# purified: (batch, data_dim) — purified inputs
+# log_px: (batch,) — log p(x) of purified inputs
+```
+
+**Purification Algorithm:**
+```
+1. Initialize perturbation δ (zero or random within Lp ball)
+2. For each step:
+   a. Compute NLL = -mean(log p(x + δ)) via born.marginal_log_probability()
+   b. Compute gradient of NLL w.r.t. δ
+   c. Update: δ = δ - step_size * normalized_gradient  (descent, not ascent!)
+   d. Project: δ = clip(δ, -radius, radius)  [for L∞]
+   e. Clamp: x + δ to input_range
+3. Return purified = x + δ (clamped), log p(purified)
+```
+
+**Key difference from PGD:** PGD does gradient **ascent** on classification loss to attack; purification does gradient **descent** on NLL to defend (moves toward higher likelihood).
+
+### PurificationConfig (schemas.py)
+
+```python
+from src.utils.schemas import PurificationConfig
+
+cfg = PurificationConfig(
+    norm="inf",
+    num_steps=20,
+    step_size=None,
+    random_start=False,
+    radii=[0.1, 0.2, 0.3],  # Multiple radii for evaluation
+    eps=1e-12,
+)
+```
+
 ## Key Patterns
 
 ### Adding a New Embedding
@@ -431,3 +490,4 @@ _GENERATIVE_LOSSES = {
 | `criterions.py` | ~163 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
 | `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
 | `evasion/minimal.py` | ~291 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |
+| `purification/minimal.py` | ~130 | `LikelihoodPurification`, `normalizing` |

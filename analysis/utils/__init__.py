@@ -23,6 +23,15 @@ from .mia import (
     MIAEvaluation,
 )
 
+from .uq import (
+    UQConfig,
+    UQResults,
+    UQEvaluation,
+    PurificationMetrics,
+    compute_thresholds,
+    compute_log_px,
+)
+
 from .mia_utils import (
     load_run_config,
     load_run_config_from_wandb,
@@ -93,6 +102,13 @@ __all__ = [
     "MIAFeatureExtractor",
     "MIAResults",
     "MIAEvaluation",
+    # UQ evaluation
+    "UQConfig",
+    "UQResults",
+    "UQEvaluation",
+    "PurificationMetrics",
+    "compute_thresholds",
+    "compute_log_px",
     # Config loading utilities
     "load_run_config",
     "load_run_config_from_wandb",

@@ -59,6 +59,7 @@ COMPUTE_MIA = True
 COMPUTE_CLS_LOSS = True
 COMPUTE_GEN_LOSS = False
 COMPUTE_FID = True
+COMPUTE_UQ = False  # Uncertainty quantification (detection + purification)
 
 # --- EVASION OVERRIDE ---
 # Set to a dict to override evasion config across ALL runs for consistency.
@@ -87,6 +88,17 @@ MIA_FEATURES = {
     "loss": True,
     "margin": True,
     "modified_entropy": True,
+}
+
+# --- UQ SETTINGS (used if COMPUTE_UQ == True) ---
+UQ_CONFIG = {
+    "norm": "inf",
+    "num_steps": 20,
+    "radii": [0.1, 0.2, 0.3],
+    "percentiles": [1, 5, 10, 20],
+    "attack_method": "PGD",
+    "attack_strengths": [0.1, 0.2, 0.3],
+    "attack_num_steps": 20,
 }
 
 # --- EVALUATION SETTINGS ---
@@ -151,10 +163,12 @@ eval_cfg = EvalConfig(
     compute_cls_loss=COMPUTE_CLS_LOSS,
     compute_gen_loss=COMPUTE_GEN_LOSS,
     compute_fid=COMPUTE_FID,
+    compute_uq=COMPUTE_UQ,
     splits=EVAL_SPLITS,
     evasion_override=EVASION_OVERRIDE,
     sampling_override=SAMPLING_OVERRIDE,
     mia_features=MIA_FEATURES,
+    uq_config=UQ_CONFIG if COMPUTE_UQ else None,
     device=DEVICE,
 )
 

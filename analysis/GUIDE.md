@@ -47,6 +47,7 @@ analysis/
 ├── sweep_analysis.py        # Post-hoc sweep analysis notebook (loads models, recomputes metrics)
 ├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
 ├── mia_analysis.py          # MIA privacy analysis notebook
+├── uq_analysis.py           # UQ analysis notebook (detection + purification)
 ├── visualize_distributions.py  # Distribution visualization notebook
 ├── config_fetcher.ipynb     # Jupyter notebook for fetching best configs
 ├── outputs/                 # Generated analysis outputs (git-ignored)
@@ -64,6 +65,12 @@ analysis/
 │   │   ├── threshold_attacks.png
 │   │   ├── feature_distributions.png
 │   │   └── mia_summary.txt
+│   ├── uq/                  # UQ analysis outputs
+│   │   ├── log_likelihood_histogram.png
+│   │   ├── detection_rate_vs_threshold.png
+│   │   ├── purification_accuracy_heatmap.png
+│   │   ├── purification_before_after.png
+│   │   └── uq_summary.txt
 │   └── distributions/      # Distribution visualization outputs
 │       └── distributions.png
 └── utils/
@@ -73,6 +80,7 @@ analysis/
     ├── statistics.py        # Shared stats & visualization functions
     ├── evaluate.py          # Post-hoc per-model evaluation
     ├── mia.py               # MIA evaluation classes
+    ├── uq.py                # UQ evaluation classes
     └── mia_utils.py         # Config loading utilities
 ```
 
@@ -490,6 +498,139 @@ results = mia_eval.evaluate(
 print(f"Attack AUC-ROC: {results.auc_roc}")
 print(f"Privacy: {results.privacy_assessment()}")
 print(results.summary())
+```
+
+---
+
+## Uncertainty Quantification (UQ) Analysis
+
+The analysis module includes **UQ evaluation** for assessing adversarial defense using the Born Machine's marginal likelihood p(x).
+
+### What is UQ for Born Machines?
+
+Born Machines learn the joint distribution p(x,c), enabling computation of the marginal input likelihood p(x) = sum_c p(x,c). This provides two defense mechanisms:
+
+1. **Detection**: Reject inputs whose log p(x) falls below a threshold (calibrated from clean data percentiles)
+2. **Purification**: For rejected inputs, gradient-descend on NLL within a perturbation ball to find a nearby high-likelihood point, then classify that instead
+
+### Running UQ Analysis
+
+**In VS Code** (recommended):
+```
+1. Open analysis/uq_analysis.py
+2. Edit RUN_DIR to point to your trained model's output directory
+3. Use "Run Cell" (Ctrl+Enter) to execute each #%% cell interactively
+```
+
+**As a script**:
+```bash
+cd /path/to/project
+python -m analysis.uq_analysis
+```
+
+### Configuration
+
+Edit the configuration section in `uq_analysis.py`:
+
+```python
+# Data source: "local" or "wandb"
+DATA_SOURCE = "local"
+RUN_DIR = "outputs/classification_example"
+
+# Purification parameters
+PURIFICATION_NORM = "inf"
+PURIFICATION_NUM_STEPS = 20
+PURIFICATION_RADII = [0.05, 0.1, 0.15, 0.2, 0.3]
+
+# Detection thresholds (percentiles of clean log p(x))
+THRESHOLD_PERCENTILES = [1, 5, 10, 20]
+
+# Attack parameters
+ATTACK_METHOD = "PGD"
+ATTACK_STRENGTHS = [0.1, 0.2, 0.3]
+ATTACK_NUM_STEPS = 20
+```
+
+### Output Files
+
+After running UQ analysis, check `analysis/outputs/uq/`:
+
+| File | Description |
+|------|-------------|
+| `log_likelihood_histogram.png` | Clean vs adversarial log p(x) distributions with threshold lines |
+| `detection_rate_vs_threshold.png` | Detection rate curves for each attack epsilon |
+| `purification_accuracy_heatmap.png` | Accuracy heatmap: rows=epsilon, cols=radius |
+| `purification_before_after.png` | Mean log p(x) before/after purification |
+| `uq_summary.txt` | Text summary with all metrics |
+
+### Sweep Integration
+
+UQ evaluation can be included in sweep analysis by setting `COMPUTE_UQ = True` in `sweep_analysis.py`:
+
+```python
+COMPUTE_UQ = True
+UQ_CONFIG = {
+    "norm": "inf",
+    "num_steps": 20,
+    "radii": [0.1, 0.2, 0.3],
+    "percentiles": [1, 5, 10, 20],
+    "attack_method": "PGD",
+    "attack_strengths": [0.1, 0.2, 0.3],
+}
+```
+
+### API Reference
+
+```python
+from analysis.utils import UQEvaluation, UQConfig
+
+uq_config = UQConfig(
+    norm="inf",
+    num_steps=20,
+    radii=[0.1, 0.2, 0.3],
+    percentiles=[1, 5, 10, 20],
+    attack_method="PGD",
+    attack_strengths=[0.1, 0.2, 0.3],
+)
+
+uq_eval = UQEvaluation(config=uq_config)
+results = uq_eval.evaluate(bornmachine, test_loader, device)
+
+# Access results
+print(f"Clean accuracy: {results.clean_accuracy}")
+print(f"Detection rates: {results.detection_rates}")
+print(results.summary())
+```
+
+### Debugging: UQ Pipeline
+
+```python
+# 1. Verify log p(x) computation
+bm = BornMachine.load("path/to/checkpoint.pt")
+bm.to(device)
+bm.cache_log_Z()
+print(f"log Z = {bm._log_Z}")
+
+data = datahandler.data["test"].to(device)
+log_px = bm.marginal_log_probability(data)
+print(f"log p(x) range: [{log_px.min():.2f}, {log_px.max():.2f}]")
+assert torch.isfinite(log_px).all()
+assert (log_px <= 0).all()
+
+# 2. Verify purification improves likelihood
+from src.utils.purification.minimal import LikelihoodPurification
+purifier = LikelihoodPurification(norm="inf", num_steps=20)
+noisy = data[:10] + 0.1 * torch.randn_like(data[:10])
+noisy = noisy.clamp(*bm.input_range)
+log_px_before = bm.marginal_log_probability(noisy).detach()
+purified, log_px_after = purifier.purify(bm, noisy, radius=0.15, device=device)
+print(f"Mean log p(x) before: {log_px_before.mean():.2f}")
+print(f"Mean log p(x) after:  {log_px_after.mean():.2f}")
+
+# 3. Verify detection thresholds
+from analysis.utils import compute_thresholds
+thresholds, clean_log_px = compute_thresholds(bm, test_loader, [1, 5, 10], device)
+print(f"Thresholds: {thresholds}")
 ```
 
 ---

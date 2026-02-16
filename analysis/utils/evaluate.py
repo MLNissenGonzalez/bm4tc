@@ -50,10 +50,12 @@ class EvalConfig:
     compute_cls_loss: bool = False
     compute_gen_loss: bool = False
     compute_fid: bool = False
+    compute_uq: bool = False
     splits: List[str] = field(default_factory=lambda: ["test"])
     evasion_override: Optional[Dict[str, Any]] = None
     sampling_override: Optional[Dict[str, Any]] = None
     mia_features: Optional[Dict[str, bool]] = None
+    uq_config: Optional[Dict[str, Any]] = None
     device: str = "cuda"
 
 
@@ -223,7 +225,37 @@ def evaluate_run(
             results["eval/mia_accuracy"] = np.nan
             results["eval/mia_auc_roc"] = np.nan
 
-    # 9. Cleanup
+    # 9. UQ (detection + purification)
+    if eval_cfg.compute_uq:
+        try:
+            from .uq import UQEvaluation, UQConfig
+
+            uq_kwargs = eval_cfg.uq_config or {}
+            uq_config = UQConfig(**uq_kwargs)
+            uq_eval = UQEvaluation(config=uq_config)
+
+            uq_results = uq_eval.evaluate(
+                bm,
+                datahandler.classification["test"],
+                device,
+            )
+            results["eval/uq_clean_accuracy"] = uq_results.clean_accuracy
+            results["eval/uq_clean_log_px_mean"] = float(uq_results.clean_log_px.mean())
+
+            for eps, acc in uq_results.adv_accuracies.items():
+                results[f"eval/uq_adv_acc/{eps}"] = acc
+
+            for (pct, eps), rate in uq_results.detection_rates.items():
+                results[f"eval/uq_detection/{pct}pct/{eps}"] = rate
+
+            for (eps, radius), metrics in uq_results.purification_results.items():
+                results[f"eval/uq_purify_acc/{eps}/{radius}"] = metrics.accuracy_after_purify
+                results[f"eval/uq_purify_recovery/{eps}/{radius}"] = metrics.recovery_rate
+        except Exception as e:
+            logger.warning(f"UQ evaluation failed: {e}")
+            results["eval/uq_clean_accuracy"] = np.nan
+
+    # 10. Cleanup
     del bm
     torch.cuda.empty_cache()
 

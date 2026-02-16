@@ -75,10 +75,63 @@ class BornMachine:
         self.num_sites = len(self.classifier.tensors)
         self.cfg = cfg
         self.device = device
+        self._log_Z: float | None = None
         
     # ==========================================================
     # Forward APIs
     # ==========================================================
+    def cache_log_Z(self) -> float:
+        """
+        Compute and cache the log partition function log(Z).
+
+        Syncs tensors (classification -> generator), then computes
+        log(Z) via generator.log_partition_function() (contracts MPS
+        with itself via virtual_mps). The result is stored as a
+        detached Python float (not a gradient target).
+
+        Returns:
+            The cached log Z value.
+        """
+        self.sync_tensors(after="classification")
+        self.generator.reset()
+        with torch.no_grad():
+            log_Z = self.generator.log_partition_function()
+        self._log_Z = float(log_Z.detach().cpu())
+        logger.info(f"[BornMachine] Cached log Z = {self._log_Z:.6f}")
+        return self._log_Z
+
+    def marginal_log_probability(self, data: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+        """
+        Compute the marginal log-probability log p(x) = log(sum_c |psi(x,c)|^2) - log(Z).
+
+        Uses the classifier to get all class amplitudes in a single MPS
+        contraction, then squares and sums over classes.
+
+        Differentiability note:
+            This is differentiable w.r.t. input data (essential for
+            purification), but NOT end-to-end differentiable w.r.t. model
+            parameters. The amplitude computation uses classifier params
+            and IS differentiable through them and through the input, but
+            _log_Z is stored as a detached constant. Since classifier and
+            generator share the same tensor values (via sync_tensors),
+            this is mathematically correct for inference. Purification
+            optimizes over inputs (not model params), so this is fine.
+
+        Args:
+            data: Input tensor of shape (batch_size, data_dim).
+            eps: Clamping floor for numerical stability in log.
+
+        Returns:
+            Tensor of shape (batch_size,) with log p(x) values.
+        """
+        if self._log_Z is None:
+            self.cache_log_Z()
+
+        embs = self.classifier.embed(data)
+        amplitudes = self.classifier.forward(data=embs)  # (batch, num_classes)
+        unnorm_px = torch.square(amplitudes).sum(dim=-1)  # (batch,)
+        return torch.log(unnorm_px.clamp(min=eps)) - self._log_Z
+
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """
         Compute class probabilities p(c|x) using the classifier.
@@ -173,6 +226,7 @@ class BornMachine:
         state = {
             "tensors": self.classifier.tensors,
             "config": OmegaConf.to_container(self.cfg, resolve=True),
+            "log_Z": self._log_Z,
         }
         torch.save(state, path)
 
@@ -190,7 +244,11 @@ class BornMachine:
         checkpoint = torch.load(path)
         cfg: schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
-        logger.info(f"[BornMachine] loaded from {path}")
+        born_machine._log_Z = checkpoint.get("log_Z", None)
+        if born_machine._log_Z is not None:
+            logger.info(f"[BornMachine] loaded from {path} (log Z = {born_machine._log_Z:.6f})")
+        else:
+            logger.info(f"[BornMachine] loaded from {path}")
         return born_machine
 
     def reset(self):
