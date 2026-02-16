@@ -2,7 +2,7 @@
 experiment: size_hpo
 
 defaults:
-  - override /born: d4D3
+  - override /born: fourier/d4D3
   - override /dataset: 2Dtoy/circles_4k
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

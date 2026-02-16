@@ -3,7 +3,7 @@
 experiment: test
 
 defaults:
-  - override /born: test
+  - override /born: fourier/test
   - override /dataset: test
   - override /trainer/classification: test
   - override /trainer/adversarial: test

@@ -184,7 +184,7 @@ adversarial_training_mps/
 experiment: default
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online

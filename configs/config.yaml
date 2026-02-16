@@ -3,7 +3,7 @@ experiment: default
 defaults:
   - _self_ # has to be here such that overrides work
   - dataset: 2Dtoy/circles_2k
-  - born: d4D3
+  - born: fourier/d4D3
   - trainer/classification: test
   - trainer/ganstyle: test
   - trainer/generative: null

@@ -13,7 +13,7 @@
 experiment: seed_sweep
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /trainer/classification: null  # Skip pretraining — use model_path
   - override /trainer/adversarial: pgd_at
   - override /trainer/ganstyle: null

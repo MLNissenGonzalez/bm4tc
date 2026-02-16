@@ -2,7 +2,7 @@
 experiment: lrwd_hpo
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/spirals_4k
   - override /trainer/classification: adam500_loss
   - override /trainer/ganstyle: null

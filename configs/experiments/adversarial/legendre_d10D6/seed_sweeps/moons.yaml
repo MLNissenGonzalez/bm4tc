@@ -1,0 +1,73 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: legendre/d10D6
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null
+  - override /trainer/adversarial: pgd_at
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: online
+
+model_path: ???
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 300
+    batch_size: 256
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 300
+    watch_freq: 1000
+    metrics: {"rob": 1, "clsloss": null, "acc": null}
+
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+        kwargs:
+          eps: 1e-8
+      strengths: [0.15]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 200
+
+    save: true
+    auto_stack: true
+    auto_unbind: false
+
+    optimizer:
+      kwargs:
+        lr: ???    # FILL FROM HPO
+        weight_decay: ???  # FILL FROM HPO
+    clean_weight: ???  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)

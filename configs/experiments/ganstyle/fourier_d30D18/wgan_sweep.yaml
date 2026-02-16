@@ -2,7 +2,7 @@
 experiment: wgan_sweep
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k # change if you change the models
   - override /trainer/classification: null # right now I have to pass this as I am defaulting to this in the code
   - override /trainer/ganstyle: default

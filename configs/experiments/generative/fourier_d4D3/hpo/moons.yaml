@@ -6,7 +6,7 @@
 experiment: size_hpo
 
 defaults:
-  - override /born: d4D3
+  - override /born: fourier/d4D3
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: null
   - override /trainer/generative: test

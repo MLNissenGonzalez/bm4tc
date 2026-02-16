@@ -7,7 +7,7 @@
 experiment: hpo_test
 
 defaults:
-  - override /born: d10D4
+  - override /born: fourier/d10D4
   - override /dataset: test
   - override /trainer/classification: test
   - override /trainer/adversarial: test

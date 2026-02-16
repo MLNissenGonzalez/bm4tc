@@ -21,7 +21,7 @@ This directory contains all Hydra configuration files for experiments.
 experiment: my_experiment
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online
@@ -421,7 +421,7 @@ Store validated best configurations for each dataset:
 experiment: best
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   # ... validated hyperparameters
@@ -444,7 +444,7 @@ Define sweep parameters in an experiment config:
 experiment: lrwd_grid
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   # ... other settings
 
@@ -472,7 +472,7 @@ defaults:
 experiment: lrwd_hpo
 
 defaults:
-  - override /born: d10D4
+  - override /born: fourier/d10D4
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online
