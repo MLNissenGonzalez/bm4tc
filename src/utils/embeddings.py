@@ -42,7 +42,7 @@ def legendre_embedding(data: torch.Tensor, degree: int = 2, axis: int = -1):
     if not isinstance(data, torch.Tensor):
         raise TypeError('`data` should be torch.Tensor type')
 
-    polies = [1, data]
+    polies = [torch.ones_like(data), data]
     for i in range(2, degree + 1):
         p_i = ((2*i-1) * data * polies[-1] - (i-1)*polies[-2]) / i
         polies.append(p_i)
