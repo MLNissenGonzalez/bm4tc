@@ -402,7 +402,8 @@ data = datahandler.data["test"].to(device)
 log_px = bm.marginal_log_probability(data)
 print(f"log p(x) range: [{log_px.min():.2f}, {log_px.max():.2f}]")
 assert torch.isfinite(log_px).all(), "Non-finite log probabilities detected"
-assert (log_px <= 0).all(), "Log probabilities should be <= 0 (probabilities <= 1)"
+# Note: log p(x) CAN be positive — p(x) is a density, not a probability mass,
+# so p(x) > 1 is valid at high-density regions as long as the integral ≈ 1.
 
 # 2. Verify partition function consistency
 # On a fine grid over input_range, sum of p(x) * dx should approximate 1.0
@@ -430,7 +431,9 @@ log_px_before = bm.marginal_log_probability(noisy).detach()
 purified, log_px_after = purifier.purify(bm, noisy, radius=0.15, device=device)
 print(f"Mean log p(x) before: {log_px_before.mean():.2f}")
 print(f"Mean log p(x) after:  {log_px_after.mean():.2f}")
-assert (log_px_after >= log_px_before - 1e-6).all(), "Purification should not decrease likelihood"
+# Check that purification improves likelihood on average (individual points may
+# decrease slightly due to discrete optimization steps and projection back into Lp ball)
+assert log_px_after.mean() >= log_px_before.mean() - 1e-3, "Purification should improve mean likelihood"
 ```
 
 ## File-by-File Reference

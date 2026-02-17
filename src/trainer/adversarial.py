@@ -410,7 +410,8 @@ class Trainer:
 
             save_path = folder / filename
             self.bornmachine.save(path=str(save_path))
-            wandb.log_model(str(save_path))
+            if wandb.run is not None and not wandb.run.disabled:
+                wandb.log_model(str(save_path))
 
         logger.info(f"Adversarial Trainer ({self.train_cfg.method}) finished.")
 

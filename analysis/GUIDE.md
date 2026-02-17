@@ -615,7 +615,7 @@ data = datahandler.data["test"].to(device)
 log_px = bm.marginal_log_probability(data)
 print(f"log p(x) range: [{log_px.min():.2f}, {log_px.max():.2f}]")
 assert torch.isfinite(log_px).all()
-assert (log_px <= 0).all()
+# Note: log p(x) CAN be positive — p(x) is a density, not a probability mass
 
 # 2. Verify purification improves likelihood
 from src.utils.purification.minimal import LikelihoodPurification
