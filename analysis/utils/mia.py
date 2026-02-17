@@ -83,9 +83,13 @@ class MIAFeatureExtractor:
     ) -> Dict[str, torch.Tensor]:
         """Extract MIA features from class probabilities.
 
+        Uses the model's predicted labels (argmax of probs) instead of true
+        labels to avoid label leakage in the attack features.
+
         Args:
             probs: Class probabilities of shape (batch_size, num_classes).
-            labels: True labels of shape (batch_size,).
+            labels: True labels of shape (batch_size,). Unused — predicted
+                labels are derived from probs to prevent leakage.
 
         Returns:
             Dictionary mapping feature names to tensors of shape (batch_size,).
@@ -93,6 +97,9 @@ class MIAFeatureExtractor:
         features = {}
         eps = 1e-10  # For numerical stability
         num_classes = probs.shape[-1]
+
+        # Use predicted labels instead of true labels to avoid leakage
+        predicted_labels = probs.argmax(dim=-1)
 
         # Clamp probabilities to avoid log(0)
         probs_clamped = probs.clamp(min=eps, max=1.0 - eps)
@@ -106,12 +113,12 @@ class MIAFeatureExtractor:
 
         if self.config.correct_prob:
             batch_indices = torch.arange(probs.shape[0], device=probs.device)
-            features["correct_prob"] = probs[batch_indices, labels]
+            features["correct_prob"] = probs[batch_indices, predicted_labels]
 
         if self.config.loss:
             batch_indices = torch.arange(probs.shape[0], device=probs.device)
-            correct_probs = probs_clamped[batch_indices, labels]
-            features["loss"] = -torch.log(correct_probs)
+            predicted_probs = probs_clamped[batch_indices, predicted_labels]
+            features["loss"] = -torch.log(predicted_probs)
 
         if self.config.margin:
             sorted_probs, _ = probs.sort(dim=-1, descending=True)
@@ -156,6 +163,10 @@ class MIAResults:
         precision_at_low_fpr: Precision at various false positive rates.
         feature_importance: Importance score for each feature (logistic regression coefficients).
         threshold_metrics: Per-feature threshold attack results.
+        worst_case_threshold: Worst-case (oracle) threshold attack results per feature.
+            Computed on the full dataset with the threshold tuned to maximize accuracy.
+            This is a theoretical upper bound — a real attacker cannot select the
+            optimal threshold without access to ground-truth membership labels.
         train_features: Feature array for training samples.
         test_features: Feature array for test samples.
         feature_names: Names of features used.
@@ -165,6 +176,7 @@ class MIAResults:
     precision_at_low_fpr: Dict[float, float]
     feature_importance: Dict[str, float]
     threshold_metrics: Dict[str, Dict[str, float]]
+    worst_case_threshold: Dict[str, Dict[str, float]]
     train_features: np.ndarray
     test_features: np.ndarray
     feature_names: List[str] = field(default_factory=list)
@@ -216,6 +228,23 @@ class MIAResults:
         )
         for name, metrics in sorted_thresh:
             lines.append(f"  {name}: {metrics.get('auc_roc', 0):.4f}")
+
+        lines.extend([
+            "",
+            "Worst-Case Threshold Attack (oracle, full dataset):",
+            "  (Threshold tuned to maximize accuracy — theoretical upper bound)",
+        ])
+        sorted_wc = sorted(
+            self.worst_case_threshold.items(),
+            key=lambda x: x[1].get("accuracy", 0),
+            reverse=True
+        )
+        for name, metrics in sorted_wc:
+            lines.append(
+                f"  {name}: acc={metrics['accuracy']:.4f}  "
+                f"threshold={metrics['threshold']:.6f}  "
+                f"TPR={metrics['tpr']:.4f}  FPR={metrics['fpr']:.4f}"
+            )
 
         lines.append("=" * 60)
         return "\n".join(lines)
@@ -382,6 +411,111 @@ class MIAEvaluation:
 
         return results
 
+    def _compute_worst_case_threshold(
+        self,
+        train_features: np.ndarray,
+        test_features: np.ndarray,
+        feature_names: List[str],
+    ) -> Dict[str, Dict[str, float]]:
+        """Compute worst-case (oracle) threshold attack on the full dataset.
+
+        For each feature, sweep all unique thresholds and pick the one that
+        maximizes membership inference accuracy. This is a theoretical upper
+        bound: a real adversary cannot select the optimal threshold without
+        knowing ground-truth membership labels.
+
+        The attack rule for each threshold t is:
+            predict "member" if score >= t, "non-member" otherwise.
+        For features where lower values indicate membership (loss, entropy),
+        the sign is flipped before thresholding.
+
+        Args:
+            train_features: Features for training (member) samples, shape (N_train, F).
+            test_features: Features for test (non-member) samples, shape (N_test, F).
+            feature_names: Names of the features (length F).
+
+        Returns:
+            Dictionary mapping feature name to metrics dict with keys:
+                accuracy, threshold, tpr, fpr, n_train, n_test.
+        """
+        n_train = len(train_features)
+        n_test = len(test_features)
+        n_total = n_train + n_test
+
+        # Labels: 1 for train (members), 0 for test (non-members)
+        labels = np.concatenate([np.ones(n_train), np.zeros(n_test)])
+
+        results = {}
+
+        for i, name in enumerate(feature_names):
+            feature_values = np.concatenate([
+                train_features[:, i],
+                test_features[:, i]
+            ])
+
+            # For loss and entropy, lower means more likely member — flip sign
+            if name in ["loss", "entropy"]:
+                scores = -feature_values
+            else:
+                scores = feature_values
+
+            # Sort unique thresholds (midpoints between consecutive unique values)
+            sorted_unique = np.unique(scores)
+            if len(sorted_unique) <= 1:
+                results[name] = {
+                    "accuracy": n_train / n_total,
+                    "threshold": 0.0,
+                    "tpr": 1.0,
+                    "fpr": 1.0,
+                    "n_train": n_train,
+                    "n_test": n_test,
+                }
+                continue
+
+            midpoints = (sorted_unique[:-1] + sorted_unique[1:]) / 2.0
+
+            # Vectorised sweep: for each threshold, predict member if score >= t
+            # preds[j, k] = 1 if scores[k] >= midpoints[j]
+            # Use broadcasting: (T, 1) >= (1, N) -> (T, N)
+            preds = (midpoints[:, None] <= scores[None, :]).astype(np.float64)
+
+            # Accuracy for each threshold
+            correct = (preds == labels[None, :]).sum(axis=1)
+            accuracies = correct / n_total
+
+            best_idx = np.argmax(accuracies)
+            best_threshold = midpoints[best_idx]
+            best_preds = preds[best_idx]
+
+            tp = ((best_preds == 1) & (labels == 1)).sum()
+            fp = ((best_preds == 1) & (labels == 0)).sum()
+            tpr = tp / n_train if n_train > 0 else 0.0
+            fpr = fp / n_test if n_test > 0 else 0.0
+
+            # Map threshold back to original scale for interpretability
+            if name in ["loss", "entropy"]:
+                original_threshold = -best_threshold
+            else:
+                original_threshold = best_threshold
+
+            results[name] = {
+                "accuracy": float(accuracies[best_idx]),
+                "threshold": float(original_threshold),
+                "tpr": float(tpr),
+                "fpr": float(fpr),
+                "n_train": n_train,
+                "n_test": n_test,
+            }
+
+            logger.info(
+                f"Worst-case threshold [{name}]: "
+                f"acc={accuracies[best_idx]:.4f}, "
+                f"threshold={original_threshold:.6f}, "
+                f"TPR={tpr:.4f}, FPR={fpr:.4f}"
+            )
+
+        return results
+
     def evaluate(
         self,
         model,
@@ -461,6 +595,12 @@ class MIAEvaluation:
             train_features, test_features, feature_names
         )
 
+        # Compute worst-case (oracle) threshold attack on full dataset
+        logger.info("Computing worst-case threshold attack (oracle)...")
+        worst_case_threshold = self._compute_worst_case_threshold(
+            train_features, test_features, feature_names
+        )
+
         # Compute precision at low FPR
         precision_at_low_fpr = self._compute_precision_at_fpr(y_eval, y_proba)
 
@@ -470,6 +610,7 @@ class MIAEvaluation:
             precision_at_low_fpr=precision_at_low_fpr,
             feature_importance=feature_importance,
             threshold_metrics=threshold_metrics,
+            worst_case_threshold=worst_case_threshold,
             train_features=train_features,
             test_features=test_features,
             feature_names=feature_names,
