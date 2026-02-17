@@ -47,27 +47,28 @@ import torch
 # =============================================================================
 
 # Path to sweep directory (contains numbered sub-dirs with .hydra/config.yaml)
-SWEEP_DIR = "outputs/adv_seed_sweep_spirals_4k_14Feb26"
+SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30D18fourier_moons_4k_1702"
 
 # Training regime: "pre", "gen", "adv", "gan"
-REGIME = "adv"
+REGIME = "gen"
 
 # --- METRIC TOGGLES ---
 COMPUTE_ACC = True
 COMPUTE_ROB = True
 COMPUTE_MIA = True
-COMPUTE_CLS_LOSS = True
+COMPUTE_CLS_LOSS = False
 COMPUTE_GEN_LOSS = False
-COMPUTE_FID = True
-COMPUTE_UQ = False  # Uncertainty quantification (detection + purification)
+COMPUTE_FID = False
+COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 
 # --- EVASION OVERRIDE ---
 # Set to a dict to override evasion config across ALL runs for consistency.
 # Set to None to use each run's own evasion config.
 EVASION_OVERRIDE = {
     "method": "PGD",
-    "strengths": [0.1, 0.2, 0.3, 0.4],
+    "strengths": [0.3, 0.45, 0.6],
     "num_steps": 20,
+    "norm": "inf",
 }
 # Example:
 # EVASION_OVERRIDE = {
@@ -89,9 +90,9 @@ MIA_FEATURES = {
     "max_prob": True,
     "entropy": True,
     "correct_prob": True,
-    "loss": True,
-    "margin": True,
-    "modified_entropy": True,
+    "loss": False,
+    "margin": False,
+    "modified_entropy": False,
     # True  = use ground-truth labels for correct_prob/loss (worst-case risk).
     # False = use predicted labels (argmax of probs) to avoid label leakage.
     "use_true_labels": True,
@@ -104,7 +105,7 @@ MIA_FEATURES = {
 # Only the worst-case (oracle) threshold attack is computed on these features.
 #
 # Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
-MIA_ADV_STRENGTH = None        # PGD epsilon (e.g. 0.15).  None = disabled.
+MIA_ADV_STRENGTH = 0.15        # PGD epsilon (e.g. 0.15).  None = disabled.
 MIA_ADV_NUM_STEPS = 20         # PGD iteration count.
 MIA_ADV_STEP_SIZE = None       # Per-step size.  None = auto (2.5 * eps / steps).
 MIA_ADV_NORM = "inf"           # Lp norm for perturbation ball ("inf", 2, ...).
@@ -113,10 +114,10 @@ MIA_ADV_NORM = "inf"           # Lp norm for perturbation ball ("inf", 2, ...).
 UQ_CONFIG = {
     "norm": "inf",
     "num_steps": 20,
-    "radii": [0.1, 0.2, 0.3],
+    "radii": [0.15, 0.3],
     "percentiles": [1, 5, 10, 20],
     "attack_method": "PGD",
-    "attack_strengths": [0.1, 0.2, 0.3],
+    "attack_strengths": [0.15, 0.3, 0.45, 0.6],
     "attack_num_steps": 20,
 }
 
