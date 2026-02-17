@@ -81,6 +81,10 @@ EVASION_OVERRIDE = {
 SAMPLING_OVERRIDE = None
 
 # --- MIA SETTINGS ---
+# Feature toggles: which confidence features to extract from p(c|x).
+# Label-free features (max_prob, entropy, margin, modified_entropy) are always
+# derived from the probability vector alone.  correct_prob and loss require a
+# reference label — controlled by use_true_labels below.
 MIA_FEATURES = {
     "max_prob": True,
     "entropy": True,
@@ -88,7 +92,22 @@ MIA_FEATURES = {
     "loss": True,
     "margin": True,
     "modified_entropy": True,
+    # True  = use ground-truth labels for correct_prob/loss (worst-case risk).
+    # False = use predicted labels (argmax of probs) to avoid label leakage.
+    "use_true_labels": True,
 }
+
+# --- ADVERSARIAL MIA SETTINGS ---
+# Generate PGD adversarial examples per sample, then extract features from
+# model output on the perturbed inputs.  Adversarial transferability differs
+# between members and non-members, providing a stronger membership signal.
+# Only the worst-case (oracle) threshold attack is computed on these features.
+#
+# Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
+MIA_ADV_STRENGTH = None        # PGD epsilon (e.g. 0.15).  None = disabled.
+MIA_ADV_NUM_STEPS = 20         # PGD iteration count.
+MIA_ADV_STEP_SIZE = None       # Per-step size.  None = auto (2.5 * eps / steps).
+MIA_ADV_NORM = "inf"           # Lp norm for perturbation ball ("inf", 2, ...).
 
 # --- UQ SETTINGS (used if COMPUTE_UQ == True) ---
 UQ_CONFIG = {
@@ -168,6 +187,10 @@ eval_cfg = EvalConfig(
     evasion_override=EVASION_OVERRIDE,
     sampling_override=SAMPLING_OVERRIDE,
     mia_features=MIA_FEATURES,
+    mia_adversarial_strength=MIA_ADV_STRENGTH,
+    mia_adversarial_num_steps=MIA_ADV_NUM_STEPS,
+    mia_adversarial_step_size=MIA_ADV_STEP_SIZE,
+    mia_adversarial_norm=MIA_ADV_NORM,
     uq_config=UQ_CONFIG if COMPUTE_UQ else None,
     device=DEVICE,
 )
@@ -212,11 +235,22 @@ TEST_CLS_LOSS = "eval/test/clsloss" if COMPUTE_CLS_LOSS else None
 # MIA is split-agnostic (always uses train vs test internally)
 MIA_COL = "eval/mia_accuracy" if COMPUTE_MIA else None
 
-print(f"VAL_ACC:  {VAL_ACC}")
-print(f"VAL_ROB:  {VAL_ROB}")
-print(f"TEST_ACC: {TEST_ACC}")
-print(f"TEST_ROB: {TEST_ROB}")
-print(f"MIA_COL:  {MIA_COL}")
+# Adversarial MIA: best worst-case threshold accuracy across all features
+ADV_MIA_COL = None
+ADV_MIA_FEATURE_COLS = []
+if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
+    if "eval/adv_mia_wc_best" in df.columns:
+        ADV_MIA_COL = "eval/adv_mia_wc_best"
+    ADV_MIA_FEATURE_COLS = [c for c in df.columns if c.startswith("eval/adv_mia_wc/")]
+
+print(f"VAL_ACC:      {VAL_ACC}")
+print(f"VAL_ROB:      {VAL_ROB}")
+print(f"TEST_ACC:     {TEST_ACC}")
+print(f"TEST_ROB:     {TEST_ROB}")
+print(f"MIA_COL:      {MIA_COL}")
+print(f"ADV_MIA_COL:  {ADV_MIA_COL}")
+if ADV_MIA_FEATURE_COLS:
+    print(f"ADV_MIA per-feature: {ADV_MIA_FEATURE_COLS}")
 
 # Resolve single robustness strength for Pareto frontier selection
 PARETO_VAL_ROB_COL = None
@@ -313,6 +347,13 @@ if not df.empty:
                         print(f"  {split_label} Robust Accuracy (eps={strength}): {best_run[rob_col]:.4f}")
             if MIA_COL and MIA_COL in best_run.index:
                 print(f"  MIA Accuracy: {best_run[MIA_COL]:.4f}")
+            if ADV_MIA_COL and ADV_MIA_COL in best_run.index:
+                print(f"  Adversarial MIA (best wc, eps={MIA_ADV_STRENGTH}): "
+                      f"{best_run[ADV_MIA_COL]:.4f}")
+                for col in ADV_MIA_FEATURE_COLS:
+                    if col in best_run.index:
+                        feat = col.split("/")[-1]
+                        print(f"    {feat}: {best_run[col]:.4f}")
 
 # %%
 # Accuracy vs perturbation strength for best run (test-set performance)
@@ -374,7 +415,7 @@ from scipy.stats import pearsonr
 
 if not df.empty:
     # --- Valid-only heatmap ---
-    valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL] if c] + list(VAL_ROB)
+    valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL, ADV_MIA_COL] if c] + list(VAL_ROB)
     valid_metrics = [c for c in valid_metrics if c in df.columns]
 
     if len(valid_metrics) >= 2:
@@ -389,7 +430,7 @@ if not df.empty:
                 plt.show()
 
     # --- Test-only heatmap ---
-    test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL] if c] + list(TEST_ROB)
+    test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL, ADV_MIA_COL] if c] + list(TEST_ROB)
     test_metrics = [c for c in test_metrics if c in df.columns]
 
     if len(test_metrics) >= 2:
@@ -489,7 +530,33 @@ if not df.empty and PARETO_VAL_ROB_COL:
             plt.show()
 
 # %% [markdown]
-# ### 3g. Summary Statistics Table
+# ### 3g. Adversarial MIA Results
+
+# %%
+# Save per-run MIA summary text (includes both benign and adversarial sections)
+if not df.empty and COMPUTE_MIA and "_mia_summary" in df.columns:
+    for _, row in df.iterrows():
+        summary = row.get("_mia_summary")
+        if summary and isinstance(summary, str):
+            mia_path = output_dir / f"mia_summary_{row['run_name']}.txt"
+            with open(mia_path, "w") as f:
+                f.write(summary)
+    print(f"Saved per-run MIA summaries to {output_dir}/mia_summary_*.txt")
+
+if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
+    print(f"\nAdversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH}):")
+    print("  Per-feature accuracy (oracle threshold, mean +/- std across runs):\n")
+    for col in sorted(ADV_MIA_FEATURE_COLS):
+        feat = col.split("/")[-1]
+        vals = df[col].dropna()
+        print(f"    {feat:25s}  {vals.mean():.4f} +/- {vals.std():.4f}")
+
+    if ADV_MIA_COL in df.columns:
+        vals = df[ADV_MIA_COL].dropna()
+        print(f"\n    {'BEST (across features)':25s}  {vals.mean():.4f} +/- {vals.std():.4f}")
+
+# %% [markdown]
+# ### 3h. Summary Statistics Table
 #
 # Both validation and test metrics are reported.  The "Best" column shows
 # metrics from the single run selected on validation (stopping criterion).
@@ -652,6 +719,9 @@ if not df.empty:
             f.write(f"Effective N: {EFFECTIVE_N}\n")
         if EVASION_OVERRIDE:
             f.write(f"Evasion override: {EVASION_OVERRIDE}\n")
+        if MIA_ADV_STRENGTH is not None:
+            f.write(f"Adversarial MIA: eps={MIA_ADV_STRENGTH}, "
+                    f"steps={MIA_ADV_NUM_STEPS}, norm={MIA_ADV_NORM}\n")
         f.write("\n")
 
         # Metrics used
@@ -663,6 +733,8 @@ if not df.empty:
             f.write(f"  Robustness (test):  {TEST_ROB}\n")
         if MIA_COL:
             f.write(f"  MIA: {MIA_COL}\n")
+        if ADV_MIA_COL:
+            f.write(f"  Adversarial MIA: {ADV_MIA_COL}\n")
         if VAL_CLS_LOSS:
             f.write(f"  Cls Loss: {VAL_CLS_LOSS}, {TEST_CLS_LOSS}\n")
         f.write("\n")
@@ -697,6 +769,25 @@ if not df.empty:
                             f.write(f"{split_label} Robust Accuracy (eps={strength}): {best_run_export[rob_col]:.4f}\n")
                 if MIA_COL and MIA_COL in best_run_export.index:
                     f.write(f"MIA Accuracy: {best_run_export[MIA_COL]:.4f}\n")
+                if ADV_MIA_COL and ADV_MIA_COL in best_run_export.index:
+                    f.write(f"Adversarial MIA Best WC (eps={MIA_ADV_STRENGTH}): "
+                            f"{best_run_export[ADV_MIA_COL]:.4f}\n")
+                    for col in ADV_MIA_FEATURE_COLS:
+                        if col in best_run_export.index:
+                            feat = col.split("/")[-1]
+                            f.write(f"  Adv MIA {feat}: {best_run_export[col]:.4f}\n")
+
+        # Adversarial MIA summary across all runs
+        if ADV_MIA_COL and ADV_MIA_COL in df.columns:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write(f"Adversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH})\n")
+            f.write("-" * 60 + "\n\n")
+            for col in sorted(ADV_MIA_FEATURE_COLS):
+                feat = col.split("/")[-1]
+                vals = df[col].dropna()
+                f.write(f"  {feat:25s}  {vals.mean():.4f} +/- {vals.std():.4f}\n")
+            vals = df[ADV_MIA_COL].dropna()
+            f.write(f"\n  {'BEST (across features)':25s}  {vals.mean():.4f} +/- {vals.std():.4f}\n")
 
         # Pareto-optimal runs (selected on validation)
         if VAL_ACC and PARETO_VAL_ROB_COL:

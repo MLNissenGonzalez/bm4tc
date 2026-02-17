@@ -435,18 +435,68 @@ MIA_FEATURES = {
 }
 ```
 
+### Data Splits
+
+The MIA evaluation uses only the **train** and **test** splits from the `DataHandler`. The **validation split is excluded entirely** — it is neither a member nor a non-member in the attack. This avoids ambiguity: training samples are "members" (label 1), test samples are "non-members" (label 0), and validation data plays no role.
+
+```python
+train_loader = datahandler.classification["train"]   # members
+test_loader  = datahandler.classification["test"]     # non-members
+# datahandler.classification["valid"] is NOT used
+```
+
 ### MIA Features
 
-The attack uses features derived from model class probabilities p(c|x):
+All features are derived solely from the model's output probabilities p(c|x). The `correct_prob` and `loss` features require a reference label — controlled by the `use_true_labels` option:
 
-| Feature | Formula | Intuition |
-|---------|---------|-----------|
-| `max_prob` | `probs.max(dim=-1)` | Models are more confident on training data |
-| `entropy` | `-sum(p * log(p))` | Lower entropy = more confident |
-| `correct_prob` | `probs[i, labels[i]]` | Higher for seen samples |
-| `loss` | `-log(correct_prob)` | Lower loss on training data |
-| `margin` | `top_prob - second_prob` | Larger margin = more confident |
-| `modified_entropy` | `1 - entropy / log(num_classes)` | Normalized confidence |
+- **`use_true_labels=True`** (default): Uses ground-truth labels. This gives a **worst-case privacy risk estimate** — an attacker who knows the true labels can exploit the gap between the model's confidence on the correct class vs. other classes.
+- **`use_true_labels=False`**: Uses predicted labels (argmax of p(c|x)). This avoids label leakage and models a realistic attacker who only queries the model.
+
+| Feature | Formula (`use_true_labels=True`) | Formula (`use_true_labels=False`) | Intuition |
+|---------|----------------------------------|-----------------------------------|-----------|
+| `max_prob` | `probs.max(dim=-1)` | (same) | Models are more confident on training data |
+| `entropy` | `-sum(p * log(p))` | (same) | Lower entropy = more confident |
+| `correct_prob` | `probs[i, label[i]]` | `probs[i, predicted[i]]` (= max_prob) | Probability at reference class |
+| `loss` | `-log(probs[i, label[i]])` | `-log(probs[i, predicted[i]])` (= -log(max_prob)) | NLL of reference class |
+| `margin` | `top_prob - second_prob` | (same) | Larger margin = more confident |
+| `modified_entropy` | `1 - entropy / log(num_classes)` | (same) | Normalized confidence |
+
+**Note:** When `use_true_labels=False`, `correct_prob` and `loss` are equivalent to `max_prob` and `-log(max_prob)` respectively — they carry no independent information. With `use_true_labels=True` (default), they provide additional signal from the true class probability.
+
+### Attack Evaluations
+
+The MIA module reports three complementary evaluations:
+
+1. **Logistic regression attack** — A logistic regression classifier is trained on 70% of the (member, non-member) feature vectors and evaluated on the remaining 30%. This simulates a realistic attacker who trains a model on shadow data.
+
+2. **Per-feature threshold attacks (AUC-ROC)** — For each feature, the AUC-ROC measures how well that single feature separates members from non-members, independent of threshold choice.
+
+3. **Worst-case (oracle) threshold attack** — For each feature, sweeps all possible thresholds on the **full** (train + test) dataset and picks the one that maximizes accuracy. This is a **theoretical upper bound** — a real attacker cannot select the optimal threshold without access to ground-truth membership labels. Reported metrics include accuracy, optimal threshold, TPR, and FPR.
+
+### Adversarial MIA
+
+In addition to the standard (benign) MIA, an **adversarial variant** is available. The idea: generate untargeted PGD adversarial examples for each sample, then extract the same confidence features from the model's output on those perturbed inputs. Adversarial transferability differs between members and non-members, providing a stronger membership signal.
+
+Enable by passing `adversarial_strength` to `MIAEvaluation`:
+
+```python
+mia_eval = MIAEvaluation(
+    adversarial_strength=0.1,       # epsilon for PGD; None = skip (default)
+    adversarial_num_steps=20,       # PGD iterations
+    adversarial_step_size=None,     # None = auto (2.5 * eps / steps)
+    adversarial_norm="inf",         # Lp norm for perturbation ball
+)
+results = mia_eval.evaluate(bornmachine, train_loader, test_loader, device)
+
+# Adversarial results (worst-case threshold only)
+if results.adversarial_worst_case_threshold is not None:
+    for name, metrics in results.adversarial_worst_case_threshold.items():
+        print(f"  {name}: acc={metrics['accuracy']:.4f}")
+```
+
+The adversarial MIA only uses the worst-case (oracle) threshold evaluation — not the logistic regression or per-feature AUC — since the adversarial signal is best captured by the oracle threshold on the full dataset.
+
+The PGD attack uses **true labels** by default for the untargeted attack objective (maximizing NLL of the correct class). This is consistent with the worst-case threat model.
 
 ### Privacy Assessment Thresholds
 
@@ -484,9 +534,12 @@ datahandler.load()
 datahandler.split_and_rescale(bornmachine)
 datahandler.get_classification_loaders()
 
-# Run MIA evaluation
-feature_config = MIAFeatureConfig(max_prob=True, entropy=True, ...)
-mia_eval = MIAEvaluation(feature_config=feature_config)
+# Run MIA evaluation (use_true_labels=True is default for worst-case estimate)
+feature_config = MIAFeatureConfig(max_prob=True, entropy=True, use_true_labels=True, ...)
+mia_eval = MIAEvaluation(
+    feature_config=feature_config,
+    adversarial_strength=0.1,  # or None to skip adversarial MIA
+)
 results = mia_eval.evaluate(
     bornmachine,
     datahandler.classification["train"],

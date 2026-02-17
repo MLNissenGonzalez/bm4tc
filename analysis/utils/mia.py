@@ -10,13 +10,16 @@ that predicts whether a sample was in the training set.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
 import logging
+
+from src.utils.evasion.minimal import ProjectedGradientDescent
+from src.utils.schemas import CriterionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,9 @@ class MIAFeatureConfig:
         loss: Use negative log-likelihood loss (lower on training data).
         margin: Use difference between top and second probability.
         modified_entropy: Use normalized confidence (1 - entropy / log(num_classes)).
+        use_true_labels: If True (default), use ground-truth labels for correct_prob
+            and loss features (worst-case risk estimate). If False, use predicted
+            labels (argmax of probs) to avoid label leakage.
     """
     max_prob: bool = True
     entropy: bool = True
@@ -42,6 +48,7 @@ class MIAFeatureConfig:
     loss: bool = True
     margin: bool = True
     modified_entropy: bool = True
+    use_true_labels: bool = True
 
     def enabled_features(self) -> List[str]:
         """Return list of enabled feature names."""
@@ -83,13 +90,11 @@ class MIAFeatureExtractor:
     ) -> Dict[str, torch.Tensor]:
         """Extract MIA features from class probabilities.
 
-        Uses the model's predicted labels (argmax of probs) instead of true
-        labels to avoid label leakage in the attack features.
-
         Args:
             probs: Class probabilities of shape (batch_size, num_classes).
-            labels: True labels of shape (batch_size,). Unused — predicted
-                labels are derived from probs to prevent leakage.
+            labels: True labels of shape (batch_size,). Used for correct_prob
+                and loss features when use_true_labels=True; otherwise predicted
+                labels (argmax of probs) are used instead.
 
         Returns:
             Dictionary mapping feature names to tensors of shape (batch_size,).
@@ -98,8 +103,11 @@ class MIAFeatureExtractor:
         eps = 1e-10  # For numerical stability
         num_classes = probs.shape[-1]
 
-        # Use predicted labels instead of true labels to avoid leakage
-        predicted_labels = probs.argmax(dim=-1)
+        # Choose labels for correct_prob and loss features
+        if self.config.use_true_labels:
+            reference_labels = labels
+        else:
+            reference_labels = probs.argmax(dim=-1)
 
         # Clamp probabilities to avoid log(0)
         probs_clamped = probs.clamp(min=eps, max=1.0 - eps)
@@ -113,12 +121,12 @@ class MIAFeatureExtractor:
 
         if self.config.correct_prob:
             batch_indices = torch.arange(probs.shape[0], device=probs.device)
-            features["correct_prob"] = probs[batch_indices, predicted_labels]
+            features["correct_prob"] = probs[batch_indices, reference_labels]
 
         if self.config.loss:
             batch_indices = torch.arange(probs.shape[0], device=probs.device)
-            predicted_probs = probs_clamped[batch_indices, predicted_labels]
-            features["loss"] = -torch.log(predicted_probs)
+            reference_probs = probs_clamped[batch_indices, reference_labels]
+            features["loss"] = -torch.log(reference_probs)
 
         if self.config.margin:
             sorted_probs, _ = probs.sort(dim=-1, descending=True)
@@ -180,6 +188,8 @@ class MIAResults:
     train_features: np.ndarray
     test_features: np.ndarray
     feature_names: List[str] = field(default_factory=list)
+    adversarial_worst_case_threshold: Optional[Dict[str, Dict[str, float]]] = None
+    adversarial_strength: Optional[float] = None
 
     def privacy_assessment(self) -> str:
         """Return a privacy assessment based on AUC-ROC.
@@ -246,6 +256,24 @@ class MIAResults:
                 f"TPR={metrics['tpr']:.4f}  FPR={metrics['fpr']:.4f}"
             )
 
+        if self.adversarial_worst_case_threshold is not None:
+            lines.extend([
+                "",
+                f"Adversarial Worst-Case Threshold Attack (eps={self.adversarial_strength}):",
+                "  (Features extracted from model outputs on PGD adversarial examples)",
+            ])
+            sorted_adv = sorted(
+                self.adversarial_worst_case_threshold.items(),
+                key=lambda x: x[1].get("accuracy", 0),
+                reverse=True
+            )
+            for name, metrics in sorted_adv:
+                lines.append(
+                    f"  {name}: acc={metrics['accuracy']:.4f}  "
+                    f"threshold={metrics['threshold']:.6f}  "
+                    f"TPR={metrics['tpr']:.4f}  FPR={metrics['fpr']:.4f}"
+                )
+
         lines.append("=" * 60)
         return "\n".join(lines)
 
@@ -268,6 +296,10 @@ class MIAEvaluation:
         attack_model: str = "logistic",
         test_split: float = 0.3,
         random_state: int = 42,
+        adversarial_strength: Optional[float] = None,
+        adversarial_num_steps: int = 20,
+        adversarial_step_size: Optional[float] = None,
+        adversarial_norm: Union[str, int] = "inf",
     ):
         """Initialize MIA evaluation.
 
@@ -276,12 +308,20 @@ class MIAEvaluation:
             attack_model: Type of attack classifier ("logistic" supported).
             test_split: Fraction of data to use for attack model evaluation.
             random_state: Random seed for reproducibility.
+            adversarial_strength: Epsilon for PGD attack. None = skip adversarial MIA.
+            adversarial_num_steps: Number of PGD steps.
+            adversarial_step_size: PGD step size. None = auto (2.5 * eps / steps).
+            adversarial_norm: Lp norm for PGD perturbation ball ("inf" or int >= 1).
         """
         self.feature_config = feature_config or MIAFeatureConfig()
         self.attack_model = attack_model
         self.test_split = test_split
         self.random_state = random_state
         self.extractor = MIAFeatureExtractor(self.feature_config)
+        self.adversarial_strength = adversarial_strength
+        self.adversarial_num_steps = adversarial_num_steps
+        self.adversarial_step_size = adversarial_step_size
+        self.adversarial_norm = adversarial_norm
 
     def _extract_all_features(
         self,
@@ -312,6 +352,51 @@ class MIAEvaluation:
                 probs = model.class_probabilities(batch_data)
 
                 # Extract features
+                features = self.extractor.extract_batch(probs, batch_labels)
+                all_features.append(features)
+
+        return np.vstack(all_features)
+
+    def _extract_all_features_adversarial(
+        self,
+        model,
+        data_loader: DataLoader,
+        device: torch.device,
+        pgd: ProjectedGradientDescent,
+        strength: float,
+    ) -> np.ndarray:
+        """Extract MIA features from model outputs on adversarial examples.
+
+        For each batch, generates untargeted PGD adversarial examples and
+        extracts the same confidence features from the model's output on
+        the perturbed inputs.
+
+        Args:
+            model: BornMachine or model with class_probabilities method.
+            data_loader: DataLoader yielding (data, labels) tuples.
+            device: Device to run inference on.
+            pgd: ProjectedGradientDescent instance for generating adversarial examples.
+            strength: Epsilon (attack radius) for PGD.
+
+        Returns:
+            Feature array of shape (num_samples, num_features).
+        """
+        all_features = []
+
+        model.to(device)
+
+        for batch_data, batch_labels in data_loader:
+            batch_data = batch_data.to(device)
+            batch_labels = batch_labels.to(device)
+
+            # Generate adversarial examples (requires gradients)
+            adv_examples = pgd.generate(
+                model, batch_data, batch_labels, strength, device
+            )
+
+            # Extract features from model output on adversarial examples
+            with torch.no_grad():
+                probs = model.class_probabilities(adv_examples)
                 features = self.extractor.extract_batch(probs, batch_labels)
                 all_features.append(features)
 
@@ -604,6 +689,39 @@ class MIAEvaluation:
         # Compute precision at low FPR
         precision_at_low_fpr = self._compute_precision_at_fpr(y_eval, y_proba)
 
+        # Adversarial MIA pipeline
+        adversarial_worst_case_threshold = None
+        if self.adversarial_strength is not None:
+            logger.info(
+                f"Running adversarial MIA (eps={self.adversarial_strength}, "
+                f"steps={self.adversarial_num_steps}, norm={self.adversarial_norm})..."
+            )
+            pgd = ProjectedGradientDescent(
+                norm=self.adversarial_norm,
+                criterion=CriterionConfig(name="nll", kwargs=None),
+                num_steps=self.adversarial_num_steps,
+                step_size=self.adversarial_step_size,
+                random_start=True,
+            )
+
+            logger.info("Extracting adversarial features from training samples...")
+            adv_train_features = self._extract_all_features_adversarial(
+                model, train_loader, device, pgd, self.adversarial_strength
+            )
+
+            logger.info("Extracting adversarial features from test samples...")
+            adv_test_features = self._extract_all_features_adversarial(
+                model, test_loader, device, pgd, self.adversarial_strength
+            )
+
+            logger.info(f"Adversarial train features shape: {adv_train_features.shape}")
+            logger.info(f"Adversarial test features shape: {adv_test_features.shape}")
+
+            logger.info("Computing adversarial worst-case threshold attack (oracle)...")
+            adversarial_worst_case_threshold = self._compute_worst_case_threshold(
+                adv_train_features, adv_test_features, feature_names
+            )
+
         return MIAResults(
             attack_accuracy=attack_accuracy,
             auc_roc=auc_roc,
@@ -614,4 +732,6 @@ class MIAEvaluation:
             train_features=train_features,
             test_features=test_features,
             feature_names=feature_names,
+            adversarial_worst_case_threshold=adversarial_worst_case_threshold,
+            adversarial_strength=self.adversarial_strength,
         )

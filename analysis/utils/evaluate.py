@@ -42,6 +42,12 @@ class EvalConfig:
         sampling_override: Dict of sampling config fields to override,
             or None to use each run's own config.
         mia_features: Dict of MIA feature toggles (passed to MIAFeatureConfig).
+            Includes use_true_labels (bool) for correct_prob/loss features.
+        mia_adversarial_strength: Epsilon for adversarial MIA (PGD attack on
+            inputs before feature extraction). None = skip adversarial MIA.
+        mia_adversarial_num_steps: Number of PGD steps for adversarial MIA.
+        mia_adversarial_step_size: PGD step size. None = auto (2.5 * eps / steps).
+        mia_adversarial_norm: Lp norm for adversarial MIA perturbation ball.
         device: Torch device string.
     """
     compute_acc: bool = True
@@ -55,6 +61,10 @@ class EvalConfig:
     evasion_override: Optional[Dict[str, Any]] = None
     sampling_override: Optional[Dict[str, Any]] = None
     mia_features: Optional[Dict[str, bool]] = None
+    mia_adversarial_strength: Optional[float] = None
+    mia_adversarial_num_steps: int = 20
+    mia_adversarial_step_size: Optional[float] = None
+    mia_adversarial_norm: Any = "inf"
     uq_config: Optional[Dict[str, Any]] = None
     device: str = "cuda"
 
@@ -210,7 +220,13 @@ def evaluate_run(
 
             feature_kwargs = eval_cfg.mia_features or {}
             feature_config = MIAFeatureConfig(**feature_kwargs)
-            mia_eval = MIAEvaluation(feature_config=feature_config)
+            mia_eval = MIAEvaluation(
+                feature_config=feature_config,
+                adversarial_strength=eval_cfg.mia_adversarial_strength,
+                adversarial_num_steps=eval_cfg.mia_adversarial_num_steps,
+                adversarial_step_size=eval_cfg.mia_adversarial_step_size,
+                adversarial_norm=eval_cfg.mia_adversarial_norm,
+            )
 
             mia_results = mia_eval.evaluate(
                 bm,
@@ -220,6 +236,19 @@ def evaluate_run(
             )
             results["eval/mia_accuracy"] = mia_results.attack_accuracy
             results["eval/mia_auc_roc"] = mia_results.auc_roc
+
+            # Store adversarial MIA worst-case threshold results
+            if mia_results.adversarial_worst_case_threshold is not None:
+                for feat_name, metrics in mia_results.adversarial_worst_case_threshold.items():
+                    results[f"eval/adv_mia_wc/{feat_name}"] = metrics["accuracy"]
+                # Store the best adversarial MIA accuracy across features
+                best_adv_mia = max(
+                    m["accuracy"] for m in mia_results.adversarial_worst_case_threshold.values()
+                )
+                results["eval/adv_mia_wc_best"] = best_adv_mia
+
+            # Store MIA summary for export
+            results["_mia_summary"] = mia_results.summary()
         except Exception as e:
             logger.warning(f"MIA evaluation failed: {e}")
             results["eval/mia_accuracy"] = np.nan
