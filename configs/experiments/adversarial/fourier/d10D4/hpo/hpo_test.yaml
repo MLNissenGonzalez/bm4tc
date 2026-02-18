@@ -1,0 +1,69 @@
+# @package _global_
+# Quick test config for adversarial HPO (validates setup before overnight run)
+#
+# Usage:
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d10D4/hpo/hpo_test
+
+experiment: hpo
+
+descriptor: test
+defaults:
+  - override /born: fourier/d10D4
+  - override /dataset: test
+  - override /trainer/classification: test
+  - override /trainer/adversarial: test
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: test
+  - override /hydra/sweeper: optuna
+
+tracking:
+  mode: disabled
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    strengths: [0.1]
+    num_steps: 5
+
+trainer:
+  classification:
+    max_epoch: 5
+    patience: 3
+    save: false
+
+  adversarial:
+    max_epoch: 10
+    batch_size: 256
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 5
+    watch_freq: 100
+    metrics: {"clsloss": 1, "acc": 1, "rob": 1}
+
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      strengths: [0.1]
+      num_steps: 5
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 5
+
+    save: false
+
+hydra:
+  sweeper:
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 2
+
+    direction: minimize
+    n_trials: 3
+    n_jobs: 1
+
+    params:
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-4, 1e-2))
+      trainer.adversarial.clean_weight: interval(0.0, 0.3)

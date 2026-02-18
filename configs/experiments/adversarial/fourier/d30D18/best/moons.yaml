@@ -1,0 +1,94 @@
+# @package _global_
+# Adversarial Training HPO with pretrained model (PGD-AT with curriculum)
+#
+# Skips classification pretraining — loads a pretrained model instead.
+# This avoids re-running pretraining for every HPO trial.
+#
+# IMPORTANT: dataset.split_seed must match the split_seed used during
+# pretraining (moons_4k default: 11) to ensure identical train/valid/test splits.
+#
+# Optimizes: lr, weight_decay, clean_weight
+# Uses strong PGD attack with curriculum training (epsilon: 0.01 -> 0.15)
+#
+# Usage:
+#   python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/best/moons \
+#       model_path=/path/to/pretrained/model.pt
+
+experiment: single
+
+descriptor: best
+defaults:
+  - override /born: fourier/d30D18
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null  # Skip pretraining — use model_path
+  - override /trainer/adversarial: pgd_at
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+# Pretrained model path (required — Hydra will error if not provided)
+model_path: /mathqi/mnissen/adversarial_training_mps/outputs/models/pretrained/best_cls_loss_moons_4k_180126.086
+
+# Ensure split matches pretraining
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+# W&B settings
+tracking:
+  seed: 71 # needs to be adjusted to match pretraining
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15]
+    num_steps: 20
+    step_size: null
+    random_start: true
+
+# Adversarial training settings
+trainer:
+  adversarial:
+    max_epoch: 500
+    batch_size: 256
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 200
+    watch_freq: 2000
+    # Evaluate clean and robust accuracy every epoch
+    # FID, genloss, viz every 50 epochs (expensive)
+    metrics: {"clsloss": 1, "acc": 1, "rob": 1, "fid": 50, "genloss": 50, "viz": 50}
+
+    # Attack settings (strong PGD attack)
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+        kwargs:
+          eps: 1e-8
+      strengths: [0.15]
+      num_steps: 20
+      step_size: null
+      random_start: true
+
+    # Curriculum: ramp epsilon from 0.01 to 0.15 over first 300 epochs
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 300
+
+    save: True
+    auto_stack: true
+    auto_unbind: false
+
+    # Optimizer pareto optimal:
+    optimizer:
+      kwargs:
+        lr: 0.000082
+        weight_decay: 3.855074e-09
+      clean_weight: 0.342117     

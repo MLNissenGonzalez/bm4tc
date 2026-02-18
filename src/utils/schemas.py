@@ -454,6 +454,7 @@ class Config:
     trainer: TrainerConfig
     tracking: TrackingConfig
     experiment: str = "default"
+    descriptor: str = ""
 
 cs.store(name="base_config", node=Config)
 
