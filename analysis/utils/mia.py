@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
+from sklearn.metrics import roc_auc_score, accuracy_score, balanced_accuracy_score, precision_recall_curve
 import logging
 
 from src.utils.evasion.minimal import ProjectedGradientDescent
@@ -179,12 +179,12 @@ class MIAResults:
         test_features: Feature array for test samples.
         feature_names: Names of features used.
     """
-    attack_accuracy: float
+    attack_accuracy: float  # Balanced accuracy (avg of TPR and TNR; baseline = 0.5)
     auc_roc: float
     precision_at_low_fpr: Dict[float, float]
     feature_importance: Dict[str, float]
     threshold_metrics: Dict[str, Dict[str, float]]
-    worst_case_threshold: Dict[str, Dict[str, float]]
+    worst_case_threshold: Dict[str, Dict[str, float]]  # "accuracy" = balanced accuracy
     train_features: np.ndarray
     test_features: np.ndarray
     feature_names: List[str] = field(default_factory=list)
@@ -505,9 +505,11 @@ class MIAEvaluation:
         """Compute worst-case (oracle) threshold attack on the full dataset.
 
         For each feature, sweep all unique thresholds and pick the one that
-        maximizes membership inference accuracy. This is a theoretical upper
-        bound: a real adversary cannot select the optimal threshold without
-        knowing ground-truth membership labels.
+        maximizes **balanced accuracy** = (TPR + TNR) / 2.  Using balanced
+        accuracy instead of raw accuracy makes the metric independent of the
+        train/test class ratio (baseline = 0.5 regardless of imbalance).
+        This is a theoretical upper bound: a real adversary cannot select the
+        optimal threshold without knowing ground-truth membership labels.
 
         The attack rule for each threshold t is:
             predict "member" if score >= t, "non-member" otherwise.
@@ -521,7 +523,7 @@ class MIAEvaluation:
 
         Returns:
             Dictionary mapping feature name to metrics dict with keys:
-                accuracy, threshold, tpr, fpr, n_train, n_test.
+                accuracy (balanced), threshold, tpr, fpr, n_train, n_test.
         """
         n_train = len(train_features)
         n_test = len(test_features)
@@ -564,18 +566,18 @@ class MIAEvaluation:
             # Use broadcasting: (T, 1) >= (1, N) -> (T, N)
             preds = (midpoints[:, None] <= scores[None, :]).astype(np.float64)
 
-            # Accuracy for each threshold
-            correct = (preds == labels[None, :]).sum(axis=1)
-            accuracies = correct / n_total
+            # Balanced accuracy = (TPR + TNR) / 2 for each threshold.
+            # Independent of class imbalance; baseline = 0.5 (random).
+            tpr_all = preds[:, :n_train].mean(axis=1)         # fraction of members predicted member
+            tnr_all = (1 - preds[:, n_train:]).mean(axis=1)   # fraction of non-members predicted non-member
+            balanced_accs = (tpr_all + tnr_all) / 2
 
-            best_idx = np.argmax(accuracies)
+            best_idx = np.argmax(balanced_accs)
             best_threshold = midpoints[best_idx]
             best_preds = preds[best_idx]
 
-            tp = ((best_preds == 1) & (labels == 1)).sum()
-            fp = ((best_preds == 1) & (labels == 0)).sum()
-            tpr = tp / n_train if n_train > 0 else 0.0
-            fpr = fp / n_test if n_test > 0 else 0.0
+            tpr = float(tpr_all[best_idx])
+            fpr = 1.0 - float(tnr_all[best_idx])
 
             # Map threshold back to original scale for interpretability
             if name in ["loss", "entropy"]:
@@ -584,17 +586,17 @@ class MIAEvaluation:
                 original_threshold = best_threshold
 
             results[name] = {
-                "accuracy": float(accuracies[best_idx]),
+                "accuracy": float(balanced_accs[best_idx]),
                 "threshold": float(original_threshold),
-                "tpr": float(tpr),
-                "fpr": float(fpr),
+                "tpr": tpr,
+                "fpr": fpr,
                 "n_train": n_train,
                 "n_test": n_test,
             }
 
             logger.info(
                 f"Worst-case threshold [{name}]: "
-                f"acc={accuracies[best_idx]:.4f}, "
+                f"balanced_acc={balanced_accs[best_idx]:.4f}, "
                 f"threshold={original_threshold:.6f}, "
                 f"TPR={tpr:.4f}, FPR={fpr:.4f}"
             )
@@ -662,10 +664,10 @@ class MIAEvaluation:
         y_pred = attack_clf.predict(X_eval)
         y_proba = attack_clf.predict_proba(X_eval)[:, 1]
 
-        attack_accuracy = accuracy_score(y_eval, y_pred)
+        attack_accuracy = balanced_accuracy_score(y_eval, y_pred)
         auc_roc = roc_auc_score(y_eval, y_proba)
 
-        logger.info(f"Attack accuracy: {attack_accuracy:.4f}")
+        logger.info(f"Attack balanced accuracy: {attack_accuracy:.4f}")
         logger.info(f"Attack AUC-ROC: {auc_roc:.4f}")
 
         # Compute feature importance from logistic regression coefficients
