@@ -171,22 +171,21 @@ def evaluate_run(
     datahandler.split_and_rescale(bm)
     datahandler.get_classification_loaders()
 
-    # 7. Evaluate each metric on each split
-    metric_names = []
+    # 7. Evaluate non-rob metrics on all splits; rob on non-test splits only.
+    #    Test-split rob is deferred to step 10 to reuse UQ's adversarial examples.
+    non_rob_metrics = []
     if eval_cfg.compute_acc:
-        metric_names.append("acc")
+        non_rob_metrics.append("acc")
     if eval_cfg.compute_cls_loss:
-        metric_names.append("clsloss")
-    if eval_cfg.compute_rob:
-        metric_names.append("rob")
+        non_rob_metrics.append("clsloss")
     if eval_cfg.compute_gen_loss:
-        metric_names.append("genloss")
+        non_rob_metrics.append("genloss")
     if eval_cfg.compute_fid:
-        metric_names.append("fid")
+        non_rob_metrics.append("fid")
 
     for split in eval_cfg.splits:
         context: Dict[str, Any] = {}
-        for metric_name in metric_names:
+        for metric_name in non_rob_metrics:
             try:
                 metric = MetricFactory.create(
                     metric_name=metric_name,
@@ -196,22 +195,33 @@ def evaluate_run(
                     device=device,
                 )
                 result = metric.evaluate(bm, split, context)
-
-                if metric_name == "rob":
-                    # RobustnessMetric returns a list of accuracies
-                    strengths = cfg.tracking.evasion.strengths
-                    for i, strength in enumerate(strengths):
-                        results[f"eval/{split}/rob/{strength}"] = float(result[i])
-                else:
-                    results[f"eval/{split}/{metric_name}"] = float(result)
+                results[f"eval/{split}/{metric_name}"] = float(result)
             except Exception as e:
                 logger.warning(f"Metric '{metric_name}' failed on split '{split}': {e}")
-                if metric_name == "rob":
-                    strengths = getattr(cfg.tracking.evasion, "strengths", [])
-                    for strength in strengths:
-                        results[f"eval/{split}/rob/{strength}"] = np.nan
-                else:
-                    results[f"eval/{split}/{metric_name}"] = np.nan
+                results[f"eval/{split}/{metric_name}"] = np.nan
+
+    # Valid-split (and any non-test split) rob via MetricFactory.
+    # UQ only evaluates on test; valid rob still uses MetricFactory directly.
+    if eval_cfg.compute_rob:
+        for split in [s for s in eval_cfg.splits if s != "test"]:
+            context: Dict[str, Any] = {}
+            try:
+                metric = MetricFactory.create(
+                    metric_name="rob",
+                    freq=1,
+                    cfg=cfg,
+                    datahandler=datahandler,
+                    device=device,
+                )
+                result = metric.evaluate(bm, split, context)
+                strengths = cfg.tracking.evasion.strengths
+                for i, strength in enumerate(strengths):
+                    results[f"eval/{split}/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Metric 'rob' failed on split '{split}': {e}")
+                strengths = getattr(cfg.tracking.evasion, "strengths", [])
+                for strength in strengths:
+                    results[f"eval/{split}/rob/{strength}"] = np.nan
 
     # 8. MIA
     if eval_cfg.compute_mia:
@@ -247,6 +257,15 @@ def evaluate_run(
                 )
                 results["eval/adv_mia_wc_best"] = best_adv_mia
 
+                # Store clean worst-case threshold for clean-vs-adversarial comparison
+                # (same oracle threshold metric as adversarial_worst_case_threshold).
+                if mia_results.worst_case_threshold:
+                    for feat_name, metrics in mia_results.worst_case_threshold.items():
+                        results[f"eval/mia_wc/{feat_name}"] = metrics["accuracy"]
+                    results["eval/mia_wc_best"] = max(
+                        m["accuracy"] for m in mia_results.worst_case_threshold.values()
+                    )
+
             # Store MIA summary for export
             results["_mia_summary"] = mia_results.summary()
         except Exception as e:
@@ -254,7 +273,9 @@ def evaluate_run(
             results["eval/mia_accuracy"] = np.nan
             results["eval/mia_auc_roc"] = np.nan
 
-    # 9. UQ (detection + purification)
+    # 9. UQ (detection + purification) — runs before test-split rob to share
+    #    adversarial examples generated on the test set.
+    uq_results = None
     if eval_cfg.compute_uq:
         try:
             from .uq import UQEvaluation, UQConfig
@@ -284,7 +305,52 @@ def evaluate_run(
             logger.warning(f"UQ evaluation failed: {e}")
             results["eval/uq_clean_accuracy"] = np.nan
 
-    # 10. Cleanup
+    # 10. Test-split rob: reuse UQ's adv_accuracies where possible to avoid
+    #     generating adversarial examples twice on the test set.
+    if eval_cfg.compute_rob and "test" in eval_cfg.splits:
+        _uq_adv_acc_cache: Dict[float, float] = {}
+        if eval_cfg.compute_uq and uq_results is not None:
+            _uq_adv_acc_cache = {
+                float(eps): acc for eps, acc in uq_results.adv_accuracies.items()
+            }
+
+        strengths = cfg.tracking.evasion.strengths
+        missing = []
+        for strength in strengths:
+            s = float(strength)
+            if s in _uq_adv_acc_cache:
+                results[f"eval/test/rob/{strength}"] = _uq_adv_acc_cache[s]
+            else:
+                missing.append(strength)
+
+        if missing:
+            logger.warning(
+                f"Test rob eps {missing} not in UQ cache; generating adversarial examples separately"
+            )
+            original_strengths = list(cfg.tracking.evasion.strengths)
+            try:
+                OmegaConf.update(cfg, "tracking.evasion.strengths", missing, force_add=True)
+                context: Dict[str, Any] = {}
+                metric = MetricFactory.create(
+                    metric_name="rob",
+                    freq=1,
+                    cfg=cfg,
+                    datahandler=datahandler,
+                    device=device,
+                )
+                result = metric.evaluate(bm, "test", context)
+                for i, strength in enumerate(missing):
+                    results[f"eval/test/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Fallback test rob generation failed: {e}")
+                for strength in missing:
+                    results[f"eval/test/rob/{strength}"] = np.nan
+            finally:
+                OmegaConf.update(
+                    cfg, "tracking.evasion.strengths", original_strengths, force_add=True
+                )
+
+    # 11. Cleanup
     del bm
     torch.cuda.empty_cache()
 

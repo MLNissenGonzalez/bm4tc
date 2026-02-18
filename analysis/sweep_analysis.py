@@ -61,21 +61,15 @@ COMPUTE_GEN_LOSS = False
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 
-# --- EVASION OVERRIDE ---
-# Set to a dict to override evasion config across ALL runs for consistency.
+# --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
+# Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
 # Set to None to use each run's own evasion config.
-EVASION_OVERRIDE = {
+EVASION_CONFIG = {
     "method": "PGD",
-    "strengths": [0.3, 0.45, 0.6],
-    "num_steps": 20,
     "norm": "inf",
+    "num_steps": 20,
+    "strengths": [0.3, 0.45, 0.6],   # base robustness eval strengths
 }
-# Example:
-# EVASION_OVERRIDE = {
-#     "method": "PGD",
-#     "strengths": [0.05, 0.1, 0.2],
-#     "num_steps": 20,
-# }
 
 # --- SAMPLING OVERRIDE ---
 # Set to a dict to override sampling config, or None to use per-run config.
@@ -98,27 +92,16 @@ MIA_FEATURES = {
     "use_true_labels": True,
 }
 
-# --- ADVERSARIAL MIA SETTINGS ---
-# Generate PGD adversarial examples per sample, then extract features from
-# model output on the perturbed inputs.  Adversarial transferability differs
-# between members and non-members, providing a stronger membership signal.
-# Only the worst-case (oracle) threshold attack is computed on these features.
-#
+# --- MIA ADVERSARIAL SETTINGS ---
 # Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
-MIA_ADV_STRENGTH = 0.15        # PGD epsilon (e.g. 0.15).  None = disabled.
-MIA_ADV_NUM_STEPS = 20         # PGD iteration count.
-MIA_ADV_STEP_SIZE = None       # Per-step size.  None = auto (2.5 * eps / steps).
-MIA_ADV_NORM = "inf"           # Lp norm for perturbation ball ("inf", 2, ...).
+# Attack settings (method, norm, num_steps) are derived from EVASION_CONFIG.
+MIA_ADV_STRENGTH = 0.15        # eps for adversarial MIA; None = disabled.
+                               # Added to EVASION_CONFIG["strengths"] automatically.
 
-# --- UQ SETTINGS (used if COMPUTE_UQ == True) ---
+# --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
-    "norm": "inf",
-    "num_steps": 20,
     "radii": [0.15, 0.3],
     "percentiles": [1, 5, 10, 20],
-    "attack_method": "PGD",
-    "attack_strengths": [0.15, 0.3, 0.45, 0.6],
-    "attack_num_steps": 20,
 }
 
 # --- EVALUATION SETTINGS ---
@@ -160,18 +143,31 @@ CONFIG_KEYS = [
 # ## 2. Per-Model Evaluation
 
 # %%
-# Ensure PARETO_ROB_STRENGTH is in the evasion strengths
-if PARETO_ROB_STRENGTH is not None and COMPUTE_ROB:
-    if EVASION_OVERRIDE is not None:
-        if "strengths" not in EVASION_OVERRIDE:
-            EVASION_OVERRIDE["strengths"] = [PARETO_ROB_STRENGTH]
-        elif PARETO_ROB_STRENGTH not in EVASION_OVERRIDE["strengths"]:
-            EVASION_OVERRIDE["strengths"].append(PARETO_ROB_STRENGTH)
-            EVASION_OVERRIDE["strengths"].sort() 
-    else:
-        print(f"Note: PARETO_ROB_STRENGTH={PARETO_ROB_STRENGTH} is set but "
-              f"EVASION_OVERRIDE is None. Ensure each run's evasion config "
-              f"includes eps={PARETO_ROB_STRENGTH}.")
+# Add PARETO and MIA strengths to EVASION_CONFIG; sort. Build full UQ config.
+if EVASION_CONFIG:
+    _strengths = [float(s) for s in EVASION_CONFIG.get("strengths", [])]
+    if COMPUTE_ROB and PARETO_ROB_STRENGTH is not None:
+        if float(PARETO_ROB_STRENGTH) not in _strengths:
+            _strengths.append(float(PARETO_ROB_STRENGTH))
+    if COMPUTE_MIA and MIA_ADV_STRENGTH is not None:
+        if float(MIA_ADV_STRENGTH) not in _strengths:
+            _strengths.append(float(MIA_ADV_STRENGTH))
+    EVASION_CONFIG["strengths"] = sorted(set(_strengths))
+    print(f"Final attack strengths: {EVASION_CONFIG['strengths']}")
+elif PARETO_ROB_STRENGTH is not None and COMPUTE_ROB:
+    print(f"Note: EVASION_CONFIG is None; using per-run evasion configs. "
+          f"Ensure each run includes eps={PARETO_ROB_STRENGTH}.")
+
+_full_uq_config = None
+if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
+    _full_uq_config = {
+        "norm":             EVASION_CONFIG.get("norm", "inf"),
+        "num_steps":        EVASION_CONFIG.get("num_steps", 20),  # purification steps
+        "attack_method":    EVASION_CONFIG.get("method", "PGD"),
+        "attack_strengths": EVASION_CONFIG["strengths"],
+        "attack_num_steps": EVASION_CONFIG.get("num_steps", 20),
+        **UQ_CONFIG,  # radii, percentiles (may override num_steps if user adds it)
+    }
 
 # %%
 from analysis.utils import EvalConfig, evaluate_sweep
@@ -185,14 +181,14 @@ eval_cfg = EvalConfig(
     compute_fid=COMPUTE_FID,
     compute_uq=COMPUTE_UQ,
     splits=EVAL_SPLITS,
-    evasion_override=EVASION_OVERRIDE,
+    evasion_override=EVASION_CONFIG,
     sampling_override=SAMPLING_OVERRIDE,
     mia_features=MIA_FEATURES,
     mia_adversarial_strength=MIA_ADV_STRENGTH,
-    mia_adversarial_num_steps=MIA_ADV_NUM_STEPS,
-    mia_adversarial_step_size=MIA_ADV_STEP_SIZE,
-    mia_adversarial_norm=MIA_ADV_NORM,
-    uq_config=UQ_CONFIG if COMPUTE_UQ else None,
+    mia_adversarial_num_steps=EVASION_CONFIG.get("num_steps", 20) if EVASION_CONFIG else 20,
+    mia_adversarial_step_size=None,
+    mia_adversarial_norm=EVASION_CONFIG.get("norm", "inf") if EVASION_CONFIG else "inf",
+    uq_config=_full_uq_config if COMPUTE_UQ else None,
     device=DEVICE,
 )
 
@@ -216,6 +212,8 @@ if not df.empty:
 sweep_name = Path(SWEEP_DIR).name.replace("/", "_")
 output_dir = project_root / "analysis" / "outputs" / sweep_name
 output_dir.mkdir(parents=True, exist_ok=True)
+mia_output_dir = output_dir / "mia"
+mia_output_dir.mkdir(parents=True, exist_ok=True)
 print(f"Output directory: {output_dir}")
 
 # %% [markdown]
@@ -244,12 +242,31 @@ if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
         ADV_MIA_COL = "eval/adv_mia_wc_best"
     ADV_MIA_FEATURE_COLS = [c for c in df.columns if c.startswith("eval/adv_mia_wc/")]
 
+# Clean worst-case threshold (for apples-to-apples comparison with adversarial MIA)
+MIA_WC_COL = None
+MIA_WC_FEATURE_COLS = []
+if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
+    if "eval/mia_wc_best" in df.columns:
+        MIA_WC_COL = "eval/mia_wc_best"
+    MIA_WC_FEATURE_COLS = [c for c in df.columns if c.startswith("eval/mia_wc/")]
+
+UQ_ADV_ACC_COLS = []
+UQ_PURIFY_ACC_COLS = []
+UQ_PURIFY_RECOVERY_COLS = []
+UQ_DETECTION_COLS = []
+if COMPUTE_UQ and not df.empty:
+    UQ_ADV_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_adv_acc/"))
+    UQ_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_purify_acc/"))
+    UQ_PURIFY_RECOVERY_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_purify_recovery/"))
+    UQ_DETECTION_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_detection/"))
+
 print(f"VAL_ACC:      {VAL_ACC}")
 print(f"VAL_ROB:      {VAL_ROB}")
 print(f"TEST_ACC:     {TEST_ACC}")
 print(f"TEST_ROB:     {TEST_ROB}")
 print(f"MIA_COL:      {MIA_COL}")
 print(f"ADV_MIA_COL:  {ADV_MIA_COL}")
+print(f"MIA_WC_COL:   {MIA_WC_COL}")
 if ADV_MIA_FEATURE_COLS:
     print(f"ADV_MIA per-feature: {ADV_MIA_FEATURE_COLS}")
 
@@ -348,13 +365,36 @@ if not df.empty:
                         print(f"  {split_label} Robust Accuracy (eps={strength}): {best_run[rob_col]:.4f}")
             if MIA_COL and MIA_COL in best_run.index:
                 print(f"  MIA Accuracy: {best_run[MIA_COL]:.4f}")
+            if MIA_WC_COL and MIA_WC_COL in best_run.index:
+                print(f"  MIA WC Threshold (clean):              {best_run[MIA_WC_COL]:.4f}")
             if ADV_MIA_COL and ADV_MIA_COL in best_run.index:
-                print(f"  Adversarial MIA (best wc, eps={MIA_ADV_STRENGTH}): "
-                      f"{best_run[ADV_MIA_COL]:.4f}")
+                print(f"  MIA WC Threshold (adv, eps={MIA_ADV_STRENGTH}): {best_run[ADV_MIA_COL]:.4f}")
                 for col in ADV_MIA_FEATURE_COLS:
                     if col in best_run.index:
                         feat = col.split("/")[-1]
                         print(f"    {feat}: {best_run[col]:.4f}")
+            if COMPUTE_UQ and UQ_PURIFY_ACC_COLS:
+                print(f"  --- UQ (Detection + Purification on test) ---")
+                uq_clean = best_run.get("eval/uq_clean_accuracy")
+                if uq_clean is not None and not np.isnan(uq_clean):
+                    print(f"  UQ Clean Acc: {uq_clean:.4f}")
+                for adv_col in UQ_ADV_ACC_COLS:
+                    eps = adv_col.split("/")[-1]
+                    adv_val = best_run.get(adv_col, float("nan"))
+                    print(f"  Adv Acc (eps={eps}, no defense): {adv_val:.4f}")
+                    for col in [c for c in UQ_PURIFY_ACC_COLS if f"/{eps}/" in c]:
+                        radius = col.split("/")[-1]
+                        purify_val = best_run.get(col, float("nan"))
+                        delta = purify_val - adv_val if not (np.isnan(purify_val) or np.isnan(adv_val)) else float("nan")
+                        delta_str = f"  (Δ={delta:+.4f})" if not np.isnan(delta) else ""
+                        print(f"  Purify Acc (eps={eps}, r={radius}): {purify_val:.4f}{delta_str}")
+                if UQ_DETECTION_COLS:
+                    print(f"  Detection rates (fraction of adv examples detected as OOD):")
+                    for col in UQ_DETECTION_COLS:
+                        parts = col.split("/")
+                        pct_str, eps = parts[-2], parts[-1]
+                        rate = best_run.get(col, float("nan"))
+                        print(f"    tau={pct_str}, eps={eps}: {rate:.4f}")
 
 # %%
 # Accuracy vs perturbation strength for best run (test-set performance)
@@ -539,14 +579,17 @@ if not df.empty and COMPUTE_MIA and "_mia_summary" in df.columns:
     for _, row in df.iterrows():
         summary = row.get("_mia_summary")
         if summary and isinstance(summary, str):
-            mia_path = output_dir / f"mia_summary_{row['run_name']}.txt"
+            mia_path = mia_output_dir / f"mia_summary_{row['run_name']}.txt"
             with open(mia_path, "w") as f:
                 f.write(summary)
-    print(f"Saved per-run MIA summaries to {output_dir}/mia_summary_*.txt")
+    print(f"Saved per-run MIA summaries to {mia_output_dir}/")
 
 if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
     print(f"\nAdversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH}):")
     print("  Per-feature accuracy (oracle threshold, mean +/- std across runs):\n")
+    if MIA_WC_COL and MIA_WC_COL in df.columns:
+        vals_wc = df[MIA_WC_COL].dropna()
+        print(f"    {'WC Threshold (clean)':25s}  {vals_wc.mean():.4f} +/- {vals_wc.std():.4f}")
     for col in sorted(ADV_MIA_FEATURE_COLS):
         feat = col.split("/")[-1]
         vals = df[col].dropna()
@@ -557,7 +600,33 @@ if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
         print(f"\n    {'BEST (across features)':25s}  {vals.mean():.4f} +/- {vals.std():.4f}")
 
 # %% [markdown]
-# ### 3h. Summary Statistics Table
+# ### 3h. UQ Results (detection + purification across all runs)
+
+# %%
+if not df.empty and COMPUTE_UQ and UQ_PURIFY_ACC_COLS:
+    print(f"\nUQ Purification Results (mean +/- std across runs, test split):\n")
+    for adv_col in UQ_ADV_ACC_COLS:
+        eps = adv_col.split("/")[-1]
+        adv_vals = df[adv_col].dropna()
+        print(f"  Adv Acc (eps={eps}, no defense): {adv_vals.mean():.4f} +/- {adv_vals.std():.4f}")
+        for col in [c for c in UQ_PURIFY_ACC_COLS if f"/{eps}/" in c]:
+            radius = col.split("/")[-1]
+            purify_vals = df[col].dropna()
+            adv_mean = adv_vals.mean()
+            purify_mean, purify_std = purify_vals.mean(), purify_vals.std()
+            delta = purify_mean - adv_mean
+            print(f"  Purify Acc (eps={eps}, r={radius}): "
+                  f"{purify_mean:.4f} +/- {purify_std:.4f}  (Δ={delta:+.4f})")
+    if UQ_DETECTION_COLS:
+        print(f"\nUQ Detection Rates (mean +/- std across runs):\n")
+        for col in UQ_DETECTION_COLS:
+            parts = col.split("/")
+            pct_str, eps = parts[-2], parts[-1]
+            vals = df[col].dropna()
+            print(f"  tau={pct_str}, eps={eps}: {vals.mean():.4f} +/- {vals.std():.4f}")
+
+# %% [markdown]
+# ### 3i. Summary Statistics Table
 #
 # Both validation and test metrics are reported.  The "Best" column shows
 # metrics from the single run selected on validation (stopping criterion).
@@ -718,11 +787,12 @@ if not df.empty:
         f.write(f"Device: {DEVICE}\n")
         if EFFECTIVE_N:
             f.write(f"Effective N: {EFFECTIVE_N}\n")
-        if EVASION_OVERRIDE:
-            f.write(f"Evasion override: {EVASION_OVERRIDE}\n")
+        if EVASION_CONFIG:
+            f.write(f"Evasion config: {EVASION_CONFIG}\n")
         if MIA_ADV_STRENGTH is not None:
             f.write(f"Adversarial MIA: eps={MIA_ADV_STRENGTH}, "
-                    f"steps={MIA_ADV_NUM_STEPS}, norm={MIA_ADV_NORM}\n")
+                    f"steps={EVASION_CONFIG.get('num_steps', 20) if EVASION_CONFIG else 20}, "
+                    f"norm={EVASION_CONFIG.get('norm', 'inf') if EVASION_CONFIG else 'inf'}\n")
         f.write("\n")
 
         # Metrics used
@@ -738,6 +808,9 @@ if not df.empty:
             f.write(f"  Adversarial MIA: {ADV_MIA_COL}\n")
         if VAL_CLS_LOSS:
             f.write(f"  Cls Loss: {VAL_CLS_LOSS}, {TEST_CLS_LOSS}\n")
+        if COMPUTE_UQ and UQ_PURIFY_ACC_COLS:
+            f.write(f"  UQ: {len(UQ_PURIFY_ACC_COLS)} purification (eps, radius) pairs, "
+                    f"{len(UQ_DETECTION_COLS)} detection (pct, eps) pairs\n")
         f.write("\n")
 
         # Summary statistics
@@ -770,25 +843,75 @@ if not df.empty:
                             f.write(f"{split_label} Robust Accuracy (eps={strength}): {best_run_export[rob_col]:.4f}\n")
                 if MIA_COL and MIA_COL in best_run_export.index:
                     f.write(f"MIA Accuracy: {best_run_export[MIA_COL]:.4f}\n")
+                if MIA_WC_COL and MIA_WC_COL in best_run_export.index:
+                    f.write(f"MIA WC Threshold (clean): {best_run_export[MIA_WC_COL]:.4f}\n")
                 if ADV_MIA_COL and ADV_MIA_COL in best_run_export.index:
-                    f.write(f"Adversarial MIA Best WC (eps={MIA_ADV_STRENGTH}): "
+                    f.write(f"MIA WC Threshold (adv, eps={MIA_ADV_STRENGTH}): "
                             f"{best_run_export[ADV_MIA_COL]:.4f}\n")
                     for col in ADV_MIA_FEATURE_COLS:
                         if col in best_run_export.index:
                             feat = col.split("/")[-1]
                             f.write(f"  Adv MIA {feat}: {best_run_export[col]:.4f}\n")
+                if COMPUTE_UQ and best_run_export is not None and UQ_PURIFY_ACC_COLS:
+                    uq_clean = best_run_export.get("eval/uq_clean_accuracy")
+                    if uq_clean is not None and not np.isnan(float(uq_clean)):
+                        f.write(f"UQ Clean Acc: {float(uq_clean):.4f}\n")
+                    for adv_col in UQ_ADV_ACC_COLS:
+                        eps = adv_col.split("/")[-1]
+                        adv_val = best_run_export.get(adv_col, float("nan"))
+                        f.write(f"UQ Adv Acc (eps={eps}, no defense): {float(adv_val):.4f}\n")
+                        for col in [c for c in UQ_PURIFY_ACC_COLS if f"/{eps}/" in c]:
+                            radius = col.split("/")[-1]
+                            purify_val = best_run_export.get(col, float("nan"))
+                            delta = float(purify_val) - float(adv_val)
+                            f.write(f"UQ Purify Acc (eps={eps}, r={radius}): "
+                                    f"{float(purify_val):.4f}  (Δ={delta:+.4f})\n")
+                    if UQ_DETECTION_COLS:
+                        for col in UQ_DETECTION_COLS:
+                            parts = col.split("/")
+                            pct_str, eps = parts[-2], parts[-1]
+                            rate = best_run_export.get(col, float("nan"))
+                            f.write(f"UQ Detect Rate (tau={pct_str}, eps={eps}): {float(rate):.4f}\n")
 
         # Adversarial MIA summary across all runs
         if ADV_MIA_COL and ADV_MIA_COL in df.columns:
             f.write("\n" + "-" * 60 + "\n")
             f.write(f"Adversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH})\n")
             f.write("-" * 60 + "\n\n")
+            if MIA_WC_COL and MIA_WC_COL in df.columns:
+                vals_wc = df[MIA_WC_COL].dropna()
+                f.write(f"  {'WC Threshold (clean)':25s}  {vals_wc.mean():.4f} +/- {vals_wc.std():.4f}\n")
             for col in sorted(ADV_MIA_FEATURE_COLS):
                 feat = col.split("/")[-1]
                 vals = df[col].dropna()
                 f.write(f"  {feat:25s}  {vals.mean():.4f} +/- {vals.std():.4f}\n")
             vals = df[ADV_MIA_COL].dropna()
             f.write(f"\n  {'BEST (across features)':25s}  {vals.mean():.4f} +/- {vals.std():.4f}\n")
+
+        if COMPUTE_UQ and UQ_PURIFY_ACC_COLS:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("UQ Results — Purification (mean +/- std across runs)\n")
+            f.write("-" * 60 + "\n\n")
+            for adv_col in UQ_ADV_ACC_COLS:
+                eps = adv_col.split("/")[-1]
+                adv_vals = df[adv_col].dropna()
+                f.write(f"  Adv Acc (eps={eps}, no defense)  "
+                        f"{adv_vals.mean():.4f} +/- {adv_vals.std():.4f}\n")
+                for col in [c for c in UQ_PURIFY_ACC_COLS if f"/{eps}/" in c]:
+                    radius = col.split("/")[-1]
+                    purify_vals = df[col].dropna()
+                    delta = purify_vals.mean() - adv_vals.mean()
+                    f.write(f"  Purify Acc (eps={eps}, r={radius})  "
+                            f"{purify_vals.mean():.4f} +/- {purify_vals.std():.4f}  "
+                            f"(Δ={delta:+.4f})\n")
+            if UQ_DETECTION_COLS:
+                f.write("\n")
+                for col in UQ_DETECTION_COLS:
+                    parts = col.split("/")
+                    pct_str, eps = parts[-2], parts[-1]
+                    vals = df[col].dropna()
+                    f.write(f"  Detect Rate (tau={pct_str}, eps={eps})  "
+                            f"{vals.mean():.4f} +/- {vals.std():.4f}\n")
 
         # Pareto-optimal runs (selected on validation)
         if VAL_ACC and PARETO_VAL_ROB_COL:
