@@ -456,8 +456,9 @@ from scipy.stats import pearsonr
 
 if not df.empty:
     # --- Valid-only heatmap ---
-    valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL, ADV_MIA_COL] if c] + list(VAL_ROB)
-    valid_metrics = [c for c in valid_metrics if c in df.columns]
+    valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL, MIA_WC_COL, ADV_MIA_COL] if c] + list(VAL_ROB)
+    # Keep only columns present in df with at least 2 distinct values (drops constants → avoids NaN rows)
+    valid_metrics = [c for c in valid_metrics if c in df.columns and df[c].nunique() > 1]
 
     if len(valid_metrics) >= 2:
         corr_valid = compute_metric_correlations(df, valid_metrics)
@@ -471,8 +472,9 @@ if not df.empty:
                 plt.show()
 
     # --- Test-only heatmap ---
-    test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL, ADV_MIA_COL] if c] + list(TEST_ROB)
-    test_metrics = [c for c in test_metrics if c in df.columns]
+    test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL, MIA_WC_COL, ADV_MIA_COL] if c] + list(TEST_ROB)
+    # Keep only columns present in df with at least 2 distinct values (drops constants → avoids NaN rows)
+    test_metrics = [c for c in test_metrics if c in df.columns and df[c].nunique() > 1]
 
     if len(test_metrics) >= 2:
         corr_test = compute_metric_correlations(df, test_metrics)
