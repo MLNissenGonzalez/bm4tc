@@ -24,6 +24,7 @@
 
 # %%
 import sys
+import argparse
 from pathlib import Path
 
 # Handle both script and interactive execution
@@ -47,7 +48,14 @@ import torch
 # =============================================================================
 
 # Path to sweep directory (contains numbered sub-dirs with .hydra/config.yaml)
+# Can be overridden from the command line:
+#   python analysis/sweep_analysis.py outputs/seed_sweep/cls/fourier/d4D3/circles_4k_1802
 SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30D18fourier_moons_4k_1702"
+_cli = argparse.ArgumentParser(add_help=False)
+_cli.add_argument("sweep_dir", nargs="?", default=None)
+_cli_args, _ = _cli.parse_known_args()
+if _cli_args.sweep_dir is not None:
+    SWEEP_DIR = _cli_args.sweep_dir
 
 # Training regime: "pre", "gen", "adv", "gan"
 REGIME = "gen"
@@ -208,9 +216,19 @@ if not df.empty:
     print(f"\n{df[['run_name'] + eval_cols].to_string()}")
 
 # %%
-# Determine sweep name for output paths
-sweep_name = Path(SWEEP_DIR).name.replace("/", "_")
-output_dir = project_root / "analysis" / "outputs" / sweep_name
+# Mirror sweep path under analysis/outputs/:
+#   outputs/seed_sweep/X/Y/Z  →  analysis/outputs/seed_sweep/X/Y/Z
+_sp = Path(SWEEP_DIR)
+if _sp.is_absolute():
+    try:
+        _sp = _sp.relative_to(project_root)
+    except ValueError:
+        pass
+try:
+    _rel = _sp.relative_to("outputs")
+except ValueError:
+    _rel = _sp
+output_dir = project_root / "analysis" / "outputs" / _rel
 output_dir.mkdir(parents=True, exist_ok=True)
 mia_output_dir = output_dir / "mia"
 mia_output_dir.mkdir(parents=True, exist_ok=True)
