@@ -230,6 +230,7 @@ except ValueError:
     _rel = _sp
 output_dir = project_root / "analysis" / "outputs" / _rel
 output_dir.mkdir(parents=True, exist_ok=True)
+sweep_name = str(_rel)  # human-readable label used in plot titles and summary
 mia_output_dir = output_dir / "mia"
 mia_output_dir.mkdir(parents=True, exist_ok=True)
 print(f"Output directory: {output_dir}")
