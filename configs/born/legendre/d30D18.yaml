@@ -1,0 +1,7 @@
+init_kwargs:
+  in_dim: 30 # physical dimension
+  bond_dim: 18
+  boundary: "obc"
+  init_method: "randn_eye"
+  std: 1e-9
+embedding: "legendre"
