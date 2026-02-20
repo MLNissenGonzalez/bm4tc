@@ -39,7 +39,7 @@ dataset:
 tracking:
   evasion:
     method: "PGD"
-    norm: "inf"
+    norm: 2
     criterion:
       name: "negative log-likelihood"
       kwargs:
@@ -65,7 +65,7 @@ trainer:
     # Attack settings (strong PGD attack)
     evasion:
       method: "PGD"
-      norm: "inf"
+      norm: 2
       criterion:
         name: "negative log-likelihood"
         kwargs:

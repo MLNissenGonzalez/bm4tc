@@ -21,7 +21,7 @@ tracking:
   seed: 42
   evasion:
     method: "PGD"
-    norm: "inf"
+    norm: 2
     criterion:
       name: "negative log-likelihood"
       kwargs:
@@ -43,7 +43,7 @@ trainer:
 
     evasion:
       method: "PGD"
-      norm: "inf"
+      norm: 2
       criterion:
         name: "negative log-likelihood"
         kwargs:

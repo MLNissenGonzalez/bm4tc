@@ -21,7 +21,7 @@ tracking:
   mode: disabled
   evasion:
     method: "PGD"
-    norm: "inf"
+    norm: 2
     strengths: [0.1]
     num_steps: 5
 
@@ -42,7 +42,7 @@ trainer:
 
     evasion:
       method: "PGD"
-      norm: "inf"
+      norm: 2
       strengths: [0.1]
       num_steps: 5
       random_start: true

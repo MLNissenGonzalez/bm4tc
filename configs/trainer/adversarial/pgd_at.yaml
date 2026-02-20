@@ -17,7 +17,7 @@ criterion:
 
 evasion:
   method: "PGD"
-  norm: "inf"
+  norm: 2
   criterion:
     name: "negative log-likelihood"
     kwargs:

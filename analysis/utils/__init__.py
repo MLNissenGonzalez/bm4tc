@@ -65,6 +65,9 @@ from .evaluate import (
 
 from .resolve import (
     resolve_regime_from_path,
+    resolve_embedding_from_path,
+    embedding_range_size,
+    _EMBEDDING_RANGE_SIZE,
     resolve_params,
     resolve_metrics,
     resolve_primary_metric,
@@ -117,6 +120,9 @@ __all__ = [
     "download_wandb_checkpoint",
     # HPO resolver utilities
     "resolve_regime_from_path",
+    "resolve_embedding_from_path",
+    "embedding_range_size",
+    "_EMBEDDING_RANGE_SIZE",
     "resolve_params",
     "resolve_metrics",
     "resolve_primary_metric",

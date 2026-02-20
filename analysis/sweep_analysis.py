@@ -71,6 +71,14 @@ if REGIME is None:
 else:
     print(f"Auto-detected training regime: '{REGIME}' (from sweep_dir)")
 
+from analysis.utils.resolve import resolve_embedding_from_path as _resolve_embedding
+from analysis.utils.resolve import embedding_range_size as _embedding_range_size
+_EMBEDDING = _resolve_embedding(SWEEP_DIR)
+if _EMBEDDING is None:
+    print(f"WARNING: Could not detect embedding from '{SWEEP_DIR}'. Assuming Fourier (range size 1.0).")
+_RANGE_SIZE = _embedding_range_size(_EMBEDDING)
+print(f"Embedding: '{_EMBEDDING or 'unknown'}'  →  input range size: {_RANGE_SIZE}")
+
 # --- METRIC TOGGLES ---
 COMPUTE_ACC = True
 COMPUTE_ROB = True
@@ -83,11 +91,15 @@ COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
 # Set to None to use each run's own evasion config.
+# Strengths are expressed as FRACTIONS of the input range:
+#   Fourier (range 1.0): multiply by 1.0 → same value
+#   Legendre (range 2.0): multiply by 2.0
+_STRENGTH_FRACTIONS = [0.05, 0.10, 0.2, 0.5, 0.8]
 EVASION_CONFIG = {
     "method": "PGD",
-    "norm": "inf",
+    "norm": 2,                                            # L2 (was "inf")
     "num_steps": 20,
-    "strengths": [0.3, 0.45, 0.6],   # base robustness eval strengths.
+    "strengths": [s * _RANGE_SIZE for s in _STRENGTH_FRACTIONS],
 }
 
 # --- SAMPLING OVERRIDE ---
@@ -114,12 +126,12 @@ MIA_FEATURES = {
 # --- MIA ADVERSARIAL SETTINGS ---
 # Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
 # Attack settings (method, norm, num_steps) are derived from EVASION_CONFIG.
-MIA_ADV_STRENGTH = 0.15        # eps for adversarial MIA; None = disabled.
-                               # Added to EVASION_CONFIG["strengths"] automatically.
+MIA_ADV_STRENGTH = 0.15 * _RANGE_SIZE  # 15% of input range; None = disabled.
+                                       # Added to EVASION_CONFIG["strengths"] automatically.
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
-    "radii": [0.15, 0.3],
+    "radii": [0.10 * _RANGE_SIZE],   # single radius: 10% of input range (was [0.15, 0.3])
     "percentiles": [1, 5, 10, 20],
 }
 
@@ -139,7 +151,7 @@ DPI = 100
 # --- PARETO SETTINGS ---
 # Robustness strength for Pareto frontier selection.
 # Set to None to auto-select the weakest non-zero strength.
-PARETO_ROB_STRENGTH = 0.15
+PARETO_ROB_STRENGTH = 0.10 * _RANGE_SIZE   # 10% of input range (was 0.15 absolute)
 
 # --- SANITY CHECK ---
 # Map eval column -> W&B summary column for comparison.
