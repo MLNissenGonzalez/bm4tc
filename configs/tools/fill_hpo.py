@@ -59,6 +59,7 @@ STAGE_PREFIXES = {
 # arch string → (in_dim, bond_dim)
 ARCH_DIMS = {
     "d4D3": (4, 3),
+    "d6D4": (6, 4),
     "d30D18": (30, 18),
 }
 
@@ -402,8 +403,8 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         nargs="+",
-        choices=["d4D3", "d30D18"],
-        default=["d4D3", "d30D18"],
+        choices=["d4D3", "d6D4", "d30D18"],
+        default=["d4D3", "d6D4", "d30D18"],
         help="Architecture(s) to process (default: both)",
     )
     parser.add_argument(

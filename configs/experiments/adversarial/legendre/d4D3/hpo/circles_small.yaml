@@ -1,0 +1,79 @@
+# @package _global_
+experiment: hpo
+
+defaults:
+  - override /born: legendre/d4D3
+  - override /dataset: 2Dtoy/circles_small
+  - override /trainer/classification: null
+  - override /trainer/adversarial: pgd_at
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+model_path: ???
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    strengths: [0.15]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 100
+    batch_size: 256
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 100
+    watch_freq: 10000
+    metrics: {"rob": 1, "acc": 1}
+
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+        kwargs:
+          eps: 1e-8
+      strengths: [0.15]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 80
+
+    save: false
+    auto_stack: true
+    auto_unbind: false
+
+hydra:
+  sweeper:
+    storage: null
+    study_name: "${experiment}_${dataset.name}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 10
+    direction: minimize
+    n_trials: 30
+    n_jobs: 1
+    params:
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-5, 1e-2))
+      trainer.adversarial.optimizer.kwargs.weight_decay: tag(log, interval(1e-9, 1e-1))
+      trainer.adversarial.clean_weight: interval(0.2, 1.0)
