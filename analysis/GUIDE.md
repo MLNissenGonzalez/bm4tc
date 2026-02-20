@@ -52,14 +52,12 @@ analysis/
 ├── config_fetcher.ipynb     # Jupyter notebook for fetching best configs
 ├── outputs/                 # Generated analysis outputs (git-ignored)
 │   ├── <sweep_name>/       # Per-sweep output directory
-│   │   ├── accuracy_histogram.png
-│   │   ├── mean_accuracies_errorbars.png
-│   │   ├── metric_correlations.png
-│   │   ├── pareto_acc_vs_rob_*.png
-│   │   ├── summary_statistics.csv
-│   │   ├── sweep_analysis_summary.txt
 │   │   ├── best_run_distributions.png
-│   │   └── best_run_samples.png
+│   │   ├── best_run_samples.png
+│   │   ├── evaluation_data.csv
+│   │   ├── sweep_analysis_summary.txt
+│   │   └── mia/
+│   │       └── mia_summary_<run>.txt
 │   ├── mia/                # MIA analysis outputs
 │   │   ├── feature_importance.png
 │   │   ├── threshold_attacks.png
@@ -776,18 +774,29 @@ The analysis module includes **sweep_analysis.py** — a notebook that **loads e
 - **Consistent evaluation** across all runs (e.g., same attack strengths via evasion override)
 - **Sanity check** post-hoc metrics against W&B summary metrics from training
 
+### Output Structure
+
+```
+analysis/outputs/<sweep>/
+├── best_run_distributions.png   ← distribution heatmaps for best run
+├── best_run_samples.png         ← generated samples for best run
+├── evaluation_data.csv          ← one row per run, all metrics (see column reference below)
+├── sweep_analysis_summary.txt   ← text summary with all tables
+└── mia/
+    └── mia_summary_<run>.txt    ← per-run MIA detail
+```
+
 ### What it Shows
 
 1. **Per-model evaluation** — loads each checkpoint and computes acc, rob, MIA, cls loss, gen loss, FID
-2. **Accuracy histogram** — distribution of clean, robust, and MIA accuracy
-3. **Mean + std bar plot** — error bars show standard deviation (not stderr)
-4. **Metric-metric correlation heatmap**
-5. **Accuracy vs stopping criterion scatter**
-6. **Pareto frontiers** — clean acc vs rob acc, MIA acc vs rob acc
-7. **Summary statistics table** — best (from best run by stop criterion), mean, std, stderr
-8. **Sanity check** — compare post-hoc metrics with W&B summary metrics
-9. **Distribution visualization** — for best model (heatmaps + generated samples)
-10. **Summary export** — text file with best model, stats table, Pareto-optimal runs
+2. **Metric-metric correlations** — printed to stdout and included in summary TXT
+3. **Pareto frontiers** — Pareto-optimal runs printed to stdout and included in summary TXT
+4. **Summary statistics table** — best (from best run by stop criterion), mean, std, stderr
+5. **Sanity check** — compare post-hoc metrics with W&B summary metrics
+6. **Distribution visualization** — for best model (`best_run_distributions.png`, `best_run_samples.png`)
+7. **Summary export** — `sweep_analysis_summary.txt` (with all tables) + `evaluation_data.csv`
+
+All derived data (correlations, Pareto, acc-vs-strength band) can be recomputed from `evaluation_data.csv` using pandas — see query examples below.
 
 ### Running Sweep Analysis
 
@@ -845,6 +854,57 @@ eval_cfg = EvalConfig(
 )
 
 df = evaluate_sweep("outputs/my_sweep", eval_cfg, config_keys=["tracking.seed"])
+```
+
+### evaluation_data.csv Reference
+
+`evaluation_data.csv` contains one row per run with all evaluation metrics. All derived outputs
+(summary stats, correlations, Pareto frontiers, acc-vs-strength band) can be recomputed from it.
+
+| Column group | Pattern | Description |
+|---|---|---|
+| Identity | `run_name`, `run_path` | Run folder name and full path |
+| Config | `config/<key>` | Extracted Hydra config values (from CONFIG_KEYS) |
+| Clean acc | `eval/<split>/acc` | Clean classification accuracy per split |
+| Cls loss | `eval/<split>/clsloss` | Classification NLL loss (if COMPUTE_CLS_LOSS) |
+| Robustness | `eval/<split>/rob/<eps>` | Robust accuracy at each epsilon, per split |
+| MIA | `eval/mia_accuracy`, `eval/mia_auc_roc` | LR attack accuracy and AUC-ROC |
+| MIA WC | `eval/mia_wc/<feat>`, `eval/mia_wc_best` | Per-feature worst-case threshold accuracy |
+| Adv MIA | `eval/adv_mia_wc/<feat>`, `eval/adv_mia_wc_best` | Adversarial MIA worst-case accuracy |
+| UQ | `eval/uq_clean_accuracy` | UQ clean accuracy on test |
+| UQ adv | `eval/uq_adv_acc/<eps>` | Adversarial accuracy (no defense) at each eps |
+| UQ detect | `eval/uq_detection/<pct>pct/<eps>` | Detection rate at threshold percentile & eps |
+| UQ purify | `eval/uq_purify_acc/<eps>/<r>` | Purification accuracy at (eps, radius) |
+| UQ recovery | `eval/uq_purify_recovery/<eps>/<r>` | Recovery rate at (eps, radius) |
+
+**Common pandas queries:**
+
+```python
+import pandas as pd
+df = pd.read_csv("analysis/outputs/<sweep>/evaluation_data.csv")
+
+# Summary stats for all eval metrics
+df.filter(like="eval/").agg(["mean", "std", "min", "max"])
+
+# Best run by test accuracy
+df.sort_values("eval/test/acc", ascending=False).iloc[0]
+
+# All robustness columns (test)
+rob_cols = [c for c in df.columns if c.startswith("eval/test/rob/")]
+df[rob_cols].agg(["mean", "std"])
+
+# Acc vs perturbation strength (mean ± std across runs, test)
+rob_cols_sorted = sorted(rob_cols, key=lambda c: float(c.split("/")[-1]))
+band = df[["eval/test/acc"] + rob_cols_sorted].agg(["mean", "std"]).T
+band.index = [0.0] + [float(c.split("/")[-1]) for c in rob_cols_sorted]
+
+# Metric correlations
+df.filter(like="eval/test/").corr()
+
+# Pareto-optimal runs (clean acc vs robust acc)
+# See analysis/utils/statistics.py: get_pareto_runs(df, acc_col, rob_col)
+from analysis.utils import get_pareto_runs
+pareto = get_pareto_runs(df, "eval/valid/acc", "eval/valid/rob/0.1", True, True)
 ```
 
 ---

@@ -14,10 +14,10 @@
 # **Sections:**
 # 1. Configuration
 # 2. Per-model evaluation
-# 3. Statistics & visualization (histogram, bar, correlation, scatter, Pareto, summary)
+# 3. Statistics (correlation, Pareto, summary — data only; no intermediate image files)
 # 4. Sanity check against W&B summary metrics
-# 5. Learned distribution visualization for best model
-# 6. Summary export
+# 5. Learned distribution visualization for best model (best_run_distributions.png, best_run_samples.png)
+# 6. Summary export (sweep_analysis_summary.txt + evaluation_data.csv)
 
 # %% [markdown]
 # ## 1. Configuration
@@ -438,66 +438,20 @@ if not df.empty:
                         rate = best_run.get(col, float("nan"))
                         print(f"    tau={pct_str}, eps={eps}: {rate:.4f}")
 
-# %%
-# Accuracy vs perturbation strength for best run (test-set performance)
-from analysis.utils import plot_accuracy_vs_strength
-
-if not df.empty and TEST_ACC and TEST_ROB and best_run is not None:
-    best_run_df = df[df["run_name"] == best_run["run_name"]]
-    fig = plot_accuracy_vs_strength(
-        best_run_df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
-        title=f"Best Run ({best_run['run_name']}): Accuracy vs Perturbation Strength (test)",
-        dpi=DPI,
-    )
-    if fig:
-        plt.savefig(output_dir / "best_run_acc_vs_strength.png", bbox_inches="tight")
-        print(f"Saved best_run_acc_vs_strength.png")
-        plt.show()
-
-# %% [markdown]
-# ### 3b. Accuracy Histogram (test)
-
-# %%
-from analysis.utils import plot_accuracy_histogram
-
-if not df.empty and TEST_ACC:
-    # Use only the Pareto robustness strength (the band plot shows all strengths)
-    _hist_rob = [PARETO_TEST_ROB_COL] if PARETO_TEST_ROB_COL else []
-    fig = plot_accuracy_histogram(
-        df, acc_col=TEST_ACC, rob_cols=_hist_rob, mia_col=MIA_COL,
-        title=f"Accuracy Distribution — test ({sweep_name})", dpi=DPI,
-    )
-    plt.savefig(output_dir / "accuracy_histogram.png", bbox_inches="tight")
-    print(f"Saved accuracy_histogram.png")
-    plt.show()
-
-# %% [markdown]
-# ### 3c. Mean + Std Bar Plot (test)
-
-# %%
-from analysis.utils import plot_mean_with_std
-
-if not df.empty and TEST_ACC:
-    # Use only the Pareto robustness strength (the band plot shows all strengths)
-    _bar_rob = [PARETO_TEST_ROB_COL] if PARETO_TEST_ROB_COL else []
-    fig = plot_mean_with_std(
-        df, acc_col=TEST_ACC, rob_cols=_bar_rob, mia_col=MIA_COL,
-        title=f"Mean Accuracies \u00b1 Std Dev — test ({sweep_name})", dpi=DPI,
-    )
-    if fig:
-        plt.savefig(output_dir / "mean_accuracies_errorbars.png", bbox_inches="tight")
-        print(f"Saved mean_accuracies_errorbars.png")
-        plt.show()
-
 # %% [markdown]
 # ### 3d. Metric-Metric Correlation Heatmaps (per split) & Cross-Split Consistency
 
 # %%
-from analysis.utils import compute_metric_correlations, plot_correlation_heatmap
+from analysis.utils import compute_metric_correlations
 from scipy.stats import pearsonr
 
+# Initialized here so Section 6 can reference them regardless of df being empty
+corr_valid = pd.DataFrame()
+corr_test = pd.DataFrame()
+cross_df = pd.DataFrame()
+
 if not df.empty:
-    # --- Valid-only heatmap ---
+    # --- Valid-only correlations ---
     valid_metrics = [c for c in [VAL_ACC, VAL_CLS_LOSS, MIA_COL, MIA_WC_COL, ADV_MIA_COL] if c] + list(VAL_ROB)
     # Keep only columns present in df with at least 2 distinct values (drops constants → avoids NaN rows)
     valid_metrics = [c for c in valid_metrics if c in df.columns and df[c].nunique() > 1]
@@ -507,13 +461,8 @@ if not df.empty:
         if not corr_valid.empty:
             print("\nMetric-Metric Correlations (valid):")
             print(corr_valid.round(3).to_string())
-            fig = plot_correlation_heatmap(corr_valid, title="Metric Correlations — valid", dpi=DPI)
-            if fig:
-                plt.savefig(output_dir / "metric_correlations_valid.png", bbox_inches="tight")
-                print("Saved metric_correlations_valid.png")
-                plt.show()
 
-    # --- Test-only heatmap ---
+    # --- Test-only correlations ---
     test_metrics = [c for c in [TEST_ACC, TEST_CLS_LOSS, MIA_COL, MIA_WC_COL, ADV_MIA_COL] if c] + list(TEST_ROB)
     # Keep only columns present in df with at least 2 distinct values (drops constants → avoids NaN rows)
     test_metrics = [c for c in test_metrics if c in df.columns and df[c].nunique() > 1]
@@ -523,11 +472,6 @@ if not df.empty:
         if not corr_test.empty:
             print("\nMetric-Metric Correlations (test):")
             print(corr_test.round(3).to_string())
-            fig = plot_correlation_heatmap(corr_test, title="Metric Correlations — test", dpi=DPI)
-            if fig:
-                plt.savefig(output_dir / "metric_correlations_test.png", bbox_inches="tight")
-                print("Saved metric_correlations_test.png")
-                plt.show()
 
     # --- Cross-split consistency ---
     valid_cols = [c for c in df.columns if c.startswith("eval/valid/")]
@@ -550,69 +494,36 @@ if not df.empty:
         print(f"Mean cross-split r: {mean_r:.4f}")
 
 # %% [markdown]
-# ### 3e. Accuracy vs Stopping Criterion Scatter (valid)
-
-# %%
-from analysis.utils import plot_scatter_vs_metric
-
-if not df.empty and STOP_CRIT_COL and VAL_ACC:
-    fig = plot_scatter_vs_metric(
-        df, x_col=STOP_CRIT_COL, acc_col=VAL_ACC, rob_cols=VAL_ROB, mia_col=MIA_COL,
-        x_label=STOP_CRIT_LABEL or "Stop Criterion",
-        title=f"Accuracy vs Stopping Criterion — valid ({sweep_name})", dpi=DPI,
-    )
-    if fig:
-        plt.savefig(output_dir / "accuracy_vs_stop_crit.png", bbox_inches="tight")
-        print(f"Saved accuracy_vs_stop_crit.png")
-        plt.show()
-
-# %% [markdown]
 # ### 3f. Pareto Frontiers (selected on valid)
 
 # %%
-from analysis.utils import plot_pareto_frontier, get_pareto_runs, plot_accuracy_vs_strength_band
+from analysis.utils import get_pareto_runs
+
+# Compute acc-vs-strength band data (mean ± std ± stderr) for TXT export
+band_data = {}  # {eps: {"mean": ..., "std": ..., "stderr": ...}}
+if not df.empty and TEST_ACC:
+    _band_cols = [(0.0, TEST_ACC)] + [(float(c.split("/")[-1]), c) for c in TEST_ROB]
+    for _eps, _col in _band_cols:
+        if _col in df.columns:
+            _vals = df[_col].dropna()
+            _n = len(_vals)
+            band_data[_eps] = {
+                "mean": _vals.mean(),
+                "std": _vals.std(),
+                "stderr": _vals.std() / (_n ** 0.5) if _n > 0 else float("nan"),
+            }
 
 if not df.empty and PARETO_VAL_ROB_COL:
     _pareto_strength = PARETO_VAL_ROB_COL.split("/")[-1]
 
-    # Clean accuracy vs robust accuracy (both maximized, on validation)
+    # Pareto-optimal runs (selected on validation; data readable from evaluation_data.csv)
     if VAL_ACC:
-        fig = plot_pareto_frontier(
-            df, VAL_ACC, PARETO_VAL_ROB_COL, maximize1=True, maximize2=True, dpi=DPI,
-        )
-        if fig:
-            plt.savefig(output_dir / f"pareto_acc_vs_rob_{_pareto_strength}.png", bbox_inches="tight")
-            print(f"Saved pareto_acc_vs_rob_{_pareto_strength}.png")
-            plt.show()
-
-            pareto_df = get_pareto_runs(df, VAL_ACC, PARETO_VAL_ROB_COL, True, True)
-            if not pareto_df.empty:
-                print(f"\nPareto-optimal runs (valid acc vs rob/{_pareto_strength}):")
-                display_cols = ["run_name", VAL_ACC, PARETO_VAL_ROB_COL]
-                display_cols = [c for c in display_cols if c in pareto_df.columns]
-                print(pareto_df[display_cols].to_string(index=False))
-
-    # MIA accuracy vs robust accuracy (MIA minimized, rob maximized, on validation)
-    if MIA_COL:
-        fig = plot_pareto_frontier(
-            df, MIA_COL, PARETO_VAL_ROB_COL, maximize1=False, maximize2=True, dpi=DPI,
-        )
-        if fig:
-            plt.savefig(output_dir / f"pareto_mia_vs_rob_{_pareto_strength}.png", bbox_inches="tight")
-            print(f"Saved pareto_mia_vs_rob_{_pareto_strength}.png")
-            plt.show()
-
-    # Mean +/- std band plot across all runs (test-set performance)
-    if TEST_ACC and TEST_ROB:
-        fig = plot_accuracy_vs_strength_band(
-            df, acc_col=TEST_ACC, rob_cols=TEST_ROB,
-            title=f"Mean Accuracy vs Perturbation Strength — test ({sweep_name})",
-            dpi=DPI,
-        )
-        if fig:
-            plt.savefig(output_dir / "mean_acc_vs_strength_band.png", bbox_inches="tight")
-            print(f"Saved mean_acc_vs_strength_band.png")
-            plt.show()
+        pareto_df = get_pareto_runs(df, VAL_ACC, PARETO_VAL_ROB_COL, True, True)
+        if not pareto_df.empty:
+            print(f"\nPareto-optimal runs (valid acc vs rob/{_pareto_strength}):")
+            display_cols = ["run_name", VAL_ACC, PARETO_VAL_ROB_COL]
+            display_cols = [c for c in display_cols if c in pareto_df.columns]
+            print(pareto_df[display_cols].to_string(index=False))
 
 # %% [markdown]
 # ### 3g. Adversarial MIA Results
@@ -705,10 +616,6 @@ if not df.empty and VAL_ACC:
         print(f"\nEffective N: {EFFECTIVE_N if EFFECTIVE_N else len(df)} (actual runs: {len(df)})")
         print()
         print(summary_df.to_string(index=False))
-
-        csv_path = output_dir / "summary_statistics.csv"
-        summary_df.to_csv(csv_path, index=False)
-        print(f"\nSaved summary to: {csv_path}")
 
 # %% [markdown]
 # ## 4. Sanity Check vs W&B Summary Metrics
@@ -970,9 +877,77 @@ if not df.empty:
                 display_cols = [c for c in display_cols if c in pareto_df.columns]
                 f.write(pareto_df[display_cols].to_string(index=False) + "\n\n")
 
+        # Acc vs Strength — Mean ± Std (test)
+        if band_data:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("Acc vs Perturbation Strength — Mean ± Std (test)\n")
+            f.write("-" * 60 + "\n\n")
+            for _eps in sorted(band_data.keys()):
+                _bd = band_data[_eps]
+                _label = f"eps={_eps:.2f} (clean):" if _eps == 0.0 else f"eps={_eps:.2f}:"
+                f.write(f"  {_label:<20s}  mean={_bd['mean']:.4f}  "
+                        f"std={_bd['std']:.4f}  stderr={_bd['stderr']:.4f}\n")
+            f.write("\n")
+
+        # Best Run Acc vs Strength (test)
+        if "best_run_export" in dir() and best_run_export is not None and TEST_ACC:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("Best Run Acc vs Perturbation Strength (test)\n")
+            f.write("-" * 60 + "\n\n")
+            if TEST_ACC in best_run_export.index:
+                f.write(f"  eps=0.00 (clean):  {best_run_export[TEST_ACC]:.4f}\n")
+            for _rob_col in sorted(TEST_ROB, key=lambda c: float(c.split("/")[-1])):
+                if _rob_col in best_run_export.index:
+                    _eps_str = _rob_col.split("/")[-1]
+                    f.write(f"  eps={float(_eps_str):.2f}:           {best_run_export[_rob_col]:.4f}\n")
+            f.write("\n")
+
+        # Metric Correlations (valid)
+        if not corr_valid.empty:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("Metric Correlations (valid)\n")
+            f.write("-" * 60 + "\n\n")
+            f.write(corr_valid.round(3).to_string() + "\n\n")
+
+        # Metric Correlations (test)
+        if not corr_test.empty:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("Metric Correlations (test)\n")
+            f.write("-" * 60 + "\n\n")
+            f.write(corr_test.round(3).to_string() + "\n\n")
+
+        # Cross-Split Consistency
+        if not cross_df.empty:
+            f.write("\n" + "-" * 60 + "\n")
+            f.write("Cross-Split Consistency (valid vs test, Pearson r across runs)\n")
+            f.write("-" * 60 + "\n\n")
+            f.write(cross_df.to_string(index=False) + "\n")
+            f.write(f"Mean cross-split r: {cross_df['pearson_r'].mean():.4f}\n\n")
+
         f.write("\n" + "=" * 60 + "\n")
 
     print(f"\nExported summary to: {summary_path}")
+
+# %%
+# --- Export full per-run evaluation data ---
+# Column groups (see analysis/GUIDE.md for full reference and pandas query examples):
+#   run_name, run_path          — identity
+#   config/<key>                — extracted Hydra config values (from CONFIG_KEYS)
+#   eval/<split>/acc            — clean classification accuracy per split
+#   eval/<split>/clsloss        — classification NLL loss (if COMPUTE_CLS_LOSS)
+#   eval/<split>/rob/<eps>      — robust accuracy at each epsilon, per split
+#   eval/mia_accuracy, eval/mia_auc_roc         — LR attack accuracy and AUC-ROC
+#   eval/mia_wc/<feat>, eval/mia_wc_best        — per-feature worst-case threshold accuracy
+#   eval/adv_mia_wc/<feat>, eval/adv_mia_wc_best — adversarial MIA worst-case accuracy
+#   eval/uq_clean_accuracy      — UQ clean accuracy on test
+#   eval/uq_adv_acc/<eps>       — adversarial accuracy (no defense) at each eps
+#   eval/uq_detection/<pct>pct/<eps>  — detection rate at threshold percentile & eps
+#   eval/uq_purify_acc/<eps>/<r>      — purification accuracy at (eps, radius)
+#   eval/uq_purify_recovery/<eps>/<r> — recovery rate at (eps, radius)
+if not df.empty:
+    _eval_export_cols = [c for c in df.columns if not c.startswith("_")]
+    df[_eval_export_cols].to_csv(output_dir / "evaluation_data.csv", index=False)
+    print(f"Saved evaluation_data.csv ({len(df)} runs, {len(_eval_export_cols)} columns)")
 
 # %% [markdown]
 # ## Completion
