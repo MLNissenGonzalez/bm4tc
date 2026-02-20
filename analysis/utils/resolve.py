@@ -20,9 +20,82 @@ Example usage:
     varied, excluded = filter_varied_params(df, param_columns)
 """
 
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import re
+
+
+# =============================================================================
+# REGIME PATH RESOLVER
+# =============================================================================
+
+# Matches exactly the strings produced by the ${training_regime:} OmegaConf
+# resolver: any concatenation of the four code tokens cls / gen / adv / gan.
+_REGIME_PATH_PATTERN = re.compile(r"^(cls)?(gen)?(adv)?(gan)?$")
+
+
+def resolve_regime_from_path(sweep_dir: str) -> Optional[str]:
+    """Infer the training regime from a sweep directory path.
+
+    The standard sweep output directory has the format::
+
+        outputs/{experiment}/{training_regime}/{embedding}/d{in}D{bond}/{dataset}_{ddmm}
+
+    where ``training_regime`` is the string produced by the ``${training_regime:}``
+    OmegaConf resolver — a concatenation of the active trainer codes:
+
+    * ``cls``  — classification pre-training
+    * ``gen``  — generative NLL training
+    * ``adv``  — adversarial training
+    * ``gan``  — GAN-style training
+
+    Possible values include ``cls``, ``gen``, ``adv``, ``gan``, ``clsadv``,
+    ``clsgen``, ``clsgan``, ``clsgenadv``, etc.
+
+    Old-style flat paths (e.g. ``seed_sweep_adv_d30D18fourier_moons_4k_1202``)
+    are also supported: the path is tokenised on both ``/`` and ``_`` and each
+    token is matched against the same pattern.
+
+    Priority when multiple codes are present: ``adv`` > ``gen`` > ``gan`` > ``cls``.
+
+    Args:
+        sweep_dir: Path to the sweep directory (relative or absolute).
+
+    Returns:
+        One of ``"pre"``, ``"gen"``, ``"adv"``, ``"gan"``, or ``None`` if
+        no known regime code was found in the path.
+
+    Examples:
+        >>> resolve_regime_from_path("outputs/seed_sweep/adv/fourier/d30D18/moons_4k_0102")
+        'adv'
+        >>> resolve_regime_from_path("outputs/seed_sweep/clsadv/fourier/d30D18/moons_4k_0102")
+        'adv'
+        >>> resolve_regime_from_path("outputs/seed_sweep/cls/fourier/d30D18/moons_4k_0102")
+        'pre'
+        >>> resolve_regime_from_path("outputs/seed_sweep/clsgen/legendre/d30D18/moons_4k_0102")
+        'gen'
+        >>> resolve_regime_from_path("outputs/seed_sweep_adv_d30D18fourier_moons_4k_1202")
+        'adv'
+    """
+    path_str = str(sweep_dir).replace("\\", "/")
+    # Tokenise on both "/" and "_" to handle new-style (/adv/) and old-style (_adv_) paths.
+    tokens = re.split(r"[/_]", path_str)
+
+    for token in tokens:
+        m = _REGIME_PATH_PATTERN.match(token.lower())
+        if m and m.group(0):  # Non-empty exact match → valid regime string
+            # Priority: adv > gen > gan > cls
+            if m.group(3):  # adv present
+                return "adv"
+            if m.group(2):  # gen present
+                return "gen"
+            if m.group(4):  # gan present
+                return "gan"
+            if m.group(1):  # cls present (no secondary trainer)
+                return "pre"
+
+    return None
 
 
 # =============================================================================

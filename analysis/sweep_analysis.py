@@ -57,8 +57,19 @@ _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
     SWEEP_DIR = _cli_args.sweep_dir
 
-# Training regime: "pre", "gen", "adv", "gan"
-REGIME = "gen"
+# Training regime: "pre", "gen", "adv", "gan".
+# Auto-detected from SWEEP_DIR (which encodes the regime via the ${training_regime:} resolver).
+# Override manually only if auto-detection gives the wrong result.
+from analysis.utils.resolve import resolve_regime_from_path as _resolve_regime_from_path
+REGIME = _resolve_regime_from_path(SWEEP_DIR)
+if REGIME is None:
+    print(
+        f"WARNING: Could not auto-detect training regime from '{SWEEP_DIR}'.\n"
+        "  Set REGIME manually to one of: 'pre', 'gen', 'adv', 'gan'."
+    )
+    REGIME = "pre"  # fallback — change if incorrect
+else:
+    print(f"Auto-detected training regime: '{REGIME}' (from sweep_dir)")
 
 # --- METRIC TOGGLES ---
 COMPUTE_ACC = True
@@ -76,7 +87,7 @@ EVASION_CONFIG = {
     "method": "PGD",
     "norm": "inf",
     "num_steps": 20,
-    "strengths": [0.3, 0.45, 0.6],   # base robustness eval strengths
+    "strengths": [0.3, 0.45, 0.6],   # base robustness eval strengths.
 }
 
 # --- SAMPLING OVERRIDE ---

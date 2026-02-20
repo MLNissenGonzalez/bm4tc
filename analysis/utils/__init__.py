@@ -64,6 +64,7 @@ from .evaluate import (
 )
 
 from .resolve import (
+    resolve_regime_from_path,
     resolve_params,
     resolve_metrics,
     resolve_primary_metric,
@@ -115,6 +116,7 @@ __all__ = [
     "find_model_checkpoint",
     "download_wandb_checkpoint",
     # HPO resolver utilities
+    "resolve_regime_from_path",
     "resolve_params",
     "resolve_metrics",
     "resolve_primary_metric",
