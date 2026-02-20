@@ -10,7 +10,7 @@ defaults:
   - override /trainer/generative: null
   - override /tracking: online
 
-model_path: ???
+model_path: outputs/seed_sweep/cls/legendre/d4D3/moons_4k_1802/7/models/moons_4k_pre_mps_bd3_legendre4_300adamlr0.028970282894244075wd1.4459472946590185e-07
 
 dataset:
   split_seed: 11
@@ -63,9 +63,9 @@ trainer:
 
     optimizer:
       kwargs:
-        lr: ???    # FILL FROM HPO
-        weight_decay: ???  # FILL FROM HPO
-    clean_weight: ???  # FILL FROM HPO
+        lr: 0.005627339497686091    # FILL FROM HPO
+        weight_decay: 1.4259680007012475e-08  # FILL FROM HPO
+    clean_weight: 0.0013212227527818476  # FILL FROM HPO
 
 hydra:
   sweeper:
