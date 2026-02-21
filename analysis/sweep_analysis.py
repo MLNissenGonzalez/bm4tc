@@ -126,7 +126,7 @@ MIA_FEATURES = {
 # --- MIA ADVERSARIAL SETTINGS ---
 # Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
 # Attack settings (method, norm, num_steps) are derived from EVASION_CONFIG.
-MIA_ADV_STRENGTH = 0.15 * _RANGE_SIZE  # 15% of input range; None = disabled.
+MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range; None = disabled.
                                        # Added to EVASION_CONFIG["strengths"] automatically.
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
