@@ -121,6 +121,7 @@ input_range = range_from_embedding("fourier")  # (0.0, 1.0)
 | `"fourier"` | (0, 1) | Fourier basis functions (tensorkrowch) |
 | `"poly"` / `"polynomial"` | varies | Polynomial embedding (tensorkrowch) |
 | `"legendre"` | (-1, 1) | Legendre polynomials (custom implementation) |
+| `"hermite"` | (0, 1) | Normalized physicist's Hermite functions |
 
 **Legendre Embedding** (`embeddings.py:11-49`):
 Uses the standard recursive formula for Legendre polynomials:
