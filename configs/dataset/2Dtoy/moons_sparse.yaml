@@ -1,9 +1,0 @@
-name: "moons_sparse"
-gen_dow_kwargs:
-  name: "moons_sparse"
-  size: 500
-  seed: 25
-  noise: 0.05
-split: [0.5, 0.25, 0.25] # train, val, test
-split_seed: 11
-overwrite: false
