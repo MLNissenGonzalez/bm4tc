@@ -529,15 +529,19 @@ if not df.empty and PARETO_VAL_ROB_COL:
 # ### 3g. Adversarial MIA Results
 
 # %%
-# Save per-run MIA summary text (includes both benign and adversarial sections)
-if not df.empty and COMPUTE_MIA and "_mia_summary" in df.columns:
-    for _, row in df.iterrows():
-        summary = row.get("_mia_summary")
-        if summary and isinstance(summary, str):
-            mia_path = mia_output_dir / f"mia_summary_{row['run_name']}.txt"
-            with open(mia_path, "w") as f:
-                f.write(summary)
-    print(f"Saved per-run MIA summaries to {mia_output_dir}/")
+# Compute sweep-mean correct_prob arrays (best model's arrays accessible via best_run row)
+if not df.empty and COMPUTE_MIA:
+    TRAIN_CP_COL = "eval/mia_train_correct_probs"
+    TEST_CP_COL = "eval/mia_test_correct_probs"
+    if TRAIN_CP_COL in df.columns and TEST_CP_COL in df.columns:
+        train_arrays = [np.array(x) for x in df[TRAIN_CP_COL].dropna() if x is not None]
+        test_arrays = [np.array(x) for x in df[TEST_CP_COL].dropna() if x is not None]
+        if train_arrays:
+            mean_train = np.mean(train_arrays, axis=0).tolist()
+            df["eval/mia_mean_train_correct_probs"] = [mean_train] * len(df)
+        if test_arrays:
+            mean_test = np.mean(test_arrays, axis=0).tolist()
+            df["eval/mia_mean_test_correct_probs"] = [mean_test] * len(df)
 
 if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
     print(f"\nAdversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH}):")

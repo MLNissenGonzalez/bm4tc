@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, accuracy_score, balanced_accuracy_score, precision_recall_curve
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
 import logging
 
 from src.utils.evasion.minimal import ProjectedGradientDescent
@@ -166,7 +166,7 @@ class MIAResults:
     """Results from membership inference attack evaluation.
 
     Attributes:
-        attack_accuracy: Classification accuracy of the attack model.
+        attack_accuracy: Regular accuracy of the LR attack on balanced (equal-size) sets.
         auc_roc: Area under ROC curve (0.5 = random, 1.0 = perfect attack).
         precision_at_low_fpr: Precision at various false positive rates.
         feature_importance: Importance score for each feature (logistic regression coefficients).
@@ -175,11 +175,11 @@ class MIAResults:
             Computed on the full dataset with the threshold tuned to maximize accuracy.
             This is a theoretical upper bound — a real attacker cannot select the
             optimal threshold without access to ground-truth membership labels.
-        train_features: Feature array for training samples.
+        train_features: Feature array for (subsampled) training samples.
         test_features: Feature array for test samples.
         feature_names: Names of features used.
     """
-    attack_accuracy: float  # Balanced accuracy (avg of TPR and TNR; baseline = 0.5)
+    attack_accuracy: float  # Regular accuracy on balanced (equal-size) train/test sets; baseline = 0.5
     auc_roc: float
     precision_at_low_fpr: Dict[float, float]
     feature_importance: Dict[str, float]
@@ -206,78 +206,6 @@ class MIAResults:
         else:
             return "Significant leakage"
 
-    def summary(self) -> str:
-        """Return a formatted summary of the MIA results."""
-        lines = [
-            "=" * 60,
-            "Membership Inference Attack Results",
-            "=" * 60,
-            f"Attack Accuracy: {self.attack_accuracy:.4f}",
-            f"AUC-ROC: {self.auc_roc:.4f}",
-            f"Privacy Assessment: {self.privacy_assessment()}",
-            "",
-            "Precision at Low FPR:",
-        ]
-        for fpr, precision in sorted(self.precision_at_low_fpr.items()):
-            lines.append(f"  FPR={fpr:.2%}: Precision={precision:.4f}")
-
-        lines.extend(["", "Feature Importance (|coefficient|):"])
-        sorted_importance = sorted(
-            self.feature_importance.items(),
-            key=lambda x: abs(x[1]),
-            reverse=True
-        )
-        for name, importance in sorted_importance:
-            lines.append(f"  {name}: {importance:.4f}")
-
-        lines.extend(["", "Per-Feature Threshold Attacks (AUC-ROC):"])
-        sorted_thresh = sorted(
-            self.threshold_metrics.items(),
-            key=lambda x: x[1].get("auc_roc", 0),
-            reverse=True
-        )
-        for name, metrics in sorted_thresh:
-            lines.append(f"  {name}: {metrics.get('auc_roc', 0):.4f}")
-
-        lines.extend([
-            "",
-            "Worst-Case Threshold Attack (oracle, full dataset):",
-            "  (Threshold tuned to maximize accuracy — theoretical upper bound)",
-        ])
-        sorted_wc = sorted(
-            self.worst_case_threshold.items(),
-            key=lambda x: x[1].get("accuracy", 0),
-            reverse=True
-        )
-        for name, metrics in sorted_wc:
-            lines.append(
-                f"  {name}: acc={metrics['accuracy']:.4f}  "
-                f"threshold={metrics['threshold']:.6f}  "
-                f"TPR={metrics['tpr']:.4f}  FPR={metrics['fpr']:.4f}"
-            )
-
-        if self.adversarial_worst_case_threshold is not None:
-            lines.extend([
-                "",
-                f"Adversarial Worst-Case Threshold Attack (eps={self.adversarial_strength}):",
-                "  (Features extracted from model outputs on PGD adversarial examples)",
-            ])
-            sorted_adv = sorted(
-                self.adversarial_worst_case_threshold.items(),
-                key=lambda x: x[1].get("accuracy", 0),
-                reverse=True
-            )
-            for name, metrics in sorted_adv:
-                lines.append(
-                    f"  {name}: acc={metrics['accuracy']:.4f}  "
-                    f"threshold={metrics['threshold']:.6f}  "
-                    f"TPR={metrics['tpr']:.4f}  FPR={metrics['fpr']:.4f}"
-                )
-
-        lines.append("=" * 60)
-        return "\n".join(lines)
-
-
 class MIAEvaluation:
     """Main class for running membership inference attack evaluation.
 
@@ -287,14 +215,13 @@ class MIAEvaluation:
     Example:
         >>> mia_eval = MIAEvaluation()
         >>> results = mia_eval.evaluate(bornmachine, train_loader, test_loader, device)
-        >>> print(results.summary())
+        >>> print(results.attack_accuracy, results.auc_roc)
     """
 
     def __init__(
         self,
         feature_config: Optional[MIAFeatureConfig] = None,
         attack_model: str = "logistic",
-        test_split: float = 0.3,
         random_state: int = 42,
         adversarial_strength: Optional[float] = None,
         adversarial_num_steps: int = 20,
@@ -306,7 +233,6 @@ class MIAEvaluation:
         Args:
             feature_config: Configuration for feature extraction. Uses defaults if None.
             attack_model: Type of attack classifier ("logistic" supported).
-            test_split: Fraction of data to use for attack model evaluation.
             random_state: Random seed for reproducibility.
             adversarial_strength: Epsilon for PGD attack. None = skip adversarial MIA.
             adversarial_num_steps: Number of PGD steps.
@@ -315,7 +241,6 @@ class MIAEvaluation:
         """
         self.feature_config = feature_config or MIAFeatureConfig()
         self.attack_model = attack_model
-        self.test_split = test_split
         self.random_state = random_state
         self.extractor = MIAFeatureExtractor(self.feature_config)
         self.adversarial_strength = adversarial_strength
@@ -630,6 +555,16 @@ class MIAEvaluation:
         logger.info(f"Train features shape: {train_features.shape}")
         logger.info(f"Test features shape: {test_features.shape}")
 
+        # Subsample train features to test size for balanced evaluation (random guessing = 50%)
+        rng = np.random.default_rng(self.random_state)
+        n_test = len(test_features)
+        if len(train_features) > n_test:
+            subsample_idx = rng.permutation(len(train_features))[:n_test]
+            train_features = train_features[subsample_idx]
+            logger.info(f"Subsampled train to {n_test} samples (matching test size)")
+        else:
+            subsample_idx = None
+
         # Create binary classification problem
         # Label 1 = training sample (member), 0 = test sample (non-member)
         X = np.vstack([train_features, test_features])
@@ -638,36 +573,24 @@ class MIAEvaluation:
             np.zeros(len(test_features))
         ])
 
-        # Split for attack model training and evaluation
-        from sklearn.model_selection import train_test_split
-        X_train, X_eval, y_train, y_eval = train_test_split(
-            X, y,
-            test_size=self.test_split,
-            random_state=self.random_state,
-            stratify=y
-        )
-
-        # Train attack model
+        # Train and evaluate on all data (in-sample, worst-case upper bound)
         logger.info("Training attack classifier...")
         if self.attack_model == "logistic":
             attack_clf = LogisticRegression(
                 random_state=self.random_state,
                 max_iter=1000,
-                class_weight="balanced"
             )
         else:
             raise ValueError(f"Unknown attack model: {self.attack_model}")
 
-        attack_clf.fit(X_train, y_train)
+        attack_clf.fit(X, y)
+        y_pred = attack_clf.predict(X)
+        y_proba = attack_clf.predict_proba(X)[:, 1]
 
-        # Evaluate attack
-        y_pred = attack_clf.predict(X_eval)
-        y_proba = attack_clf.predict_proba(X_eval)[:, 1]
+        attack_accuracy = accuracy_score(y, y_pred)   # regular accuracy; sets are balanced
+        auc_roc = roc_auc_score(y, y_proba)
 
-        attack_accuracy = balanced_accuracy_score(y_eval, y_pred)
-        auc_roc = roc_auc_score(y_eval, y_proba)
-
-        logger.info(f"Attack balanced accuracy: {attack_accuracy:.4f}")
+        logger.info(f"Attack accuracy: {attack_accuracy:.4f}")
         logger.info(f"Attack AUC-ROC: {auc_roc:.4f}")
 
         # Compute feature importance from logistic regression coefficients
@@ -689,7 +612,7 @@ class MIAEvaluation:
         )
 
         # Compute precision at low FPR
-        precision_at_low_fpr = self._compute_precision_at_fpr(y_eval, y_proba)
+        precision_at_low_fpr = self._compute_precision_at_fpr(y, y_proba)
 
         # Adversarial MIA pipeline
         adversarial_worst_case_threshold = None
@@ -715,6 +638,9 @@ class MIAEvaluation:
             adv_test_features = self._extract_all_features_adversarial(
                 model, test_loader, device, pgd, self.adversarial_strength
             )
+
+            if subsample_idx is not None:
+                adv_train_features = adv_train_features[subsample_idx]
 
             logger.info(f"Adversarial train features shape: {adv_train_features.shape}")
             logger.info(f"Adversarial test features shape: {adv_test_features.shape}")

@@ -247,6 +247,12 @@ def evaluate_run(
             results["eval/mia_accuracy"] = mia_results.attack_accuracy
             results["eval/mia_auc_roc"] = mia_results.auc_roc
 
+            # Store correct_prob arrays for histogram analysis
+            if "correct_prob" in mia_results.feature_names:
+                cp_idx = mia_results.feature_names.index("correct_prob")
+                results["eval/mia_train_correct_probs"] = mia_results.train_features[:, cp_idx].tolist()
+                results["eval/mia_test_correct_probs"] = mia_results.test_features[:, cp_idx].tolist()
+
             # Store adversarial MIA worst-case threshold results
             if mia_results.adversarial_worst_case_threshold is not None:
                 for feat_name, metrics in mia_results.adversarial_worst_case_threshold.items():
@@ -266,8 +272,6 @@ def evaluate_run(
                         m["accuracy"] for m in mia_results.worst_case_threshold.values()
                     )
 
-            # Store MIA summary for export
-            results["_mia_summary"] = mia_results.summary()
         except Exception as e:
             logger.warning(f"MIA evaluation failed: {e}")
             results["eval/mia_accuracy"] = np.nan
