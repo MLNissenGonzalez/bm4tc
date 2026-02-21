@@ -1,0 +1,42 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: hermite/d6D4
+  - override /dataset: 2Dtoy/circles_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  generative:
+    max_epoch: 150
+    batch_size: 256
+    patience: 150
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???    # FILL FROM HPO
+        weight_decay: ???  # FILL FROM HPO
+    criterion:
+      name: "nll"
+      kwargs:
+        eps: 1e-8
+    metrics: {"genloss": 1}
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)
