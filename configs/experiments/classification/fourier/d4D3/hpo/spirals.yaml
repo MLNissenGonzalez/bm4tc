@@ -24,7 +24,7 @@ trainer:
     batch_size: 256
     patience: 300
     stop_crit: "clsloss"
-    watch_freq: 10000
+    watch_freq: 0
     save: false
     optimizer:
       name: "adam"

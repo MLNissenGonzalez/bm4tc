@@ -17,7 +17,7 @@ trainer:
     batch_size: 256
     patience: 150
     stop_crit: "genloss"
-    watch_freq: 2000
+    watch_freq: 0
     metrics: {"genloss": 1, "acc": 20, "rob": 20, "fid": 50, "viz": 50}
     save: false
 

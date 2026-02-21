@@ -29,7 +29,7 @@ evasion:
 
 stop_crit: "rob"
 patience: 30
-watch_freq: 500
+watch_freq: 0
 
 metrics: {"clsloss": 1, "acc": 1, "rob": 5}
 

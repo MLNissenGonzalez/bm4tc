@@ -11,7 +11,7 @@ criterion:
     eps: 1e-8
 patience: 10
 stop_crit: "genloss"
-watch_freq: 1
+watch_freq: 0
 metrics: {"genloss": 1}
 save: false
 auto_stack: true

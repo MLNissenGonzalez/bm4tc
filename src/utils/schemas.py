@@ -249,12 +249,12 @@ class ClassificationConfig:
     criterion: CriterionConfig 
     stop_crit: str  # "acc", "clsloss", "genloss", "fid", or "rob"
     patience: int
-    watch_freq: int
+    watch_freq: int  # gradient logging step interval; 0 = disabled (default)
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
     save: bool
     auto_stack: bool = True
     auto_unbind: bool = False
-    
+
 
 cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
      
@@ -284,7 +284,7 @@ class GANStyleConfig:
     info_freq : int
         Frequency (in epochs) to log progress information.
     watch_freq : int
-        Step interval for gradient logging and monitoring.
+        Step interval for gradient logging and monitoring. Set to 0 to disable gradient logging (default).
     acc_drop_tol : float
         Accuracy drop tolerance; triggers retraining if validation accuracy falls below (best_acc - acc_drop_tol).
     retrain : PretrainMPSConfig
@@ -338,7 +338,7 @@ class AdversarialConfig:
     patience : int
         Number of epochs without improvement before early stopping.
     watch_freq : int
-        Frequency of gradient logging to W&B.
+        Frequency of gradient logging to W&B. Set to 0 to disable gradient logging (default).
     metrics : Dict[str, int]
         Metrics to evaluate and their frequencies.
     trades_beta : float
@@ -394,7 +394,7 @@ class GenerativeConfig:
     criterion: CriterionConfig  # generative NLL criterion (user implements)
     stop_crit: str  # "acc", "genloss", "fid", or "rob"
     patience: int
-    watch_freq: int
+    watch_freq: int  # gradient logging step interval; 0 = disabled (default)
     metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
     save: bool = False
     auto_stack: bool = True

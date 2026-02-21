@@ -13,6 +13,6 @@ auto_stack: True
 auto_unbind: False
 patience: 50
 stop_crit: "clsloss"
-watch_freq: 1
+watch_freq: 0
 metrics: {"clsloss": 1}
 save: False

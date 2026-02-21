@@ -38,7 +38,7 @@ trainer:
     method: "pgd_at"
     stop_crit: "rob"
     patience: 100
-    watch_freq: 1000
+    watch_freq: 0
     metrics: {"rob": 1, "clsloss": null, "acc": null}
 
     evasion:

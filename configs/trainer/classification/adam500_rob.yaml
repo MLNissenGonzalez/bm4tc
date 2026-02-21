@@ -13,7 +13,7 @@ auto_stack: True
 auto_unbind: False
 patience: 100
 stop_crit: "rob"
-watch_freq: 1000
+watch_freq: 0
 metrics: {"clsloss": 1, "acc": 1, "viz": 50, "fid": 50, "rob": 1}
 save: True
 

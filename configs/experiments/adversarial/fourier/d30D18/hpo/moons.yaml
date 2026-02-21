@@ -64,7 +64,7 @@ trainer:
     method: "pgd_at"
     stop_crit: "rob"
     patience: 200
-    watch_freq: 2000
+    watch_freq: 0
     # Evaluate clean and robust accuracy every epoch
     # FID, genloss, viz every 50 epochs (expensive)
     metrics: {"clsloss": 1, "acc": 1, "rob": 1, "fid": 50, "genloss": 50, "viz": 50}

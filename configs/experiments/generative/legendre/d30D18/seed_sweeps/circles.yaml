@@ -23,7 +23,7 @@ trainer:
     batch_size: 256
     patience: 300
     stop_crit: "genloss"
-    watch_freq: 1000
+    watch_freq: 0
     save: true
     optimizer:
       name: "adam"

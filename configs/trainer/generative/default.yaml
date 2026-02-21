@@ -11,7 +11,7 @@ criterion:
     eps: 1e-8
 patience: 50
 stop_crit: "acc"
-watch_freq: 100
+watch_freq: 0
 metrics: {"genloss": 1, "acc": 1, "fid": 10, "viz": 10}
 save: false
 auto_stack: true

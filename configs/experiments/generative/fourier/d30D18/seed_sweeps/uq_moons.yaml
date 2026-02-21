@@ -29,7 +29,7 @@ trainer:
         eps: 1e-8
     patience: 150
     stop_crit: "genloss"
-    watch_freq: 3000
+    watch_freq: 0
     metrics: {"genloss": 1}
     save: true
     auto_stack: true

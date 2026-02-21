@@ -162,7 +162,7 @@ def log_grads(bm_view: BornClassifier | BornGenerator, step: int, watch_freq: in
     - To reduce logging overhead, scalar summaries (mean/std/max) are currently disabled
       but can be re-enabled by uncommenting the respective lines.
     """
-    if step % watch_freq != 0:
+    if watch_freq == 0 or step % watch_freq != 0:
         return
 
     log_grads = {}
