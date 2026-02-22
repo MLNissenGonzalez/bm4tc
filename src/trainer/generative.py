@@ -54,13 +54,13 @@ class Trainer:
             device: Torch device for training.
         """
         self.datahandler = datahandler
-        if getattr(self.datahandler, "classification", None) is None:
-            self.datahandler.get_classification_loaders()
-
         self.device = device
         self.cfg = cfg
         self.stage = "gen"
         self.train_cfg = cfg.trainer.generative
+
+        if getattr(self.datahandler, "classification", None) is None:
+            self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
         # Config-provided criterion
         self.criterion = get.criterion("generative", self.train_cfg.criterion)

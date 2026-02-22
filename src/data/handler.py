@@ -8,6 +8,9 @@ from typing import *
 from torch.utils.data import DataLoader, TensorDataset
 import src.utils.get as get
 from math import ceil
+import logging
+
+logger = logging.getLogger(__name__)
 
 _SCALER_MAP = {
     "minmax": MinMaxScaler
@@ -134,17 +137,28 @@ class DataHandler:
         del all_data
         del all_labels
 
-    def get_classification_loaders(self):
-        """Create DataLoaders for classification training (data, labels) pairs."""
+    def get_classification_loaders(self, batch_size: int = 64):
+        """Create DataLoaders for classification training (data, labels) pairs.
+
+        Args:
+            batch_size: Number of samples per batch. Should match the trainer's
+                        configured batch_size (from ClassificationConfig, etc.).
+        """
         if not isinstance(self.data, dict):
             raise AttributeError(f"Call split_and_rescale first.")
-        
+
         self.classification = {}
         for split, split_data in self.data.items():
             split_labels = self.labels[split]
             lbd_data = TensorDataset(split_data, split_labels)
-            self.classification[split] = DataLoader(lbd_data, 
-                                             batch_size=64, 
+            effective_bs = min(batch_size, len(split_data))
+            if effective_bs < batch_size:
+                logger.warning(
+                    f"batch_size ({batch_size}) exceeds {split} split size "
+                    f"({len(split_data)}); clamping to {effective_bs}."
+                )
+            self.classification[split] = DataLoader(lbd_data,
+                                             batch_size=effective_bs,
                                              drop_last=(split=="train"),
                                              shuffle=(split=="train"))
             

@@ -61,13 +61,13 @@ class Trainer:
             device: Torch device for training.
         """
         self.datahandler = datahandler
-        if self.datahandler.classification is None:
-            self.datahandler.get_classification_loaders()
-
         self.device = device
         self.cfg = cfg
         self.stage = stage
         self.train_cfg = cfg.trainer.adversarial
+
+        if self.datahandler.classification is None:
+            self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
         # Validate method
         if self.train_cfg.method not in ["pgd_at", "trades"]:

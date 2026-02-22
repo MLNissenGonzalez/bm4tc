@@ -44,17 +44,17 @@ class Trainer:
             device: Torch device for training.
         """
         self.datahandler = datahandler
-        if self.datahandler.classification == None:
-            self.datahandler.get_classification_loaders()
-            
         self.device = device
         self.cfg, self.stage = cfg, stage # needed in summary of training
-    
+
         if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
             self.train_cfg = cfg.trainer.classification
         elif stage == "re":
             self.train_cfg = cfg.trainer.ganstyle.retrain
         else: raise f"{stage} not recognised."
+
+        if self.datahandler.classification == None:
+            self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
         wandb.define_metric(f"{stage}/train/loss", summary="none")
         metrics = self.train_cfg.metrics
