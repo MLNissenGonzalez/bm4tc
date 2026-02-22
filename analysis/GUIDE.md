@@ -45,6 +45,7 @@ analysis/
 ├── GUIDE.md                 # This file
 ├── __init__.py
 ├── sweep_analysis.py        # Post-hoc sweep analysis notebook (loads models, recomputes metrics)
+├── queue_analysis.py        # Batch-run sweep_analysis for unanalyzed seed sweeps
 ├── hpo_analysis.py          # HPO analysis notebook (.py with #%% cells)
 ├── mia_analysis.py          # MIA privacy analysis notebook
 ├── uq_analysis.py           # UQ analysis notebook (detection + purification)
@@ -906,6 +907,42 @@ df.filter(like="eval/test/").corr()
 from analysis.utils import get_pareto_runs
 pareto = get_pareto_runs(df, "eval/valid/acc", "eval/valid/rob/0.1", True, True)
 ```
+
+---
+
+## Batch Analysis: queue_analysis.py
+
+`queue_analysis.py` discovers all completed seed sweeps under `outputs/seed_sweep/`
+and runs `sweep_analysis.py` for any that haven't been analyzed yet
+(i.e., lack `evaluation_data.csv` in `analysis/outputs/`).
+
+### Usage
+
+```bash
+python analysis/queue_analysis.py                               # run all unanalyzed
+python analysis/queue_analysis.py --dry-run                    # print commands only
+python analysis/queue_analysis.py --list                       # show all sweeps + status
+python analysis/queue_analysis.py --filter-embedding hermite   # only hermite sweeps
+python analysis/queue_analysis.py --filter-dataset circles_4k  # dataset substring match
+python analysis/queue_analysis.py --force                      # re-run even if analyzed
+```
+
+### How it works
+
+1. Scans `outputs/seed_sweep/` recursively for directories containing `multirun.yaml`
+2. For each sweep, checks if `analysis/outputs/<sweep>/evaluation_data.csv` exists
+3. Runs `python analysis/sweep_analysis.py <sweep_dir>` for every unanalyzed sweep
+4. Stops with a non-zero exit code if any analysis fails
+
+### Output
+
+Mirrors the sweep path into `analysis/outputs/`:
+```
+outputs/seed_sweep/gen/hermite/d4D3/moons_4k_2102/
+  → analysis/outputs/seed_sweep/gen/hermite/d4D3/moons_4k_2102/evaluation_data.csv
+```
+
+Exits with non-zero status if any `sweep_analysis.py` call fails.
 
 ---
 

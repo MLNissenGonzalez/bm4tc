@@ -40,14 +40,22 @@ configs/
 ├── GUIDE.md                    # This file
 ├── config.yaml                 # Main config with defaults
 ├── born/                       # BornMachine architecture configs
-│   ├── d4D3.yaml              # in_dim=4, bond_dim=3
-│   ├── d10D3.yaml             # in_dim=10, bond_dim=3
-│   ├── d10D4.yaml             # in_dim=10, bond_dim=4
-│   ├── d10D6.yaml             # in_dim=10, bond_dim=6
-│   ├── d30D4.yaml             # in_dim=30, bond_dim=4
-│   ├── d30D10.yaml            # in_dim=30, bond_dim=10
-│   ├── d30D18.yaml            # in_dim=30, bond_dim=18
-│   └── test.yaml              # Minimal test config
+│   ├── fourier/               # Fourier embedding configs
+│   │   ├── d2D2.yaml         # in_dim=2, bond_dim=2
+│   │   ├── d3D3.yaml         # in_dim=3, bond_dim=3
+│   │   ├── d4D3.yaml         # in_dim=4, bond_dim=3
+│   │   ├── d6D4.yaml         # in_dim=6, bond_dim=4
+│   │   ├── d10D3.yaml        # in_dim=10, bond_dim=3
+│   │   ├── d10D4.yaml        # in_dim=10, bond_dim=4
+│   │   ├── d10D6.yaml        # in_dim=10, bond_dim=6
+│   │   ├── d30D4.yaml        # in_dim=30, bond_dim=4
+│   │   ├── d30D10.yaml       # in_dim=30, bond_dim=10
+│   │   ├── d30D18.yaml       # in_dim=30, bond_dim=18
+│   │   └── test.yaml         # Minimal test config
+│   ├── legendre/              # Legendre polynomial embedding configs
+│   │   ├── d2D2.yaml ... d30D18.yaml
+│   └── hermite/               # Hermite polynomial embedding configs
+│       ├── d2D2.yaml ... d30D18.yaml
 ├── dataset/                    # Dataset configs
 │   ├── test.yaml              # Minimal test config
 │   └── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
@@ -91,53 +99,37 @@ configs/
 ├── tracking/                  # W&B and evaluation configs
 │   ├── online.yaml           # Online W&B logging
 │   └── test.yaml             # Test config
-├── experiments/              # Full experiment configs (organized by task/architecture/phase)
+├── experiments/              # Full experiment configs (organized by task/embedding/arch/phase)
 │   ├── classification/       # Classification experiments
-│   │   ├── fourier_d30D18/  # Fourier embedding, in_dim=30, bond_dim=18
-│   │   │   ├── D18.yaml
-│   │   │   ├── D18_sweep.yaml
-│   │   │   ├── best/        # Best configs per dataset
-│   │   │   │   ├── circles.yaml
-│   │   │   │   ├── moons.yaml
-│   │   │   │   └── spirals.yaml
-│   │   │   ├── hpo/         # HPO experiments
-│   │   │   │   ├── lr_hpo.yaml
-│   │   │   │   ├── lrwd_hpo.yaml
-│   │   │   │   └── sanity_check.yaml
-│   │   │   └── seed_sweeps/ # Seed sweep experiments
-│   │   │       ├── circles.yaml
-│   │   │       ├── moons.yaml
-│   │   │       └── spirals.yaml
-│   │   └── fourier_d4D3/    # Fourier embedding, in_dim=4, bond_dim=3
-│   │       └── hpo/
-│   │           ├── circles.yaml
-│   │           ├── moons.yaml
-│   │           └── spirals.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   ├── d30D18/      # in_dim=30, bond_dim=18
+│   │   │   │   ├── best/    # Best configs per dataset
+│   │   │   │   ├── hpo/     # HPO experiments
+│   │   │   │   └── seed_sweeps/
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6}/  # Other architectures
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── adversarial/          # Adversarial training experiments
-│   │   ├── fourier_d30D18/  # Fourier embedding, in_dim=30, bond_dim=18
-│   │   │   ├── hpo/         # HPO experiments
-│   │   │   │   ├── circles.yaml
-│   │   │   │   ├── moons.yaml
-│   │   │   │   └── spirals.yaml
-│   │   │   ├── best/        # Best HPO configs per dataset
-│   │   │   │   ├── circles.yaml
-│   │   │   │   ├── moons.yaml
-│   │   │   │   └── spirals.yaml
-│   │   │   └── seed_sweeps/ # Seed sweep experiments
-│   │   │       ├── circles.yaml
-│   │   │       ├── moons.yaml
-│   │   │       └── spirals.yaml
-│   │   └── fourier_d10D4/   # Fourier embedding, in_dim=10, bond_dim=4
-│   │       └── hpo/
-│   │           └── hpo_test.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   ├── d30D18/
+│   │   │   │   ├── best/    # Best HPO configs per dataset
+│   │   │   │   ├── hpo/
+│   │   │   │   └── seed_sweeps/
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d10D4}/  # Other architectures
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── generative/           # Generative NLL experiments
-│   │   └── fourier_d30D18/
-│   │       ├── hpo/
-│   │       │   └── hpo.yaml
-│   │       └── seed_sweeps/
-│   │           ├── circles.yaml
-│   │           ├── moons.yaml
-│   │           └── spirals.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d30D18}/
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   ├── legendre/        # Legendre embedding (same arch structure)
+│   │   └── hermite/         # Hermite polynomial embedding
+│   │       └── {d4D3,d6D4,d10D6,d30D18}/
+│   │           ├── hpo/
+│   │           └── seed_sweeps/
 │   ├── ganstyle/             # GAN experiments
 │   │   └── fourier_d30D18/
 │   │       ├── critic_sweep.yaml
@@ -155,6 +147,8 @@ configs/
 │       ├── adversarial.yaml
 │       ├── generative.yaml
 │       └── generative_hpo.yaml
+├── tools/                    # Config maintenance scripts
+│   └── fill_hpo.py          # Patch seed_sweep configs with HPO results
 └── hydra/                    # Hydra-specific configs
     └── job_logging/
         ├── debug.yaml        # Verbose logging
@@ -194,7 +188,7 @@ hydra:
 Naming convention: `d{in_dim}D{bond_dim}`
 
 ```yaml
-# born/d10D4.yaml
+# born/fourier/d10D4.yaml
 init_kwargs:
   in_dim: 10           # Physical/embedding dimension
   bond_dim: 4          # Bond dimension (expressivity)
@@ -211,7 +205,7 @@ embedding: "fourier"   # Embedding type
 | `bond_dim` | Bond dimension | Higher = more expressive but slower |
 | `boundary` | `"obc"` or `"pbc"` | Open vs periodic boundaries |
 | `init_method` | Tensor initialization | `"randn"`, `"randn_eye"`, etc. |
-| `embedding` | `"fourier"` or `"legendre"` | Input mapping type |
+| `embedding` | `"fourier"`, `"legendre"`, or `"hermite"` | Input mapping type |
 
 ### dataset/ — Dataset Configs
 

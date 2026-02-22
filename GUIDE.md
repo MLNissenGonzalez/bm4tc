@@ -12,7 +12,7 @@ The research hypothesis is that generative models (which learn p(x,c) rather tha
 
 Born Machines model probability distributions using the Born Rule from quantum mechanics:
 - **Probability = |amplitude|²** — the probability of an outcome is the squared magnitude of an amplitude
-- Inputs are mapped to a higher-dimensional **Hilbert Space** via embeddings (currently Fourier, also supports Legendre/polynomial)
+- Inputs are mapped to a higher-dimensional **Hilbert Space** via embeddings (Fourier, Legendre, and Hermite)
 - Each input feature is embedded independently; the complete input is a "product state"
 - The Born Machine is a **tensor network** with structured factorization
 
@@ -161,6 +161,7 @@ adversarial_training_mps/
 │   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
 │   ├── visualize_distributions.py  # Distribution visualization
 │   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
+│   ├── queue_analysis.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
 │   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
@@ -274,6 +275,8 @@ embedding: "fourier"
 | Compute marginal p(x) | `src/models/born.py` (`marginal_log_probability`) |
 | UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
 | Analyze HPO results | `analysis/hpo_analysis.py` |
+| Batch-run sweep analysis | `analysis/queue_analysis.py` |
+| Fill seed_sweep configs from HPO | `configs/tools/fill_hpo.py` |
 | Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
 ### Critical code sections to understand:

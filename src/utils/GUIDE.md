@@ -487,7 +487,7 @@ _GENERATIVE_LOSSES = {
 |------|-------|----------------------|
 | `schemas.py` | ~434 | All `*Config` dataclasses |
 | `get.py` | ~75 | `optimizer`, `indim_and_ncls` (re-exports from embeddings/criterions) |
-| `embeddings.py` | ~114 | `embedding`, `range_from_embedding`, `legendre_embedding` |
+| `embeddings.py` | ~175 | `embedding`, `range_from_embedding`, `legendre_embedding`, `hermite_embedding` |
 | `criterions.py` | ~163 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
 | `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
 | `evasion/minimal.py` | ~291 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |

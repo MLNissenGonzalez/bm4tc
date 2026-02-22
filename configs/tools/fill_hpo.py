@@ -397,9 +397,9 @@ def main() -> None:
     parser.add_argument(
         "--embedding",
         nargs="+",
-        choices=["fourier", "legendre"],
-        default=["fourier", "legendre"],
-        help="Embedding(s) to process (default: both)",
+        choices=["fourier", "legendre", "hermite"],
+        default=["fourier", "legendre", "hermite"],
+        help="Embedding(s) to process (default: all three)",
     )
     parser.add_argument(
         "--arch",
