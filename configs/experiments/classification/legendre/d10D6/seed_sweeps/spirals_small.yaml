@@ -17,9 +17,9 @@ dataset:
 
 trainer:
   classification:
-    max_epoch: 100
+    max_epoch: 1000
     batch_size: 256
-    patience: 100
+    patience: 1000
     stop_crit: "clsloss"
     watch_freq: 0
     save: true

@@ -3,7 +3,7 @@ descriptor: ""
 
 defaults:
   - _self_ # has to be here such that overrides work
-  - dataset: 2Dtoy/circles_2k
+  - dataset: 2Dtoy/circles_4k
   - born: fourier/d4D3
   - trainer/classification: test
   - trainer/ganstyle: test
