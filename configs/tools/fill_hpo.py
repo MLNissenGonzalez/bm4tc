@@ -73,6 +73,12 @@ FILL_PATTERN = re.compile(
     re.MULTILINE,
 )
 
+# Regex for overwrite mode — matches already-filled numeric/float values too
+OVERWRITE_PATTERN = re.compile(
+    r'^(\s*)(lr|weight_decay|clean_weight):\s*\S+(\s*(?:#[^\n]*)?)$',
+    re.MULTILINE,
+)
+
 
 # =============================================================================
 # Metric resolution from HPO config
@@ -263,11 +269,13 @@ def _format_value(val: Any) -> str:
     return str(val)
 
 
-def patch_yaml(content: str, params: Dict[str, Any]) -> Tuple[str, int]:
+def patch_yaml(content: str, params: Dict[str, Any], overwrite: bool = False) -> Tuple[str, int]:
     """
     Replace `key: ???  # comment` lines with actual values.
+    In overwrite mode, also replaces already-filled values for the same keys.
     Only replaces keys present in params. Returns (new_content, num_replaced).
     """
+    pattern = OVERWRITE_PATTERN if overwrite else FILL_PATTERN
     count = 0
 
     def replacer(m: re.Match) -> str:
@@ -282,7 +290,7 @@ def patch_yaml(content: str, params: Dict[str, Any]) -> Tuple[str, int]:
         count += 1
         return f"{indent}{key}: {_format_value(params[key])}{comment}"
 
-    new_content = FILL_PATTERN.sub(replacer, content)
+    new_content = pattern.sub(replacer, content)
     return new_content, count
 
 
@@ -301,6 +309,7 @@ def process_combo(
     outputs_dir: Path,
     configs_root: Path,
     dry_run: bool,
+    overwrite: bool = False,
 ) -> bool:
     """Process one combo. Returns True if successfully patched (or dry-run patched)."""
     training_dir = TRAINING_DIRS[training_type]
@@ -347,10 +356,13 @@ def process_combo(
     with open(seed_cfg_path, "r") as f:
         content = f.read()
 
-    new_content, count = patch_yaml(content, params)
+    new_content, count = patch_yaml(content, params, overwrite=overwrite)
 
     if count == 0:
-        print("  WARNING: No ??? placeholders found (already filled or wrong file).")
+        if overwrite:
+            print("  WARNING: No matching keys found (lr/weight_decay/clean_weight) — wrong file?")
+        else:
+            print("  WARNING: No ??? placeholders found (already filled or wrong file).")
         return False
 
     rel_path = seed_cfg_path.relative_to(PROJECT_ROOT)
@@ -434,6 +446,11 @@ def main() -> None:
         action="store_true",
         help="Print diff without writing files",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite already-filled values (default: skip files with no ??? placeholders)",
+    )
 
     args = parser.parse_args()
 
@@ -461,6 +478,7 @@ def main() -> None:
                     outputs_dir=outputs_dir,
                     configs_root=configs_root,
                     dry_run=args.dry_run,
+                    overwrite=args.overwrite,
                 )
                 if success:
                     patched += 1
