@@ -103,19 +103,20 @@ def resolve_regime_from_path(sweep_dir: str) -> Optional[str]:
 # =============================================================================
 
 # Known embedding names; used to detect the embedding from a sweep path.
-_KNOWN_EMBEDDINGS = {"fourier", "legendre"}
+_KNOWN_EMBEDDINGS = {"fourier", "legendre", "hermite"}
 
 _EMBEDDING_RANGE_SIZE: Dict[str, float] = {
     "fourier":  1.0,   # range (0, 1)
     "legendre": 2.0,   # range (-1, 1)
+    "hermite":  1.0,   # range (0, 1)
 }
 
 
 def resolve_embedding_from_path(sweep_dir: str) -> Optional[str]:
     """Infer the embedding type from a sweep directory path.
 
-    Returns 'fourier', 'legendre', or None.
-    The embedding appears as a whole path token (e.g. .../fourier/... or ..._fourier_...).
+    Returns 'fourier', 'legendre', 'hermite', or None.
+    The embedding appears as a whole path token (e.g. .../hermite/... or ..._hermite_...).
     """
     path_str = str(sweep_dir).replace("\\", "/")
     tokens = re.split(r"[/_]", path_str)
