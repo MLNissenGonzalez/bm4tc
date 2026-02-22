@@ -8,6 +8,8 @@ Usage
     python analysis/queue_analysis.py --dry-run                   # print commands only
     python analysis/queue_analysis.py --filter-embedding hermite
     python analysis/queue_analysis.py --filter-dataset  circles   # substring match
+    python analysis/queue_analysis.py --filter-arch     d4D3
+    python analysis/queue_analysis.py --filter-type     gen       # gen | cls | adv
     python analysis/queue_analysis.py --filter-embedding fourier --filter-dataset moons_4k
     python analysis/queue_analysis.py --force                     # re-run already analyzed
     python analysis/queue_analysis.py --list                      # show status of all sweeps
@@ -40,9 +42,20 @@ def is_analyzed(sweep_dir: Path) -> bool:
     return (analysis_output_dir(sweep_dir) / "evaluation_data.csv").exists()
 
 
+def get_training_type(sweep_dir: Path) -> str:
+    """First path component under SWEEP_ROOT: gen | cls | adv."""
+    parts = sweep_dir.relative_to(SWEEP_ROOT).parts
+    return parts[0] if len(parts) >= 1 else ""
+
+
 def get_embedding(sweep_dir: Path) -> str:
     parts = sweep_dir.relative_to(SWEEP_ROOT).parts
     return parts[1] if len(parts) >= 2 else ""
+
+
+def get_arch(sweep_dir: Path) -> str:
+    parts = sweep_dir.relative_to(SWEEP_ROOT).parts
+    return parts[2] if len(parts) >= 3 else ""
 
 
 def get_dataset_base(sweep_dir: Path) -> str:
@@ -62,6 +75,10 @@ def main():
                         help="Only process sweeps with this embedding (e.g. hermite).")
     parser.add_argument("--filter-dataset", metavar="DS",
                         help="Only process sweeps with this base dataset name (e.g. circles_4k).")
+    parser.add_argument("--filter-arch", metavar="ARCH",
+                        help="Only process sweeps with this architecture (e.g. d4D3).")
+    parser.add_argument("--filter-type", metavar="TYPE",
+                        help="Only process sweeps with this training type (gen, cls, adv).")
     parser.add_argument("--list", action="store_true",
                         help="Print status of all discovered sweeps and exit.")
     args = parser.parse_args()
@@ -78,8 +95,12 @@ def main():
         return
 
     # Apply filters
+    if args.filter_type:
+        sweeps = [s for s in sweeps if get_training_type(s) == args.filter_type]
     if args.filter_embedding:
         sweeps = [s for s in sweeps if get_embedding(s) == args.filter_embedding]
+    if args.filter_arch:
+        sweeps = [s for s in sweeps if get_arch(s) == args.filter_arch]
     if args.filter_dataset:
         sweeps = [s for s in sweeps if args.filter_dataset in get_dataset_base(s)]
 

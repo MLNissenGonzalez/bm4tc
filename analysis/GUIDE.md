@@ -922,7 +922,9 @@ and runs `sweep_analysis.py` for any that haven't been analyzed yet
 python analysis/queue_analysis.py                               # run all unanalyzed
 python analysis/queue_analysis.py --dry-run                    # print commands only
 python analysis/queue_analysis.py --list                       # show all sweeps + status
+python analysis/queue_analysis.py --filter-type    gen         # training type: gen | cls | adv
 python analysis/queue_analysis.py --filter-embedding hermite   # only hermite sweeps
+python analysis/queue_analysis.py --filter-arch    d4D3        # only d4D3 architecture
 python analysis/queue_analysis.py --filter-dataset circles_4k  # dataset substring match
 python analysis/queue_analysis.py --force                      # re-run even if analyzed
 ```
