@@ -114,12 +114,64 @@ class HermiteEmbedding:
         return torch.stack(components, dim=axis)
 
 
+class ChebyshevT1Embedding:
+    """Chebyshev functions of the first kind, orthonormal on L²[-1,1].
+    φ_n(x) = T_n(x) · sqrt(k_n / (π √(1−x²))),  k_0=1, k_n=2 for n≥1.
+    """
+    def __init__(self, dim: int):
+        self.dim = dim
+        self._scales: List[float] = [sqrt(1.0 / pi)] + [sqrt(2.0 / pi)] * (dim - 1)
+
+    def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
+        if not isinstance(data, torch.Tensor):
+            raise TypeError('`data` should be torch.Tensor type')
+        w = (1.0 - data ** 2).clamp(min=1e-6).pow(-0.25)
+        T_prev = torch.ones_like(data)
+        T_curr = data.clone()
+        components = [T_prev * self._scales[0] * w]
+        if self.dim > 1:
+            components.append(T_curr * self._scales[1] * w)
+        for n in range(2, self.dim):
+            T_next = 2.0 * data * T_curr - T_prev
+            components.append(T_next * self._scales[n] * w)
+            T_prev, T_curr = T_curr, T_next
+        return torch.stack(components, dim=axis)
+
+
+class ChebyshevT2Embedding:
+    """Chebyshev functions of the second kind, orthonormal on L²[-1,1].
+    ψ_n(x) = U_n(x) · sqrt(2/π · √(1−x²)).
+    """
+    def __init__(self, dim: int):
+        self.dim = dim
+        self._scale: float = sqrt(2.0 / pi)
+
+    def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
+        if not isinstance(data, torch.Tensor):
+            raise TypeError('`data` should be torch.Tensor type')
+        w = (1.0 - data ** 2).clamp(min=0.0).pow(0.25)
+        U_prev = torch.ones_like(data)
+        U_curr = 2.0 * data
+        components = [U_prev * self._scale * w]
+        if self.dim > 1:
+            components.append(U_curr * self._scale * w)
+        for n in range(2, self.dim):
+            U_next = 2.0 * data * U_curr - U_prev
+            components.append(U_next * self._scale * w)
+            U_prev, U_curr = U_curr, U_next
+        return torch.stack(components, dim=axis)
+
+
 _EMBEDDING_MAP = {
-    "fourier":    FourierEmbedding,
-    "poly":       PolyEmbedding,
-    "polynomial": PolyEmbedding,
-    "legendre":   LegendreEmbedding,
-    "hermite":    HermiteEmbedding,
+    "fourier":     FourierEmbedding,
+    "poly":        PolyEmbedding,
+    "polynomial":  PolyEmbedding,
+    "legendre":    LegendreEmbedding,
+    "hermite":     HermiteEmbedding,
+    "chebychev1":  ChebyshevT1Embedding,
+    "chebyshev1":  ChebyshevT1Embedding,
+    "chebychev2":  ChebyshevT2Embedding,
+    "chebyshev2":  ChebyshevT2Embedding,
 }
 
 
@@ -158,9 +210,13 @@ def embedding(name: str, dim: int) -> Callable[[torch.Tensor], torch.Tensor]:
 
 
 _EMBEDDING_TO_RANGE = {
-    "fourier": (0., 1.),
-    "legendre": (-1., 1.),
-    "hermite": (-4., 4.),
+    "fourier":    (0., 1.),
+    "legendre":   (-1., 1.),
+    "hermite":    (-4., 4.),
+    "chebychev1": (-1., 1.),
+    "chebyshev1": (-1., 1.),
+    "chebychev2": (-1., 1.),
+    "chebyshev2": (-1., 1.),
 }
 
 
