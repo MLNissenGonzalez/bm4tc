@@ -23,7 +23,7 @@ class BornGenerator(tk.models.MPS):
     def __init__(
             self,
             tensors: List[torch.Tensor],
-            embedding: Callable[[torch.Tensor, int], torch.Tensor],
+            embedding: Callable[[torch.Tensor], torch.Tensor],
             cls_pos: int,
             in_dim: int,
             num_cls: int,
@@ -186,7 +186,7 @@ class BornGenerator(tk.models.MPS):
         embs[self.cls_pos] = cls_emb[None, :].expand(num_spc * num_bins, -1).to(self.device)
 
         # Input embedding TODO: Could move outside, as class and batch independent
-        in_emb = self.embedding(self.input_space, self.in_dim)  # [num_bins, in_dim]
+        in_emb = self.embedding(self.input_space)  # [num_bins, in_dim]
         # [num_samples, num_bins, in_dim]
         in_emb = in_emb[None, :, :].expand(num_spc, -1, -1)
         # [num_samples * num_bins, phys_dim]
@@ -211,9 +211,9 @@ class BornGenerator(tk.models.MPS):
             samples.append(feature)  # shape (num_spc,)
 
             # Embed drawn samples and use for conditioning for the next site.
-            embs[site] = self.embedding(samples[-1], self.in_dim
+            embs[site] = self.embedding(samples[-1]
                                 )[:, None, :].expand(-1, num_bins, -1
-                                                        ).reshape(num_spc*num_bins, -1)
+                                                     ).reshape(num_spc*num_bins, -1)
 
         # Stack sampled per-site arrays across sites
         samples = torch.stack(tensors=samples, dim=1)  # shape (num_spc, data_dim)
@@ -460,7 +460,7 @@ class BornGenerator(tk.models.MPS):
         Returns:
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
-        data_embs = self.embedding(data, self.in_dim)
+        data_embs = self.embedding(data)
         class_embs = tk.embeddings.basis(labels, self.num_cls).float()
 
         # start with data embeddings as a list

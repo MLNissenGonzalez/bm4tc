@@ -44,7 +44,7 @@ class BornMachine:
         
         # 1. Initialize embedding 
         self.embedding_name = cfg.embedding
-        self.embedding = get.embedding(self.embedding_name)
+        self.embedding = get.embedding(self.embedding_name, cfg.init_kwargs.in_dim)
         self.input_range = get.range_from_embedding(self.embedding_name)
 
         # 2. Intialize classifier, either from tensors, or configuration file

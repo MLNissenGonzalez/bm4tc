@@ -17,7 +17,7 @@ class BornClassifier(tk.models.MPSLayer):
 
     def __init__(
             self,
-            embedding: Callable[[torch.Tensor, int], torch.Tensor],
+            embedding: Callable[[torch.Tensor], torch.Tensor],
             n_features: Optional[int] = None,
             in_dim: Optional[Union[int, Sequence[int]]] = None,
             out_dim: Optional[int] = None,
@@ -49,8 +49,7 @@ class BornClassifier(tk.models.MPSLayer):
         Returns:
             Embedded tensor of shape (batch_size, data_dim, phys_dim).
         """
-        in_dim = self.in_dim[0]
-        return self.embedding(data, in_dim)
+        return self.embedding(data)
 
     def prepare(
             self,
