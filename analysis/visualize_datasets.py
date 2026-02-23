@@ -55,6 +55,7 @@ class DatasetSpec:
     seed: int = 25
     circ_factor: Optional[float] = None
     split: tuple = field(default_factory=lambda: (0.5, 0.25, 0.25))
+    split_seed: int = 11
 
 
 def _dataset_type(name: str) -> str:
@@ -65,7 +66,8 @@ def _dataset_type(name: str) -> str:
 
 
 def _make_label(spec: DatasetSpec) -> str:
-    parts = f"n={2 * spec.size}  noise={spec.noise}"
+    n_train = round(spec.split[0] * 2 * spec.size)
+    parts = f"n_train={n_train}  noise={spec.noise}"
     if spec.circ_factor is not None:
         parts += f"  cf={spec.circ_factor}"
     return f"{spec.name}\n{parts}"
@@ -85,6 +87,7 @@ def load_specs(config_dir: Path) -> list[DatasetSpec]:
             seed=g.get("seed", 25),
             circ_factor=g.get("circ_factor"),
             split=tuple(cfg.get("split", [0.5, 0.25, 0.25])),
+            split_seed=cfg.get("split_seed", 11),
         ))
     specs.sort(key=lambda s: (_TYPE_ORDER.get(_dataset_type(s.name), 99), s.size, s.name))
     return specs
@@ -143,6 +146,10 @@ def plot_dataset_grid(
     for i, spec in enumerate(specs):
         row, col = divmod(i, n_cols)
         X, t = generate_dataset(spec)
+        n_train = round(spec.split[0] * len(X))
+        rng = np.random.RandomState(spec.split_seed)
+        idx = rng.permutation(len(X))[:n_train]
+        X, t = X[idx], t[idx]
         create_2d_scatter(X=X, t=t, title=_make_label(spec), ax=axes[row, col], show_legend=False)
 
     for i in range(n, n_rows * n_cols):
@@ -174,7 +181,8 @@ if __name__ == "__main__":
     print(f"Found {len(specs)} dataset configs in {CONFIG_DIR.name}/:")
     for s in specs:
         cf = f"  circ_factor={s.circ_factor}" if s.circ_factor is not None else ""
-        print(f"  {s.name}: size={s.size} (n_total={2*s.size}), noise={s.noise}{cf}")
+        n_train = round(s.split[0] * 2 * s.size)
+        print(f"  {s.name}: size={s.size} (n_total={2*s.size}, n_train={n_train}), noise={s.noise}{cf}")
 
     # n_cols = max variants per dataset type → one row per type
     type_counts = Counter(_dataset_type(s.name) for s in specs)
