@@ -1,0 +1,72 @@
+# @package _global_
+experiment: cls_reg
+
+defaults:
+  - override /born: fourier/d6D4
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null
+  - override /trainer/adversarial: pgd_at
+  - override /trainer/ganstyle: null
+  - override /trainer/generative: null
+  - override /tracking: online
+
+model_path: ???  # FILL: relative path to pretrained classifier checkpoint
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+  evasion:
+    method: "PGD"
+    norm: 2
+    criterion:
+      name: "negative log-likelihood"
+      kwargs: {eps: 1e-8}
+    strengths: [0.1]   # 10% of input range
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 1            # placeholder; swept via hydra sweeper
+    batch_size: 256
+    method: "pgd_at"
+    stop_crit: "rob"
+    patience: 100           # >= max max_epoch -> no early stopping during sweep
+    watch_freq: 0
+    metrics: {"rob": 1, "clsloss": 1, "acc": 1}
+
+    evasion:
+      method: "PGD"
+      norm: 2
+      criterion:
+        name: "negative log-likelihood"
+        kwargs: {eps: 1e-8}
+      strengths: [0.1]   # 10% of input range (fourier: [0,1])
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: false
+    curriculum_start: 0.0
+    curriculum_end_epoch: null
+    clean_weight: 0.0       # pure adversarial, 0% clean weight
+    save: true
+    auto_stack: true
+    auto_unbind: false
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.03378430634654086
+        weight_decay: 3.2102615532356944e-08
+
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.max_epoch: choice(1,5,10,50,100)
+      tracking.seed: range(1,6)
