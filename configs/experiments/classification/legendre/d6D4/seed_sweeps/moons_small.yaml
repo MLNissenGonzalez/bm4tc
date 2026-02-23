@@ -26,8 +26,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.02931565161670948    # FILL FROM HPO
-        weight_decay: 6.764802356222441e-09  # FILL FROM HPO
+        lr: 0.014058488356621627    # FILL FROM HPO
+        weight_decay: 4.916424522239738e-09  # FILL FROM HPO
     criterion:
       name: "negative log-likelihood"
       kwargs:
