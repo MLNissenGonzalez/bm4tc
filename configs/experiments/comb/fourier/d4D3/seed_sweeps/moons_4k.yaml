@@ -34,7 +34,7 @@ trainer:
       name: "negative log-likelihood"
       kwargs:
         eps: 1e-8
-    metrics: {"clsloss": 1, "acc": 1, "genloss": 1, "fid": 10}
+    metrics: {"clsloss": 1, "acc": 1, "genloss": 1, "fid": 5}
 
   generative:
     max_epoch: ${complement_100:${trainer.classification.max_epoch}}
@@ -52,7 +52,7 @@ trainer:
       name: "nll"
       kwargs:
         eps: 1e-8
-    metrics: {"genloss": 1, "acc": 1, "clsloss": 1, "fid": 10}
+    metrics: {"genloss": 1, "acc": 1, "clsloss": 1, "fid": 5}
 
 hydra:
   sweeper:

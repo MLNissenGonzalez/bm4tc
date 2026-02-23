@@ -103,12 +103,14 @@ def resolve_regime_from_path(sweep_dir: str) -> Optional[str]:
 # =============================================================================
 
 # Known embedding names; used to detect the embedding from a sweep path.
-_KNOWN_EMBEDDINGS = {"fourier", "legendre", "hermite"}
+_KNOWN_EMBEDDINGS = {"fourier", "legendre", "hermite", "chebychev1", "chebychev2"}
 
 _EMBEDDING_RANGE_SIZE: Dict[str, float] = {
-    "fourier":  1.0,   # range (0, 1)
-    "legendre": 2.0,   # range (-1, 1)
-    "hermite":  1.0,   # range (0, 1)
+    "fourier":    1.0,   # range (0, 1)
+    "legendre":   2.0,   # range (-1, 1)
+    "hermite":    1.0,   # range (0, 1)
+    "chebychev1": 2.0,   # range (-1, 1)
+    "chebychev2": 2.0,   # range (-1, 1)
 }
 
 
