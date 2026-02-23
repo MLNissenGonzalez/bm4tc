@@ -19,3 +19,5 @@ def register_resolvers():
         OmegaConf.register_new_resolver(
             "training_regime", _training_regime, use_cache=False
         )
+    if not OmegaConf.has_resolver("complement_100"):
+        OmegaConf.register_new_resolver("complement_100", lambda x: 100 - int(x))

@@ -216,7 +216,8 @@ class Trainer:
 
         self.bornmachine.reset()
         self.bornmachine.to("cpu")
-        del self.valid_perf
+        if hasattr(self, 'valid_perf'):
+            del self.valid_perf
 
         # Save model
         if self.train_cfg.save:
@@ -255,6 +256,7 @@ class Trainer:
                   If reached, training stops regardless of patience.
         """
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.epoch = 0  # guard: stays 0 if max_epoch=0
         self.best_epoch = 0
         self.epoch_times = []
 
