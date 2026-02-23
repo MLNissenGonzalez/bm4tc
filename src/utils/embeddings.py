@@ -156,7 +156,7 @@ def embedding(name: str) -> Callable[[torch.FloatTensor, int], torch.FloatTensor
 _EMBEDDING_TO_RANGE = {
     "fourier": (0., 1.),
     "legendre": (-1., 1.),
-    "hermite": (0., 1.),
+    "hermite": (-4., 4.),
 }
 
 

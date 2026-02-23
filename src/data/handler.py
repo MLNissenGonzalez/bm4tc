@@ -88,8 +88,7 @@ class DataHandler:
         if self.data is None:
             self.load(self.cfg)
         # Final input range depends on the embedding chosen for the Born-Machine.    
-        embedding_name = bornmachine.embedding_name
-        self.input_range = get.range_from_embedding(embedding_name)
+        self.input_range = bornmachine.input_range
         # Initalize dictionaries
         data = {}
         labels = {}
