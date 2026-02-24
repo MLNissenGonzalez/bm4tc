@@ -121,7 +121,35 @@ input_range = range_from_embedding("fourier")  # (0.0, 1.0)
 | `"fourier"` | (0, 1) | Fourier basis functions (tensorkrowch) |
 | `"poly"` / `"polynomial"` | varies | Polynomial embedding (tensorkrowch) |
 | `"legendre"` | (-1, 1) | Legendre polynomials (custom implementation) |
-| `"hermite"` | (0, 1) | Normalized physicist's Hermite functions |
+| `"hermite"` | (-4, 4) | Normalized physicist's Hermite functions with Gaussian damping |
+| `"chebychev1"` / `"chebyshev1"` | **(-0.99, 0.99)** | Chebyshev T1 polynomials, L²-orthonormal — range restricted to avoid boundary artefact (see below) |
+| `"chebychev2"` / `"chebyshev2"` | (-1, 1) | Chebyshev T2 polynomials, L²-orthonormal |
+
+### Chebyshev T1 boundary artefact
+
+The T1 embedding makes `φ_n(x) = T_n(x) · (1−x²)^{−1/4} · scale_n` orthonormal
+in flat L²([-1,1], dx).  The weight factor `(1−x²)^{−1/4}` is the square root of
+the Chebyshev measure `(1−x²)^{−1/2}` and **diverges** at x = ±1:
+
+| x        | (1−x²)^{−1/4} |
+|----------|--------------|
+| 0        | 1.00         |
+| ±0.99    | ~2.24        |
+| ±1 (raw) | → ∞ (31.6 with 1e-6 clamp floor) |
+
+Because Born Machine probability scales as |ψ|², embedding values ~32× larger at the
+boundary translate into a ~1000× higher implicit probability prior there — before the
+model has seen any data.  The model must then learn to cancel this prior, wasting
+capacity and producing spurious high-density regions at the boundary in
+visualizations.
+
+**Fix (applied):** `_EMBEDDING_TO_RANGE` for `chebychev1` is set to `(-0.99, 0.99)`
+instead of `(-1, 1)`.  The data rescaling in `DataHandler` then guarantees
+x ∈ [-0.99, 0.99], keeping the weight bounded at ≤ 2.24.  The `clamp(min=1e-6)`
+inside the embedding is a numerical safety net only.
+
+**T2 is unaffected:** its weight is `(1−x²)^{+1/4}` → 0 at ±1 (boundary suppression,
+not amplification), so the full (-1, 1) range is safe for T2.
 
 **Legendre Embedding** (`embeddings.py:11-49`):
 Uses the standard recursive formula for Legendre polynomials:

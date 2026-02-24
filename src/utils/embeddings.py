@@ -117,6 +117,14 @@ class HermiteEmbedding:
 class ChebyshevT1Embedding:
     """Chebyshev functions of the first kind, orthonormal on L²[-1,1].
     φ_n(x) = T_n(x) · sqrt(k_n / (π √(1−x²))),  k_0=1, k_n=2 for n≥1.
+
+    IMPORTANT — domain is restricted to (-0.99, 0.99), NOT the full (-1, 1).
+    The weight factor (1−x²)^{−1/4} is the square root of the Chebyshev
+    measure and diverges at x = ±1.  Restricting the data range to ±0.99
+    bounds the weight to at most (1−0.99²)^{−1/4} ≈ 2.24, preventing the
+    Born Machine from placing artificially high probability mass at the
+    boundaries due to the embedding magnitude alone.  See src/utils/GUIDE.md
+    "Chebyshev T1 boundary artefact" for a full explanation.
     """
     def __init__(self, dim: int):
         self.dim = dim
@@ -125,6 +133,8 @@ class ChebyshevT1Embedding:
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
         if not isinstance(data, torch.Tensor):
             raise TypeError('`data` should be torch.Tensor type')
+        # clamp(min=1e-6) is a numerical safety net only; the data range (-0.99, 0.99)
+        # already keeps (1-x²) >= 0.0199, so w <= ~2.24 under normal operation.
         w = (1.0 - data ** 2).clamp(min=1e-6).pow(-0.25)
         T_prev = torch.ones_like(data)
         T_curr = data.clone()
@@ -213,8 +223,13 @@ _EMBEDDING_TO_RANGE = {
     "fourier":    (0., 1.),
     "legendre":   (-1., 1.),
     "hermite":    (-4., 4.),
-    "chebychev1": (-1., 1.),
-    "chebyshev1": (-1., 1.),
+    # (-0.99, 0.99) rather than (-1, 1): the T1 weight (1-x²)^{-1/4} diverges
+    # at ±1 (w → ∞), creating a strong implicit boundary prior in the Born
+    # Machine.  Restricting to ±0.99 caps w ≈ 2.24 vs ~31.6 at the raw
+    # boundary.  T2 has the opposite weight (1-x²)^{+1/4} → 0 at ±1, so the
+    # full (-1,1) range is safe for T2 (boundary = zero embedding, not ∞).
+    "chebychev1": (-0.99, 0.99),
+    "chebyshev1": (-0.99, 0.99),
     "chebychev2": (-1., 1.),
     "chebyshev2": (-1., 1.),
 }
