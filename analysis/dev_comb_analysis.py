@@ -282,23 +282,26 @@ for i, run in enumerate(runs):
     run_id_str = f"[{i + 1}/{len(runs)}] {run.name} (cls_epochs={int(cls_epochs)})"
     print(f"  Fetching history: {run_id_str} ...")
 
-    # Fetch both phases in one call; rows are sorted by _step automatically
+    # Fetch pre and gen FID histories separately.
+    # Requesting both keys in one call can yield empty results from the W&B
+    # sampledHistory endpoint when the two keys never appear in the same step
+    # (pre/valid/fid only during pre-phase, gen/valid/fid only during gen-phase).
     try:
-        hist = fetcher.fetch_run_history(
-            run,
-            keys=["pre/valid/fid", "gen/valid/fid"],
-        )
+        pre_hist = fetcher.fetch_run_history(run, keys=["pre/valid/fid"])
+        gen_hist = fetcher.fetch_run_history(run, keys=["gen/valid/fid"])
     except Exception as e:
         print(f"    Warning: could not fetch history for {run.name}: {e}")
         continue
 
-    if hist is None or hist.empty:
-        print(f"    Warning: empty history for {run.name}")
-        continue
+    def _fid_rows(hist, key):
+        if hist is None or hist.empty or key not in hist.columns:
+            return pd.DataFrame()
+        rows = hist[hist[key].notna()].copy()
+        return rows
 
     # Separate pre and gen phase rows
-    pre_rows = hist[hist["pre/valid/fid"].notna()].copy() if "pre/valid/fid" in hist.columns else pd.DataFrame()
-    gen_rows = hist[hist["gen/valid/fid"].notna()].copy() if "gen/valid/fid" in hist.columns else pd.DataFrame()
+    pre_rows = _fid_rows(pre_hist, "pre/valid/fid")
+    gen_rows = _fid_rows(gen_hist, "gen/valid/fid")
 
     n_pre = len(pre_rows)
     n_gen = len(gen_rows)
