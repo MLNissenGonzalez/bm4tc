@@ -65,6 +65,8 @@ def main(cfg: schemas.Config):
 
     if model_path is not None:
         evaluate_loaded_model(cfg, bornmachine, datahandler, device)
+        bornmachine.reset()
+        bornmachine.unset_data_nodes()
 
     if model_path is None:
         # Classification pretraining (optional)
