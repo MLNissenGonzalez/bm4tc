@@ -13,7 +13,7 @@ Usage:
     python analysis/dev_comb_analysis.py <wandb_group_name>
 
 Example:
-    python analysis/dev_comb_analysis.py seed_sweep_comb_d6D4fourier_circles_4k_2302
+    python analysis/dev_comb_analysis.py dev_comb_clsgen_d6D4fourier_circles_4k_2302
 """
 
 import sys
@@ -60,7 +60,7 @@ _cli = argparse.ArgumentParser(
     description="dev_comb analysis: tradeoff curve + FID dynamics from W&B.",
     add_help=False,
 )
-_cli.add_argument("group_name", help="W&B group name, e.g. seed_sweep_comb_d6D4fourier_circles_4k_2302")
+_cli.add_argument("group_name", help="W&B group name, e.g. dev_comb_clsgen_d6D4fourier_circles_4k_2302")
 _cli_args, _ = _cli.parse_known_args()
 GROUP_NAME = _cli_args.group_name
 
@@ -72,22 +72,26 @@ def parse_group_name(group_name: str):
     """Parse dev_comb group name into (arch, embedding, dataset, date).
 
     Expected format:
-        seed_sweep_comb_{arch}{embedding}_{dataset}_{date}
+        dev_comb_{regime}_{arch}{embedding}_{dataset}_{date}
     where date is DDMM (4 digits) or DDMM_HHMM (8 digits with underscore).
 
     Examples:
-        seed_sweep_comb_d6D4fourier_circles_4k_2302
+        dev_comb_clsgen_d6D4fourier_circles_4k_2302
           → arch='d6D4', embedding='fourier', dataset='circles_4k', date='2302'
-        seed_sweep_comb_d10D6legendre_moons_4k_2302_1430
+        dev_comb_clsgen_d10D6legendre_moons_4k_2302_1430
           → arch='d10D6', embedding='legendre', dataset='moons_4k', date='2302_1430'
     """
-    prefix = "seed_sweep_comb_"
+    prefix = "dev_comb_"
     if not group_name.startswith(prefix):
         raise ValueError(
             f"Group name must start with '{prefix}', got: {group_name}\n"
-            "Expected format: seed_sweep_comb_{{arch}}{{embedding}}_{{dataset}}_{{date}}"
+            "Expected format: dev_comb_{{regime}}_{{arch}}{{embedding}}_{{dataset}}_{{date}}"
         )
     rest = group_name[len(prefix):]
+
+    # Strip the regime token (e.g. "clsgen_") that precedes the arch.
+    # Regime names are purely alphabetical; arch always starts with d<digit>.
+    rest = re.sub(r'^[a-zA-Z]+_', '', rest)
 
     # Match arch (d<n>D<m>) + embedding at the start
     m = re.match(
