@@ -26,8 +26,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.041376293143363094
-        weight_decay: 1.1024958579569868e-09
+        lr: 0.023502419779019068
+        weight_decay: 6.249501184812437e-09
     criterion:
       name: "negative log-likelihood"
       kwargs:
