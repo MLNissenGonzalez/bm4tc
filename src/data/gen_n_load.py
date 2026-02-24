@@ -42,7 +42,7 @@ _DATA_DIR = os.path.abspath(
 # -----------------------------
 _TWO_DIM_DATA = ["moons", "circles", "spirals"]
 _SK_DATA = []   # placeholders for sklearn datasets
-_NIST_DATA = []  # placeholders for MNIST, FashionMNIST, etc.
+_NIST_DATA = ["mnist"]
 _TS_DATA = [] # placeholder for time-series data
 
 _CANONICAL_FOLDERS = _TWO_DIM_DATA + _SK_DATA + _NIST_DATA + _TS_DATA
@@ -139,7 +139,57 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-# TODO: Add code to download and prepreprocess MNIST dataset (ADDED AS ISSUE, highpriority)
+def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Download and preprocess MNIST dataset.
+
+    Combines train (60k) + test (10k) splits into one pool and optionally
+    subsamples a balanced set of ``cfg.size`` samples per class.
+
+    Parameters
+    ----------
+    cfg : DataGenDowConfig
+        Must contain:
+        - ``size``: int or None — samples per class; None means use all.
+        - ``seed``: int — RNG seed for subsampling.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(X_np, y_np)`` where ``X_np`` has shape (N, 784) in float32 ∈ [0, 1]
+        and ``y_np`` has shape (N,) as int.
+    """
+    import torchvision.datasets as tv_datasets
+
+    # Raw files go to _DATA_DIR/MNIST/raw/ (torchvision convention)
+    train_ds = tv_datasets.MNIST(root=_DATA_DIR, train=True, download=True)
+    test_ds = tv_datasets.MNIST(root=_DATA_DIR, train=False, download=True)
+
+    # Access tensors directly — avoids iterating the full dataset
+    data = np.concatenate(
+        [train_ds.data.numpy(), test_ds.data.numpy()], axis=0
+    )  # (70000, 28, 28), uint8
+    targets = np.concatenate(
+        [train_ds.targets.numpy(), test_ds.targets.numpy()], axis=0
+    )  # (70000,), int64
+
+    # Flatten spatial dims and normalise to float32 in [0, 1]
+    data = data.reshape(-1, 784).astype(np.float32) / 255.0  # (70000, 784)
+    targets = targets.astype(int)
+
+    if cfg.size is not None:
+        rng = np.random.RandomState(cfg.seed)
+        indices = []
+        for c in range(10):
+            class_idx = np.where(targets == c)[0]
+            chosen = rng.choice(class_idx, size=cfg.size, replace=False)
+            indices.append(chosen)
+        indices = np.concatenate(indices)
+        rng.shuffle(indices)
+        data = data[indices]
+        targets = targets[indices]
+
+    logger.info(f"MNIST loaded: {data.shape[0]} samples, {data.shape[1]} features")
+    return data, targets
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -204,8 +254,9 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
 
     if canonical in _TWO_DIM_DATA:
         X, t = _two_dim_generator(cfg)
+    elif canonical in _NIST_DATA:
+        X, t = _nist_generator(cfg)
     else:
-        # TODO: Extend this block to handle _SK_DATA or _NIST_DATA
         raise ValueError(f"Dataset {name} not supported.")
 
     np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)

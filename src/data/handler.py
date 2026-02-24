@@ -132,7 +132,10 @@ class DataHandler:
             if self.data_dim < 1e2:
                 mean, cov = self._compute_mean_and_covariance(class_data)
                 self.means.append(mean), self.covs.append(cov)
-        self.classified_data = torch.stack(self.classified_data, dim=1) # already more or less sorted into splits
+        min_size = min(cd.shape[0] for cd in self.classified_data)
+        self.classified_data = torch.stack(
+            [cd[:min_size] for cd in self.classified_data], dim=1
+        )  # (min_size, num_cls, data_dim)
         del all_data
         del all_labels
 
