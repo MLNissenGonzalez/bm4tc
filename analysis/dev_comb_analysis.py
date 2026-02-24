@@ -313,8 +313,18 @@ for i, run in enumerate(runs):
     pre_epochs = np.linspace(0, cls_epochs, n_pre + 1)[1:] if n_pre > 0 else np.array([])
     gen_epochs = np.linspace(cls_epochs, 100, n_gen + 1)[1:] if n_gen > 0 else np.array([])
 
-    pre_fids = pre_rows["pre/valid/fid"].values if n_pre > 0 else np.array([])
-    gen_fids = gen_rows["gen/valid/fid"].values if n_gen > 0 else np.array([])
+    pre_fids = pd.to_numeric(pre_rows["pre/valid/fid"], errors="coerce").values if n_pre > 0 else np.array([])
+    gen_fids = pd.to_numeric(gen_rows["gen/valid/fid"], errors="coerce").values if n_gen > 0 else np.array([])
+
+    # Drop non-finite FID values (coercion failures or genuine NaN) along with their epoch counterparts
+    if n_pre > 0:
+        finite_pre = np.isfinite(pre_fids)
+        pre_fids   = pre_fids[finite_pre]
+        pre_epochs = pre_epochs[finite_pre]
+    if n_gen > 0:
+        finite_gen = np.isfinite(gen_fids)
+        gen_fids   = gen_fids[finite_gen]
+        gen_epochs = gen_epochs[finite_gen]
 
     all_epochs = np.concatenate([pre_epochs, gen_epochs])
     all_fids   = np.concatenate([pre_fids,   gen_fids])
