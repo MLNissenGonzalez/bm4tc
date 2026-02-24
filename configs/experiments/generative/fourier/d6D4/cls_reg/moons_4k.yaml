@@ -19,14 +19,6 @@ dataset:
 
 tracking:
   seed: 42
-  evasion: 
-  method: "PGD"
-  norm: 2
-  criterion: 
-    name: "negative log-likelihood"
-    kwargs:
-      eps: 1e-8
-  strengths: [0.1] # not relative, default for dataspaces [0,1]^n\
 
 trainer:
   generative:
