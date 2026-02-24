@@ -73,6 +73,8 @@ def main(cfg: schemas.Config):
             pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
             pre_trainer.train()
             # Move back to device after pretraining (it moves to CPU at end)
+            bornmachine.reset()
+            bornmachine.unset_data_nodes()
             bornmachine.to(device)
         else:
             logger.info("Skipping classification pretraining.")

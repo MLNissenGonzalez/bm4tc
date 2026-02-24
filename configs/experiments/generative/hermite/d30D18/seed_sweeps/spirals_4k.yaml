@@ -28,8 +28,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???    # FILL FROM HPO
-        weight_decay: ???  # FILL FROM HPO
+        lr: 0.0017567965383883536    # FILL FROM HPO
+        weight_decay: 0.0016060052857395394  # FILL FROM HPO
     criterion:
       name: "nll"
       kwargs:

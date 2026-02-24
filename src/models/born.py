@@ -255,5 +255,10 @@ class BornMachine:
         """Reset internal state of both classifier and generator MPS networks."""
         self.classifier.reset()
         self.generator.reset()
+        
+    def unset_data_nodes(self):
+        """Unset data nodes in both classifier and generator."""
+        self.classifier.unset_data_nodes()
+        self.generator.unset_data_nodes()
 
     
