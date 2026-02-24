@@ -109,7 +109,7 @@ class BornClassifier(tk.models.MPSLayer):
 
         
         p = torch.square(self.forward(data=embs))
-        return p / p.sum(dim=-1, keepdim=True)
+        return p / p.sum(dim=-1, keepdim=True).clamp(min=torch.finfo(p.dtype).tiny)
         
     
     def probabilities(self, data: torch.Tensor) -> torch.Tensor:
