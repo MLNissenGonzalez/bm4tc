@@ -555,6 +555,22 @@ class MIAEvaluation:
         logger.info(f"Train features shape: {train_features.shape}")
         logger.info(f"Test features shape: {test_features.shape}")
 
+        # Drop rows with non-finite features (NaN/Inf from degenerate model outputs).
+        # Store masks so the adversarial path can apply them in the same order.
+        train_finite_mask = np.isfinite(train_features).all(axis=1)
+        test_finite_mask  = np.isfinite(test_features).all(axis=1)
+        n_train_dropped = int((~train_finite_mask).sum())
+        n_test_dropped  = int((~test_finite_mask).sum())
+        if n_train_dropped or n_test_dropped:
+            logger.warning(
+                f"MIA: dropping {n_train_dropped} train and {n_test_dropped} test "
+                f"samples with non-finite features."
+            )
+        train_features = train_features[train_finite_mask]
+        test_features  = test_features[test_finite_mask]
+        if len(train_features) == 0 or len(test_features) == 0:
+            raise ValueError("No finite feature rows remain after NaN filtering.")
+
         # Subsample train features to test size for balanced evaluation (random guessing = 50%)
         rng = np.random.default_rng(self.random_state)
         n_test = len(test_features)
@@ -639,6 +655,9 @@ class MIAEvaluation:
                 model, test_loader, device, pgd, self.adversarial_strength
             )
 
+            # Apply the same finite-row masks as the clean path, then subsample.
+            adv_train_features = adv_train_features[train_finite_mask]
+            adv_test_features  = adv_test_features[test_finite_mask]
             if subsample_idx is not None:
                 adv_train_features = adv_train_features[subsample_idx]
 
