@@ -120,7 +120,7 @@ input_range = range_from_embedding("fourier")  # (0.0, 1.0)
 |------|-------|-------------|
 | `"fourier"` | (0, 1) | Fourier basis functions (tensorkrowch) |
 | `"poly"` / `"polynomial"` | varies | Polynomial embedding (tensorkrowch) |
-| `"legendre"` | (-1, 1) | Legendre polynomials (custom implementation) |
+| `"legendre"` | (-1, 1) | Normalized Legendre polynomials φ_k = sqrt((2k+1)/2)·P_k, orthonormal on L²[-1,1] |
 | `"hermite"` | (-4, 4) | Normalized physicist's Hermite functions with Gaussian damping |
 | `"chebychev1"` / `"chebyshev1"` | **(-0.99, 0.99)** | Chebyshev T1 polynomials, L²-orthonormal — range restricted to avoid boundary artefact (see below) |
 | `"chebychev2"` / `"chebyshev2"` | (-1, 1) | Chebyshev T2 polynomials, L²-orthonormal |
@@ -151,13 +151,16 @@ inside the embedding is a numerical safety net only.
 **T2 is unaffected:** its weight is `(1−x²)^{+1/4}` → 0 at ±1 (boundary suppression,
 not amplification), so the full (-1, 1) range is safe for T2.
 
-**Legendre Embedding** (`embeddings.py:11-49`):
-Uses the standard recursive formula for Legendre polynomials:
+**Legendre Embedding** (`embeddings.py`):
+Computes normalized Legendre polynomials via the standard recurrence, then
+multiplies each component by `sqrt((2k+1)/2)`:
 ```
-P_0(x) = 1
-P_1(x) = x
-P_n(x) = ((2n-1) x P_{n-1}(x) - (n-1) P_{n-2}(x)) / n
+P_0(x) = 1,  P_1(x) = x,  P_n(x) = ((2n-1) x P_{n-1}(x) - (n-1) P_{n-2}(x)) / n
+φ_k(x) = sqrt((2k+1)/2) · P_k(x)   →   ∫_{-1}^{1} φ_m φ_n dx = δ_{mn}
 ```
+Without the normalization factor, `||P_k||² = 2/(2k+1)` decreases with k,
+systematically under-weighting higher-order components and biasing the
+Born Machine toward low-frequency features.
 
 ## get.py — Optimizer Factory
 

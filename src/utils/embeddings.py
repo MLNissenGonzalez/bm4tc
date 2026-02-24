@@ -55,18 +55,26 @@ class PolyEmbedding:
 
 class LegendreEmbedding:
     """
-    Legendre polynomial embedding.
+    Normalized Legendre polynomial embedding, orthonormal on L²[-1,1].
 
-    Generates Legendre polynomials P_0 through P_{dim-1} for each element,
+    φ_k(x) = sqrt((2k+1)/2) · P_k(x),  so ∫_{-1}^{1} φ_m φ_n dx = δ_{mn}.
+
+    Generates normalized polynomials φ_0 through φ_{dim-1} for each element,
     producing exactly ``dim`` components to match the MPS physical dimension.
+
+    Note: ∫ P_k² dx = 2/(2k+1), so without the normalization factor the
+    higher-order components are systematically under-represented (their
+    L²-norm decreases as 1/k), biasing the Born Machine toward low-frequency
+    features.
     """
 
     def __init__(self, dim: int):
         self.dim = dim
-        # Precompute recurrence coefficients alpha[i] = (2i-1)/i, beta[i] = (i-1)/i
-        # for i = 2..dim-1
+        # Recurrence coefficients: P_i = alpha[i]*x*P_{i-1} - beta[i]*P_{i-2}
         self._alpha: List[float] = [0.0, 0.0] + [(2*i - 1) / i for i in range(2, dim)]
         self._beta: List[float]  = [0.0, 0.0] + [(i - 1) / i     for i in range(2, dim)]
+        # Orthonormality scales: ||P_k||² = 2/(2k+1)  →  scale = sqrt((2k+1)/2)
+        self._norms: List[float] = [sqrt((2*k + 1) / 2) for k in range(dim)]
 
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
         if not isinstance(data, torch.Tensor):
@@ -75,7 +83,9 @@ class LegendreEmbedding:
         for i in range(2, self.dim):
             p_i = self._alpha[i] * data * polies[-1] - self._beta[i] * polies[-2]
             polies.append(p_i)
-        return torch.stack(polies[:self.dim], dim=axis)
+        return torch.stack(
+            [p * n for p, n in zip(polies[:self.dim], self._norms)], dim=axis
+        )
 
 
 class HermiteEmbedding:
