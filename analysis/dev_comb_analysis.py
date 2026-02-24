@@ -182,7 +182,14 @@ for run in runs:
         "seed":       seed,
     }
     for key in SUMMARY_KEYS:
-        record[key] = summary.get(key)
+        val = summary.get(key)
+        try:
+            val = float(val)
+            if not np.isfinite(val):
+                val = float("nan")
+        except (TypeError, ValueError):
+            val = float("nan")
+        record[key] = val
 
     records.append(record)
 
@@ -206,7 +213,8 @@ for cls_ep in cls_epochs_values:
     group = df[df["cls_epochs"] == cls_ep]
     agg = {"cls_epochs": int(cls_ep), "n_runs": len(group)}
     for key in SUMMARY_KEYS:
-        vals = group[key].dropna()
+        vals = pd.to_numeric(group[key], errors="coerce")
+        vals = vals[np.isfinite(vals)]
         agg[f"{key}/mean"] = vals.mean() if len(vals) > 0 else float("nan")
         agg[f"{key}/std"]  = vals.std()  if len(vals) > 1 else float("nan")
     agg_records.append(agg)
