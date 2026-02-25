@@ -160,6 +160,11 @@ def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
     """
     import torchvision.datasets as tv_datasets
 
+    # yann.lecun.com returns HTTP 200 with garbage content → MD5 fails → RuntimeError
+    # (not URLError), so torchvision's mirror fallback is never triggered. Force the
+    # working S3 mirror directly.
+    tv_datasets.MNIST.mirrors = ["https://ossci-datasets.s3.amazonaws.com/mnist/"]
+
     # Raw files go to _DATA_DIR/MNIST/raw/ (torchvision convention)
     train_ds = tv_datasets.MNIST(root=_DATA_DIR, train=True, download=True)
     test_ds = tv_datasets.MNIST(root=_DATA_DIR, train=False, download=True)
