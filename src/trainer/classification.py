@@ -95,6 +95,11 @@ class Trainer:
             probs = self.bornmachine.class_probabilities(data)
             loss : torch.Tensor = self.criterion(probs, labels)
 
+            if torch.isnan(loss):
+                logger.warning("NaN loss detected — aborting epoch.")
+                self._nan_detected = True
+                break
+
             self.optimizer.zero_grad()
             loss.backward()
             log_grads(bm_view=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
@@ -258,6 +263,10 @@ class Trainer:
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
+            if getattr(self, '_nan_detected', False):
+                logger.warning("NaN loss detected — stopping training. Reporting clsloss=inf to HPO.")
+                self.best["clsloss"] = float("inf")
+                break
             # TODO: Write a prior check if generative eval-metrics are requested. If not, skip sync_tensors here.
             self.bornmachine.sync_tensors(after="classification", verify=False) # needed for generative-performance eval-metrics
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
