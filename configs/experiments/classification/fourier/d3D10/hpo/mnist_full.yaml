@@ -16,7 +16,7 @@ tracking:
 trainer:
   classification:
     max_epoch: 30
-    batch_size: 500
+    batch_size: 128
     patience: 30
     stop_crit: "clsloss"
     watch_freq: 0

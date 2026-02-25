@@ -6,9 +6,9 @@ defaults:
   - dataset: 2Dtoy/circles_4k
   - born: fourier/d4D3
   - trainer/classification: test
-  - trainer/ganstyle: test
+  - trainer/ganstyle: null
   - trainer/generative: null
-  - trainer/adversarial: test
+  - trainer/adversarial: null
   - tracking: test
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
