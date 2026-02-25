@@ -28,8 +28,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.0005721250540733859
-        weight_decay: 1.8105084656257542e-06
+        lr: 0.0017118701955444774
+        weight_decay: 4.00755954384674e-07
     criterion:
       name: "nll"
       kwargs:
