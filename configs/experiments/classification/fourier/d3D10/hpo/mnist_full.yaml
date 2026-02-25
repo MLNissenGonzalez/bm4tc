@@ -15,11 +15,13 @@ tracking:
 
 trainer:
   classification:
-    max_epoch: 30
-    batch_size: 128
-    patience: 30
+    max_epoch: 90
+    batch_size: 256
+    patience: 90
     stop_crit: "clsloss"
     watch_freq: 0
+    auto_stack: True
+    auto_unbind: False
     save: false
     optimizer:
       name: "adam"
