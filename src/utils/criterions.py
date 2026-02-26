@@ -46,6 +46,27 @@ class ClassificationNLL(nn.Module):
         p = p.clamp(min=self.eps)
         return -torch.log(p[torch.arange(p.size(0)), t]).mean()
 
+class ClassificationBrier(nn.Module):
+    """
+    Brier Score Loss for MPS classification using Born rule probabilities.
+
+    Computes the mean squared error between Born-rule class probabilities and
+    one-hot targets — a bounded proper scoring rule ∈ [0, 2]:
+
+        BS = mean_i  Σ_c (p(c|x_i) - y_{i,c})²
+
+    where y_{i,c} = 1 if c == t_i else 0.
+
+    Compared to the spherical NLL, gradients ∂BS/∂p_c = 2(p_c - y_c) are bounded,
+    avoiding instability when probabilities are near zero.
+    """
+
+    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        y = torch.zeros_like(p)
+        y.scatter_(1, t.unsqueeze(1), 1.0)
+        return ((p - y) ** 2).sum(dim=1).mean()
+
+
 # This uses logs to improve numerical stability which is not necessary for class probabilities.
 
 
@@ -104,6 +125,9 @@ _CLASSIFICATION_LOSSES = {
     "nlll": ClassificationNLL,
     "negativeloglikelihood": ClassificationNLL,
     "negloglikelihood": ClassificationNLL,
+    "brier": ClassificationBrier,
+    "brierscore": ClassificationBrier,
+    "bs": ClassificationBrier,
 }
 _GENERATIVE_LOSSES = {
     "nll": GenerativeNLL,

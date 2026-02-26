@@ -1,0 +1,35 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: fourier/d3D10
+  - override /dataset: mnist/mnist_full
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  classification:
+    max_epoch: 300
+    batch_size: 512
+    patience: 60
+    stop_crit: "acc"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???    # FILL FROM HPO
+        weight_decay: ???  # FILL FROM HPO
+    criterion:
+      name: "brier"
+      kwargs: null
+    metrics: {"clsloss": 1, "acc": 1}
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)
