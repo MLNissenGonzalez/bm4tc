@@ -1,7 +1,7 @@
 # @package _global_
 experiment: hpo
 
-descriptor: size
+descriptor: nll
 defaults:
   - override /born: fourier/d3D10
   - override /dataset: mnist/mnist_full
