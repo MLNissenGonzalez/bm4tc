@@ -124,6 +124,7 @@ class DataGenDowConfig:
     noise: Optional[float]
     circ_factor: Optional[float]
     dow_link: Optional[List[str]]
+    dow_password: Optional[str] = None  # password for protected zip downloads
 
 @dataclass
 class DatasetConfig:
@@ -149,6 +150,7 @@ class DatasetConfig:
     split: Tuple[float, float, float]
     split_seed: int
     overwrite: bool = False
+    use_ucr_split: bool = False  # if True, honour original UCR train/test boundary
 
 cs.store(group="dataset", name="schema", node=DatasetConfig)
 

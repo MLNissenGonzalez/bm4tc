@@ -51,13 +51,15 @@ class DataHandler:
         self.num_cls: int = None
         self.total_size: int = None
         self.num_spc: List[int] = None
+        self.ucr_train_size: Optional[int] = None
 
     def load(self):
         """Load raw dataset from disk (or generate if needed)."""
         lbld_data = load_dataset(self.cfg)
         self.data, self.labels = lbld_data.X, lbld_data.t
         self.data_dim, self.num_cls, self.total_size = lbld_data.num_feat, lbld_data.num_cls, lbld_data.size
-        
+        self.ucr_train_size = lbld_data.ucr_train_size  # non-None only for UCR datasets
+
 
     def _compute_mean_and_covariance(self, data: torch.FloatTensor):
         mean = data.mean(dim=0)
@@ -87,27 +89,43 @@ class DataHandler:
         # Check that data is already loaded to handler, otherwise, load it:
         if self.data is None:
             self.load(self.cfg)
-        # Final input range depends on the embedding chosen for the Born-Machine.    
+        # Final input range depends on the embedding chosen for the Born-Machine.
         self.input_range = bornmachine.input_range
         # Initalize dictionaries
         data = {}
         labels = {}
-        # First split: separate test set
-        split_ratios = self.cfg.split
-        (remaining_data, data["test"], 
-         remaining_labels, labels["test"]) = train_test_split(
-                                            self.data, self.labels, 
-                                            test_size=split_ratios[-1], 
-                                            random_state=self.cfg.split_seed
-                                        )
-        # Second split: separate validation set from remaining data
-        # ratio_new = ratio_old / ratio_remaining
-        (data["train"], data["valid"], 
-         labels["train"], labels["valid"]) = train_test_split(
-                                            remaining_data, remaining_labels, 
-                                            test_size=split_ratios[1]/(1-split_ratios[-1]), 
-                                            random_state=self.cfg.split_seed
-                                        )
+
+        if getattr(self.cfg, 'use_ucr_split', False) and self.ucr_train_size is not None:
+            # Honour original UCR train/test boundary; carve valid from test half
+            n_train = self.ucr_train_size
+            train_data   = self.data[:n_train]
+            train_labels = self.labels[:n_train]
+            rest_data    = self.data[n_train:]
+            rest_labels  = self.labels[n_train:]
+            n_half = len(rest_data) // 2
+            data["train"]  = train_data
+            data["valid"]  = rest_data[:n_half]
+            data["test"]   = rest_data[n_half:]
+            labels["train"] = train_labels
+            labels["valid"] = rest_labels[:n_half]
+            labels["test"]  = rest_labels[n_half:]
+        else:
+            split_ratios = self.cfg.split
+            # First split: separate test set
+            (remaining_data, data["test"],
+             remaining_labels, labels["test"]) = train_test_split(
+                                                self.data, self.labels,
+                                                test_size=split_ratios[-1],
+                                                random_state=self.cfg.split_seed
+                                            )
+            # Second split: separate validation set from remaining data
+            # ratio_new = ratio_old / ratio_remaining
+            (data["train"], data["valid"],
+             labels["train"], labels["valid"]) = train_test_split(
+                                                remaining_data, remaining_labels,
+                                                test_size=split_ratios[1]/(1-split_ratios[-1]),
+                                                random_state=self.cfg.split_seed
+                                            )
         # Fit scaler to training data to avoid data leakage.
         self._get_scaler(scaler_name)
         data["train"] = self.scaler.fit_transform(data["train"])

@@ -1,0 +1,10 @@
+# @package _global_
+experiment: "cls_ecg200"
+
+defaults:
+  - override /born: fourier/d30D18
+  - override /dataset: ucr_ts/ecg200
+  - override /trainer/classification: adam500_loss
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - _self_
