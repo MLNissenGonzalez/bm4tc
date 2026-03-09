@@ -84,7 +84,10 @@ class BornMachine:
                     f"[BornMachine] 'randn_eye' + '{self.embedding_name}': phi_0={_phi_0:.4f} "
                     f"(expected 1.0). Initial amplitude ≈ {_expected_amp:.2e} for "
                     f"n_sites={_n_sites} — float32 underflow risk. Rescaling all tensors "
-                    f"by 1/phi_0={_scale:.4f} to restore initial amplitude ≈ 1."
+                    f"by 1/phi_0={_scale:.4f}. "
+                    f"NOTE: this rescaling is exact only when phi_0 is constant (e.g. Legendre). "
+                    f"For embeddings with input-varying phi_0 (Hermite, Chebyshev) use "
+                    f"init_method='canonical' instead to avoid persistent underflow."
                 )
                 with torch.no_grad():
                     for _t in self.classifier.tensors:

@@ -307,7 +307,9 @@ embedding: "fourier"
    tensors by `1/φ_0` so the initial amplitude is restored to `≈ 1`.  This is exact for
    embeddings with a constant zeroth component (Legendre: `φ_0 = √(1/2)` → scale `√2`);
    for embeddings where `φ_0` varies with input (Hermite, Chebyshev) `canonical` initialization
-   is recommended instead.
+   is required instead — the rescaling only restores amplitude `≈ 1` at `x=0` for these embeddings,
+   while typical data has `φ_0(x) = exp(-x²/2)/π^{1/4} ≪ 1` at most sites, so underflow persists.
+   All Hermite configs have been updated to `init_method: canonical` for this reason.
 
 ## Future Directions (from README)
 
