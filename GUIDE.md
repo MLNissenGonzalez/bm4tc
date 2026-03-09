@@ -296,6 +296,19 @@ embedding: "fourier"
 
 3. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
 
+4. **`randn_eye` amplitude collapse for non-Fourier embeddings on high-dimensional data** —
+   `randn_eye` places the identity matrix at physical index 0 of every MPS tensor, so the
+   initial amplitude is `φ_0(x)^n_sites`.  For Fourier `φ_0 = 1.0` (safe), but for Legendre
+   `φ_0 = √(1/2) ≈ 0.707`.  On MNIST (`n_sites = 785`) this gives
+   amplitude `≈ 10⁻¹¹⁸`, squared `≈ 10⁻²³⁶` — complete float32 underflow.
+   All Born probabilities become 0, NLL stays at `-log(eps) ≈ 13.8` (constant), gradients are
+   zero throughout, and training silently fails.  **Fixed in `BornMachine.__init__`**: after
+   `randn_eye` initialization the code checks `φ_0`, and if it differs from 1 rescales all
+   tensors by `1/φ_0` so the initial amplitude is restored to `≈ 1`.  This is exact for
+   embeddings with a constant zeroth component (Legendre: `φ_0 = √(1/2)` → scale `√2`);
+   for embeddings where `φ_0` varies with input (Hermite, Chebyshev) `canonical` initialization
+   is recommended instead.
+
 ## Future Directions (from README)
 
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`

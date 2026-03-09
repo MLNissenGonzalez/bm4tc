@@ -48,6 +48,7 @@ class BornMachine:
         self.input_range = get.range_from_embedding(self.embedding_name)
 
         # 2. Intialize classifier, either from tensors, or configuration file
+        init_cfg = None
         if tensors is not None:
             self.classifier = BornClassifier(embedding=self.embedding, tensors=tensors)
         else:
@@ -58,6 +59,36 @@ class BornMachine:
         OmegaConf.set_struct(cfg, False)
         cfg.init_kwargs.out_position = self.classifier.out_position
         OmegaConf.set_struct(cfg, True)
+
+        # Amplitude correction for randn_eye with non-unit phi_0 embeddings.
+        #
+        # randn_eye places identity at physical index 0 of each MPS tensor:
+        #   T[:, 0, :] ≈ I,  T[:, k>0, :] ≈ std * randn
+        # The initial amplitude for any input is therefore ≈ phi_0(x)^n_sites.
+        #
+        # For Fourier:  phi_0 = 1.0  →  amplitude ≈ 1^n_sites = 1  ✓
+        # For Legendre: phi_0 = sqrt(0.5) ≈ 0.707  →  on MNIST (n_sites=785):
+        #   amplitude ≈ 0.707^785 ≈ 10^{-118}  →  |ψ|² ≈ 10^{-236}
+        #   → float32 underflow → all Born probs = 0 → NLL = -log(eps) = const
+        #   → zero gradients → silent training failure.
+        #
+        # Fix: rescale every tensor by 1/phi_0 so (phi_0 * 1/phi_0)^n_sites = 1.
+        if init_cfg is not None and init_cfg.get('init_method') == 'randn_eye':
+            _x0 = torch.zeros(1)
+            _phi_0 = float(self.embedding(_x0).view(-1)[0])
+            if abs(_phi_0 - 1.0) > 1e-6:
+                _n_sites = len(self.classifier.tensors)
+                _expected_amp = _phi_0 ** _n_sites
+                _scale = 1.0 / _phi_0
+                logger.warning(
+                    f"[BornMachine] 'randn_eye' + '{self.embedding_name}': phi_0={_phi_0:.4f} "
+                    f"(expected 1.0). Initial amplitude ≈ {_expected_amp:.2e} for "
+                    f"n_sites={_n_sites} — float32 underflow risk. Rescaling all tensors "
+                    f"by 1/phi_0={_scale:.4f} to restore initial amplitude ≈ 1."
+                )
+                with torch.no_grad():
+                    for _t in self.classifier.tensors:
+                        _t.data.mul_(_scale)
 
         # 3. Create generator with shared tensors
         self.generator = BornGenerator(tensors=self.classifier.tensors, 
