@@ -43,6 +43,8 @@ configs/
 │   ├── fourier/               # Fourier embedding configs
 │   │   ├── d2D2.yaml         # in_dim=2, bond_dim=2
 │   │   ├── d3D3.yaml         # in_dim=3, bond_dim=3
+│   │   ├── d3D10.yaml        # in_dim=3, bond_dim=10  ← UCR time-series
+│   │   ├── d3D20.yaml        # in_dim=3, bond_dim=20  ← UCR time-series
 │   │   ├── d4D3.yaml         # in_dim=4, bond_dim=3
 │   │   ├── d6D4.yaml         # in_dim=6, bond_dim=4
 │   │   ├── d10D3.yaml        # in_dim=10, bond_dim=3
@@ -53,19 +55,28 @@ configs/
 │   │   ├── d30D18.yaml       # in_dim=30, bond_dim=18
 │   │   └── test.yaml         # Minimal test config
 │   ├── legendre/              # Legendre polynomial embedding configs
+│   │   ├── d3D10.yaml        # in_dim=3, bond_dim=10  ← UCR time-series
+│   │   ├── d3D20.yaml        # in_dim=3, bond_dim=20  ← UCR time-series
 │   │   ├── d2D2.yaml ... d30D18.yaml
 │   └── hermite/               # Hermite polynomial embedding configs
 │       ├── d2D2.yaml ... d30D18.yaml
 ├── dataset/                    # Dataset configs
 │   ├── test.yaml              # Minimal test config
-│   └── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
-│       ├── circles_2k.yaml    # 2k samples, circles
-│       ├── circles_4k.yaml    # 4k samples, circles
-│       ├── moons_2k.yaml      # 2k samples, moons
-│       ├── moons_4k.yaml      # 4k samples, moons
-│       ├── spirals_2k.yaml    # 2k samples, spirals
-│       └── spirals_4k.yaml    # 4k samples, spirals
-│   # Future: mnist/, timeseries/
+│   ├── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
+│   │   ├── circles_2k.yaml    # 2k samples, circles
+│   │   ├── circles_4k.yaml    # 4k samples, circles
+│   │   ├── moons_2k.yaml      # 2k samples, moons
+│   │   ├── moons_4k.yaml      # 4k samples, moons
+│   │   ├── spirals_2k.yaml    # 2k samples, spirals
+│   │   └── spirals_4k.yaml    # 4k samples, spirals
+│   └── ucr_ts/                # UCR time-series datasets
+│       ├── ecg200.yaml
+│       ├── italypowerdemand.yaml
+│       ├── chlorineconcentration.yaml
+│       ├── syntheticcontrol.yaml
+│       ├── cricketx.yaml
+│       ├── crickety.yaml
+│       └── cricketz.yaml
 ├── trainer/
 │   ├── classification/        # Classifier training configs
 │   │   ├── adam500_loss.yaml # Adam, 500 epochs, stop on loss
@@ -237,6 +248,28 @@ overwrite: false       # Regenerate dataset even if cached (for seed sweeps)
 ```
 - `dataset: 2Dtoy/moons_4k` (do not forget the subfolder)
 - Set `overwrite: true` when sweeping over dataset seeds to ensure fresh data each run
+
+**UCR Time-Series Datasets** (`dataset/ucr_ts/`):
+```yaml
+# dataset/ucr_ts/ecg200.yaml
+name: "ecg200"
+gen_dow_kwargs:
+  name: "ecg200"
+  size: null
+  seed: 42
+  noise: null
+  circ_factor: null
+  dow_link:
+    - "https://www.cs.ucr.edu/~eamonn/time_series_data_2018/UCRArchive_2018.zip"
+  dow_password: "someone"
+split: [0.5, 0.25, 0.25]   # only used if use_ucr_split: false
+split_seed: 42
+use_ucr_split: true         # use the canonical UCR train/test boundary
+overwrite: false
+```
+- `dataset: ucr_ts/ecg200` (subfolder required)
+- `use_ucr_split: true` uses the canonical UCR train/test split; the valid set is carved from the UCR training portion
+- The five datasets ChlorineConcentration, SyntheticControl, CricketX/Y/Z were selected to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers
 
 ### trainer/classification/ — Classifier Training
 

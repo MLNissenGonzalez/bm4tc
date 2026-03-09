@@ -46,11 +46,17 @@ _DATA_DIR = os.path.abspath(
 _TWO_DIM_DATA = ["moons", "circles", "spirals"]
 _SK_DATA = []   # placeholders for sklearn datasets
 _NIST_DATA = ["mnist"]
-_TS_DATA = ["ecg200", "italypowerdemand"]
+_TS_DATA = ["ecg200", "italypowerdemand", "chlorineconcentration",
+            "syntheticcontrol", "cricketx", "crickety", "cricketz"]
 
 _UCR_TS_DATASET_DIRS = {          # canonical → folder name inside ucr_ts/
     "ecg200": "ECG200",
     "italypowerdemand": "ItalyPowerDemand",
+    "chlorineconcentration": "ChlorineConcentration",
+    "syntheticcontrol": "SyntheticControl",
+    "cricketx": "CricketX",
+    "crickety": "CricketY",
+    "cricketz": "CricketZ",
 }
 
 _CANONICAL_FOLDERS = _TWO_DIM_DATA + _SK_DATA + _NIST_DATA + _TS_DATA

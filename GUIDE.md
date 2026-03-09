@@ -318,7 +318,7 @@ embedding: "fourier"
 3. ~~**Uncertainty quantification**: Marginal p(x) for detection and purification~~ — **DONE**: `src/models/born.py` (marginal_log_probability), `src/utils/purification/` (LikelihoodPurification), `analysis/utils/uq.py` (UQEvaluation)
 4. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
 5. **MPS as discriminator backbone**: Using MPS features as input to critic
-6. **More datasets**: Univariate time series dataset planned (`configs/dataset/timeseries/`)
+6. ~~**More datasets**: Univariate time series dataset planned~~ — **DONE**: 7 UCR time-series datasets added (`configs/dataset/ucr_ts/`). The 5 new datasets (ChlorineConcentration, SyntheticControl, CricketX/Y/Z) were chosen to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers, enabling direct comparison with their results.
 
 ## Quick Reference: Common Commands
 
