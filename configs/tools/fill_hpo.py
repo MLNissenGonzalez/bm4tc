@@ -62,6 +62,7 @@ ARCH_DIMS = {
     "d6D4": (6, 4),
     "d10D6": (10, 6),
     "d30D18": (30, 18),
+    "d3D21": (3, 21),
 }
 
 DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
@@ -416,8 +417,8 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         nargs="+",
-        choices=["d4D3", "d6D4", "d10D6", "d30D18"],
-        default=["d4D3", "d6D4", "d10D6", "d30D18"],
+        choices=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21"],
+        default=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21"],
         help="Architecture(s) to process (default: both)",
     )
     parser.add_argument(
