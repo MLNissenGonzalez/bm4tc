@@ -108,8 +108,8 @@ _KNOWN_EMBEDDINGS = {"fourier", "legendre", "hermite", "chebychev1", "chebychev2
 _EMBEDDING_RANGE_SIZE: Dict[str, float] = {
     "fourier":    1.0,   # range (0, 1)
     "legendre":   2.0,   # range (-1, 1)
-    "hermite":    1.0,   # range (0, 1)
-    "chebychev1": 2.0,   # range (-1, 1)
+    "hermite":    8.0,   # range (-4, 4)
+    "chebychev1": 1.98,  # range (-0.99, 0.99) — restricted to avoid boundary divergence
     "chebychev2": 2.0,   # range (-1, 1)
 }
 
