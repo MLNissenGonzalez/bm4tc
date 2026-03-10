@@ -10,6 +10,7 @@ This directory contains the entry point scripts for running experiments.
 | `ganstyle.py` | Classification pretraining + GAN-style training |
 | `adversarial.py` | Classification pretraining + Adversarial training |
 | `generative.py` | Classification pretraining + Generative NLL training |
+| `queue_experiments.py` | Batch-run/list HPO and seed_sweep configs (skip already-run) |
 
 ## Running Experiments
 
@@ -133,6 +134,63 @@ python -m experiments.classification --help
 ```bash
 python -m experiments.classification --info all +experiments=tests/classification
 ```
+
+## Batch-Running Experiments (`queue_experiments.py`)
+
+`queue_experiments.py` discovers all `hpo/` and `seed_sweeps/` configs under
+`configs/experiments/` and runs them sequentially, skipping any that already
+have a matching output directory.
+
+### Usage
+
+```bash
+# List all discovered configs with [ran]/[   ] status
+python -m experiments.queue_experiments --list
+
+# Dry-run: print commands without executing
+python -m experiments.queue_experiments --dry-run
+
+# Run everything that hasn't been run yet
+python -m experiments.queue_experiments
+
+# Re-run even if outputs already exist
+python -m experiments.queue_experiments --force
+
+# Filter by training type (cls | adv | gen)
+python -m experiments.queue_experiments --filter-type gen --dry-run
+
+# Filter by embedding
+python -m experiments.queue_experiments --filter-embedding legendre --dry-run
+
+# Filter by architecture (exact match, e.g. d3D10)
+python -m experiments.queue_experiments --filter-arch d3D10 --dry-run
+
+# Filter by kind (hpo | seed_sweep)
+python -m experiments.queue_experiments --filter-kind hpo --dry-run
+
+# Filter by dataset (substring match)
+python -m experiments.queue_experiments --filter-dataset cricket --dry-run
+
+# Combine filters
+python -m experiments.queue_experiments \
+    --filter-type gen --filter-embedding hermite --filter-kind seed_sweep
+```
+
+### How it works
+
+1. **Discovery**: walks `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/{hpo,seed_sweeps}/` and collects all `.yaml` files.
+2. **Already-run check**: looks for a matching `outputs/{experiment}/*/{embedding}/d{in_dim}D{bond_dim}/{dataset}_*` directory. If found, the config is skipped (unless `--force`).
+3. **Execution**: calls `python -m experiments.{type} --multirun +experiments={type}/{embedding}/{arch}/{kind}/{name}` for each remaining config, stopping on the first non-zero exit code.
+
+### Filters
+
+| Flag | Values | Description |
+|------|--------|-------------|
+| `--filter-type` | `cls`, `adv`, `gen` (or full names) | Training regime |
+| `--filter-embedding` | `fourier`, `legendre`, `hermite` | Embedding type |
+| `--filter-arch` | e.g. `d3D10`, `d30D18` | Architecture (exact match) |
+| `--filter-kind` | `hpo`, `seed_sweep` | Config phase |
+| `--filter-dataset` | any substring | Dataset name substring match |
 
 ## HPO Objective Values
 
