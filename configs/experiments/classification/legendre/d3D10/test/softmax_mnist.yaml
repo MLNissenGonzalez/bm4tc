@@ -3,7 +3,7 @@ experiment: sanity
 
 defaults:
   - override /born: legendre/d3D10
-  - override /dataset: 2Dtoy/circles_4k
+  - override /dataset: mnist/mnist_full
   - override /trainer/classification: softmax_adam50
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
