@@ -131,13 +131,13 @@ class BornGenerator(tk.models.MPS):
         # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
         if len(in_tensors) < self.n_features:
             rho = self.forward(in_tensors, marginalize_output=True,
-                            inline_input=True, inline_mats=True)  # density matrix
+                            inline_input=True, inline_mats=True)  # density matrix, hoping that marginalize_output=True workds with complex numbers
             p = torch.diagonal(rho)
         # Case 2: All variables appear.
         else:
             amplitude = self.forward(
                 data=in_tensors, inline_input=True, inline_mats=True)  # prob. amplitude
-            p = torch.square(amplitude)
+            p = amplitude.real**2 + amplitude.imag**2  # Born rule for complex amplitudes
         return p
     
     def _single_class(
@@ -377,7 +377,7 @@ class BornGenerator(tk.models.MPS):
         
         create_copies = any(create_copies)
         
-        # Copy output nodes sharing tensors
+        # TODO: Copy output nodes sharing tensors: adapt the code below for complex Born machines
         if create_copies:
             copied_nodes = []
             for node in all_nodes:
@@ -460,17 +460,16 @@ class BornGenerator(tk.models.MPS):
         Returns:
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
+        # Embed data
         data_embs = self.embedding(data)
-        class_embs = tk.embeddings.basis(labels, self.num_cls).float()
-
-        # start with data embeddings as a list
         embs = [data_embs[:, i, :] for i in range(data_embs.shape[1])]
 
-        # insert class embedding at cls_pos
-        embs.insert(self.cls_pos, class_embs)
+        # TODO: this assumes that there is input data and class data, for tensorkrowch integration, code needs to be more agnostic (put this behind a if clause  or something)
+        class_embs = tk.embeddings.basis(labels, self.num_cls).float()
+        embs.insert(self.cls_pos, class_embs) # insert class embedding at cls_pos
 
         # Compute amplitude
         amplitude = self.forward(
                 data=embs, inline_input=True, inline_mats=True)  # prob. amplitude
 
-        return torch.square(amplitude)
+        return amplitude.real**2 + amplitude.imag**2

@@ -107,8 +107,8 @@ class BornClassifier(tk.models.MPSLayer):
             raise TypeError(
                 "embs input must be a tensor of shape (batch_size, D, phys_dim).")
 
-        
-        p = torch.square(self.forward(data=embs))
+        amplitudes = self.forward(data=embs)
+        p = amplitudes.real**2 + amplitudes.imag**2
         return p / p.sum(dim=-1, keepdim=True).clamp(min=torch.finfo(p.dtype).tiny)
         
     
