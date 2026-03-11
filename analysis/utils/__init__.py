@@ -59,6 +59,7 @@ from .statistics import (
 from .evaluate import (
     EvalConfig,
     evaluate_run,
+    evaluate_pretrained_model,
     evaluate_sweep,
     resolve_stop_criterion,
 )
@@ -157,6 +158,7 @@ __all__ = [
     # Post-hoc evaluation
     "EvalConfig",
     "evaluate_run",
+    "evaluate_pretrained_model",
     "evaluate_sweep",
     "resolve_stop_criterion",
 ]

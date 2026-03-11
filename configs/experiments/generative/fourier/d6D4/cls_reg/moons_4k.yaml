@@ -10,7 +10,7 @@ defaults:
   - override /trainer/adversarial: null
   - override /tracking: online
 
-model_path: outputs/seed_sweep/cls/fourier/d10D6/moons_4k_2102/2/models/moons_4k_pre_mps_bd6_fourier10_300adamlr0.02563796411379188wd2.9843528783699723e-06  # FILL: relative path to pretrained classifier checkpoint
+model_path: outputs/seed_sweep/cls/fourier/d6D4/moons_4k_DDMM/2/models/<checkpoint>  # FILL: run fill_hpo.py after d6D4 cls seed_sweep
 
 dataset:
   split_seed: 11
@@ -31,7 +31,7 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.0006624310605949989
+        lr: 0.00022081035353166630
         weight_decay: 1.4077923139972418e-06
     criterion:
       name: "nll"

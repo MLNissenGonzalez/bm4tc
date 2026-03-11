@@ -361,6 +361,142 @@ def evaluate_run(
     return results
 
 
+def evaluate_pretrained_model(
+    model_path: str,
+    ref_run_dir: Path,
+    eval_cfg: EvalConfig,
+) -> Dict[str, float]:
+    """Evaluate a pretrained model using the dataset config from a reference run.
+
+    Identical to evaluate_run() except the model is loaded from ``model_path``
+    directly (not from find_model_checkpoint(ref_run_dir)).  Used in cls_reg
+    sweeps to add a max_epoch=0 baseline row to the evaluation CSV.
+    """
+    from src.models import BornMachine
+    from src.data.handler import DataHandler
+    from src.tracking.evaluator import MetricFactory
+
+    ref_run_dir = Path(ref_run_dir)
+    device = torch.device(eval_cfg.device)
+    results: Dict[str, float] = {}
+
+    cfg = load_run_config(ref_run_dir)
+    _apply_config_overrides(cfg, eval_cfg.evasion_override, eval_cfg.sampling_override)
+
+    bm = BornMachine.load(model_path)
+    bm.to(device)
+
+    OmegaConf.update(cfg, "dataset.overwrite", True, force_add=True)
+    datahandler = DataHandler(cfg.dataset)
+    datahandler.load()
+    datahandler.split_and_rescale(bm)
+    datahandler.get_classification_loaders()
+
+    # Non-rob metrics (skip gen/fid — pretrained is classifier only)
+    non_rob_metrics = []
+    if eval_cfg.compute_acc:
+        non_rob_metrics.append("acc")
+    if eval_cfg.compute_cls_loss:
+        non_rob_metrics.append("clsloss")
+
+    for split in eval_cfg.splits:
+        context: Dict[str, Any] = {}
+        for metric_name in non_rob_metrics:
+            try:
+                metric = MetricFactory.create(metric_name, 1, cfg, datahandler, device)
+                result = metric.evaluate(bm, split, context)
+                results[f"eval/{split}/{metric_name}"] = float(result)
+            except Exception as e:
+                logger.warning(f"Metric '{metric_name}' on '{split}': {e}")
+                results[f"eval/{split}/{metric_name}"] = np.nan
+
+    # Valid-split rob
+    if eval_cfg.compute_rob:
+        for split in [s for s in eval_cfg.splits if s != "test"]:
+            context: Dict[str, Any] = {}
+            try:
+                metric = MetricFactory.create("rob", 1, cfg, datahandler, device)
+                result = metric.evaluate(bm, split, context)
+                strengths = cfg.tracking.evasion.strengths
+                for i, strength in enumerate(strengths):
+                    results[f"eval/{split}/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Rob on '{split}': {e}")
+                strengths = getattr(cfg.tracking.evasion, "strengths", [])
+                for strength in strengths:
+                    results[f"eval/{split}/rob/{strength}"] = np.nan
+
+    # MIA (train vs test)
+    if eval_cfg.compute_mia:
+        try:
+            from .mia import MIAEvaluation, MIAFeatureConfig
+            feature_kwargs = eval_cfg.mia_features or {}
+            mia_eval = MIAEvaluation(
+                feature_config=MIAFeatureConfig(**feature_kwargs),
+                adversarial_strength=eval_cfg.mia_adversarial_strength,
+                adversarial_num_steps=eval_cfg.mia_adversarial_num_steps,
+                adversarial_step_size=eval_cfg.mia_adversarial_step_size,
+                adversarial_norm=eval_cfg.mia_adversarial_norm,
+            )
+            mia_results = mia_eval.evaluate(
+                bm, datahandler.classification["train"],
+                datahandler.classification["test"], device,
+            )
+            results["eval/mia_accuracy"] = mia_results.attack_accuracy
+            results["eval/mia_auc_roc"] = mia_results.auc_roc
+        except Exception as e:
+            logger.warning(f"MIA failed: {e}")
+            results["eval/mia_accuracy"] = np.nan
+            results["eval/mia_auc_roc"] = np.nan
+
+    # UQ
+    uq_results = None
+    if eval_cfg.compute_uq:
+        try:
+            from .uq import UQEvaluation, UQConfig
+            uq_eval = UQEvaluation(UQConfig(**(eval_cfg.uq_config or {})))
+            uq_results = uq_eval.evaluate(bm, datahandler.classification["test"], device)
+            results["eval/uq_clean_accuracy"] = uq_results.clean_accuracy
+            for eps, acc in uq_results.adv_accuracies.items():
+                results[f"eval/uq_adv_acc/{eps}"] = acc
+            for (pct, eps), rate in uq_results.detection_rates.items():
+                results[f"eval/uq_detection/{pct}pct/{eps}"] = rate
+            for (eps, radius), m in uq_results.purification_results.items():
+                results[f"eval/uq_purify_acc/{eps}/{radius}"] = m.accuracy_after_purify
+                results[f"eval/uq_purify_recovery/{eps}/{radius}"] = m.recovery_rate
+        except Exception as e:
+            logger.warning(f"UQ failed: {e}")
+
+    # Test-split rob (reuse UQ cache where possible)
+    if eval_cfg.compute_rob and "test" in eval_cfg.splits:
+        _uq_cache: Dict[float, float] = (
+            {float(e): a for e, a in uq_results.adv_accuracies.items()}
+            if uq_results is not None else {}
+        )
+        strengths = cfg.tracking.evasion.strengths
+        missing = []
+        for strength in strengths:
+            if float(strength) in _uq_cache:
+                results[f"eval/test/rob/{strength}"] = _uq_cache[float(strength)]
+            else:
+                missing.append(strength)
+        if missing:
+            try:
+                OmegaConf.update(cfg, "tracking.evasion.strengths", missing, force_add=True)
+                metric = MetricFactory.create("rob", 1, cfg, datahandler, device)
+                result = metric.evaluate(bm, "test", {})
+                for i, strength in enumerate(missing):
+                    results[f"eval/test/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Fallback test rob: {e}")
+                for strength in missing:
+                    results[f"eval/test/rob/{strength}"] = np.nan
+
+    del bm
+    torch.cuda.empty_cache()
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Sweep-level evaluation
 # ---------------------------------------------------------------------------

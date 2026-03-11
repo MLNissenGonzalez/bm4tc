@@ -232,6 +232,50 @@ print("=" * 60)
 df = evaluate_sweep(str(sweep_path), eval_cfg, config_keys=CONFIG_KEYS)
 
 # %%
+# Auto-extract max_epoch for cls_reg sweeps (sweeper param not in CONFIG_KEYS by default)
+from analysis.utils.mia_utils import load_run_config as _load_run_config_for_me
+if not df.empty and "config/max_epoch" not in df.columns:
+    _max_epochs = []
+    for _, _r in df.iterrows():
+        try:
+            _cfg_i = _load_run_config_for_me(Path(_r["run_path"]))
+            _me = None
+            for _k in ["adversarial", "generative"]:
+                _t = getattr(_cfg_i.trainer, _k, None)
+                if _t is not None:
+                    _me = getattr(_t, "max_epoch", None)
+                    break
+            _max_epochs.append(_me)
+        except Exception:
+            _max_epochs.append(None)
+    if any(e is not None for e in _max_epochs):
+        df["config/max_epoch"] = _max_epochs
+        print(f"Auto-extracted config/max_epoch values: {sorted(set(e for e in _max_epochs if e is not None))}")
+
+# For cls_reg: evaluate pretrained model and prepend as max_epoch=0 baseline row
+if not df.empty:
+    try:
+        from analysis.utils import evaluate_pretrained_model
+        _first_run_dir = Path(df.iloc[0]["run_path"])
+        _first_cfg = _load_run_config_for_me(_first_run_dir)
+        _model_path_rel = getattr(_first_cfg, "model_path", None)
+        if _model_path_rel is not None:
+            _model_path_abs = str(project_root / _model_path_rel)
+            print(f"\nDetected cls_reg pretrained model: {_model_path_rel}")
+            print("Evaluating pretrained model (will be row max_epoch=0)...")
+            _pretrained_metrics = evaluate_pretrained_model(_model_path_abs, _first_run_dir, eval_cfg)
+            _pretrained_row = {
+                "run_name": "pretrained",
+                "run_path": _model_path_abs,
+                "config/max_epoch": 0,
+                **_pretrained_metrics,
+            }
+            df = pd.concat([pd.DataFrame([_pretrained_row]), df], ignore_index=True)
+            print("Prepended pretrained baseline row (config/max_epoch=0) to evaluation data.")
+    except Exception as _e:
+        print(f"Warning: Could not evaluate pretrained model baseline: {_e}")
+
+# %%
 # Show DataFrame summary
 if not df.empty:
     eval_cols = [c for c in df.columns if c.startswith("eval/")]
