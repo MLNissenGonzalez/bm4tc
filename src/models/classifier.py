@@ -73,8 +73,9 @@ class BornClassifier(tk.models.MPSLayer):
         self.to(device)
         if train_cfg is not None:
             self.auto_stack, self._auto_unbind = train_cfg.auto_stack, train_cfg.auto_unbind
+        _dtype = self.tensors[0].dtype if self.tensors else torch.get_default_dtype()
         self.trace(torch.zeros(1, len(self.in_features),
-                        self.in_dim[0]).to(device))
+                        self.in_dim[0], dtype=_dtype, device=device))
         
     def parallel(
             self,  # could use MPSLayer class for this one actually

@@ -411,6 +411,12 @@ class BornGenerator(tk.models.MPS):
                 
                 # Connect copies directly to output nodes
                 copied_node['input'] ^ node['input']
+
+            # If MPS nodes are complex, conjugate the bra side (same pattern as tk.MPS.norm())
+            is_complex = copied_nodes[0].is_complex()
+            if is_complex:
+                for i, node in enumerate(copied_nodes):
+                    copied_nodes[i] = node.conj()
         else:
             copied_nodes = []
             for node in all_nodes:
