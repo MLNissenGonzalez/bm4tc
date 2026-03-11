@@ -5,13 +5,14 @@
 # of a trained BornMachine over the 2D input space.
 #
 # **What it shows:**
-# - Row 1: p(c|x) conditional class probabilities per class + decision boundary
-# - Row 2: p(x,c) joint probabilities per class + marginal p(x)
+# - p(c=1|x): conditional probability heatmap
+# - p(x): marginal probability heatmap
 # - Optional training data overlay for verification
 #
 # **Usage:**
 # - Set `RUN_DIR` to your Hydra output directory
 # - Run cells interactively (VS Code) or as a script
+# - CLI: python -m analysis.visualize.distributions --run <run_dir> --save-dir <dir>
 
 # %% [markdown]
 # ## Setup and Configuration
@@ -22,10 +23,10 @@ from pathlib import Path
 
 # Handle both script and interactive execution
 if "__file__" in dir():
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
 else:
-    # Interactive/notebook mode - assume we're in analysis/
-    project_root = Path.cwd().parent
+    # Interactive/notebook mode - assume we're in analysis/visualize/
+    project_root = Path.cwd().parent.parent
     if not (project_root / "src").exists():
         project_root = Path.cwd()
 
@@ -165,148 +166,78 @@ def compute_joint_probs(bm: BornMachine, grid_points, device, normalize=True, ba
     return joint
 
 
-def plot_distributions(
-    conditional, joint, grid_x1, grid_x2,
-    train_data=None, train_labels=None,
-    input_range=(0.0, 1.0),
-    save_path=None,
-):
-    """Plot conditional and joint probability distributions.
-
-    Layout:
-        Row 0: p(c|x) per class [heatmaps] + decision boundary [argmax]
-        Row 1: p(x,c) per class [heatmaps] + sum_c p(x,c) [marginal]
-
-    Args:
-        conditional: (N, num_classes) tensor of p(c|x).
-        joint: (N, num_classes) tensor of p(x,c).
-        grid_x1: (res, res) meshgrid x1 coordinates.
-        grid_x2: (res, res) meshgrid x2 coordinates.
-        train_data: Optional (M, 2) tensor of training points.
-        train_labels: Optional (M,) tensor of training labels.
-        input_range: Tuple (lo, hi) for axis limits.
-        save_path: If given, save figure to this path.
-
-    Returns:
-        Matplotlib Figure object.
-    """
-    num_classes = conditional.shape[1]
-    resolution = grid_x1.shape[0]
-    n_cols = num_classes + 1  # one per class + summary column
-
-    fig, axes = plt.subplots(2, n_cols, figsize=(4 * n_cols, 8))
-
-    cond_np = conditional.numpy()
-    joint_np = joint.numpy()
-
-    lo, hi = input_range
-
-    # --- Row 0: p(c|x) ---
-    for c in range(num_classes):
-        ax = axes[0, c]
-        vals = cond_np[:, c].reshape(resolution, resolution)
-        pcm = ax.pcolormesh(grid_x1, grid_x2, vals, cmap="viridis",
-                            shading="auto", vmin=0.0, vmax=1.0)
-        fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
-        ax.set_title(f"p(c={c}|x)")
-        ax.set_xlabel("$x_1$")
-        ax.set_ylabel("$x_2$")
-        ax.set_xlim(lo, hi)
-        ax.set_ylim(lo, hi)
-        ax.set_aspect("equal")
-
-        if train_data is not None and train_labels is not None:
-            _overlay_data(ax, train_data, train_labels, num_classes)
-
-    # Decision boundary (argmax)
-    ax = axes[0, num_classes]
-    decision = np.argmax(cond_np, axis=1).reshape(resolution, resolution)
-    cmap_discrete = plt.colormaps.get_cmap("tab10").resampled(num_classes)
-    pcm = ax.pcolormesh(grid_x1, grid_x2, decision, cmap=cmap_discrete,
-                        shading="auto", vmin=-0.5, vmax=num_classes - 0.5)
-    cbar = fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04, ticks=range(num_classes))
-    cbar.set_label("Class")
-    ax.set_title("Decision boundary\nargmax p(c|x)")
-    ax.set_xlabel("$x_1$")
-    ax.set_ylabel("$x_2$")
-    ax.set_xlim(lo, hi)
-    ax.set_ylim(lo, hi)
-    ax.set_aspect("equal")
-
-    if train_data is not None and train_labels is not None:
-        _overlay_data(ax, train_data, train_labels, num_classes)
-
-    # --- Row 1: p(x,c) ---
-    # Find global max for consistent color scale across class columns
-    joint_max = joint_np.max()
-
-    for c in range(num_classes):
-        ax = axes[1, c]
-        vals = joint_np[:, c].reshape(resolution, resolution)
-        pcm = ax.pcolormesh(grid_x1, grid_x2, vals, cmap="viridis",
-                            shading="auto", vmin=0.0, vmax=joint_max)
-        fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
-        ax.set_title(f"p(x, c={c})")
-        ax.set_xlabel("$x_1$")
-        ax.set_ylabel("$x_2$")
-        ax.set_xlim(lo, hi)
-        ax.set_ylim(lo, hi)
-        ax.set_aspect("equal")
-
-        if train_data is not None and train_labels is not None:
-            _overlay_data(ax, train_data, train_labels, num_classes)
-
-    # Marginal p(x) = sum_c p(x,c)
-    ax = axes[1, num_classes]
-    marginal = joint_np.sum(axis=1).reshape(resolution, resolution)
-    pcm = ax.pcolormesh(grid_x1, grid_x2, marginal, cmap="viridis", shading="auto")
-    fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
-    ax.set_title(r"$p(x) = \sum_c p(x,c)$")
-    ax.set_xlabel("$x_1$")
-    ax.set_ylabel("$x_2$")
-    ax.set_xlim(lo, hi)
-    ax.set_ylim(lo, hi)
-    ax.set_aspect("equal")
-
-    if train_data is not None and train_labels is not None:
-        _overlay_data(ax, train_data, train_labels, num_classes)
-
-    fig.suptitle("Learned Distributions of BornMachine", fontsize=14, y=1.02)
-    fig.tight_layout()
-
-    if save_path is not None:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-        logger.info(f"Figure saved to {save_path}")
-
-    return fig
-
-
 def _overlay_data(ax, data, labels, num_classes):
-    """Overlay training data scatter points on an axis.
-
-    Args:
-        ax: Matplotlib axis.
-        data: (M, 2) tensor or array of data points.
-        labels: (M,) tensor or array of class labels.
-        num_classes: Number of distinct classes.
-    """
+    """High-contrast scatter overlay — solid opaque dots, white fill, dark edge."""
     if torch.is_tensor(data):
         data = data.detach().cpu().numpy()
     if torch.is_tensor(labels):
         labels = labels.detach().cpu().numpy()
-
-    # Use contrasting markers for visibility on heatmaps
     markers = ["o", "s", "^", "D", "v", "P", "*", "X"]
     for c in range(num_classes):
         mask = labels == c
-        marker = markers[c % len(markers)]
-        ax.scatter(
-            data[mask, 0], data[mask, 1],
-            s=3, alpha=0.3, c="white", edgecolors="black",
-            linewidths=0.3, marker=marker, zorder=5,
-        )
+        ax.scatter(data[mask, 0], data[mask, 1],
+                   s=6, alpha=0.9, c="white", edgecolors="black",
+                   linewidths=0.5, marker=markers[c % len(markers)], zorder=5)
+
+
+def _save_fig(fig, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    logger.info(f"Saved {path}")
+
+
+def plot_class_conditional(
+    conditional, grid_x1, grid_x2,
+    input_range=(0.0, 1.0),
+    train_data=None, train_labels=None, num_classes=None,
+    cmap="viridis", save_path=None,
+) -> plt.Figure:
+    """Square figure: p(c=1|x) heatmap, no title/labels, with colorbar."""
+    fig, ax = plt.subplots(figsize=(4, 4))
+    lo, hi = input_range
+    res = grid_x1.shape[0]
+    prob1 = conditional.numpy()[:, 1].reshape(res, res)
+    pcm = ax.pcolormesh(grid_x1, grid_x2, prob1, cmap=cmap,
+                        shading="auto", vmin=0.0, vmax=1.0)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if train_data is not None and num_classes is not None:
+        _overlay_data(ax, train_data, train_labels, num_classes)
+    fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    if save_path:
+        _save_fig(fig, save_path)
+    return fig
+
+
+def plot_joint_marginal(
+    joint, grid_x1, grid_x2,
+    input_range=(0.0, 1.0),
+    train_data=None, train_labels=None, num_classes=None,
+    cmap="viridis", save_path=None,
+) -> plt.Figure:
+    """Square figure: p(x) = sum_c p(x,c) marginal, no title/labels, with colorbar."""
+    fig, ax = plt.subplots(figsize=(4, 4))
+    lo, hi = input_range
+    res = grid_x1.shape[0]
+    marginal = joint.numpy().sum(axis=1).reshape(res, res)
+    pcm = ax.pcolormesh(grid_x1, grid_x2, marginal, cmap=cmap, shading="auto")
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if train_data is not None and num_classes is not None:
+        _overlay_data(ax, train_data, train_labels, num_classes)
+    fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    if save_path:
+        _save_fig(fig, save_path)
+    return fig
 
 
 def visualize_from_run_dir(
@@ -328,10 +259,8 @@ def visualize_from_run_dir(
         save_dir: Directory to save figures. If None, does not save.
 
     Returns:
-        Matplotlib Figure object.
+        Tuple of (fig_cls, fig_jnt) Matplotlib Figure objects.
     """
-    
-
     device = torch.device(device)
     run_dir = Path(run_dir)
 
@@ -350,6 +279,7 @@ def visualize_from_run_dir(
     # Get training data for overlay
     train_data = datahandler.data["train"] if show_data else None
     train_labels = datahandler.labels["train"] if show_data else None
+    num_classes = bm.out_dim if show_data else None
 
     # Build grid
     input_range = bm.input_range
@@ -362,20 +292,24 @@ def visualize_from_run_dir(
     logger.info("Computing joint probabilities p(x,c)...")
     joint = compute_joint_probs(bm, grid_points, device, normalize=normalize_joint)
 
-    # Determine save path
-    save_path = None
-    if save_dir is not None:
-        save_path = Path(save_dir) / "distributions.png"
+    # Determine save paths
+    class_path = (Path(save_dir) / "best_class_dist.png") if save_dir else None
+    joint_path = (Path(save_dir) / "best_joint.png") if save_dir else None
 
-    # Plot
-    fig = plot_distributions(
-        conditional, joint, grid_x1, grid_x2,
-        train_data=train_data, train_labels=train_labels,
+    fig_cls = plot_class_conditional(
+        conditional, grid_x1, grid_x2,
         input_range=input_range,
-        save_path=save_path,
+        train_data=train_data, train_labels=train_labels, num_classes=num_classes,
+        save_path=class_path,
+    )
+    fig_jnt = plot_joint_marginal(
+        joint, grid_x1, grid_x2,
+        input_range=input_range,
+        train_data=train_data, train_labels=train_labels, num_classes=num_classes,
+        save_path=joint_path,
     )
 
-    return fig
+    return fig_cls, fig_jnt
 
 
 # %% [markdown]
@@ -388,10 +322,6 @@ def load_model_and_data():
     Returns:
         Tuple of (bornmachine, datahandler, device, cfg).
     """
-    from analysis.utils import load_run_config, find_model_checkpoint
-    from src.data import DataHandler
-    from src.models import BornMachine
-
     device = torch.device(DEVICE)
     logger.info(f"Using device: {device}")
 
@@ -418,69 +348,77 @@ def load_model_and_data():
 
 # %%
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Loading model and data...")
-    print("=" * 60)
+    import argparse
 
-    bm, datahandler, device, cfg = load_model_and_data()
+    parser = argparse.ArgumentParser(description="Generate distribution plots for a run directory.")
+    parser.add_argument("--run", default=None, help="Path to Hydra run directory.")
+    parser.add_argument("--save-dir", default=None, help="Directory to save output figures.")
+    parser.add_argument("--resolution", type=int, default=RESOLUTION)
+    parser.add_argument("--no-data", action="store_true")
+    parser.add_argument("--device", default=DEVICE)
+    cli_args = parser.parse_args()
 
-    print(f"\nDataset: {cfg.dataset.name}")
-    print(f"Train samples: {len(datahandler.data['train'])}")
-    print(f"Number of classes: {datahandler.num_cls}")
-    print(f"Input range: {bm.input_range}")
+    if cli_args.run is not None:
+        fig_cls, fig_jnt = visualize_from_run_dir(
+            run_dir=cli_args.run,
+            resolution=cli_args.resolution,
+            normalize_joint=NORMALIZE_JOINT,
+            show_data=not cli_args.no_data,
+            device=cli_args.device,
+            save_dir=cli_args.save_dir,
+        )
+        plt.show()
+    else:
+        print("=" * 60)
+        print("Loading model and data...")
+        print("=" * 60)
 
-    # %% [markdown]
-    # ## Compute Distributions
+        bm, datahandler, device, cfg = load_model_and_data()
 
-    # %%
-    print("=" * 60)
-    print("Computing distributions over input grid...")
-    print("=" * 60)
+        print(f"\nDataset: {cfg.dataset.name}")
+        print(f"Train samples: {len(datahandler.data['train'])}")
+        print(f"Number of classes: {datahandler.num_cls}")
+        print(f"Input range: {bm.input_range}")
 
-    input_range = bm.input_range
-    grid_x1, grid_x2, grid_points = make_grid(input_range, RESOLUTION)
-    print(f"Grid: {RESOLUTION}x{RESOLUTION} = {grid_points.shape[0]} points")
+        print("=" * 60)
+        print("Computing distributions over input grid...")
+        print("=" * 60)
 
-    # %%
-    print("\nComputing p(c|x)...")
-    conditional = compute_conditional_probs(bm, grid_points, device)
-    print(f"  Shape: {conditional.shape}")
-    print(f"  Range: [{conditional.min():.4f}, {conditional.max():.4f}]")
+        input_range = bm.input_range
+        grid_x1, grid_x2, grid_points = make_grid(input_range, RESOLUTION)
+        print(f"Grid: {RESOLUTION}x{RESOLUTION} = {grid_points.shape[0]} points")
 
-    # %%
-    print("\nComputing p(x,c)...")
-    joint = compute_joint_probs(bm, grid_points, device, normalize=NORMALIZE_JOINT)
-    print(f"  Shape: {joint.shape}")
-    print(f"  Range: [{joint.min():.6f}, {joint.max():.6f}]")
+        print("\nComputing p(c|x)...")
+        conditional = compute_conditional_probs(bm, grid_points, device)
+        print(f"  Shape: {conditional.shape}")
 
-    # %% [markdown]
-    # ## Plot Distributions
+        print("\nComputing p(x,c)...")
+        joint = compute_joint_probs(bm, grid_points, device, normalize=NORMALIZE_JOINT)
+        print(f"  Shape: {joint.shape}")
 
-    # %%
-    # Prepare training data overlay
-    train_data = datahandler.data["train"] if SHOW_DATA else None
-    train_labels = datahandler.labels["train"] if SHOW_DATA else None
+        train_data = datahandler.data["train"] if SHOW_DATA else None
+        train_labels = datahandler.labels["train"] if SHOW_DATA else None
 
-    # Setup output directory
-    save_dir = Path(SAVE_DIR)
-    if not save_dir.is_absolute():
-        save_dir = project_root / save_dir
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / "distributions.png"
+        save_dir = Path(SAVE_DIR)
+        if not save_dir.is_absolute():
+            save_dir = project_root / save_dir
 
-    print(f"\nOutput directory: {save_dir}")
+        fig_cls, fig_jnt = plot_class_conditional(
+            conditional, grid_x1, grid_x2,
+            input_range=input_range,
+            train_data=train_data, train_labels=train_labels,
+            num_classes=bm.out_dim if SHOW_DATA else None,
+            save_path=save_dir / "best_class_dist.png",
+        ), plot_joint_marginal(
+            joint, grid_x1, grid_x2,
+            input_range=input_range,
+            train_data=train_data, train_labels=train_labels,
+            num_classes=bm.out_dim if SHOW_DATA else None,
+            save_path=save_dir / "best_joint.png",
+        )
+        plt.show()
 
-    # %%
-    fig = plot_distributions(
-        conditional, joint, grid_x1, grid_x2,
-        train_data=train_data, train_labels=train_labels,
-        input_range=input_range,
-        save_path=save_path,
-    )
-    plt.show()
-
-    # %%
-    print("\n" + "=" * 60)
-    print("Distribution Visualization Complete")
-    print("=" * 60)
-    print(f"\nSaved figure: {save_path}")
+        print("\n" + "=" * 60)
+        print("Distribution Visualization Complete")
+        print("=" * 60)
+        print(f"\nSaved to: {save_dir}")

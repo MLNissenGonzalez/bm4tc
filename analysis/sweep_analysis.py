@@ -745,9 +745,9 @@ if not df.empty and best_run is not None:
 
         # Distribution heatmaps
         try:
-            from analysis.visualize_distributions import visualize_from_run_dir
+            from analysis.visualize.distributions import visualize_from_run_dir
 
-            fig = visualize_from_run_dir(
+            visualize_from_run_dir(
                 run_dir=best_run_path,
                 resolution=150,
                 normalize_joint=True,
@@ -755,11 +755,8 @@ if not df.empty and best_run is not None:
                 device=DEVICE,
                 save_dir=str(output_dir),
             )
-            default_path = output_dir / "distributions.png"
-            final_path = output_dir / "best_run_distributions.png"
-            if default_path.exists():
-                default_path.rename(final_path)
-                print(f"Saved best_run_distributions.png")
+            # directly saves best_class_dist.png + best_joint.png
+            print(f"Saved best_class_dist.png + best_joint.png")
             plt.show()
         except Exception as e:
             print(f"Warning: Could not generate distribution visualization: {e}")

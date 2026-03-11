@@ -9,7 +9,7 @@ baseline column at epoch 0.
 
 Usage::
 
-    python analysis/visualize_cls_reg_evolution.py <sweep_dir> [options]
+    python analysis/visualize/cls_reg_evolution.py <sweep_dir> [options]
 
 """
 
@@ -19,9 +19,9 @@ import argparse
 from pathlib import Path
 
 if "__file__" in dir():
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
 else:
-    project_root = Path.cwd().parent
+    project_root = Path.cwd().parent.parent
     if not (project_root / "src").exists():
         project_root = Path.cwd()
 
@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 import torch
 import logging
 
-from analysis.visualize_distributions import (
+from analysis.visualize.distributions import (
     make_grid,
     compute_conditional_probs,
     compute_joint_probs,

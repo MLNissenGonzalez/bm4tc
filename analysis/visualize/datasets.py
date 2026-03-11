@@ -9,7 +9,7 @@
 #
 # **Usage:**
 # ```bash
-# python -m analysis.visualize_datasets
+# python -m analysis.visualize.datasets
 # ```
 #
 # Saves output to `analysis/outputs/datasets/configured_datasets.png`.
@@ -22,9 +22,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 if "__file__" in dir():
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
 else:
-    project_root = Path.cwd().parent
+    project_root = Path.cwd().parent.parent
     if not (project_root / "src").exists():
         project_root = Path.cwd()
 

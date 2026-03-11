@@ -4,14 +4,14 @@ Plots individual time-series traces per class (density through overlap) in a
 2×2 grid: rows = datasets (ECG200, ItalyPowerDemand), cols = classes.
 
 Usage:
-    python -m analysis.visualize_ts_datasets
+    python -m analysis.visualize.ts_datasets
 """
 
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 UCR_TS_ROOT  = PROJECT_ROOT / ".datasets" / "ucr_ts"
 OUTPUT_DIR   = PROJECT_ROOT / "analysis" / "outputs" / "datasets"
 
