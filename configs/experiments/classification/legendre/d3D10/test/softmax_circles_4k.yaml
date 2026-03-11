@@ -4,7 +4,7 @@ experiment: sanity
 defaults:
   - override /born: legendre/d3D10
   - override /dataset: 2Dtoy/circles_4k
-  - override /trainer/classification: softmax_adam500
+  - override /trainer/classification: softmax_adam50
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
