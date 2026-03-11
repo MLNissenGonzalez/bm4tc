@@ -428,6 +428,22 @@ Experiment configs override defaults. The main experiment directories are:
 - `ganstyle/` — GAN-style training experiments
 - `tests/` — Quick test experiments
 
+### cls_reg — Classifier-Regularized Fine-Tuning
+
+`cls_reg` configs fine-tune a pre-trained classifier checkpoint using either adversarial or generative
+training for a small number of epochs. The key parameters are:
+
+- `model_path`: Path to a classifier checkpoint from a completed `seed_sweep/cls` run. Set this after
+  running `fill_hpo.py` (or manually).
+- `max_epoch`: Swept over `choice(1, 2, 4, 8, 16, 32, 64, 128)` — the fine-tuning budget (log-scale).
+- `tracking.seed × max_epoch`: 5 seeds × 8 epoch budgets = 40 runs per config.
+
+**Hyperparameter note:** `lr`, `weight_decay` (and `clean_weight` for adversarial) are filled from the
+corresponding **generative or adversarial HPO** results via `fill_hpo.py`. These hyperparameters were
+optimized for full training runs (300–1000 epochs), not for fine-tuning. As a result, the fine-tuning
+will be slightly suboptimal compared to what a dedicated cls_reg HPO would achieve — the learning rate
+may be too aggressive or conservative for short fine-tuning schedules.
+
 ```yaml
 # experiments/tests/classification.yaml
 # @package _global_
