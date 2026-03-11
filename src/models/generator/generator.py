@@ -35,6 +35,15 @@ class BornGenerator(tk.models.MPS):
             tensors=tensors, device=device, dtype=dtype
         )
         self.embedding = embedding
+        _dtype = tensors[0].dtype
+        if _dtype.is_complex:
+            self.abs_square  = lambda t: t.real**2 + t.imag**2
+            self._diag_real  = lambda p: p.real
+            self._is_complex = True
+        else:
+            self.abs_square  = lambda t: t**2
+            self._diag_real  = lambda p: p
+            self._is_complex = False
         self.input_range = input_range
         self.input_space: torch.FloatTensor | None = None
         self.cls_pos, self.in_dim, self.num_cls = cls_pos, in_dim, num_cls
@@ -132,12 +141,12 @@ class BornGenerator(tk.models.MPS):
         if len(in_tensors) < self.n_features:
             rho = self.forward(in_tensors, marginalize_output=True,
                             inline_input=True, inline_mats=True)  # density matrix, hoping that marginalize_output=True workds with complex numbers
-            p = torch.diagonal(rho)
+            p = self._diag_real(torch.diagonal(rho))
         # Case 2: All variables appear.
         else:
             amplitude = self.forward(
                 data=in_tensors, inline_input=True, inline_mats=True)  # prob. amplitude
-            p = amplitude.real**2 + amplitude.imag**2  # Born rule for complex amplitudes
+            p = self.abs_square(amplitude)
         return p
     
     def _single_class(
@@ -413,8 +422,7 @@ class BornGenerator(tk.models.MPS):
                 copied_node['input'] ^ node['input']
 
             # If MPS nodes are complex, conjugate the bra side (same pattern as tk.MPS.norm())
-            is_complex = copied_nodes[0].is_complex()
-            if is_complex:
+            if self._is_complex:
                 for i, node in enumerate(copied_nodes):
                     copied_nodes[i] = node.conj()
         else:
@@ -478,4 +486,4 @@ class BornGenerator(tk.models.MPS):
         amplitude = self.forward(
                 data=embs, inline_input=True, inline_mats=True)  # prob. amplitude
 
-        return amplitude.real**2 + amplitude.imag**2
+        return self.abs_square(amplitude)

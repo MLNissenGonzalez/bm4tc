@@ -33,11 +33,16 @@ class BornClassifier(tk.models.MPSLayer):
             ):
         super().__init__(
             n_features=n_features, in_dim=in_dim, out_dim=out_dim,
-            bond_dim=bond_dim, out_position=out_position, 
+            bond_dim=bond_dim, out_position=out_position,
             boundary=boundary, tensors=tensors, n_batches=n_batches,
             init_method=init_method, device=device, dtype=dtype, **kwargs
         )
         self.embedding = embedding
+        _dtype = self.tensors[0].dtype
+        if _dtype.is_complex:
+            self.abs_square = lambda t: t.real**2 + t.imag**2
+        else:
+            self.abs_square = lambda t: t**2
 
     def embed(self, data: torch.Tensor) -> torch.Tensor:
         """
@@ -109,7 +114,7 @@ class BornClassifier(tk.models.MPSLayer):
                 "embs input must be a tensor of shape (batch_size, D, phys_dim).")
 
         amplitudes = self.forward(data=embs)
-        p = amplitudes.real**2 + amplitudes.imag**2
+        p = self.abs_square(amplitudes)
         return p / p.sum(dim=-1, keepdim=True).clamp(min=torch.finfo(p.dtype).tiny)
         
     

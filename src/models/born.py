@@ -169,7 +169,7 @@ class BornMachine:
 
         embs = self.classifier.embed(data)
         amplitudes = self.classifier.forward(data=embs)  # (batch, num_classes)
-        unnorm_px = (amplitudes.real**2 + amplitudes.imag**2).sum(dim=-1)  # (batch,)
+        unnorm_px = self.classifier.abs_square(amplitudes).sum(dim=-1)  # (batch,)
         return torch.log(unnorm_px.clamp(min=eps)) - self._log_Z
 
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
