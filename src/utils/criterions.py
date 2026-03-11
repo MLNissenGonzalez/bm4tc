@@ -67,6 +67,32 @@ class ClassificationBrier(nn.Module):
         return ((p - y) ** 2).sum(dim=1).mean()
 
 
+class ClassificationSoftmaxNLL(nn.Module):
+    """
+    Softmax-based NLL for sanity-checking against tutorial MPS classifiers.
+
+    Tutorial implementations treat MPS outputs as logits and apply softmax.
+    This loss approximates that approach using Born probabilities: it takes
+    sqrt(p_born) to recover amplitude magnitudes |ψ|/√Z, treats those as
+    logits, applies log-softmax, and computes NLL on the true class.
+
+    Parameters
+    ----------
+    eps : float
+        Clamp Born probs from below before sqrt. Default 1e-12.
+    """
+
+    def __init__(self, eps: float = 1e-12):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        import torch.nn.functional as F
+        logits = p.clamp(min=self.eps).sqrt()
+        log_probs = F.log_softmax(logits, dim=-1)
+        return -log_probs[torch.arange(p.size(0)), t].mean()
+
+
 # This uses logs to improve numerical stability which is not necessary for class probabilities.
 
 
@@ -128,6 +154,9 @@ _CLASSIFICATION_LOSSES = {
     "brier": ClassificationBrier,
     "brierscore": ClassificationBrier,
     "bs": ClassificationBrier,
+    "softmaxnll": ClassificationSoftmaxNLL,
+    "softmax_nll": ClassificationSoftmaxNLL,
+    "softmax": ClassificationSoftmaxNLL,
 }
 _GENERATIVE_LOSSES = {
     "nll": GenerativeNLL,
