@@ -48,11 +48,17 @@ class BornMachine:
         self.input_range = get.range_from_embedding(self.embedding_name)
 
         # 2. Intialize classifier, either from tensors, or configuration file
+        _DTYPE_MAP = {
+            "float32": torch.float32, "float64": torch.float64,
+            "complex64": torch.complex64, "complex128": torch.complex128,
+        }
         init_cfg = None
         if tensors is not None:
             self.classifier = BornClassifier(embedding=self.embedding, tensors=tensors)
         else:
             init_cfg = OmegaConf.to_object(cfg.init_kwargs)
+            if init_cfg.get("dtype") is not None:
+                init_cfg["dtype"] = _DTYPE_MAP[init_cfg["dtype"]]
             self.classifier = BornClassifier(embedding=self.embedding, device=device, **init_cfg)
 
         # Save out_position if not done yet.
