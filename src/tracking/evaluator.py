@@ -6,6 +6,7 @@ import logging
 from src.models.born import BornMachine
 from src.data.handler import DataHandler
 import src.utils.get as get
+from src.utils.criterions import ClassificationSoftmaxNLL
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,33 @@ class RobustnessMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+class SoftmaxLossMetric(BaseMetric):
+    """Compute softmax NLL on the dataset using raw MPS amplitudes as logits."""
+
+    def __init__(self, freq, cfg: schemas.Config, datahandler, device):
+        super().__init__(freq, cfg, datahandler, device)
+        self.criterion = ClassificationSoftmaxNLL()
+
+    def _labels_n_amplitudes(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        if "labels_n_amplitudes" not in context:
+            context["labels_n_amplitudes"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    embs = bornmachine.classifier.embed(data)
+                    amplitudes = bornmachine.classifier.amplitudes(embs).cpu()
+                    context["labels_n_amplitudes"].append((labels, amplitudes))
+
+    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        bornmachine.classifier.eval()
+        losses = []
+        self._labels_n_amplitudes(bornmachine, split, context)
+        with torch.no_grad():
+            for labels, amplitudes in context["labels_n_amplitudes"]:
+                losses.append(self.criterion(amplitudes, labels).item())
+        return sum(losses) / len(losses) if losses else float('nan')
+
+
 class GenerativeLossMetric(BaseMetric):
     """Compute generative loss (NLL of joint distribution) on the dataset."""
 
@@ -251,6 +279,7 @@ class MetricFactory:
         """Create a metric instance by name (clsloss, genloss, acc, fid, rob, viz)."""
         mapping = {
             "clsloss": ClassificationLossMetric,
+            "softmaxloss": SoftmaxLossMetric,
             "acc": AccuracyMetric,
             "fid": FIDMetric,
             "rob": RobustnessMetric,

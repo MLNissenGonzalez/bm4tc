@@ -12,5 +12,5 @@ auto_unbind: False
 patience: 250
 stop_crit: "acc"
 watch_freq: 0
-metrics: {"clsloss": 1, "acc": 1}
+metrics: {"softmaxloss": 1, "acc": 1}
 save: False

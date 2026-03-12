@@ -70,11 +70,11 @@ class Trainer:
         for metric_name in self.best.keys():
             if metric_name in ["acc", "rob"]:
                 self.best[metric_name] = 0.0
-            elif metric_name in ["clsloss", "genloss", "fid"]:
+            elif metric_name in ["clsloss", "softmaxloss", "genloss", "fid"]:
                 self.best[metric_name] = float("Inf")
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
-        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        valid_criteria = ["clsloss", "softmaxloss", "genloss", "acc", "fid", "rob"]
         if self.stopping_criterion_name not in valid_criteria:
             raise ValueError(
                 f"Invalid stop_crit '{self.stopping_criterion_name}'. "
@@ -140,7 +140,7 @@ class Trainer:
         # Check whether the monitored metric improved
         if self.stopping_criterion_name in ["acc", "rob"]:
             improved = current_value > former_best
-        elif self.stopping_criterion_name in ["clsloss", "genloss", "fid"]:
+        elif self.stopping_criterion_name in ["clsloss", "softmaxloss", "genloss", "fid"]:
             improved = current_value < former_best
         else:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
@@ -157,7 +157,7 @@ class Trainer:
             reached_goal = goal_value > self.goal["rob"]
         elif goal_key in ["acc"]:
             reached_goal = self.valid_perf.get(goal_key, 0.0) > self.goal[goal_key]
-        elif goal_key in ["clsloss", "genloss", "fid"]:
+        elif goal_key in ["clsloss", "softmaxloss", "genloss", "fid"]:
             reached_goal = self.valid_perf.get(goal_key, float("Inf")) < self.goal[goal_key]
         else:
             reached_goal = False
