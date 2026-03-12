@@ -2,6 +2,7 @@ max_epoch: 50
 batch_size: 256
 criterion:
   name: "softmax_nll"
+  kwargs: null
 optimizer:
   name: "adam"
   kwargs:
