@@ -182,6 +182,33 @@ class ChebyshevT2Embedding:
         return torch.stack(components, dim=axis)
 
 
+class SimpEmbedding:
+    """
+    Simple 3-component embedding: φ(x) = (1, x, 1-x).
+
+    Maps x ∈ [0, 1] to a 3-dimensional vector. Used as a reference
+    baseline matching tutorial MPS softmax classifiers.
+
+    NOTE: This embedding is NOT orthonormal. The three components
+    (1, x, 1-x) are linearly dependent (col 0 = col 1 + col 2) and
+    not orthogonal under any standard L² inner product. It is provided
+    purely as a sanity-check baseline, not for production use.
+
+    The `dim` parameter is accepted for compatibility with the Hydra
+    config system (which passes `in_dim` from born config) but is
+    ignored — the output always has exactly 3 components.
+    """
+
+    def __init__(self, dim: int):
+        # dim is absorbed for Hydra compatibility; output is always 3-dimensional.
+        pass
+
+    def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
+        if not isinstance(data, torch.Tensor):
+            raise TypeError('`data` should be torch.Tensor type')
+        return torch.stack([torch.ones_like(data), data, 1.0 - data], dim=axis)
+
+
 _EMBEDDING_MAP = {
     "fourier":     FourierEmbedding,
     "poly":        PolyEmbedding,
@@ -192,6 +219,7 @@ _EMBEDDING_MAP = {
     "chebyshev1":  ChebyshevT1Embedding,
     "chebychev2":  ChebyshevT2Embedding,
     "chebyshev2":  ChebyshevT2Embedding,
+    "simp":        SimpEmbedding,
 }
 
 
@@ -242,6 +270,7 @@ _EMBEDDING_TO_RANGE = {
     "chebyshev1": (-0.99, 0.99),
     "chebychev2": (-1., 1.),
     "chebyshev2": (-1., 1.),
+    "simp":       (0., 1.),
 }
 
 

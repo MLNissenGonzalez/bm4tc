@@ -69,28 +69,26 @@ class ClassificationBrier(nn.Module):
 
 class ClassificationSoftmaxNLL(nn.Module):
     """
-    Softmax-based NLL for sanity-checking against tutorial MPS classifiers.
+    Softmax NLL for sanity-checking against tutorial MPS classifiers.
 
-    Tutorial implementations treat MPS outputs as logits and apply softmax.
-    This loss approximates that approach using Born probabilities: it takes
-    sqrt(p_born) to recover amplitude magnitudes |ψ|/√Z, treats those as
-    logits, applies log-softmax, and computes NLL on the true class.
+    Expects raw MPS amplitudes ψ (signed, unnormalized) as input —
+    NOT Born-rule probabilities. Treats amplitudes directly as logits,
+    applies log-softmax, and computes NLL on the true class.
 
-    Parameters
-    ----------
-    eps : float
-        Clamp Born probs from below before sqrt. Default 1e-12.
+    This matches tutorial implementations that call forward() on the MPS
+    and feed the result into cross-entropy / log-softmax without any
+    Born-rule squaring or normalization.
+
+    IMPORTANT: This criterion must be used with experiments/softmax_sanity.py,
+    which calls bm.classifier.amplitudes() instead of bm.class_probabilities().
+    Using it inside the standard ClassificationTrainer (which passes Born probs)
+    will produce incorrect gradients.
     """
 
-    def __init__(self, eps: float = 1e-12):
-        super().__init__()
-        self.eps = eps
-
-    def forward(self, p: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, amplitudes: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         import torch.nn.functional as F
-        logits = p.clamp(min=self.eps).sqrt()
-        log_probs = F.log_softmax(logits, dim=-1)
-        return -log_probs[torch.arange(p.size(0)), t].mean()
+        log_probs = F.log_softmax(amplitudes, dim=-1)
+        return -log_probs[torch.arange(amplitudes.size(0)), t].mean()
 
 
 # This uses logs to improve numerical stability which is not necessary for class probabilities.

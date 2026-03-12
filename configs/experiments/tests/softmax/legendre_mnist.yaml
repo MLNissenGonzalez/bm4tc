@@ -1,5 +1,5 @@
 # @package _global_
-experiment: sanity
+experiment: softmax_sanity_legendre
 
 defaults:
   - override /born: legendre/d3D10

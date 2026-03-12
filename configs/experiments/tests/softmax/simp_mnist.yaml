@@ -1,0 +1,10 @@
+# @package _global_
+experiment: softmax_sanity_simp
+
+defaults:
+  - override /born: simp/d3D10
+  - override /dataset: mnist/mnist_full
+  - override /trainer/classification: softmax_adam50
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online

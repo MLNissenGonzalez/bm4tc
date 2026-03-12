@@ -56,6 +56,22 @@ class BornClassifier(tk.models.MPSLayer):
         """
         return self.embedding(data)
 
+    def amplitudes(self, embs: torch.Tensor) -> torch.Tensor:
+        """
+        Compute raw MPS output amplitudes for embedded inputs.
+
+        This is a semantically explicit alias for the inherited
+        MPSLayer.forward() method. Amplitudes are signed and unnormalized
+        — use this for softmax-based losses, NOT for Born-rule classification.
+
+        Args:
+            embs: Embedded inputs of shape (batch_size, D, phys_dim).
+
+        Returns:
+            Tensor of shape (batch_size, num_classes) with raw amplitudes ψ.
+        """
+        return self.forward(data=embs)
+
     def prepare(
             self,
             tensors: List[torch.Tensor] | None = None,
