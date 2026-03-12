@@ -12,8 +12,9 @@ from typing import *
 class FourierEmbedding:
     """Fourier basis embedding of L²[0,1], matching tk.embeddings.fourier."""
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         # Precompute (op, scale, freq) for i = 1..dim (1-indexed as in tk source)
         self._triples: List[Tuple[str, float, float]] = []
         for i in range(1, dim + 1):
@@ -36,21 +37,22 @@ class FourierEmbedding:
                 components.append(scale * (freq * data).cos())
             else:
                 components.append(scale * (freq * data).sin())
-        return torch.stack(components, dim=axis)
+        return torch.stack(components, dim=axis).to(self.dtype)
 
 
 class PolyEmbedding:
     """Polynomial (monomial) embedding, matching tk.embeddings.poly."""
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         # tk.embeddings.poly(data, degree=dim) produces dim+1 components
         self._powers: List[int] = list(range(dim + 1))
 
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
         if not isinstance(data, torch.Tensor):
             raise TypeError('`data` should be torch.Tensor type')
-        return torch.stack([data.pow(i) for i in self._powers], dim=axis)
+        return torch.stack([data.pow(i) for i in self._powers], dim=axis).to(self.dtype)
 
 
 class LegendreEmbedding:
@@ -68,8 +70,9 @@ class LegendreEmbedding:
     features.
     """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         # Recurrence coefficients: P_i = alpha[i]*x*P_{i-1} - beta[i]*P_{i-2}
         self._alpha: List[float] = [0.0, 0.0] + [(2*i - 1) / i for i in range(2, dim)]
         self._beta: List[float]  = [0.0, 0.0] + [(i - 1) / i     for i in range(2, dim)]
@@ -85,7 +88,7 @@ class LegendreEmbedding:
             polies.append(p_i)
         return torch.stack(
             [p * n for p, n in zip(polies[:self.dim], self._norms)], dim=axis
-        )
+        ).to(self.dtype)
 
 
 class HermiteEmbedding:
@@ -99,8 +102,9 @@ class HermiteEmbedding:
     to avoid overflow for large dim.
     """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         log_sqrt_pi_quarter = 0.25 * math.log(math.pi)
         log2 = math.log(2.0)
         self._norms: List[float] = [
@@ -121,7 +125,7 @@ class HermiteEmbedding:
             g_next = 2.0 * data * g_curr - 2.0 * (n - 1) * g_prev
             components.append(g_next * self._norms[n])
             g_prev, g_curr = g_curr, g_next
-        return torch.stack(components, dim=axis)
+        return torch.stack(components, dim=axis).to(self.dtype)
 
 
 class ChebyshevT1Embedding:
@@ -136,8 +140,9 @@ class ChebyshevT1Embedding:
     boundaries due to the embedding magnitude alone.  See src/utils/GUIDE.md
     "Chebyshev T1 boundary artefact" for a full explanation.
     """
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         self._scales: List[float] = [sqrt(1.0 / pi)] + [sqrt(2.0 / pi)] * (dim - 1)
 
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
@@ -155,15 +160,16 @@ class ChebyshevT1Embedding:
             T_next = 2.0 * data * T_curr - T_prev
             components.append(T_next * self._scales[n] * w)
             T_prev, T_curr = T_curr, T_next
-        return torch.stack(components, dim=axis)
+        return torch.stack(components, dim=axis).to(self.dtype)
 
 
 class ChebyshevT2Embedding:
     """Chebyshev functions of the second kind, orthonormal on L²[-1,1].
     ψ_n(x) = U_n(x) · sqrt(2/π · √(1−x²)).
     """
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
+        self.dtype = dtype
         self._scale: float = sqrt(2.0 / pi)
 
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
@@ -179,7 +185,7 @@ class ChebyshevT2Embedding:
             U_next = 2.0 * data * U_curr - U_prev
             components.append(U_next * self._scale * w)
             U_prev, U_curr = U_curr, U_next
-        return torch.stack(components, dim=axis)
+        return torch.stack(components, dim=axis).to(self.dtype)
 
 
 class SimpEmbedding:
@@ -199,14 +205,14 @@ class SimpEmbedding:
     ignored — the output always has exactly 3 components.
     """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         # dim is absorbed for Hydra compatibility; output is always 3-dimensional.
-        pass
+        self.dtype = dtype
 
     def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
         if not isinstance(data, torch.Tensor):
             raise TypeError('`data` should be torch.Tensor type')
-        return torch.stack([torch.ones_like(data), data, 1.0 - data], dim=axis)
+        return torch.stack([torch.ones_like(data), data, 1.0 - data], dim=axis).to(self.dtype)
 
 
 _EMBEDDING_MAP = {
@@ -223,7 +229,7 @@ _EMBEDDING_MAP = {
 }
 
 
-def embedding(name: str, dim: int) -> Callable[[torch.Tensor], torch.Tensor]:
+def embedding(name: str, dim: int, dtype: torch.dtype = torch.float32) -> Callable[[torch.Tensor], torch.Tensor]:
     """
     Instantiate an embedding callable by name and physical dimension.
 
@@ -237,6 +243,8 @@ def embedding(name: str, dim: int) -> Callable[[torch.Tensor], torch.Tensor]:
         - "hermite"
     dim : int
         Physical dimension (number of embedding components).
+    dtype : torch.dtype
+        Output dtype of the embedding (default: torch.float32).
 
     Returns
     -------
@@ -254,7 +262,7 @@ def embedding(name: str, dim: int) -> Callable[[torch.Tensor], torch.Tensor]:
     except KeyError:
         raise ValueError(f"Embedding {name} not recognised. "
                          f"Available: {list(_EMBEDDING_MAP.keys())}")
-    return cls(dim)
+    return cls(dim, dtype=dtype)
 
 
 _EMBEDDING_TO_RANGE = {

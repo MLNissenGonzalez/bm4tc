@@ -42,16 +42,24 @@ class BornMachine:
             cfg.init_kwargs.out_dim = num_classes
         OmegaConf.set_struct(cfg, True) # Re-enable struct mode for safety
         
-        # 1. Initialize embedding 
-        self.embedding_name = cfg.embedding
-        self.embedding = get.embedding(self.embedding_name, cfg.init_kwargs.in_dim)
-        self.input_range = get.range_from_embedding(self.embedding_name)
-
-        # 2. Intialize classifier, either from tensors, or configuration file
+        # 1. Determine dtype early so the embedding can be dtype-aware
         _DTYPE_MAP = {
             "float32": torch.float32, "float64": torch.float64,
             "complex64": torch.complex64, "complex128": torch.complex128,
         }
+        if tensors is not None:
+            _dtype = tensors[0].dtype
+        else:
+            _raw = OmegaConf.to_object(cfg.init_kwargs).get("dtype")
+            _dtype = _DTYPE_MAP.get(_raw, torch.float32)
+
+        # 2. Initialize embedding (dtype-aware)
+        self.embedding_name = cfg.embedding
+        self.embedding = get.embedding(self.embedding_name, cfg.init_kwargs.in_dim, dtype=_dtype)
+        self.input_range = get.range_from_embedding(self.embedding_name)
+        self.dtype = _dtype
+
+        # 3. Intialize classifier, either from tensors, or configuration file
         init_cfg = None
         if tensors is not None:
             self.classifier = BornClassifier(embedding=self.embedding, tensors=tensors)

@@ -36,6 +36,7 @@ class BornGenerator(tk.models.MPS):
         )
         self.embedding = embedding
         _dtype = tensors[0].dtype
+        self.dtype = _dtype
         if _dtype.is_complex:
             self.abs_square  = lambda t: t.real**2 + t.imag**2
             self._diag_real  = lambda p: p.real
@@ -49,7 +50,7 @@ class BornGenerator(tk.models.MPS):
         self.cls_pos, self.in_dim, self.num_cls = cls_pos, in_dim, num_cls
         self.cls_embs = []
         for cls in range(self.num_cls):
-            emb = tk.embeddings.basis(torch.tensor(cls), self.num_cls).float()
+            emb = tk.embeddings.basis(torch.tensor(cls), self.num_cls).to(self.dtype)
             self.cls_embs.append(emb.to(device))
         self.device = device
 
@@ -479,7 +480,7 @@ class BornGenerator(tk.models.MPS):
         embs = [data_embs[:, i, :] for i in range(data_embs.shape[1])]
 
         # TODO: this assumes that there is input data and class data, for tensorkrowch integration, code needs to be more agnostic (put this behind a if clause  or something)
-        class_embs = tk.embeddings.basis(labels, self.num_cls).float()
+        class_embs = tk.embeddings.basis(labels, self.num_cls).to(self.dtype)
         embs.insert(self.cls_pos, class_embs) # insert class embedding at cls_pos
 
         # Compute amplitude

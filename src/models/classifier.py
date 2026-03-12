@@ -38,7 +38,8 @@ class BornClassifier(tk.models.MPSLayer):
             init_method=init_method, device=device, dtype=dtype, **kwargs
         )
         self.embedding = embedding
-        _dtype = self.tensors[0].dtype
+        self.dtype = self.tensors[0].dtype
+        _dtype = self.dtype
         if _dtype.is_complex:
             self.abs_square = lambda t: t.real**2 + t.imag**2
         else:
