@@ -56,7 +56,7 @@ class BornClassifier(tk.models.MPSLayer):
         """
         return self.embedding(data)
 
-    def amplitudes(self, embs: torch.Tensor) -> torch.Tensor:
+    def amplitudes(self, data: torch.Tensor) -> torch.Tensor:
         """
         Compute raw MPS output amplitudes for embedded inputs.
 
@@ -70,6 +70,7 @@ class BornClassifier(tk.models.MPSLayer):
         Returns:
             Tensor of shape (batch_size, num_classes) with raw amplitudes ψ.
         """
+        embs = self.embed(data)
         return self.forward(data=embs)
 
     def prepare(

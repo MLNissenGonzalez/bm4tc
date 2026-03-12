@@ -8,3 +8,13 @@ defaults:
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
+
+tracking:
+  seed: 1
+  mode: offline
+
+trainer:
+  classification:
+    optimizer:
+      kwargs:
+        lr: 1e-4

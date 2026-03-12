@@ -69,26 +69,21 @@ class ClassificationBrier(nn.Module):
 
 class ClassificationSoftmaxNLL(nn.Module):
     """
-    Softmax NLL for sanity-checking against tutorial MPS classifiers.
+    Thin wrapper around nn.CrossEntropyLoss for softmax-based MPS classifiers.
 
-    Expects raw MPS amplitudes ψ (signed, unnormalized) as input —
-    NOT Born-rule probabilities. Treats amplitudes directly as logits,
-    applies log-softmax, and computes NLL on the true class.
+    Expects raw MPS amplitudes ψ (signed, unnormalized) as logits — NOT
+    Born-rule probabilities. Delegates to nn.CrossEntropyLoss, which applies
+    log-softmax internally (numerically stable fused kernel).
 
-    This matches tutorial implementations that call forward() on the MPS
-    and feed the result into cross-entropy / log-softmax without any
-    Born-rule squaring or normalization.
-
-    IMPORTANT: This criterion must be used with experiments/softmax_sanity.py,
-    which calls bm.classifier.amplitudes() instead of bm.class_probabilities().
-    Using it inside the standard ClassificationTrainer (which passes Born probs)
-    will produce incorrect gradients.
+    IMPORTANT: Must be used with experiments/softmax_sanity.py, which calls
+    bm.classifier.amplitudes() instead of bm.class_probabilities().
     """
+    def __init__(self):
+        super().__init__()
+        self._loss = nn.CrossEntropyLoss()
 
     def forward(self, amplitudes: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        import torch.nn.functional as F
-        log_probs = F.log_softmax(amplitudes, dim=-1)
-        return -log_probs[torch.arange(amplitudes.size(0)), t].mean()
+        return self._loss(amplitudes, t)
 
 
 # This uses logs to improve numerical stability which is not necessary for class probabilities.

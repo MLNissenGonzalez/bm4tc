@@ -2,9 +2,20 @@
 experiment: softmax_sanity_simp
 
 defaults:
+  - _self_
   - override /born: simp/d3D10
   - override /dataset: mnist/mnist_full
   - override /trainer/classification: softmax_adam50
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
+
+tracking:
+  seed: 5
+  mode: offline
+
+trainer:
+  classification:
+    optimizer:
+      kwargs:
+        lr: 5e-5

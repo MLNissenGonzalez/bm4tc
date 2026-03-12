@@ -12,8 +12,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+class LinearScaler:
+    """
+    Global linear scaler: fits a single linear transform to map the
+    global min/max of the training data to ``feature_range``.
+
+    Unlike MinMaxScaler, which normalizes each feature independently,
+    LinearScaler applies one shared transform across all features.
+    This preserves relative feature magnitudes and avoids amplifying
+    near-constant background pixels (e.g. MNIST border pixels).
+
+    Reduces to a passthrough when the data already lies in
+    ``feature_range`` (e.g. MNIST ∈ [0,1] with SimpEmbedding or
+    FourierEmbedding, both targeting [0,1]).
+    """
+
+    def __init__(self, feature_range=(0., 1.), clip=False):
+        self.feature_range = feature_range
+        self.clip = clip
+        self._scale: float = 1.0
+        self._offset: float = 0.0
+
+    def fit(self, X):
+        x_min = float(X.min())
+        x_max = float(X.max())
+        t_min, t_max = self.feature_range
+        if x_max == x_min:
+            self._scale = 1.0
+            self._offset = t_min
+        else:
+            self._scale = (t_max - t_min) / (x_max - x_min)
+            self._offset = t_min - x_min * self._scale
+        return self
+
+    def transform(self, X):
+        result = X * self._scale + self._offset
+        if self.clip:
+            import numpy as np
+            result = np.clip(result, self.feature_range[0], self.feature_range[1])
+        return result
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+
 _SCALER_MAP = {
-    "minmax": MinMaxScaler
+    "minmax": MinMaxScaler,
+    "linear": LinearScaler,
 }
 
 
@@ -77,14 +124,14 @@ class DataHandler:
     def split_and_rescale(
             self,
             bornmachine: BornMachine,
-            scaler_name: str = "minmax"
+            scaler_name: str = None   # None → read from self.cfg.scaler
     ):
         """
         Split data into train/valid/test and rescale to embedding range.
 
         Args:
             bornmachine: BornMachine (used to determine input range from embedding).
-            scaler_name: Scaler type ("minmax").
+            scaler_name: Scaler type ("minmax" or "linear"). If None, reads from self.cfg.scaler.
         """
         # Check that data is already loaded to handler, otherwise, load it:
         if self.data is None:
@@ -127,6 +174,8 @@ class DataHandler:
                                                 random_state=self.cfg.split_seed
                                             )
         # Fit scaler to training data to avoid data leakage.
+        if scaler_name is None:
+            scaler_name = getattr(self.cfg, 'scaler', 'minmax')
         self._get_scaler(scaler_name)
         data["train"] = self.scaler.fit_transform(data["train"])
         # Transform validation and test sets using the scaler fitted on training data

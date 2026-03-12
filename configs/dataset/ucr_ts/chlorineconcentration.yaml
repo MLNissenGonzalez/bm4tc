@@ -12,3 +12,4 @@ split: [0.5, 0.25, 0.25]
 split_seed: 42
 use_ucr_split: true
 overwrite: false
+scaler: minmax

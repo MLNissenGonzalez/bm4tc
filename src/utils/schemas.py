@@ -151,6 +151,7 @@ class DatasetConfig:
     split_seed: int
     overwrite: bool = False
     use_ucr_split: bool = False  # if True, honour original UCR train/test boundary
+    scaler: str = "minmax"
 
 cs.store(group="dataset", name="schema", node=DatasetConfig)
 
@@ -243,17 +244,17 @@ class CriticConfig:
 cs.store(group="trainer/ganstyle/critic", name="schema", node=CriticConfig)
 # --- Trainer configs ---  
 
-@dataclass 
+@dataclass
 class ClassificationConfig:
     max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     optimizer: OptimizerConfig
-    criterion: CriterionConfig 
-    stop_crit: str  # "acc", "clsloss", "genloss", "fid", or "rob"
-    patience: int
-    watch_freq: int  # gradient logging step interval; 0 = disabled (default)
+    criterion: CriterionConfig
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
-    save: bool
+    stop_crit: str = "acc"  # "acc", "clsloss", "genloss", "fid", or "rob"
+    patience: int = 250
+    watch_freq: int = 0  # gradient logging step interval; 0 = disabled (default)
+    save: bool = False
     auto_stack: bool = True
     auto_unbind: bool = False
 
