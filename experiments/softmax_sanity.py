@@ -48,8 +48,7 @@ class SoftmaxSanityTrainer(ClassificationTrainer):
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
-            embs = self.bornmachine.classifier.embed(data)
-            amplitudes = self.bornmachine.classifier.amplitudes(embs)
+            amplitudes = self.bornmachine.classifier.amplitudes(data)
             loss: torch.Tensor = self.criterion(amplitudes, labels)
 
             if torch.isnan(loss):

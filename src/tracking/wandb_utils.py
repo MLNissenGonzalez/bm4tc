@@ -117,7 +117,7 @@ def record(results: Dict[str, Any], stage: str, set: str, step: Optional[int] = 
 def log_dataset_viz(datahandler):
     """Log a scatter plot of the full (rescaled) dataset to W&B under 'dataset/all'."""
     if datahandler.data_dim != 2:
-        logger.debug(f"Skipping dataset viz for data_dim={datahandler.data_dim} (only 2D supported)")
+        logger.info(f"Skipping dataset viz for data_dim={datahandler.data_dim} (only 2D supported)")
         return
 
     from src.tracking.visualisation import visualise_samples
