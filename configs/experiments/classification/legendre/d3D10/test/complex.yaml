@@ -3,7 +3,7 @@ experiment: test
 
 descriptor: complex
 defaults:
-  - override /born: legendre/d3D10_c64
+  - override /born: legendre/d3D10c64
   - override /dataset: mnist/mnist_full
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
