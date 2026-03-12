@@ -1,5 +1,5 @@
 max_epoch: 50
-batch_size: 256
+batch_size: 500
 criterion:
   name: "softmax_nll"
   kwargs: null
@@ -11,7 +11,7 @@ optimizer:
 auto_stack: True
 auto_unbind: False
 patience: 250
-stop_crit: "acc"
+stop_crit: "softmaxacc"
 watch_freq: 0
-metrics: {"softmaxloss": 1, "acc": 1}
+metrics: {"softmaxloss": 1, "softmaxacc": 1}
 save: False

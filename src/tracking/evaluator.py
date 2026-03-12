@@ -34,23 +34,11 @@ class BaseMetric:
         self.datahandler = datahandler
         self.device = device
     
-    def _labels_n_probs(
-            self, 
-            bornmachine: BornMachine,
-            split: str,
-            context: Dict[str, Any]
-            ):
-        """
-        Method to precompute class probabilities if not already in context.
-        """
-        
-        if "labels_n_probs" not in context:
-            context["labels_n_probs"] = []
-            with torch.no_grad():
-                for data, labels in self.datahandler.classification[split]:
-                    data = data.to(self.device)
-                    probs = bornmachine.class_probabilities(data).cpu()
-                    context["labels_n_probs"].append((labels, probs))
+    _scores_cache_key: str  # set by each subclass
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        """Cache (labels, scores) in context. Must be overridden by subclasses."""
+        raise NotImplementedError
 
 
     def _generate(
@@ -84,6 +72,8 @@ class BaseMetric:
 class ClassificationLossMetric(BaseMetric):
     """Compute classification loss (NLL) on the dataset."""
 
+    _scores_cache_key = "labels_n_probs"
+
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
         if hasattr(cfg.trainer, "classification") and hasattr(cfg.trainer.classification, "criterion"):
@@ -91,36 +81,110 @@ class ClassificationLossMetric(BaseMetric):
         else:
             crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})
             self.criterion = get.criterion(mode="classification", cfg=crit_cfg)
+
+    def _labels_n_scores(self, bornmachine, split, context):
+        if "labels_n_probs" not in context:
+            context["labels_n_probs"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    probs = bornmachine.class_probabilities(data).cpu()
+                    context["labels_n_probs"].append((labels, probs))
+
     def evaluate(self, bornmachine, split, context):
         bornmachine.classifier.eval()
         losses = []
-        self._labels_n_probs(bornmachine, split, context)
+        self._labels_n_scores(bornmachine, split, context)
 
         with torch.no_grad():
-            for labels, probs in context["labels_n_probs"]:
+            for labels, probs in context[self._scores_cache_key]:
                 loss = self.criterion(probs, labels).mean().item()
                 losses.append(loss)
 
-        # Compute mean loss
         return sum(losses) / len(losses) if losses else float('nan')
 
 class AccuracyMetric(BaseMetric):
     """Compute clean classification accuracy on the dataset."""
 
+    _scores_cache_key = "labels_n_probs"
+
     def __init__(self, freq, cfg, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
+
+    def _labels_n_scores(self, bornmachine, split, context):
+        if "labels_n_probs" not in context:
+            context["labels_n_probs"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    probs = bornmachine.class_probabilities(data).cpu()
+                    context["labels_n_probs"].append((labels, probs))
 
     def evaluate(self, bornmachine: BornMachine, split, context):
         bornmachine.classifier.eval()
         correct, num_pred = 0, 0
-        self._labels_n_probs(bornmachine, split, context)
+        self._labels_n_scores(bornmachine, split, context)
 
         with torch.no_grad():
-            for labels, probs in context["labels_n_probs"]:        
-                predictions = torch.argmax(probs, dim=1) # (batch_size,)
+            for labels, scores in context[self._scores_cache_key]:
+                predictions = torch.argmax(scores, dim=1)
                 correct += (predictions == labels).sum().item()
                 num_pred += labels.shape[0]
-        
+
+        return correct / num_pred if num_pred > 0 else float('nan')
+
+# For the sanity check
+class SoftmaxLossMetric(BaseMetric):
+    """Compute softmax NLL on the dataset using raw MPS amplitudes as logits."""
+
+    _scores_cache_key = "labels_n_amplitudes"
+
+    def __init__(self, freq, cfg: schemas.Config, datahandler, device):
+        super().__init__(freq, cfg, datahandler, device)
+        self.criterion = ClassificationSoftmaxNLL()
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        if "labels_n_amplitudes" not in context:
+            context["labels_n_amplitudes"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    scores = bornmachine.classifier.amplitudes(data).cpu()
+                    context["labels_n_amplitudes"].append((labels, scores))
+
+    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        bornmachine.classifier.eval()
+        losses = []
+        self._labels_n_scores(bornmachine, split, context)
+        with torch.no_grad():
+            for labels, amplitudes in context[self._scores_cache_key]:
+                losses.append(self.criterion(amplitudes, labels).item())
+        return sum(losses) / len(losses) if losses else float('nan')
+
+
+class SoftmaxAccuracyMetric(BaseMetric):
+    """Accuracy using argmax of raw MPS amplitudes (matches softmax training objective)."""
+
+    _scores_cache_key = "labels_n_amplitudes"
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        if "labels_n_amplitudes" not in context:
+            context["labels_n_amplitudes"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    scores = bornmachine.classifier.amplitudes(data).cpu()
+                    context["labels_n_amplitudes"].append((labels, scores))
+
+    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        bornmachine.classifier.eval()
+        correct, num_pred = 0, 0
+        self._labels_n_scores(bornmachine, split, context)
+        with torch.no_grad():
+            for labels, amplitudes in context[self._scores_cache_key]:
+                preds = torch.argmax(amplitudes, dim=1)
+                correct += (preds == labels).sum().item()
+                num_pred += labels.shape[0]
         return correct / num_pred if num_pred > 0 else float('nan')
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -210,33 +274,6 @@ class RobustnessMetric(BaseMetric):
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-class SoftmaxLossMetric(BaseMetric):
-    """Compute softmax NLL on the dataset using raw MPS amplitudes as logits."""
-
-    def __init__(self, freq, cfg: schemas.Config, datahandler, device):
-        super().__init__(freq, cfg, datahandler, device)
-        self.criterion = ClassificationSoftmaxNLL()
-
-    def _labels_n_amplitudes(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
-        if "labels_n_amplitudes" not in context:
-            context["labels_n_amplitudes"] = []
-            with torch.no_grad():
-                for data, labels in self.datahandler.classification[split]:
-                    data = data.to(self.device)
-                    embs = bornmachine.classifier.embed(data)
-                    amplitudes = bornmachine.classifier.amplitudes(embs).cpu()
-                    context["labels_n_amplitudes"].append((labels, amplitudes))
-
-    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
-        bornmachine.classifier.eval()
-        losses = []
-        self._labels_n_amplitudes(bornmachine, split, context)
-        with torch.no_grad():
-            for labels, amplitudes in context["labels_n_amplitudes"]:
-                losses.append(self.criterion(amplitudes, labels).item())
-        return sum(losses) / len(losses) if losses else float('nan')
-
-
 class GenerativeLossMetric(BaseMetric):
     """Compute generative loss (NLL of joint distribution) on the dataset."""
 
@@ -281,6 +318,7 @@ class MetricFactory:
             "clsloss": ClassificationLossMetric,
             "softmaxloss": SoftmaxLossMetric,
             "acc": AccuracyMetric,
+            "softmaxacc": SoftmaxAccuracyMetric,
             "fid": FIDMetric,
             "rob": RobustnessMetric,
             "viz": VisualizationMetric,
