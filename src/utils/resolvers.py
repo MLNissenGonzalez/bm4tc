@@ -16,7 +16,7 @@ def _training_regime(*, _root_):
 
 _DTYPE_SUFFIX = {
     None: "", "float32": "", "float64": "",
-    "complex64": "_c64", "complex128": "_c128",
+    "complex64": "c64", "complex128": "c128",
 }
 
 

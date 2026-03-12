@@ -56,14 +56,12 @@ STAGE_PREFIXES = {
     "adv": "adv",
 }
 
-# arch string → (in_dim, bond_dim)
-ARCH_DIMS = {
-    "d4D3": (4, 3),
-    "d6D4": (6, 4),
-    "d10D6": (10, 6),
-    "d30D18": (30, 18),
-    "d3D21": (3, 21),
-}
+def parse_arch(arch: str):
+    """'d3D10' → (3, 10, '')  |  'd3D10c64' → (3, 10, 'c64')"""
+    m = re.match(r"d(\d+)D(\d+)(c\d+)?$", arch)
+    if m:
+        return int(m.group(1)), int(m.group(2)), m.group(3) or ""
+    return None, None, ""
 
 DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 DEFAULT_PROJECT = "gan_train"
@@ -150,8 +148,8 @@ def query_wandb(
 
     import wandb
 
-    in_dim, bond_dim = ARCH_DIMS[arch]
-    archinfo = f"d{in_dim}D{bond_dim}{embedding}"
+    in_dim, bond_dim, dtype_suffix = parse_arch(arch)
+    archinfo = f"d{in_dim}D{bond_dim}{dtype_suffix}{embedding}"
 
     # Group naming: hpo_{training_type}_{archinfo}_{dataset}_{date}
     group_pattern = f"^hpo_{training_type}_{archinfo}_{dataset}_"
@@ -208,7 +206,7 @@ def query_local(
     outputs_dir: Path,
 ) -> Optional[Dict[str, Any]]:
     """Walk outputs dir to find matching HPO trials; return params from best."""
-    in_dim, bond_dim = ARCH_DIMS[arch]
+    in_dim, bond_dim, dtype_suffix = parse_arch(arch)
     trainer_key = TRAINER_KEYS[training_type]
 
     best_metric: Optional[float] = None
@@ -229,6 +227,9 @@ def query_local(
         if _get_nested_value(cfg, "born.embedding") != embedding:
             continue
         if _get_nested_value(cfg, "born.init_kwargs.bond_dim") != bond_dim:
+            continue
+        _expected_dtype = {"c64": "complex64", "c128": "complex128"}.get(dtype_suffix)
+        if _get_nested_value(cfg, "born.init_kwargs.dtype") != _expected_dtype:
             continue
         if _get_nested_value(cfg, f"trainer.{trainer_key}") is None:
             continue
@@ -417,9 +418,8 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         nargs="+",
-        choices=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21"],
-        default=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21"],
-        help="Architecture(s) to process (default: both)",
+        default=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21", "d3D10c64"],
+        help="Architecture(s) to process (default: all known archs)",
     )
     parser.add_argument(
         "--source",

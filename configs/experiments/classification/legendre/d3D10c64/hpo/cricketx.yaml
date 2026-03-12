@@ -3,8 +3,8 @@ experiment: hpo
 
 descriptor: nll
 defaults:
-  - override /born: legendre/d3D10_c64
-  - override /dataset: ucr_ts/syntheticcontrol
+  - override /born: legendre/d3D10c64
+  - override /dataset: ucr_ts/cricketx
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online

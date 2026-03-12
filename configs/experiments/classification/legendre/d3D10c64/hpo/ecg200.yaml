@@ -3,7 +3,7 @@ experiment: hpo
 
 descriptor: nll
 defaults:
-  - override /born: legendre/d3D10_c64
+  - override /born: legendre/d3D10c64
   - override /dataset: ucr_ts/ecg200
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

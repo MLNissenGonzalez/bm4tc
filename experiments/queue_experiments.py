@@ -12,7 +12,6 @@ Usage
 """
 
 import argparse
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,14 +42,6 @@ KIND_SHORT = {
 }
 
 
-def parse_arch(arch):
-    """Parse 'd4D3' → (in_dim=4, bond_dim=3)."""
-    m = re.match(r"d(\d+)D(\d+)", arch)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    return None, None
-
-
 def parse_dataset_name(config_path, fallback):
     """Extract dataset name from yaml defaults list; fall back to config stem."""
     try:
@@ -79,12 +70,9 @@ def get_experiment_field(config_path, kind):
     return "seed_sweep" if kind == "seed_sweeps" else "hpo"
 
 
-def is_already_run(experiment, embedding, in_dim, bond_dim, dataset_name):
+def is_already_run(experiment, embedding, arch, dataset_name):
     """Return True if an output directory exists for this config."""
-    pattern = (
-        f"outputs/{experiment}/*/{embedding}"
-        f"/d{in_dim}D{bond_dim}/{dataset_name}_*"
-    )
+    pattern = f"outputs/{experiment}/*/{embedding}/{arch}/{dataset_name}_*"
     return any(ROOT.glob(pattern))
 
 
@@ -103,7 +91,6 @@ def discover_configs():
                 if not arch_dir.is_dir():
                     continue
                 arch = arch_dir.name
-                in_dim, bond_dim = parse_arch(arch)
                 for kind in VALID_KINDS:
                     kind_dir = arch_dir / kind
                     if not kind_dir.is_dir():
@@ -119,8 +106,6 @@ def discover_configs():
                             "type":           typ,
                             "embedding":      embedding,
                             "arch":           arch,
-                            "in_dim":         in_dim,
-                            "bond_dim":       bond_dim,
                             "kind":           kind,
                             "name":           name,
                             "dataset_name":   dataset_name,
@@ -167,7 +152,7 @@ def main():
     if args.list:
         for c in configs:
             ran = is_already_run(c["experiment"], c["embedding"],
-                                 c["in_dim"], c["bond_dim"], c["dataset_name"])
+                                 c["arch"], c["dataset_name"])
             status = "ran" if ran else "   "
             print(f"[{status}] {c['experiment_key']}")
         return
@@ -189,7 +174,7 @@ def main():
     todo    = [c for c in configs
                if args.force or not is_already_run(
                    c["experiment"], c["embedding"],
-                   c["in_dim"], c["bond_dim"], c["dataset_name"])]
+                   c["arch"], c["dataset_name"])]
     skipped = len(configs) - len(todo)
 
     if skipped:

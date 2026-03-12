@@ -64,7 +64,7 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
 
     # Architecture
     _dtype = OmegaConf.select(cfg, "born.init_kwargs.dtype")
-    _dtype_suffix = {"complex64": "_c64", "complex128": "_c128"}.get(_dtype, "")
+    _dtype_suffix = {"complex64": "c64", "complex128": "c128"}.get(_dtype, "")
     archinfo = f"d{cfg.born.init_kwargs.in_dim}D{cfg.born.init_kwargs.bond_dim}{_dtype_suffix}{cfg.born.embedding}"
 
     # Date
