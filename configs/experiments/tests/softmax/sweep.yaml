@@ -1,0 +1,18 @@
+# @package _global_
+experiment: softmax_sweep
+
+defaults:
+  - override /born: legendre/d3D10
+  - override /dataset: mnist/mnist_full
+  - override /trainer/classification: softmax_adam50
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+hydra:
+  sweeper:
+    params:
+      born: legendre/d3D10, fourier/d3D10
+      born.init_kwargs.init_method: randn, unit, canonical
+      tracking.seed: 1, 2
+      trainer.classification.optimizer.kwargs.lr: 1e-4, 1e-5

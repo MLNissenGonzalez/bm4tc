@@ -10,11 +10,11 @@ defaults:
   - override /tracking: online
 
 tracking:
-  seed: 1
+  seed: 13
   mode: offline
 
 trainer:
   classification:
     optimizer:
       kwargs:
-        lr: 1e-4
+        lr: 5e-5
