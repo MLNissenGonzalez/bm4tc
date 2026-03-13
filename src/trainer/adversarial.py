@@ -393,20 +393,7 @@ class Trainer:
             folder = run_dir / "models"
             folder.mkdir(parents=True, exist_ok=True)
 
-            method = self.train_cfg.method
-            eps = self.base_epsilon
-            optimizer_cfg = self.train_cfg.optimizer
-            lr = optimizer_cfg.kwargs.get("lr", "") if optimizer_cfg.kwargs else ""
-
-            filename_components = [
-                f"{self.cfg.dataset.name}",
-                f"{self.stage}_{method}_eps{eps}",
-                f"mps_bd{self.cfg.born.init_kwargs.bond_dim}",
-                f"{self.cfg.born.embedding}{self.cfg.born.init_kwargs.in_dim}",
-                f"{self.train_cfg.max_epoch}{optimizer_cfg.name}lr{lr}"
-            ]
-
-            filename = "_".join(filename_components)
+            filename = "adv"
 
             save_path = folder / filename
             self.bornmachine.save(path=str(save_path))

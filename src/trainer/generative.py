@@ -227,18 +227,7 @@ class Trainer:
             folder = run_dir / "models"
             folder.mkdir(parents=True, exist_ok=True)
 
-            optimizer_cfg = self.train_cfg.optimizer
-            lr = optimizer_cfg.kwargs.lr or ""
-            weight_decay = optimizer_cfg.kwargs.weight_decay or ""
-
-            filename_components = [
-                f"{self.cfg.dataset.name}",
-                f"{self.stage}_mps_bd{self.cfg.born.init_kwargs.bond_dim}",
-                f"{self.cfg.born.embedding}{self.cfg.born.init_kwargs.in_dim}",
-                f"{self.train_cfg.max_epoch}{optimizer_cfg.name}lr{lr}wd{weight_decay}"
-            ]
-
-            filename = "_".join(filename_components)
+            filename = "gen"
 
             save_path = folder / filename
             self.bornmachine.save(path=str(save_path))

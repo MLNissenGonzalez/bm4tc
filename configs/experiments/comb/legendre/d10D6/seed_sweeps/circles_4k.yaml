@@ -24,17 +24,17 @@ trainer:
     patience: 100
     stop_crit: "clsloss"
     watch_freq: 0
-    save: false
+    save: true
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.02931565161670948
+        lr: 0.01465782580835474
         weight_decay: 0
     criterion:
       name: "negative log-likelihood"
       kwargs:
         eps: 1e-8
-    metrics: {"clsloss": 1, "acc": 1, "genloss": 1, "fid": 1}
+    metrics: {"clsloss": 1, "acc": 1, "genloss": 1}
 
   generative:
     max_epoch: ${complement_200:${trainer.classification.max_epoch}}
@@ -46,16 +46,16 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.0006624310605949989
+        lr: 0.00033121553029749945
         weight_decay: 0
     criterion:
       name: "nll"
       kwargs:
         eps: 1e-8
-    metrics: {"genloss": 1, "acc": 1, "clsloss": 1, "fid": 1}
+    metrics: {"genloss": 1, "acc": 1, "clsloss": 1}
 
 hydra:
   sweeper:
     params:
-      trainer.classification.max_epoch: choice(0, 1, 5, 10, 20, 50, 100, 150, 180, 190, 195, 199, 200)
+      trainer.classification.max_epoch: choice(0, 1, 5, 10, 20, 30, 50, 70, 100, 130, 150, 170, 180, 190, 195, 199, 200)
       tracking.seed: range(1,6)
