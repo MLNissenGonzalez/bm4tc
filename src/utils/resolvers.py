@@ -32,5 +32,7 @@ def register_resolvers():
         )
     if not OmegaConf.has_resolver("complement_100"):
         OmegaConf.register_new_resolver("complement_100", lambda x: 100 - int(x))
+    if not OmegaConf.has_resolver("complement_200"):
+        OmegaConf.register_new_resolver("complement_200", lambda x: 200 - int(x))
     if not OmegaConf.has_resolver("dtype_suffix"):
         OmegaConf.register_new_resolver("dtype_suffix", _dtype_suffix, use_cache=False)
