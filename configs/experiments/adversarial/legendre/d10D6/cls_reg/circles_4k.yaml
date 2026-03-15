@@ -54,7 +54,6 @@ trainer:
     curriculum: false
     curriculum_start: 0.0
     curriculum_end_epoch: null
-    clean_weight: ???        # FILL FROM HPO (adv)
     save: true
     auto_stack: true
     auto_unbind: false
@@ -62,9 +61,9 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???              # FILL FROM HPO (adv or gen)
-        weight_decay: ???    # FILL FROM HPO (adv or gen)
-
+        lr: 0.0001329291894316216                  # FILL FROM HPO
+        weight_decay: 0.04033800832600378        # FILL FROM HPO
+    clean_weight: 0.7855951534491241  
 hydra:
   sweeper:
     params:

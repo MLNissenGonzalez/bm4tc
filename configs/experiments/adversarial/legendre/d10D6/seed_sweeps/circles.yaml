@@ -70,4 +70,4 @@ trainer:
 hydra:
   sweeper:
     params:
-      tracking.seed: range(1,21)
+      tracking.seed: range(1,9)

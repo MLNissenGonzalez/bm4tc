@@ -22,8 +22,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???    # FILL FROM HPO
-        weight_decay: ???  # FILL FROM HPO
+        lr: 0.0001329291894316216    # FILL FROM HPO
+        weight_decay: 0.00025619560600751486  # FILL FROM HPO
     criterion:
       name: "negative log-likelihood"
       kwargs:
@@ -33,4 +33,4 @@ trainer:
 hydra:
   sweeper:
     params:
-      tracking.seed: range(1,21)
+      tracking.seed: range(1,11)

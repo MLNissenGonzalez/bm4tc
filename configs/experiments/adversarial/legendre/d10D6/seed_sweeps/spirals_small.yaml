@@ -63,9 +63,9 @@ trainer:
 
     optimizer:
       kwargs:
-        lr: ???                  # FILL FROM HPO
-        weight_decay: ???        # FILL FROM HPO
-    clean_weight: ???            # FILL FROM HPO
+        lr: 0.0006251373574521745                  # FILL FROM HPO
+        weight_decay: 1.7707168643537813e-08        # FILL FROM HPO
+    clean_weight: 0.32479561626896214            # FILL FROM HPO
 
 hydra:
   sweeper:
