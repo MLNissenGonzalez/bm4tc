@@ -116,9 +116,8 @@ def main():
 
     if args.list:
         for s in sweeps:
-            ana = "analyzed" if is_analyzed(s) else "       "
-            vis = "visualized" if is_visualized(s) else "          "
-            print(f"[{ana}] [{vis}] {s.relative_to(ROOT)}")
+            status = "OK " if is_visualized(s) else "   "
+            print(f"[{status}] {s.relative_to(ROOT)}")
         return
 
     # Apply filters

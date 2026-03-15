@@ -7,11 +7,11 @@ and patches the seed_sweep YAML in-place, replacing `???  # FILL FROM HPO`
 placeholders with the actual hyperparameter values.
 
 Usage:
-    python configs/tools/fill_hpo.py <dataset> [options]
-
-Examples:
-    python configs/tools/fill_hpo.py circles_hard
-    python configs/tools/fill_hpo.py moons_hard --training-type adv --dry-run
+    python configs/tools/fill_hpo.py --list
+    python configs/tools/fill_hpo.py --dry-run
+    python configs/tools/fill_hpo.py --filter-type adv --dry-run
+    python configs/tools/fill_hpo.py --filter-dataset circles --filter-embedding legendre
+    python configs/tools/fill_hpo.py --force
 """
 
 import argparse
@@ -36,6 +36,14 @@ from analysis.utils.wandb_fetcher import (
 # =============================================================================
 # Constants
 # =============================================================================
+
+VALID_TYPES = ["adversarial", "classification", "generative"]
+
+TYPE_SHORT = {
+    "cls": "classification",
+    "adv": "adversarial",
+    "gen": "generative",
+}
 
 TRAINING_DIRS = {
     "cls": "classification",
@@ -297,32 +305,71 @@ def patch_yaml(content: str, params: Dict[str, Any], overwrite: bool = False) ->
 
 
 # =============================================================================
+# Discovery
+# =============================================================================
+
+def discover_combos(configs_root: Path) -> List[Dict]:
+    """Discover all combos that have both hpo/ and seed_sweeps/ yamls."""
+    combos = []
+    for typ in VALID_TYPES:
+        type_dir = configs_root / "experiments" / typ
+        if not type_dir.is_dir():
+            continue
+        type_short = next(k for k, v in TRAINING_DIRS.items() if v == typ)
+        for embedding_dir in sorted(type_dir.iterdir()):
+            if not embedding_dir.is_dir():
+                continue
+            embedding = embedding_dir.name
+            for arch_dir in sorted(embedding_dir.iterdir()):
+                if not arch_dir.is_dir():
+                    continue
+                arch = arch_dir.name
+                hpo_dir = arch_dir / "hpo"
+                seed_dir = arch_dir / "seed_sweeps"
+                if not hpo_dir.is_dir() or not seed_dir.is_dir():
+                    continue
+                for hpo_path in sorted(hpo_dir.glob("*.yaml")):
+                    dataset = hpo_path.stem
+                    seed_path = seed_dir / f"{dataset}.yaml"
+                    if not seed_path.exists():
+                        continue
+                    combos.append({
+                        "type":       typ,
+                        "type_short": type_short,
+                        "embedding":  embedding,
+                        "arch":       arch,
+                        "dataset":    dataset,
+                        "hpo_path":   hpo_path,
+                        "seed_path":  seed_path,
+                    })
+    return combos
+
+
+def is_filled(seed_path: Path) -> bool:
+    """Return True if the seed_sweep YAML has no ??? placeholders."""
+    return not bool(FILL_PATTERN.search(seed_path.read_text()))
+
+
+# =============================================================================
 # Per-combo processing
 # =============================================================================
 
 def process_combo(
-    dataset: str,
-    training_type: str,
-    embedding: str,
-    arch: str,
+    combo: Dict,
     source: str,
     entity: str,
     project: str,
     outputs_dir: Path,
-    configs_root: Path,
     dry_run: bool,
-    overwrite: bool = False,
+    force: bool = False,
 ) -> bool:
     """Process one combo. Returns True if successfully patched (or dry-run patched)."""
-    training_dir = TRAINING_DIRS[training_type]
-    base = configs_root / "experiments" / training_dir / embedding / arch
-
-    hpo_cfg_path = base / "hpo" / f"{dataset}.yaml"
-    seed_cfg_path = base / "seed_sweeps" / f"{dataset}.yaml"
-
-    # Skip silently if either config file is absent
-    if not hpo_cfg_path.exists() or not seed_cfg_path.exists():
-        return False
+    training_type = combo["type_short"]
+    embedding     = combo["embedding"]
+    arch          = combo["arch"]
+    dataset       = combo["dataset"]
+    hpo_cfg_path  = combo["hpo_path"]
+    seed_cfg_path = combo["seed_path"]
 
     print(f"\n[{training_type}/{embedding}/{arch}/{dataset}]")
 
@@ -358,10 +405,10 @@ def process_combo(
     with open(seed_cfg_path, "r") as f:
         content = f.read()
 
-    new_content, count = patch_yaml(content, params, overwrite=overwrite)
+    new_content, count = patch_yaml(content, params, overwrite=force)
 
     if count == 0:
-        if overwrite:
+        if force:
             print("  WARNING: No matching keys found (lr/weight_decay/clean_weight) — wrong file?")
         else:
             print("  WARNING: No ??? placeholders found (already filled or wrong file).")
@@ -399,59 +446,28 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("dataset", help="Dataset name (e.g., circles_hard)")
-    parser.add_argument(
-        "--training-type",
-        nargs="+",
-        choices=["cls", "gen", "adv"],
-        default=["cls", "gen", "adv"],
-        metavar="TYPE",
-        help="Training type(s) to process (default: all three)",
-    )
-    parser.add_argument(
-        "--embedding",
-        nargs="+",
-        choices=["fourier", "legendre", "hermite", "chebychev1", "chebychev2"],
-        default=["fourier", "legendre", "hermite", "chebychev1", "chebychev2"],
-        help="Embedding(s) to process (default: all five)",
-    )
-    parser.add_argument(
-        "--arch",
-        nargs="+",
-        default=["d4D3", "d6D4", "d10D6", "d30D18", "d3D21", "d3D10c64"],
-        help="Architecture(s) to process (default: all known archs)",
-    )
-    parser.add_argument(
-        "--source",
-        choices=["wandb", "local", "both"],
-        default="both",
-        help="Where to look for HPO results (default: both, wandb first)",
-    )
-    parser.add_argument(
-        "--entity",
-        default=DEFAULT_ENTITY,
-        help="W&B entity (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--project",
-        default=DEFAULT_PROJECT,
-        help="W&B project (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--outputs-dir",
-        default="outputs",
-        help="Local Hydra outputs root (default: outputs)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print diff without writing files",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Overwrite already-filled values (default: skip files with no ??? placeholders)",
-    )
+    parser.add_argument("--filter-dataset", metavar="DS",
+                        help="Substring match on dataset name (e.g. circles).")
+    parser.add_argument("--filter-type", metavar="TYPE",
+                        help="cls | adv | gen (or full name).")
+    parser.add_argument("--filter-embedding", metavar="EMB",
+                        help="fourier | legendre | hermite | chebychev1 | chebychev2")
+    parser.add_argument("--filter-arch", metavar="ARCH",
+                        help="e.g. d4D3, d10D6")
+    parser.add_argument("--source", choices=["wandb", "local", "both"], default="both",
+                        help="Where to look for HPO results (default: both, wandb first)")
+    parser.add_argument("--entity", default=DEFAULT_ENTITY,
+                        help="W&B entity (default: %(default)s)")
+    parser.add_argument("--project", default=DEFAULT_PROJECT,
+                        help="W&B project (default: %(default)s)")
+    parser.add_argument("--outputs-dir", default="outputs",
+                        help="Local Hydra outputs root (default: outputs)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print diff without writing files")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite already-filled values")
+    parser.add_argument("--list", action="store_true",
+                        help="Print status of all discovered combos and exit.")
 
     args = parser.parse_args()
 
@@ -461,28 +477,55 @@ def main() -> None:
 
     configs_root = PROJECT_ROOT / "configs"
 
-    total = 0
-    patched = 0
+    combos = discover_combos(configs_root)
+    if not combos:
+        print("No HPO combos found under configs/experiments/.")
+        return
 
-    for training_type in args.training_type:
-        for embedding in args.embedding:
-            for arch in args.arch:
-                total += 1
-                success = process_combo(
-                    dataset=args.dataset,
-                    training_type=training_type,
-                    embedding=embedding,
-                    arch=arch,
-                    source=args.source,
-                    entity=args.entity,
-                    project=args.project,
-                    outputs_dir=outputs_dir,
-                    configs_root=configs_root,
-                    dry_run=args.dry_run,
-                    overwrite=args.overwrite,
-                )
-                if success:
-                    patched += 1
+    if args.list:
+        for c in combos:
+            status = "OK " if is_filled(c["seed_path"]) else "   "
+            print(f"[{status}] {c['type_short']}/{c['embedding']}/{c['arch']}/{c['dataset']}")
+        return
+
+    # Apply filters
+    if args.filter_type:
+        typ = TYPE_SHORT.get(args.filter_type, args.filter_type)
+        combos = [c for c in combos if c["type"] == typ]
+    if args.filter_embedding:
+        combos = [c for c in combos if c["embedding"] == args.filter_embedding]
+    if args.filter_arch:
+        combos = [c for c in combos if c["arch"] == args.filter_arch]
+    if args.filter_dataset:
+        combos = [c for c in combos if args.filter_dataset in c["dataset"]]
+
+    todo    = [c for c in combos if args.force or not is_filled(c["seed_path"])]
+    skipped = len(combos) - len(todo)
+
+    if skipped:
+        print(f"Skipping {skipped} already-filled combo(s).")
+    if not todo:
+        print("Nothing to do. Use --force to re-fill already-filled combos.")
+        return
+
+    total   = len(todo)
+    patched = 0
+    for combo in todo:
+        try:
+            success = process_combo(
+                combo=combo,
+                source=args.source,
+                entity=args.entity,
+                project=args.project,
+                outputs_dir=outputs_dir,
+                dry_run=args.dry_run,
+                force=args.force,
+            )
+            if success:
+                patched += 1
+        except Exception as e:
+            label = f"{combo['type_short']}/{combo['embedding']}/{combo['arch']}/{combo['dataset']}"
+            print(f"  WARNING: Exception processing {label}: {e}")
 
     suffix = " (dry run)" if args.dry_run else ""
     print(f"\nDone. Patched {patched}/{total} combos{suffix}.")
