@@ -10,6 +10,7 @@ This directory contains the entry point scripts for running experiments.
 | `ganstyle.py` | Classification pretraining + GAN-style training |
 | `adversarial.py` | Classification pretraining + Adversarial training |
 | `generative.py` | Classification pretraining + Generative NLL training |
+| `softmax_sanity.py` | Softmax interpretation sanity check (raw amplitudes as logits) |
 | `queue_experiments.py` | Batch-run/list HPO and seed_sweep configs (skip already-run) |
 
 ## Running Experiments
@@ -31,6 +32,9 @@ python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
 
 # Quick test run
 python -m experiments.classification +experiments=tests/classification
+
+# Softmax sanity check (MPS with softmax loss instead of Born rule)
+python -m experiments.softmax_sanity +experiments=tests/softmax/legendre_mnist
 ```
 
 ### Command-Line Overrides (debugging only)

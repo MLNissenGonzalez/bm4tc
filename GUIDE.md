@@ -148,7 +148,8 @@ adversarial_training_mps/
 │   ├── classification.py      # Classification-only training
 │   ├── ganstyle.py           # Classification + GAN-style training
 │   ├── adversarial.py        # Classification + Adversarial training
-│   └── generative.py         # Classification + Generative NLL training
+│   ├── generative.py         # Classification + Generative NLL training
+│   └── softmax_sanity.py     # Softmax interpretation sanity check (raw amplitudes as logits)
 ├── src/                       # Main source code
 │   ├── models/               # Model definitions (see src/models/GUIDE.md)
 │   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
@@ -159,9 +160,12 @@ adversarial_training_mps/
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
 │   ├── mia_analysis.py      # MIA privacy analysis notebook
 │   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
-│   ├── visualize_distributions.py  # Distribution visualization
 │   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
 │   ├── queue_analysis.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
+│   ├── queue_visualize.py   # Batch-regenerate distribution visualizations
+│   ├── cls_reg_analysis.py  # Post-training cls_reg sweep evaluation
+│   ├── dev_comb_analysis.py # Combined cls+gen dual-model sweep evaluation
+│   ├── visualize/           # Visualization helpers (distributions, evolution plots)
 │   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
@@ -276,6 +280,10 @@ embedding: "fourier"
 | UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
 | Analyze HPO results | `analysis/hpo_analysis.py` |
 | Batch-run sweep analysis | `analysis/queue_analysis.py` |
+| Batch-regenerate distribution plots | `analysis/queue_visualize.py` |
+| Post-training cls_reg sweep evaluation | `analysis/cls_reg_analysis.py` |
+| Combined cls+gen dual-model evaluation | `analysis/dev_comb_analysis.py` |
+| Softmax sanity-check experiment | `experiments/softmax_sanity.py` |
 | Fill seed_sweep configs from HPO | `configs/tools/fill_hpo.py` |
 | Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
@@ -291,6 +299,8 @@ embedding: "fourier"
 ## Known Issues & Gotchas
 
 1. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
+
+5. **Complex Born Machines require torch ≥ 2.1.0** — Adam optimizer has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates. Always use torch ≥ 2.1.0 when training with `dtype: "complex64"` or `"complex128"` configs.
 
 2. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
 
@@ -316,7 +326,7 @@ embedding: "fourier"
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
 2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
 3. ~~**Uncertainty quantification**: Marginal p(x) for detection and purification~~ — **DONE**: `src/models/born.py` (marginal_log_probability), `src/utils/purification/` (LikelihoodPurification), `analysis/utils/uq.py` (UQEvaluation)
-4. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
+4. ~~**MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)~~ — **DONE**: `d3D10c64` (complex64) and `d3D10` (float32) configs added for MNIST and UCR time-series datasets; legendre embedding with complex MPS is the recommended configuration.
 5. **MPS as discriminator backbone**: Using MPS features as input to critic
 6. ~~**More datasets**: Univariate time series dataset planned~~ — **DONE**: 7 UCR time-series datasets added (`configs/dataset/ucr_ts/`). The 5 new datasets (ChlorineConcentration, SyntheticControl, CricketX/Y/Z) were chosen to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers, enabling direct comparison with their results.
 

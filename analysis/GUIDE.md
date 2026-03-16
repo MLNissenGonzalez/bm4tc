@@ -1,9 +1,12 @@
 # Analysis Module Guide
 
-Post-experiment analysis for Born Machine seed sweeps. The two scripts you will use day-to-day are:
+Post-experiment analysis for Born Machine seed sweeps. The main scripts you will use day-to-day are:
 
 - **`queue_analysis.py`** — batch-run analysis for all unanalyzed sweeps (start here)
 - **`sweep_analysis.py`** — analyze one sweep interactively or as a script
+- **`queue_visualize.py`** — batch-regenerate distribution plots for analyzed sweeps
+- **`cls_reg_analysis.py`** — post-training evolution evaluation for cls_reg sweeps
+- **`dev_comb_analysis.py`** — combined cls+gen dual-model sweep evaluation
 
 For the math behind what is being computed (attacks, purification, MIA, UQ), see [`analysis/utils/GUIDE.md`](utils/GUIDE.md).
 
@@ -160,7 +163,8 @@ All outputs go to `analysis/outputs/<sweep_path>/`:
 | `evaluation_data.csv` | **One row per run**, all metrics. This is the primary output. |
 | `sweep_analysis_summary.txt` | Human-readable summary: statistics table, Pareto runs, acc-vs-eps band, correlations |
 | `best_run_samples.png` | Generated samples from the best model |
-| `best_run_distributions.png` | Decision boundary + p(x,c) heatmaps for best model |
+| `best_class_dist.png` | p(c\|x) conditional heatmap for best model (was `best_run_distributions.png`) |
+| `best_joint.png` | Marginal p(x) heatmap for best model (was `best_run_distributions.png`) |
 
 `evaluation_data.csv` column groups:
 
@@ -215,6 +219,70 @@ SANITY_CHECK_METRICS = {
 
 ---
 
+---
+
+## `cls_reg_analysis.py` — Post-Training Evolution Evaluation
+
+Evaluates cls_reg sweeps: experiments where a pre-trained classifier is continued for additional epochs (post-training). Includes a pretrained baseline at `max_epoch=0` so that "diff" columns (post − pretrained) can be computed.
+
+### Usage
+
+```bash
+python analysis/cls_reg_analysis.py <sweep_dir> [--device cuda] [--force]
+```
+
+### Key outputs
+
+| File | Description |
+|------|-------------|
+| `evaluation_data.csv` | One row per run, all metrics across epochs |
+| `summary.csv` | Aggregated statistics |
+| `acc.png` | Accuracy vs post-training epoch |
+| `rob.png` | Robustness vs post-training epoch |
+| `diff.png` | Δ metrics (post − pretrained baseline) |
+| `evolution.png` | Combined evolution plot |
+
+---
+
+## `dev_comb_analysis.py` — Dual-Model Sweep Evaluation
+
+Evaluates combined development sweeps where each run has both a `models/cls` checkpoint and a `models/gen` checkpoint. Loads and evaluates both models, then computes diff columns (`gen − cls`) to measure the generative training effect.
+
+### Usage
+
+```bash
+python analysis/dev_comb_analysis.py <sweep_dir> [--device cuda] [--force]
+```
+
+---
+
+## `queue_visualize.py` — Batch Visualization Regenerator
+
+Analogous to `queue_analysis.py`, but only regenerates the distribution visualizations (`best_class_dist.png` and `best_joint.png`) for all already-analyzed seed sweeps. Does **not** recompute metrics. Useful after plot style changes.
+
+### Usage
+
+```bash
+# Regenerate all visualization plots
+python analysis/queue_visualize.py
+
+# Dry run
+python analysis/queue_visualize.py --dry-run
+
+# List status
+python analysis/queue_visualize.py --list
+
+# Filter flags (same as queue_analysis.py)
+python analysis/queue_visualize.py --filter-type gen --filter-embedding legendre
+
+# Force regeneration even if plots exist
+python analysis/queue_visualize.py --force
+```
+
+**Output files per sweep**: `best_class_dist.png` (p(c|x) conditional heatmap) and `best_joint.png` (marginal p(x) heatmap).
+
+---
+
 ## Other analysis scripts
 
 | Script | When to use |
@@ -222,7 +290,8 @@ SANITY_CHECK_METRICS = {
 | `hpo_analysis.py` | Explore HPO results: parameter-metric correlations, surface plots. Reads from W&B or local. |
 | `mia_analysis.py` | Deep MIA analysis for a single run with histograms and feature importance plots. |
 | `uq_analysis.py` | Deep UQ analysis for a single run with detection/purification heatmaps. |
-| `visualize_distributions.py` | 2D decision boundary + p(x,c) heatmaps for a single run. |
+| `visualize/distributions.py` | 2D decision boundary + p(x,c) heatmaps for a single run (library module). |
+| `visualize/cls_reg_evolution.py` | Evolution plot helpers used by `cls_reg_analysis.py`. |
 
 For most purposes `sweep_analysis.py` / `queue_analysis.py` cover everything above — the standalone scripts are for deeper dives into a single run.
 

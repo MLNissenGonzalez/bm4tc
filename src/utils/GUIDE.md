@@ -231,8 +231,26 @@ Computes NLL for the joint distribution p(x,c):
 **Available Loss Functions:**
 | Mode | Name | Aliases | Description |
 |------|------|---------|-------------|
-| `"classification"` | `"nll"` | `"nlll"`, `"negativeloglikelihood"` | Classification NLL |
+| `"classification"` | `"nll"` | `"nlll"`, `"negativeloglikelihood"`, `"negloglikelihood"` | Classification NLL — expects Born probabilities |
+| `"classification"` | `"brier"` | `"brierscore"`, `"bs"` | Brier score — bounded proper scoring rule (MSE vs one-hot) |
+| `"classification"` | `"softmaxnll"` | `"softmax_nll"`, `"softmax"` | Softmax NLL — expects raw amplitudes, wraps `nn.CrossEntropyLoss` |
 | `"generative"` | `"nll"` | `"nlll"`, `"negativeloglikelihood"` | Generative NLL |
+
+### ClassificationBrier
+
+Brier score: mean squared error between Born-rule class probabilities and one-hot targets. Bounded proper scoring rule ∈ [0, 2]:
+
+```
+BS = mean_i Σ_c (p(c|xᵢ) − y_{i,c})²
+```
+
+Useful when probabilities are near zero and NLL gradients become unstable — Brier gradients `2(p_c − y_c)` are always bounded. Expects Born probabilities (already squared and normalized) from `bm.class_probabilities()`.
+
+### ClassificationSoftmaxNLL
+
+Thin wrapper around `nn.CrossEntropyLoss`. Expects **raw MPS amplitudes** ψ (signed, unnormalized) as logits — NOT Born probabilities. Applies log-softmax internally.
+
+**IMPORTANT**: Must be paired with `experiments/softmax_sanity.py`, which calls `bm.classifier.amplitudes()` instead of `bm.class_probabilities()`. Using this loss with the standard classification entry point (which passes Born probabilities) will give wrong gradients.
 
 ## _utils.py — Miscellaneous Utilities
 
@@ -519,7 +537,7 @@ _GENERATIVE_LOSSES = {
 | `schemas.py` | ~434 | All `*Config` dataclasses |
 | `get.py` | ~75 | `optimizer`, `indim_and_ncls` (re-exports from embeddings/criterions) |
 | `embeddings.py` | ~175 | `embedding`, `range_from_embedding`, `legendre_embedding`, `hermite_embedding` |
-| `criterions.py` | ~163 | `criterion`, `ClassificationNLL`, `GenerativeNLL` |
+| `criterions.py` | ~210 | `criterion`, `ClassificationNLL`, `ClassificationBrier`, `ClassificationSoftmaxNLL`, `GenerativeNLL` |
 | `_utils.py` | ~100 | `set_seed`, `sample_quality_control` |
 | `evasion/minimal.py` | ~291 | `FastGradientMethod`, `ProjectedGradientDescent`, `RobustnessEvaluation` |
 | `purification/minimal.py` | ~130 | `LikelihoodPurification`, `normalizing` |

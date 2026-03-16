@@ -72,13 +72,45 @@ def sync_tensors(self, after: str, verify: bool=False):
 ```python
 embs = self.classifier.embed(data)             # (batch, D, in_dim)
 amplitudes = self.classifier.forward(data=embs) # (batch, num_classes) — single contraction
-unnorm_px = torch.square(amplitudes).sum(dim=-1)  # (batch,) — sum_c |psi(x,c)|^2
+unnorm_px = self.classifier.abs_square(amplitudes).sum(dim=-1)  # (batch,) — sum_c |psi(x,c)|^2
 log_px = log(unnorm_px) - log_Z                   # normalized log p(x)
 ```
 
 **Differentiability:** Differentiable w.r.t. input data (for purification) but NOT w.r.t. model parameters (`_log_Z` is a detached constant). This is correct for purification (which optimizes over inputs, not model params).
 
 **log Z caching:** `_log_Z` is computed once via `generator.log_partition_function()` and stored as a Python float. It is persisted in checkpoints via `save()`/`load()`. Call `cache_log_Z()` to recompute after model parameter changes.
+
+### Complex Born Machines / dtype support
+
+`BornMachine.__init__` determines dtype early — before initializing the classifier — so the embedding can be dtype-aware:
+
+1. If `tensors` is provided (loading a checkpoint), dtype is inferred from `tensors[0].dtype`.
+2. Otherwise, the string `cfg.init_kwargs.dtype` (e.g. `"complex64"`) is looked up in an internal map; missing or `None` defaults to `torch.float32`.
+
+The resolved dtype is stored as `self.dtype` and passed to the embedding factory (`get.embedding(..., dtype=_dtype)`).
+
+`BornClassifier.__init__` then sets the `abs_square` lambda based on the tensor dtype:
+
+```python
+if _dtype.is_complex:
+    self.abs_square = lambda t: t.real**2 + t.imag**2
+else:
+    self.abs_square = lambda t: t**2
+```
+
+**CRITICAL**: Always use `self.classifier.abs_square(amplitudes)` (not `torch.square`) when converting amplitudes to Born probabilities. `torch.square` on a complex tensor returns a complex result, not the real-valued |ψ|², causing silent correctness bugs.
+
+To enable complex Born Machines, add `dtype: "complex64"` to the born config YAML:
+```yaml
+init_kwargs:
+  dtype: "complex64"
+  in_dim: 3
+  bond_dim: 10
+```
+
+**Known issue**: Adam optimizer with complex parameters requires **torch ≥ 2.1.0** (foreach bug fix). Training with complex dtypes on older torch versions produces NaN updates.
+
+---
 
 ### BornClassifier (`classifier.py`)
 
@@ -102,16 +134,18 @@ Born Rule: |amplitude|² / Σ|amplitudes|² = p(c|x)
 |--------|-------|--------|-------------|
 | `embed(data)` | `(batch, D)` | `(batch, D, in_dim)` | Embed raw features |
 | `forward(data)` | `(batch, D, in_dim)` | `(batch, num_cls)` | **Amplitudes** (not probabilities!) |
-| `parallel(embs)` | `(batch, D, in_dim)` | `(batch, num_cls)` | Probabilities (squared & normalized) |
+| `amplitudes(data)` | `(batch, D)` | `(batch, num_cls)` | Raw amplitude forward pass (alias for `forward()` after embedding) — use with softmax-based losses, **not** Born-rule classification |
+| `parallel(embs)` | `(batch, D, in_dim)` | `(batch, num_cls)` | Probabilities (squared & normalized via `abs_square`) |
 | `probabilities(data)` | `(batch, D)` | `(batch, num_cls)` | End-to-end: data → p(c|x) |
 | `prepare(...)` | — | — | Reset and prepare for training |
 
 **CRITICAL WARNING** (`classifier.py:112`):
 ```python
 # The forward() method returns AMPLITUDES, not probabilities!
-# To get probabilities, use:
-p = torch.square(self.forward(data=embs))
+# To get probabilities, use abs_square (handles both real and complex):
+p = self.abs_square(self.forward(data=embs))
 return p / p.sum(dim=-1, keepdim=True)
+# Do NOT use torch.square() — it returns complex output for complex tensors!
 ```
 
 ### BornGenerator (`generator/generator.py`)
@@ -440,8 +474,8 @@ assert log_px_after.mean() >= log_px_before.mean() - 1e-3, "Purification should 
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `born.py` | ~200 | `BornMachine` |
-| `classifier.py` | ~132 | `BornClassifier` |
+| `born.py` | ~312 | `BornMachine` |
+| `classifier.py` | ~156 | `BornClassifier` |
 | `generator/generator.py` | ~475 | `BornGenerator` |
 | `generator/differential_sampling.py` | ~132 | `os_secant`, `main` |
 | `discriminator/discriminator.py` | ~281 | `Critic` |
