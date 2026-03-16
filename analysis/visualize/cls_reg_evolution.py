@@ -142,7 +142,28 @@ def build_evolution_figure(
     # ------------------------------------------------------------------
     # Step 1: detect regime + config key
     # ------------------------------------------------------------------
-    regime = resolve_regime_from_path(str(sweep_path))
+    # resolve_regime_from_path() cannot be used here because it tokenises on
+    # '_', turning "cls_reg" → ["cls", "reg"] and matching "cls" → "pre"
+    # every time.  Instead, look for the path component directly after
+    # "cls_reg/" just like cls_reg_analysis.py does.
+    regime = None
+    for i, p in enumerate(sweep_path.parts):
+        if p == "cls_reg" and i + 1 < len(sweep_path.parts):
+            raw = sweep_path.parts[i + 1]
+            if "adv" in raw:
+                regime = "adv"
+            elif "gen" in raw:
+                regime = "gen"
+            elif "gan" in raw:
+                regime = "gan"
+            elif raw == "cls":
+                regime = "pre"
+            else:
+                regime = raw
+            break
+    if regime is None:
+        regime = resolve_regime_from_path(str(sweep_path)) or "gen"
+
     epoch_key = (
         "trainer.adversarial.max_epoch" if regime == "adv"
         else "trainer.generative.max_epoch"
