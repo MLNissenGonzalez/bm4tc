@@ -64,6 +64,21 @@ class BornGenerator(tk.models.MPS):
 
         self.virtual_mps = self.copy(share_tensors=True)
 
+        # tensorkrowch's copy(share_tensors=True) shares the main MPS tensors but
+        # creates new boundary nodes with the *default* dtype (float32), even when
+        # the main tensors are complex64.  This causes a dtype mismatch inside
+        # log_partition_function() when the boundary nodes are contracted with the
+        # complex main nodes.  Fix: cast boundary nodes to the model dtype.
+        if self._is_complex:
+            if self.virtual_mps._left_node is not None:
+                self.virtual_mps._left_node.set_tensor(
+                    self.virtual_mps._left_node.tensor.to(self.dtype)
+                )
+            if self.virtual_mps._right_node is not None:
+                self.virtual_mps._right_node.set_tensor(
+                    self.virtual_mps._right_node.tensor.to(self.dtype)
+                )
+
     def prepare(self):
         """Reset MPS state and clear data nodes for a fresh sampling pass."""
         self.reset()
