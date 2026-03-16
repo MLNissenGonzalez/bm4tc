@@ -6,6 +6,7 @@ Simpler than GANStyleTrainer - no critic, no retraining.
 """
 
 import hydra
+import math
 from pathlib import Path
 import time
 import torch
@@ -102,13 +103,19 @@ class Trainer:
     def _train_epoch(self):
         """Execute one training epoch: forward pass, loss, backward, optimizer step."""
         losses = []
+        self._norm_collapsed = False
 
         for data, labels in self.datahandler.classification["train"]:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
             # Generative NLL (criterion takes bornmachine, not just probs)
-            loss = self.criterion(self.bornmachine, data, labels)
+            try:
+                loss = self.criterion(self.bornmachine, data, labels)
+            except RuntimeError as e:
+                logger.warning(f"Norm collapse detected during training ({e}). Stopping training early.")
+                self._norm_collapsed = True
+                break
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -139,7 +146,7 @@ class Trainer:
         else:
             current_value = self.valid_perf.get(self.stopping_criterion_name)
 
-        if current_value is None:
+        if current_value is None or not math.isfinite(current_value):
             return
 
         former_best = self.best.get(self.stopping_criterion_name, 0.0 if self.stopping_criterion_name in ["acc", "rob"] else float("Inf"))
@@ -221,7 +228,12 @@ class Trainer:
             del self.valid_perf
 
         # Save model
-        if self.train_cfg.save:
+        best_stop = self.best.get(self.stopping_criterion_name)
+        if best_stop is not None and not math.isfinite(best_stop):
+            logger.warning(
+                f"Best {self.stopping_criterion_name} is {best_stop} (non-finite); skipping model save."
+            )
+        elif self.train_cfg.save:
             run_dir = Path(
                 hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
 
@@ -249,6 +261,7 @@ class Trainer:
         self.epoch = 0  # guard: stays 0 if max_epoch=0
         self.best_epoch = 0
         self.epoch_times = []
+        self._norm_collapsed = False
 
         # Prepare generator and optimizer
         self.bornmachine.generator.reset()
@@ -263,6 +276,10 @@ class Trainer:
             self.epoch = epoch + 1
 
             self._train_epoch()
+
+            if self._norm_collapsed:
+                logger.info("Norm collapsed; ending training and summarising.")
+                break
 
             # Sync to classifier for evaluation metrics
             self.bornmachine.sync_tensors(after="generation", verify=False)

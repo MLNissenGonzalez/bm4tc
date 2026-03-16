@@ -18,7 +18,7 @@ tracking:
 
 trainer:
   generative:
-    max_epoch: 50
+    max_epoch: 100
     batch_size: 500
     patience: 50
     stop_crit: "genloss"
