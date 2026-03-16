@@ -287,11 +287,19 @@ class GenerativeLossMetric(BaseMetric):
 
     def evaluate(self, bornmachine, split, context):
         """Compute mean generative NLL over the dataset."""
+        import math
         losses = []
         with torch.no_grad():
             for data, labels in self.datahandler.classification[split]:
                 data, labels = data.to(self.device), labels.to(self.device)
-                loss = self.criterion(bornmachine, data, labels).item()
+                try:
+                    loss = self.criterion(bornmachine, data, labels).item()
+                except RuntimeError as e:
+                    logger.warning(f"Generative loss computation failed ({e}), skipping batch.")
+                    continue
+                if not math.isfinite(loss):
+                    logger.warning(f"Non-finite generative loss ({loss}), skipping batch.")
+                    continue
                 losses.append(loss)
         return sum(losses) / len(losses) if losses else float('nan')
 

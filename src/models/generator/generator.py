@@ -470,7 +470,28 @@ class BornGenerator(tk.models.MPS):
             result_node = result_node.renormalize()
 
         return log_Z
-    
+
+    def renormalize_(self) -> None:
+        """
+        Rescale all MPS tensors in-place so that Z = 1.
+
+        Distributes the rescaling factor equally across all n cores (including the
+        class tensor), so each tensor is multiplied by exp(-log_Z / (2n)).
+
+        Safe to call after optimizer.step(): uses .data to bypass autograd so
+        Adam's internal moment buffers (keyed by tensor identity) remain valid.
+        No-ops silently if Z is already non-finite (collapse guard in the loss
+        will catch it on the next forward pass).
+        """
+        with torch.no_grad():
+            log_Z = self.log_partition_function()
+            if not torch.isfinite(log_Z):
+                return  # already collapsed; loss guard will raise on next forward
+            n = len(self.tensors)
+            alpha = float(torch.exp(-log_Z / (2 * n)))
+            for t in self.tensors:
+                t.data.mul_(alpha)
+
     def unnormalized_prob(
             self,
             data: torch.Tensor,

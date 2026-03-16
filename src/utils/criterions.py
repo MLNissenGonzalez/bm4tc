@@ -130,6 +130,11 @@ class GenerativeNLL(nn.Module):
             .clamp(min=self.eps)
         )
         log_Z: torch.Tensor = born.log_partition_function()
+        if not torch.isfinite(log_Z):
+            raise RuntimeError(
+                f"log_partition_function returned non-finite value: {log_Z.item():.4g}. "
+                "MPS has collapsed or exploded."
+            )
         log_prob = log_unnorm - log_Z
         return -log_prob.mean()
 

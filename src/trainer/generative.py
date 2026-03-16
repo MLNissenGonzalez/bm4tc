@@ -115,6 +115,7 @@ class Trainer:
             log_grads(bm_view=self.bornmachine.generator, watch_freq=self.train_cfg.watch_freq,
                       step=self.step, stage=self.stage)
             self.optimizer.step()
+            self.bornmachine.generator.renormalize_()
 
             losses.append(loss.detach().cpu().item())
 
