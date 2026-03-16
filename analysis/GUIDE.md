@@ -10,6 +10,8 @@ Post-experiment analysis for Born Machine seed sweeps. The main scripts you will
 
 For the math behind what is being computed (attacks, purification, MIA, UQ), see [`analysis/utils/GUIDE.md`](utils/GUIDE.md).
 
+For a detailed schema of every `evaluation_data.csv` and `summary.csv` — including what is not stored and how to reconstruct it — see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
+
 ---
 
 ## Quick Start
