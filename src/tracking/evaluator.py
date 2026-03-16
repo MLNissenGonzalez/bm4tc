@@ -418,10 +418,17 @@ def evaluate_loaded_model(
     """Evaluate a loaded model before training begins, logging diagnostics to W&B under 'loaded' stage."""
     from .wandb_utils import record
 
-    train_cfg = SimpleNamespace(
+    if datahandler.data_dim is not None and datahandler.data_dim < 10:
+        train_cfg = SimpleNamespace(
         metrics={"clsloss": 1, "genloss": 1, "acc": 1, "viz": 1},
         stop_crit=None,
+    )    
+    else: 
+        train_cfg = SimpleNamespace(
+        metrics={"clsloss": 1, "genloss": 1, "acc": 1},
+        stop_crit=None,
     )
+    
     evaluator = PerformanceEvaluator(cfg, datahandler, train_cfg, device)
     results = evaluator.evaluate(bornmachine, split="valid", step=0)
     record(results, stage="loaded", set="valid")
