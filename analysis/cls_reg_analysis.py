@@ -95,10 +95,27 @@ def _parse_sweep_dir(sweep_dir: Path):
     if embedding is None:
         embedding = parts[-3] if len(parts) >= 3 else "unknown"
 
-    # Detect regime from path
-    regime = resolve_regime_from_path(str(sweep_dir))
+    # Detect regime directly from the 'cls_reg/{regime}/' path component.
+    # resolve_regime_from_path() cannot be used here because it tokenises on '_',
+    # turning "cls_reg" → ["cls", "reg"] and matching "cls" → "pre" every time.
+    regime = None
+    for i, p in enumerate(parts):
+        if p == "cls_reg" and i + 1 < len(parts):
+            raw = parts[i + 1]
+            if "adv" in raw:
+                regime = "adv"
+            elif "gen" in raw:
+                regime = "gen"
+            elif "gan" in raw:
+                regime = "gan"
+            elif raw == "cls":
+                regime = "pre"
+            else:
+                regime = raw  # pass through unknown codes
+            break
     if regime is None:
-        regime = "gen"
+        # Fallback for non-standard paths
+        regime = resolve_regime_from_path(str(sweep_dir)) or "gen"
 
     # Split last component into dataset + date (trailing 4-digit tokens)
     tokens     = last.split("_")
