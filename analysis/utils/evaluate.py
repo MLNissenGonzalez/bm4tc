@@ -497,6 +497,211 @@ def evaluate_pretrained_model(
     return results
 
 
+def evaluate_model_at_path(
+    model_path: str,
+    ref_run_dir: Path,
+    eval_cfg: EvalConfig,
+    sync_gen: bool = False,
+) -> Dict[str, float]:
+    """Full evaluate_run() but loads model from explicit path.
+
+    Args:
+        model_path: Direct path to BornMachine checkpoint (e.g. run_dir/models/cls).
+        ref_run_dir: Run dir to read dataset/evasion config from.
+        eval_cfg: Evaluation configuration.
+        sync_gen: If True, call bm.sync_tensors(after="classification") before
+                  gen_loss/fid (correct for cls-phase model). Set False for
+                  gen-phase model whose gen tensors are already trained.
+    """
+    from src.models import BornMachine
+    from src.data.handler import DataHandler
+    from src.tracking.evaluator import MetricFactory
+
+    ref_run_dir = Path(ref_run_dir)
+    device = torch.device(eval_cfg.device)
+    results: Dict[str, float] = {}
+
+    # 1. Load config
+    cfg = load_run_config(ref_run_dir)
+
+    # 2. Apply evasion/sampling overrides
+    _apply_config_overrides(cfg, eval_cfg.evasion_override, eval_cfg.sampling_override)
+
+    # 3. Load model from explicit path
+    bm = BornMachine.load(str(model_path))
+    bm.to(device)
+
+    # 4. Sync generator to match classifier tensors (needed for gen loss & FID)
+    if sync_gen and (eval_cfg.compute_gen_loss or eval_cfg.compute_fid):
+        bm.sync_tensors(after="classification")
+
+    # 5. Ensure dataset is regenerated with correct seed
+    OmegaConf.update(cfg, "dataset.overwrite", True, force_add=True)
+
+    # 6. Load data
+    datahandler = DataHandler(cfg.dataset)
+    datahandler.load()
+    datahandler.split_and_rescale(bm)
+    datahandler.get_classification_loaders()
+
+    # 7. Evaluate non-rob metrics on all splits; rob on non-test splits only.
+    non_rob_metrics = []
+    if eval_cfg.compute_acc:
+        non_rob_metrics.append("acc")
+    if eval_cfg.compute_cls_loss:
+        non_rob_metrics.append("clsloss")
+    if eval_cfg.compute_gen_loss:
+        non_rob_metrics.append("genloss")
+    if eval_cfg.compute_fid:
+        non_rob_metrics.append("fid")
+
+    for split in eval_cfg.splits:
+        context: Dict[str, Any] = {}
+        for metric_name in non_rob_metrics:
+            try:
+                metric = MetricFactory.create(
+                    metric_name=metric_name,
+                    freq=1,
+                    cfg=cfg,
+                    datahandler=datahandler,
+                    device=device,
+                )
+                result = metric.evaluate(bm, split, context)
+                results[f"eval/{split}/{metric_name}"] = float(result)
+            except Exception as e:
+                logger.warning(f"Metric '{metric_name}' failed on split '{split}': {e}")
+                results[f"eval/{split}/{metric_name}"] = np.nan
+
+    # Valid-split rob
+    if eval_cfg.compute_rob:
+        for split in [s for s in eval_cfg.splits if s != "test"]:
+            context: Dict[str, Any] = {}
+            try:
+                metric = MetricFactory.create(
+                    metric_name="rob",
+                    freq=1,
+                    cfg=cfg,
+                    datahandler=datahandler,
+                    device=device,
+                )
+                result = metric.evaluate(bm, split, context)
+                strengths = cfg.tracking.evasion.strengths
+                for i, strength in enumerate(strengths):
+                    results[f"eval/{split}/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Metric 'rob' failed on split '{split}': {e}")
+                strengths = getattr(cfg.tracking.evasion, "strengths", [])
+                for strength in strengths:
+                    results[f"eval/{split}/rob/{strength}"] = np.nan
+
+    # 8. MIA
+    if eval_cfg.compute_mia:
+        try:
+            from .mia import MIAEvaluation, MIAFeatureConfig
+
+            feature_kwargs = eval_cfg.mia_features or {}
+            feature_config = MIAFeatureConfig(**feature_kwargs)
+            mia_eval = MIAEvaluation(
+                feature_config=feature_config,
+                adversarial_strength=eval_cfg.mia_adversarial_strength,
+                adversarial_num_steps=eval_cfg.mia_adversarial_num_steps,
+                adversarial_step_size=eval_cfg.mia_adversarial_step_size,
+                adversarial_norm=eval_cfg.mia_adversarial_norm,
+            )
+            mia_results = mia_eval.evaluate(
+                bm,
+                datahandler.classification["train"],
+                datahandler.classification["test"],
+                device,
+            )
+            results["eval/mia_accuracy"] = mia_results.attack_accuracy
+            results["eval/mia_auc_roc"] = mia_results.auc_roc
+        except Exception as e:
+            logger.warning(f"MIA evaluation failed: {e}")
+            results["eval/mia_accuracy"] = np.nan
+            results["eval/mia_auc_roc"] = np.nan
+
+    # 9. UQ (detection + purification)
+    uq_results = None
+    if eval_cfg.compute_uq:
+        try:
+            from .uq import UQEvaluation, UQConfig
+
+            uq_kwargs = eval_cfg.uq_config or {}
+            uq_config = UQConfig(**uq_kwargs)
+            uq_eval = UQEvaluation(config=uq_config)
+            uq_results = uq_eval.evaluate(
+                bm,
+                datahandler.classification["test"],
+                device,
+            )
+            results["eval/uq_clean_accuracy"] = uq_results.clean_accuracy
+            results["eval/uq_clean_log_px_mean"] = float(uq_results.clean_log_px.mean())
+
+            for eps, acc in uq_results.adv_accuracies.items():
+                results[f"eval/uq_adv_acc/{eps}"] = acc
+
+            for (pct, eps), rate in uq_results.detection_rates.items():
+                results[f"eval/uq_detection/{pct}pct/{eps}"] = rate
+
+            for (eps, radius), metrics in uq_results.purification_results.items():
+                results[f"eval/uq_purify_acc/{eps}/{radius}"] = metrics.accuracy_after_purify
+                results[f"eval/uq_purify_recovery/{eps}/{radius}"] = metrics.recovery_rate
+        except Exception as e:
+            logger.warning(f"UQ evaluation failed: {e}")
+            results["eval/uq_clean_accuracy"] = np.nan
+
+    # 10. Test-split rob: reuse UQ's adv_accuracies where possible
+    if eval_cfg.compute_rob and "test" in eval_cfg.splits:
+        _uq_adv_acc_cache: Dict[float, float] = {}
+        if eval_cfg.compute_uq and uq_results is not None:
+            _uq_adv_acc_cache = {
+                float(eps): acc for eps, acc in uq_results.adv_accuracies.items()
+            }
+
+        strengths = cfg.tracking.evasion.strengths
+        missing = []
+        for strength in strengths:
+            s = float(strength)
+            if s in _uq_adv_acc_cache:
+                results[f"eval/test/rob/{strength}"] = _uq_adv_acc_cache[s]
+            else:
+                missing.append(strength)
+
+        if missing:
+            logger.warning(
+                f"Test rob eps {missing} not in UQ cache; generating adversarial examples separately"
+            )
+            original_strengths = list(cfg.tracking.evasion.strengths)
+            try:
+                OmegaConf.update(cfg, "tracking.evasion.strengths", missing, force_add=True)
+                context: Dict[str, Any] = {}
+                metric = MetricFactory.create(
+                    metric_name="rob",
+                    freq=1,
+                    cfg=cfg,
+                    datahandler=datahandler,
+                    device=device,
+                )
+                result = metric.evaluate(bm, "test", context)
+                for i, strength in enumerate(missing):
+                    results[f"eval/test/rob/{strength}"] = float(result[i])
+            except Exception as e:
+                logger.warning(f"Fallback test rob generation failed: {e}")
+                for strength in missing:
+                    results[f"eval/test/rob/{strength}"] = np.nan
+            finally:
+                OmegaConf.update(
+                    cfg, "tracking.evasion.strengths", original_strengths, force_add=True
+                )
+
+    # 11. Cleanup
+    del bm
+    torch.cuda.empty_cache()
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Sweep-level evaluation
 # ---------------------------------------------------------------------------
