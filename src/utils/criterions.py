@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 
 # TODO: Think about making both NLL losses share more code or call structures..
 
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------Classification------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
 
 class ClassificationNLL(nn.Module):
     """
@@ -86,9 +91,14 @@ class ClassificationSoftmaxNLL(nn.Module):
         return self._loss(amplitudes, t)
 
 
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------Generative------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+
+
 # This uses logs to improve numerical stability which is not necessary for class probabilities.
-
-
 class GenerativeNLL(nn.Module):
     """
     Generative NLL loss for joint distribution p(x,c).
@@ -139,6 +149,57 @@ class GenerativeNLL(nn.Module):
         return -log_prob.mean()
 
 
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------Mixed------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------------------------
+
+class MixedNLL(nn.Module):
+    """
+    Compute (1-alpha)ClassicationNLL + alpha*GenerativeNLL 
+            = ClassificationNLL - alpha * ln(p(x)).mean() 
+            = Sum_(x,c) -ln (bm(x,c)) + ln (sum_c' bm(x,c')) + alpha * (bm.log_partition() - ln(sum_c' bm(x,c'))
+            = Sum_(x,c) -ln (bm(x,c)) + (1-alpha) * ln(sum_c' bm(x,c')) + alpha * bm.log_partition()
+
+    where bm(x,c) is the forward call of the born machine, which is tn(x,c).abs_square(), i.e. the unnormalized probability of the tensor network. 
+    """
+
+    def __init__(self, eps: float = 1e-12, alpha: float = 0.1):
+        super().__init__()
+        self.eps = eps
+        self.alpha = alpha
+
+    def forward(self, bm: "BornMachine", data: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        gen = bm.generator
+        log_Z: torch.Tensor = gen.log_partition_function()
+        if not torch.isfinite(log_Z):
+            raise RuntimeError(
+                f"log_partition_function returned non-finite value: {log_Z.item():.4g}. "
+                "MPS has collapsed or exploded."
+            )
+
+        # Compute |ψ(x,c)|² for all C classes via C generator forward passes
+        # unnorm shape: (batch, num_classes)
+        unnorm = torch.stack(
+            [gen.unnormalized_prob(data, torch.full_like(labels, c))
+             for c in range(bm.out_dim)],
+            dim=1
+        )
+
+        # Term 1: -log|ψ(x,c_true)|²
+        log_unnorm_joint = torch.log(
+            unnorm[torch.arange(len(labels)), labels].clamp(min=self.eps)
+        )
+
+        # Term 2: log Σ_c |ψ(x,c)|²  (marginal, needed for classification component)
+        log_unnorm_marginal = torch.log(unnorm.sum(dim=1).clamp(min=self.eps))
+
+        loss = -log_unnorm_joint + (1 - self.alpha) * log_unnorm_marginal + self.alpha * log_Z
+        return loss.mean()
+
+
+
 # -----------------------------------------------------------------------------------------------
 # -----------------------------------------------------------------------------------------------
 # ---------API-----------------------------------------------------------------
@@ -160,7 +221,10 @@ _GENERATIVE_LOSSES = {
     "nll": GenerativeNLL,
     "nlll": GenerativeNLL,
     "negativeloglikelihood": GenerativeNLL,
-    "negloglikelihood": GenerativeNLL
+    "negloglikelihood": GenerativeNLL,
+    "mixednll": MixedNLL,
+    "mixed": MixedNLL,
+    "mixed_nll": MixedNLL,
 }
 
 _LOSS_MAP = {
