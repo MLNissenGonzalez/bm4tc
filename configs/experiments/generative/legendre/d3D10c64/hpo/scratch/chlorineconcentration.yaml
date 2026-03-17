@@ -1,6 +1,6 @@
 # @package _global_
-experiment: hpo
-descriptor: nll_scratch
+experiment: hpo_scratch
+descriptor: nll_from_scratch
 
 defaults:
   - override /born: legendre/d3D10c64

@@ -1,3 +1,4 @@
+import math
 import torch
 import tensorkrowch as tk
 from src.models.generator.differential_sampling import main as diff_sampling
@@ -488,7 +489,7 @@ class BornGenerator(tk.models.MPS):
             if not torch.isfinite(log_Z):
                 return  # already collapsed; loss guard will raise on next forward
             n = len(self.tensors)
-            alpha = float(torch.exp(-log_Z / (2 * n)))
+            alpha = math.exp(-log_Z.item() / (2 * n))
             for t in self.tensors:
                 t.data.mul_(alpha)
 

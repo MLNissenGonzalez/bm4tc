@@ -1,5 +1,5 @@
 # @package _global_
-experiment: hpo
+experiment: hpo_reg
 descriptor: nll_pretrained
 
 defaults:

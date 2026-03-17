@@ -1,5 +1,5 @@
 # @package _global_
-experiment: hpo
+experiment: hpo_reg
 descriptor: nll_pretrained
 
 defaults:
@@ -19,7 +19,7 @@ tracking:
 trainer:
   generative:
     max_epoch: 100
-    batch_size: 500
+    batch_size: 512
     patience: 50
     stop_crit: "genloss"
     watch_freq: 0
