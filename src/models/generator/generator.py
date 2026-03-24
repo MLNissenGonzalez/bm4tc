@@ -80,6 +80,27 @@ class BornGenerator(tk.models.MPS):
                     self.virtual_mps._right_node.tensor.to(self.dtype)
                 )
 
+    def initialize(self, tensors=None, **kwargs):
+        """Override to re-link virtual_mps after initialize() replaces Parameter objects.
+
+        tensorkrowch's MPS.initialize() assigns new tensors to each node in
+        self._mats_env via ``node.tensor = tensor``, which creates new Parameter
+        objects and breaks the sharing link established between self._mats_env
+        and self.virtual_mps._mats_env by copy(share_tensors=True).
+
+        This override re-links the virtual_mps nodes to the current Parameter
+        objects after every initialize() call.  The hasattr guard is needed
+        because MPS.__init__ itself calls initialize() before virtual_mps exists.
+        """
+        super().initialize(tensors=tensors, **kwargs)
+        if hasattr(self, 'virtual_mps'):
+            self._sync_virtual_mps()
+
+    def _sync_virtual_mps(self) -> None:
+        """Re-link virtual_mps._mats_env to self._mats_env after tensor replacement."""
+        for vnode, main_node in zip(self.virtual_mps._mats_env, self._mats_env):
+            vnode.tensor = main_node.tensor
+
     def prepare(self):
         """Reset MPS state and clear data nodes for a fresh sampling pass."""
         self.reset()
