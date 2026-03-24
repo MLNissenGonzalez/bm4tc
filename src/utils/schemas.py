@@ -384,6 +384,32 @@ cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
 
 @dataclass
+class NormControlConfig:
+    """
+    Unified control for Born Machine norm management during generative training.
+
+    Both mechanisms share the same ``target`` Z value.
+    Set ``hard_every=0`` to disable hard renorm; set ``soft_strength=0.0`` to
+    disable the soft penalty. Both can be enabled simultaneously.
+
+    Parameters
+    ----------
+    target : float | None
+        Target partition function Z. None = capture from BornMachine at the
+        start of ``train()`` (i.e. the pretrained value). Default 1.0.
+    hard_every : int
+        Hard-renormalize toward target every N optimizer steps.
+        0 = disabled. Default 1 (every step).
+    soft_strength : float
+        Coefficient for the soft penalty  strength * (Z - target)².
+        0.0 = disabled. Default 0.0.
+    """
+    target: Optional[float] = 1.0
+    hard_every: int = 1
+    soft_strength: float = 0.0
+
+
+@dataclass
 class GenerativeConfig:
     """
     Configuration for generative training using NLL minimization.
@@ -398,6 +424,7 @@ class GenerativeConfig:
     stop_crit: str  # "acc", "genloss", "fid", or "rob"
     patience: int
     watch_freq: int  # gradient logging step interval; 0 = disabled (default)
+    norm_control: NormControlConfig  # norm management (hard renorm and/or soft penalty)
     metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
     save: bool = False
     auto_stack: bool = True

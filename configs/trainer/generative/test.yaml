@@ -12,6 +12,10 @@ criterion:
 patience: 10
 stop_crit: "genloss"
 watch_freq: 0
+norm_control:
+  target: 1.0
+  hard_every: 1
+  soft_strength: 0.0
 metrics: {"genloss": 1}
 save: false
 auto_stack: true

@@ -208,6 +208,7 @@ def sequential(self, embs: Dict[int, torch.Tensor]) -> torch.Tensor:
 | `sample_single_class(cls, cfg)` | API: sample from specific class (handles batching) |
 | `sample_all_classes(cfg)` | API: sample from all classes |
 | `prepare()` | Reset MPS state before sampling |
+| `renormalize_(target=1.0)` | Rescale tensors in-place so Z → target (default 1.0). Called by `GenerativeTrainer` after each optimizer step when `hard_every > 0`. |
 
 **Output Shapes:**
 - `sample_single_class(cls, cfg)` → `(num_spc, data_dim)`

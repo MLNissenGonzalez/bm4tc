@@ -16,6 +16,7 @@ import wandb
 from src.tracking import PerformanceEvaluator, record, log_grads
 from src.data.handler import DataHandler
 from src.models import BornMachine
+from src.utils.criterions import NormRegularizer
 
 import logging
 logger = logging.getLogger(__name__)
@@ -69,6 +70,13 @@ class Trainer:
         wandb.define_metric(f"{self.stage}/train/loss", summary="none")
         self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, self.device)
 
+        # Norm control setup (target resolved lazily in train() after device placement)
+        self._nc = self.train_cfg.norm_control
+        self.norm_regularizer: NormRegularizer | None = None
+        self._nc_target: float | None = None
+        if self._nc.soft_strength > 0.0:
+            wandb.define_metric(f"{self.stage}/train/norm_reg", summary="none")
+
         # Ensure stop_crit is in metrics (for HPO)
         metrics_for_best = dict(self.train_cfg.metrics)
         if self.train_cfg.stop_crit not in metrics_for_best and self.train_cfg.stop_crit != "rob":
@@ -111,22 +119,36 @@ class Trainer:
 
             # Generative NLL (criterion takes bornmachine, not just probs)
             try:
-                loss = self.criterion(self.bornmachine, data, labels)
+                nll_loss = self.criterion(self.bornmachine, data, labels)
             except RuntimeError as e:
                 logger.warning(f"Norm collapse detected during training ({e}). Stopping training early.")
                 self._norm_collapsed = True
                 break
 
+            # Soft norm regularization (optional, trainer-level so evaluator is unaffected)
+            if self.norm_regularizer is not None:
+                reg_loss = self.norm_regularizer(self.bornmachine)
+                total_loss = nll_loss + reg_loss
+            else:
+                reg_loss = None
+                total_loss = nll_loss
+
             self.optimizer.zero_grad()
-            loss.backward()
+            total_loss.backward()
             log_grads(bm_view=self.bornmachine.generator, watch_freq=self.train_cfg.watch_freq,
                       step=self.step, stage=self.stage)
             self.optimizer.step()
-            self.bornmachine.generator.renormalize_()
 
-            losses.append(loss.detach().cpu().item())
+            # Hard renormalization (conditional on frequency; hard_every=0 disables)
+            if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
+                self.bornmachine.generator.renormalize_(target=self._nc_target)
 
-            wandb.log({f"{self.stage}/train/loss": sum(losses) / len(losses)})
+            losses.append(nll_loss.detach().cpu().item())  # NLL only for comparability
+
+            log_payload = {f"{self.stage}/train/loss": sum(losses) / len(losses)}
+            if reg_loss is not None:
+                log_payload[f"{self.stage}/train/norm_reg"] = reg_loss.detach().cpu().item()
+            wandb.log(log_payload)
 
     def _update(self):
         """
@@ -267,6 +289,20 @@ class Trainer:
         self.bornmachine.generator.reset()
         self.bornmachine.generator.out_features = []
         self.bornmachine.to(self.device)
+
+        # Resolve norm control target (None = capture from pretrained BM)
+        if self._nc.target is None:
+            with torch.no_grad():
+                log_Z0 = self.bornmachine.generator.log_partition_function()
+            self._nc_target = torch.exp(log_Z0).item()
+            logger.info(f"NormControl: target Z (pretrained) = {self._nc_target:.6g}")
+        else:
+            self._nc_target = float(self._nc.target)
+        if self._nc.soft_strength > 0.0:
+            self.norm_regularizer = NormRegularizer(
+                strength=self._nc.soft_strength, target=self._nc_target
+            )
+
         self.optimizer = get.optimizer(self.bornmachine.parameters(mode="generator"),
                                        self.train_cfg.optimizer)
 

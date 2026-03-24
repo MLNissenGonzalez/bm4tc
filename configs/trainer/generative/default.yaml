@@ -12,6 +12,10 @@ criterion:
 patience: 50
 stop_crit: "acc"
 watch_freq: 0
+norm_control:
+  target: 1.0        # null = use pretrained Z; float = explicit target
+  hard_every: 1      # hard renorm every N steps; 0 = disabled
+  soft_strength: 0.0 # soft penalty coefficient; 0.0 = disabled
 metrics: {"genloss": 1, "acc": 1, "fid": 10, "viz": 10}
 save: false
 auto_stack: true

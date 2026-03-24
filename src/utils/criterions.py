@@ -200,6 +200,43 @@ class MixedNLL(nn.Module):
 
 
 
+class NormRegularizer(nn.Module):
+    """
+    Partition-function norm regularization penalty (trainer-level, not a criterion).
+
+    Computes  strength * (Z - target)²  where Z = exp(log_partition_function()).
+
+    Not in _GENERATIVE_LOSSES — instantiated directly by GenerativeTrainer, so that
+    PerformanceEvaluator remains unaffected by the regularization term.
+
+    Parameters
+    ----------
+    strength : float
+        Regularization coefficient.
+    target : float
+        Target value for the partition function Z (norm² of the MPS).
+    """
+
+    def __init__(self, strength: float, target: float):
+        super().__init__()
+        self.strength = strength
+        self.target = target
+
+    def forward(self, bornmachine: "BornMachine") -> torch.Tensor:
+        """
+        Compute the norm regularization penalty.
+
+        Args:
+            bornmachine: BornMachine instance.
+
+        Returns:
+            Scalar tensor with the penalty value.
+        """
+        log_Z: torch.Tensor = bornmachine.generator.log_partition_function()
+        Z = torch.exp(log_Z)
+        return self.strength * (Z - self.target) ** 2
+
+
 # -----------------------------------------------------------------------------------------------
 # -----------------------------------------------------------------------------------------------
 # ---------API-----------------------------------------------------------------

@@ -352,11 +352,22 @@ optimizer:
 patience: 50
 stop_crit: "genloss"       # "genloss", "acc", or "fid"
 watch_freq: 100
+norm_control:
+  target: 1.0              # null = capture Z from BM at start of train() (pretrained value)
+  hard_every: 1            # hard renorm every N steps; 0 = disabled
+  soft_strength: 0.0       # soft penalty strength * (Z - target)^2; 0.0 = disabled
 metrics: {genloss: 1, acc: 1, fid: 10, viz: 10}
 save: false
 auto_stack: true
 auto_unbind: false
 ```
+
+**Norm control details:**
+- Both `hard_every` and `soft_strength` share the same `target`.
+- `target: null` → the pretrained Z is captured at the start of `train()` (after device placement).
+- Hard renorm rescales all MPS tensors in-place so Z → target (logged nowhere, silent).
+- Soft reg adds `soft_strength * (Z - target)²` to the per-step loss; logged as `gen/train/norm_reg` (separate from `gen/train/loss` which tracks NLL only).
+- Default config (`hard_every: 1, soft_strength: 0.0, target: 1.0`) preserves the original behavior.
 
 ### AdversarialConfig (`schemas.py:288`)
 
