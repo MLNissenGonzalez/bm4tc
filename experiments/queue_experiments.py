@@ -1,13 +1,18 @@
 #!/usr/bin/env python
 """
-Discover and run seed_sweep / hpo experiment configs from configs/experiments/.
+Discover and run seed_sweep / hpo / grid_sweep experiment configs from configs/experiments/.
+
+Two directory layouts are supported:
+  - Old (no regime):   configs/experiments/{type}/{embedding}/{arch}/{kind}/{dataset}.yaml
+  - New (with regime): configs/experiments/{type}/{regime}/{embedding}/{arch}/{kind}/{dataset}.yaml
 
 Usage
 -----
     python -m experiments.queue_experiments --list
     python -m experiments.queue_experiments --dry-run
-    python -m experiments.queue_experiments --filter-type gen --filter-embedding hermite --dry-run
-    python -m experiments.queue_experiments --filter-type gen --filter-embedding hermite --filter-kind seed_sweep
+    python -m experiments.queue_experiments --filter-type gen --filter-embedding legendre --dry-run
+    python -m experiments.queue_experiments --filter-type gen --filter-kind grid_sweep
+    python -m experiments.queue_experiments --filter-type gen --filter-regime hard_pretrained --filter-kind grid_sweep
     python -m experiments.queue_experiments --filter-type cls --filter-dataset moons --force --dry-run
 """
 
@@ -22,7 +27,7 @@ ROOT         = Path(__file__).parent.parent
 CONFIGS_ROOT = ROOT / "configs" / "experiments"
 
 VALID_TYPES = ["classification", "adversarial", "generative"]
-VALID_KINDS = ["seed_sweeps", "hpo"]
+VALID_KINDS = ["seed_sweeps", "hpo", "grid_sweep"]
 
 TYPE_TO_MODULE = {
     "classification": "experiments.classification",
@@ -39,6 +44,7 @@ TYPE_SHORT = {
 KIND_SHORT = {
     "seed_sweep": "seed_sweeps",
     "hpo":        "hpo",
+    "grid_sweep": "grid_sweep",
 }
 
 
@@ -77,42 +83,63 @@ def is_already_run(experiment, embedding, arch, dataset_name):
 
 
 def discover_configs():
-    """Yield config dicts for every seed_sweeps / hpo yaml under CONFIGS_ROOT."""
+    """Yield config dicts for every seed_sweeps / hpo / grid_sweep yaml under CONFIGS_ROOT.
+
+    Handles two directory layouts:
+      - Old (no regime):   {type}/{embedding}/{arch}/{kind}/{dataset}.yaml
+      - New (with regime): {type}/{regime}/{embedding}/{arch}/{kind}/{dataset}.yaml
+
+    The regime level is detected by checking whether the second-level directory is
+    a known embedding name; if not, it is treated as a regime sub-namespace.
+    """
     configs = []
     for typ in VALID_TYPES:
         type_dir = CONFIGS_ROOT / typ
         if not type_dir.is_dir():
             continue
-        for embedding_dir in sorted(type_dir.iterdir()):
-            if not embedding_dir.is_dir():
-                continue
-            embedding = embedding_dir.name
-            for arch_dir in sorted(embedding_dir.iterdir()):
-                if not arch_dir.is_dir():
-                    continue
-                arch = arch_dir.name
-                for kind in VALID_KINDS:
-                    kind_dir = arch_dir / kind
-                    if not kind_dir.is_dir():
-                        continue
-                    for config_path in sorted(kind_dir.glob("*.yaml")):
-                        name         = config_path.stem
-                        dataset_name = parse_dataset_name(config_path, name)
-                        experiment   = get_experiment_field(config_path, kind)
-                        experiment_key = (
-                            f"{typ}/{embedding}/{arch}/{kind}/{name}"
-                        )
-                        configs.append({
-                            "type":           typ,
-                            "embedding":      embedding,
-                            "arch":           arch,
-                            "kind":           kind,
-                            "name":           name,
-                            "dataset_name":   dataset_name,
-                            "experiment":     experiment,
-                            "config_path":    config_path,
-                            "experiment_key": experiment_key,
-                        })
+        # Walk all yaml files under this type directory and classify by path depth.
+        for config_path in sorted(type_dir.rglob("*.yaml")):
+            rel   = config_path.relative_to(type_dir)
+            parts = rel.parts  # e.g. (embedding, arch, kind, name) or (regime, embedding, arch, kind, name)
+
+            # Locate the kind component — the first part that is in VALID_KINDS.
+            kind_idx = next(
+                (i for i, p in enumerate(parts[:-1]) if p in VALID_KINDS), None
+            )
+            if kind_idx is None:
+                continue   # no valid kind in path
+
+            kind   = parts[kind_idx]
+            prefix = parts[:kind_idx]   # components before the kind dir
+
+            if len(prefix) == 2:
+                # No regime: embedding / arch
+                embedding, arch = prefix
+                regime = None
+            elif len(prefix) == 3:
+                # With regime: regime / embedding / arch
+                regime, embedding, arch = prefix
+            else:
+                continue   # unexpected depth
+
+            name           = config_path.stem
+            dataset_name   = parse_dataset_name(config_path, name)
+            experiment     = get_experiment_field(config_path, kind)
+            experiment_key = str(
+                Path(typ) / rel.with_suffix("")
+            )
+            configs.append({
+                "type":           typ,
+                "regime":         regime,
+                "embedding":      embedding,
+                "arch":           arch,
+                "kind":           kind,
+                "name":           name,
+                "dataset_name":   dataset_name,
+                "experiment":     experiment,
+                "config_path":    config_path,
+                "experiment_key": experiment_key,
+            })
     return configs
 
 
@@ -124,7 +151,7 @@ def build_cmd(c):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Discover and run seed_sweep / hpo experiment configs."
+        description="Discover and run seed_sweep / hpo / grid_sweep experiment configs."
     )
     parser.add_argument("--list", action="store_true",
                         help="Print all discovered configs with [ran]/[   ] status.")
@@ -141,7 +168,9 @@ def main():
     parser.add_argument("--filter-dataset", metavar="DS",
                         help="Substring match on dataset name (e.g. moons).")
     parser.add_argument("--filter-kind", metavar="KIND",
-                        help="seed_sweep | hpo")
+                        help="seed_sweep | hpo | grid_sweep")
+    parser.add_argument("--filter-regime", metavar="REGIME",
+                        help="Substring match on regime (e.g. hard_pretrained, mixed_scratch).")
     args = parser.parse_args()
 
     configs = discover_configs()
@@ -149,15 +178,7 @@ def main():
         print("No experiment configs found under configs/experiments/.")
         return
 
-    if args.list:
-        for c in configs:
-            ran = is_already_run(c["experiment"], c["embedding"],
-                                 c["arch"], c["dataset_name"])
-            status = "ran" if ran else "   "
-            print(f"[{status}] {c['experiment_key']}")
-        return
-
-    # Apply filters
+    # Apply filters (before --list so the listing is also filtered)
     if args.filter_type:
         typ = TYPE_SHORT.get(args.filter_type, args.filter_type)
         configs = [c for c in configs if c["type"] == typ]
@@ -170,6 +191,17 @@ def main():
     if args.filter_kind:
         kind = KIND_SHORT.get(args.filter_kind, args.filter_kind)
         configs = [c for c in configs if c["kind"] == kind]
+    if args.filter_regime:
+        configs = [c for c in configs
+                   if c["regime"] is not None and args.filter_regime in c["regime"]]
+
+    if args.list:
+        for c in configs:
+            ran = is_already_run(c["experiment"], c["embedding"],
+                                 c["arch"], c["dataset_name"])
+            status = "ran" if ran else "   "
+            print(f"[{status}] {c['experiment_key']}")
+        return
 
     todo    = [c for c in configs
                if args.force or not is_already_run(

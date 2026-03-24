@@ -11,7 +11,7 @@ This directory contains the entry point scripts for running experiments.
 | `adversarial.py` | Classification pretraining + Adversarial training |
 | `generative.py` | Classification pretraining + Generative NLL training |
 | `softmax_sanity.py` | Softmax interpretation sanity check (raw amplitudes as logits) |
-| `queue_experiments.py` | Batch-run/list HPO and seed_sweep configs (skip already-run) |
+| `queue_experiments.py` | Batch-run/list HPO, grid_sweep, and seed_sweep configs (skip already-run) |
 
 ## Running Experiments
 
@@ -141,7 +141,7 @@ python -m experiments.classification --info all +experiments=tests/classificatio
 
 ## Batch-Running Experiments (`queue_experiments.py`)
 
-`queue_experiments.py` discovers all `hpo/` and `seed_sweeps/` configs under
+`queue_experiments.py` discovers all `hpo/`, `grid_sweep/`, and `seed_sweeps/` configs under
 `configs/experiments/` and runs them sequentially, skipping any that already
 have a matching output directory.
 
@@ -182,9 +182,9 @@ python -m experiments.queue_experiments \
 
 ### How it works
 
-1. **Discovery**: walks `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/{hpo,seed_sweeps}/` and collects all `.yaml` files.
+1. **Discovery**: recursively scans `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/` for `.yaml` files under any `hpo/`, `seed_sweeps/`, or `grid_sweep/` subdirectory (including nested subdirs like `grid_sweep/hard_pretrained/`).
 2. **Already-run check**: looks for a matching `outputs/{experiment}/*/{embedding}/d{in_dim}D{bond_dim}/{dataset}_*` directory. If found, the config is skipped (unless `--force`).
-3. **Execution**: calls `python -m experiments.{type} --multirun +experiments={type}/{embedding}/{arch}/{kind}/{name}` for each remaining config, stopping on the first non-zero exit code.
+3. **Execution**: calls `python -m experiments.{type} --multirun +experiments={experiment_key}` for each remaining config, stopping on the first non-zero exit code.
 
 ### Filters
 
@@ -193,7 +193,8 @@ python -m experiments.queue_experiments \
 | `--filter-type` | `cls`, `adv`, `gen` (or full names) | Training regime |
 | `--filter-embedding` | `fourier`, `legendre`, `hermite` | Embedding type |
 | `--filter-arch` | e.g. `d3D10`, `d30D18` | Architecture (exact match) |
-| `--filter-kind` | `hpo`, `seed_sweep` | Config phase |
+| `--filter-kind` | `hpo`, `grid_sweep`, `seed_sweep` | Config phase |
+| `--filter-regime` | e.g. `hard_pretrained`, `mixed_scratch` | Sub-namespace (substring match) |
 | `--filter-dataset` | any substring | Dataset name substring match |
 
 ## HPO Objective Values
