@@ -141,7 +141,7 @@ python -m experiments.classification --info all +experiments=tests/classificatio
 
 ## Batch-Running Experiments (`queue_experiments.py`)
 
-`queue_experiments.py` discovers all `hpo/`, `grid_sweep/`, and `seed_sweeps/` configs under
+`queue_experiments.py` discovers all `hpo/`, `grid_sweep/`, and `seed_sweep/` configs under
 `configs/experiments/` and runs them sequentially, skipping any that already
 have a matching output directory.
 
@@ -182,7 +182,7 @@ python -m experiments.queue_experiments \
 
 ### How it works
 
-1. **Discovery**: recursively scans `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/` for `.yaml` files under any `hpo/`, `seed_sweeps/`, or `grid_sweep/` subdirectory (including nested subdirs like `grid_sweep/hard_pretrained/`).
+1. **Discovery**: recursively scans `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/` for `.yaml` files under any `hpo/`, `seed_sweep/`, or `grid_sweep/` subdirectory (including variant suffixes like `grid_sweep_hard`, `seed_sweep_soft`).
 2. **Already-run check**: looks for a matching `outputs/{experiment}/*/{embedding}/d{in_dim}D{bond_dim}/{dataset}_*` directory. If found, the config is skipped (unless `--force`).
 3. **Execution**: calls `python -m experiments.{type} --multirun +experiments={experiment_key}` for each remaining config, stopping on the first non-zero exit code.
 
@@ -193,8 +193,7 @@ python -m experiments.queue_experiments \
 | `--filter-type` | `cls`, `adv`, `gen` (or full names) | Training regime |
 | `--filter-embedding` | `fourier`, `legendre`, `hermite` | Embedding type |
 | `--filter-arch` | e.g. `d3D10`, `d30D18` | Architecture (exact match) |
-| `--filter-kind` | `hpo`, `grid_sweep`, `seed_sweep` | Config phase |
-| `--filter-regime` | e.g. `hard_pretrained`, `mixed_scratch` | Sub-namespace (substring match) |
+| `--filter-kind` | `hpo`, `grid_sweep`, `seed_sweep`, `grid_sweep_hard`, `seed_sweep_soft`, … | Config kind (exact match) |
 | `--filter-dataset` | any substring | Dataset name substring match |
 
 ## HPO Objective Values

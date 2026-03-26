@@ -116,31 +116,41 @@ configs/
 │   │   │   ├── d30D18/      # in_dim=30, bond_dim=18
 │   │   │   │   ├── best/    # Best configs per dataset
 │   │   │   │   ├── hpo/     # HPO experiments
-│   │   │   │   └── seed_sweeps/
+│   │   │   │   └── seed_sweep/
 │   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6}/  # Other architectures
 │   │   │       ├── hpo/
-│   │   │       └── seed_sweeps/
+│   │   │       └── seed_sweep/
 │   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── adversarial/          # Adversarial training experiments
 │   │   ├── fourier/         # Fourier embedding
 │   │   │   ├── d30D18/
 │   │   │   │   ├── best/    # Best HPO configs per dataset
 │   │   │   │   ├── hpo/
-│   │   │   │   └── seed_sweeps/
+│   │   │   │   └── seed_sweep/
 │   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d10D4}/  # Other architectures
 │   │   │       ├── hpo/
-│   │   │       └── seed_sweeps/
+│   │   │       └── seed_sweep/
 │   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── generative/           # Generative NLL experiments
 │   │   ├── fourier/         # Fourier embedding
 │   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d30D18}/
 │   │   │       ├── hpo/
-│   │   │       └── seed_sweeps/
-│   │   ├── legendre/        # Legendre embedding (same arch structure)
+│   │   │       └── seed_sweep/
+│   │   ├── legendre/        # Legendre embedding
+│   │   │   └── {arch}/
+│   │   │       ├── hpo/              # scratch HPO
+│   │   │       ├── hpo_pretrained/   # pretrained HPO
+│   │   │       ├── seed_sweep/       # scratch seed sweep
+│   │   │       ├── grid_sweep_hard/  # pretrained + hard norm ctrl grid sweep
+│   │   │       ├── seed_sweep_hard/  # pretrained + hard norm ctrl seed sweep
+│   │   │       ├── grid_sweep_soft/  # pretrained + soft norm ctrl
+│   │   │       ├── seed_sweep_soft/
+│   │   │       ├── grid_sweep_mixed/ # scratch + mixed NLL
+│   │   │       └── seed_sweep_mixed/
 │   │   └── hermite/         # Hermite polynomial embedding
 │   │       └── {d4D3,d6D4,d10D6,d30D18}/
 │   │           ├── hpo/
-│   │           └── seed_sweeps/
+│   │           └── seed_sweep/
 │   ├── ganstyle/             # GAN experiments
 │   │   └── fourier_d30D18/
 │   │       ├── critic_sweep.yaml
@@ -470,7 +480,7 @@ defaults:
   # ... validated hyperparameters
 ```
 
-**Seed sweeps** (`experiments/classification/fourier_d30D18/seed_sweeps/`):
+**Seed sweeps** (`experiments/classification/fourier/d30D18/seed_sweep/`):
 Run the same config with different random seeds for statistical analysis.
 
 ## Running Experiments

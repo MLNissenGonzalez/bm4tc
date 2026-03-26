@@ -309,7 +309,7 @@ def patch_yaml(content: str, params: Dict[str, Any], overwrite: bool = False) ->
 # =============================================================================
 
 def discover_combos(configs_root: Path) -> List[Dict]:
-    """Discover all combos that have both hpo/ and seed_sweeps/ yamls."""
+    """Discover all combos that have both hpo/ and seed_sweep/ yamls."""
     combos = []
     for typ in VALID_TYPES:
         type_dir = configs_root / "experiments" / typ
@@ -325,7 +325,7 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                     continue
                 arch = arch_dir.name
                 hpo_dir = arch_dir / "hpo"
-                seed_dir = arch_dir / "seed_sweeps"
+                seed_dir = arch_dir / "seed_sweep"
                 if not hpo_dir.is_dir() or not seed_dir.is_dir():
                     continue
                 for hpo_path in sorted(hpo_dir.glob("*.yaml")):
