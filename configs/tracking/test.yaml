@@ -14,4 +14,4 @@ evasion:
     name: "negative log-likelihood"
     kwargs:
       eps: 1e-8
-  strengths: [0.1, 0.3] # not relative, default for dataspaces [0,1]^n\
+  strengths: [0.15] # not relative, default for dataspaces [0,1]^n

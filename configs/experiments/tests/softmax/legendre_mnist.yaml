@@ -1,0 +1,20 @@
+# @package _global_
+experiment: softmax_sanity_legendre
+
+defaults:
+  - override /born: legendre/d3D10
+  - override /dataset: mnist/mnist_full
+  - override /trainer/classification: softmax_adam50
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 13
+  mode: offline
+
+trainer:
+  classification:
+    optimizer:
+      kwargs:
+        lr: 5e-5

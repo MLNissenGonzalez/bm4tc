@@ -13,7 +13,7 @@ optimizer:
   kwargs:
     lr: 1e-4
     weight_decay: 0.00
-watch_freq: 100
+watch_freq: 0
 metrics: {"clsloss": 1, "acc": 1, "rob": 5, "viz": 40, "fid": 1}
 retrain_crit: "acc"
 tolerance: 0.75
@@ -34,7 +34,7 @@ retrain:
   auto_unbind: False
   patience: 30
   stop_crit: "acc"
-  watch_freq: 100
+  watch_freq: 0
   metrics: {"acc": 10}
   save: False
 save: False

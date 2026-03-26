@@ -1,0 +1,61 @@
+# @package _global_
+experiment: dev_comb
+
+defaults:
+  - override /born: legendre/d10D6
+  - override /dataset: 2Dtoy/circles_4k
+  - override /trainer/classification: adam500_loss
+  - override /trainer/generative: default
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  classification:
+    max_epoch: ???
+    batch_size: 256
+    patience: 100
+    stop_crit: "clsloss"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.01465782580835474
+        weight_decay: 0
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    metrics: {"clsloss": 1, "acc": 1, "genloss": 1}
+
+  generative:
+    max_epoch: ${complement_200:${trainer.classification.max_epoch}}
+    batch_size: 256
+    patience: 100
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.00033121553029749945
+        weight_decay: 0
+    criterion:
+      name: "nll"
+      kwargs:
+        eps: 1e-8
+    metrics: {"genloss": 1, "acc": 1, "clsloss": 1}
+
+hydra:
+  sweeper:
+    params:
+      trainer.classification.max_epoch: choice(0, 1, 5, 10, 20, 30, 50, 70, 100, 130, 150, 170, 180, 190, 195, 199, 200)
+      tracking.seed: range(1,6)

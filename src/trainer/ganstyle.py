@@ -180,26 +180,13 @@ class Trainer:
             # Models subfolder inside it
             folder = run_dir / "models"
             folder.mkdir(parents=True, exist_ok=True)
-            # Filename construction
-            optimizer_cfg = self.train_cfg.optimizer
-            lr = optimizer_cfg.kwargs.lr or ""
-            weight_decay = optimizer_cfg.kwargs.weight_decay or ""
-
-
-            filename_components = [
-                f"{self.cfg.dataset.name}",
-                f"gan_mps_bd{self.cfg.models.born.init_kwargs.bond_dim}",
-                f"{self.cfg.models.born.embedding}{self.cfg.models.born.init_kwargs.in_dim}",
-                f"{self.train_cfg.max_epoch}{optimizer_cfg.name}lr{lr}wd{weight_decay}"
-            ]
-            
-
-            filename = "_".join(filename_components)
+            filename = "gan"
 
             # Saving
             save_path = folder / filename
             self.bornmachine.save(path=str(save_path))
-            wandb.log_model(str(save_path))
+            if wandb.run is not None and not wandb.run.disabled:
+                wandb.log_model(str(save_path))
     
     def train(self):
         """

@@ -1,0 +1,10 @@
+name: "moons_small"
+gen_dow_kwargs:
+  name: "moons_small"
+  size: 200
+  seed: 25
+  noise: 0.15
+split: [0.15, 0.425, 0.425] # train, val, test
+split_seed: 11
+overwrite: false
+scaler: minmax

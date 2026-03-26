@@ -1,3 +1,4 @@
+import math
 import torch
 import tensorkrowch as tk
 from src.models.generator.differential_sampling import main as diff_sampling
@@ -23,7 +24,7 @@ class BornGenerator(tk.models.MPS):
     def __init__(
             self,
             tensors: List[torch.Tensor],
-            embedding: Callable[[torch.Tensor, int], torch.Tensor],
+            embedding: Callable[[torch.Tensor], torch.Tensor],
             cls_pos: int,
             in_dim: int,
             num_cls: int,
@@ -35,12 +36,22 @@ class BornGenerator(tk.models.MPS):
             tensors=tensors, device=device, dtype=dtype
         )
         self.embedding = embedding
+        _dtype = tensors[0].dtype
+        self.dtype = _dtype
+        if _dtype.is_complex:
+            self.abs_square  = lambda t: t.real**2 + t.imag**2
+            self._diag_real  = lambda p: p.real
+            self._is_complex = True
+        else:
+            self.abs_square  = lambda t: t**2
+            self._diag_real  = lambda p: p
+            self._is_complex = False
         self.input_range = input_range
         self.input_space: torch.FloatTensor | None = None
         self.cls_pos, self.in_dim, self.num_cls = cls_pos, in_dim, num_cls
         self.cls_embs = []
         for cls in range(self.num_cls):
-            emb = tk.embeddings.basis(torch.tensor(cls), self.num_cls).float()
+            emb = tk.embeddings.basis(torch.tensor(cls), self.num_cls).to(self.dtype)
             self.cls_embs.append(emb.to(device))
         self.device = device
 
@@ -53,6 +64,42 @@ class BornGenerator(tk.models.MPS):
         # Maybe it is better to copy like it is done inside .norm()?
 
         self.virtual_mps = self.copy(share_tensors=True)
+
+        # tensorkrowch's copy(share_tensors=True) shares the main MPS tensors but
+        # creates new boundary nodes with the *default* dtype (float32), even when
+        # the main tensors are complex64.  This causes a dtype mismatch inside
+        # log_partition_function() when the boundary nodes are contracted with the
+        # complex main nodes.  Fix: cast boundary nodes to the model dtype.
+        if self._is_complex:
+            if self.virtual_mps._left_node is not None:
+                self.virtual_mps._left_node.set_tensor(
+                    self.virtual_mps._left_node.tensor.to(self.dtype)
+                )
+            if self.virtual_mps._right_node is not None:
+                self.virtual_mps._right_node.set_tensor(
+                    self.virtual_mps._right_node.tensor.to(self.dtype)
+                )
+
+    def initialize(self, tensors=None, **kwargs):
+        """Override to re-link virtual_mps after initialize() replaces Parameter objects.
+
+        tensorkrowch's MPS.initialize() assigns new tensors to each node in
+        self._mats_env via ``node.tensor = tensor``, which creates new Parameter
+        objects and breaks the sharing link established between self._mats_env
+        and self.virtual_mps._mats_env by copy(share_tensors=True).
+
+        This override re-links the virtual_mps nodes to the current Parameter
+        objects after every initialize() call.  The hasattr guard is needed
+        because MPS.__init__ itself calls initialize() before virtual_mps exists.
+        """
+        super().initialize(tensors=tensors, **kwargs)
+        if hasattr(self, 'virtual_mps'):
+            self._sync_virtual_mps()
+
+    def _sync_virtual_mps(self) -> None:
+        """Re-link virtual_mps._mats_env to self._mats_env after tensor replacement."""
+        for vnode, main_node in zip(self.virtual_mps._mats_env, self._mats_env):
+            vnode.tensor = main_node.tensor
 
     def prepare(self):
         """Reset MPS state and clear data nodes for a fresh sampling pass."""
@@ -131,13 +178,13 @@ class BornGenerator(tk.models.MPS):
         # Case 1: Not all variables appear, thus marginalize_output=True and one has to take the diagonal.
         if len(in_tensors) < self.n_features:
             rho = self.forward(in_tensors, marginalize_output=True,
-                            inline_input=True, inline_mats=True)  # density matrix
-            p = torch.diagonal(rho)
+                            inline_input=True, inline_mats=True)  # density matrix, hoping that marginalize_output=True workds with complex numbers
+            p = self._diag_real(torch.diagonal(rho))
         # Case 2: All variables appear.
         else:
             amplitude = self.forward(
                 data=in_tensors, inline_input=True, inline_mats=True)  # prob. amplitude
-            p = torch.square(amplitude)
+            p = self.abs_square(amplitude)
         return p
     
     def _single_class(
@@ -186,7 +233,7 @@ class BornGenerator(tk.models.MPS):
         embs[self.cls_pos] = cls_emb[None, :].expand(num_spc * num_bins, -1).to(self.device)
 
         # Input embedding TODO: Could move outside, as class and batch independent
-        in_emb = self.embedding(self.input_space, self.in_dim)  # [num_bins, in_dim]
+        in_emb = self.embedding(self.input_space)  # [num_bins, in_dim]
         # [num_samples, num_bins, in_dim]
         in_emb = in_emb[None, :, :].expand(num_spc, -1, -1)
         # [num_samples * num_bins, phys_dim]
@@ -211,9 +258,9 @@ class BornGenerator(tk.models.MPS):
             samples.append(feature)  # shape (num_spc,)
 
             # Embed drawn samples and use for conditioning for the next site.
-            embs[site] = self.embedding(samples[-1], self.in_dim
+            embs[site] = self.embedding(samples[-1]
                                 )[:, None, :].expand(-1, num_bins, -1
-                                                        ).reshape(num_spc*num_bins, -1)
+                                                     ).reshape(num_spc*num_bins, -1)
 
         # Stack sampled per-site arrays across sites
         samples = torch.stack(tensors=samples, dim=1)  # shape (num_spc, data_dim)
@@ -377,7 +424,7 @@ class BornGenerator(tk.models.MPS):
         
         create_copies = any(create_copies)
         
-        # Copy output nodes sharing tensors
+        # TODO: Copy output nodes sharing tensors: adapt the code below for complex Born machines
         if create_copies:
             copied_nodes = []
             for node in all_nodes:
@@ -411,6 +458,11 @@ class BornGenerator(tk.models.MPS):
                 
                 # Connect copies directly to output nodes
                 copied_node['input'] ^ node['input']
+
+            # If MPS nodes are complex, conjugate the bra side (same pattern as tk.MPS.norm())
+            if self._is_complex:
+                for i, node in enumerate(copied_nodes):
+                    copied_nodes[i] = node.conj()
         else:
             copied_nodes = []
             for node in all_nodes:
@@ -440,7 +492,32 @@ class BornGenerator(tk.models.MPS):
             result_node = result_node.renormalize()
 
         return log_Z
-    
+
+    def renormalize_(self, target: float = 1.0) -> None:
+        """
+        Rescale all MPS tensors in-place so that Z → target.
+
+        Distributes the rescaling factor equally across all n cores (including the
+        class tensor), so each tensor is multiplied by exp((log(target) - log_Z) / (2n)).
+
+        Default target=1.0 preserves existing behavior (unit-norm MPS).
+        Safe to call after optimizer.step(): uses .data to bypass autograd so
+        Adam's internal moment buffers (keyed by tensor identity) remain valid.
+        No-ops silently if Z is already non-finite (collapse guard in the loss
+        will catch it on the next forward pass).
+
+        Args:
+            target: Desired partition function value after rescaling. Must be > 0.
+        """
+        with torch.no_grad():
+            log_Z = self.log_partition_function()
+            if not torch.isfinite(log_Z):
+                return  # already collapsed; loss guard will raise on next forward
+            n = len(self.tensors)
+            alpha = math.exp((math.log(target) - log_Z.item()) / (2 * n))
+            for t in self.tensors:
+                t.data.mul_(alpha)
+
     def unnormalized_prob(
             self,
             data: torch.Tensor,
@@ -460,17 +537,16 @@ class BornGenerator(tk.models.MPS):
         Returns:
             Tensor of shape (batch_size,) with log unnormalized probabilities.
         """
-        data_embs = self.embedding(data, self.in_dim)
-        class_embs = tk.embeddings.basis(labels, self.num_cls).float()
-
-        # start with data embeddings as a list
+        # Embed data
+        data_embs = self.embedding(data)
         embs = [data_embs[:, i, :] for i in range(data_embs.shape[1])]
 
-        # insert class embedding at cls_pos
-        embs.insert(self.cls_pos, class_embs)
+        # TODO: this assumes that there is input data and class data, for tensorkrowch integration, code needs to be more agnostic (put this behind a if clause  or something)
+        class_embs = tk.embeddings.basis(labels, self.num_cls).to(self.dtype)
+        embs.insert(self.cls_pos, class_embs) # insert class embedding at cls_pos
 
         # Compute amplitude
         amplitude = self.forward(
                 data=embs, inline_input=True, inline_mats=True)  # prob. amplitude
 
-        return torch.square(amplitude)
+        return self.abs_square(amplitude)

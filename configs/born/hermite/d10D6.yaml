@@ -1,0 +1,6 @@
+init_kwargs:
+  in_dim: 10 # physical dimension
+  bond_dim: 6
+  boundary: "obc"
+  init_method: "canonical"
+embedding: "hermite"

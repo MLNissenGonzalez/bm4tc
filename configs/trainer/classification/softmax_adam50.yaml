@@ -1,0 +1,17 @@
+max_epoch: 50
+batch_size: 500
+criterion:
+  name: "softmax_nll"
+  kwargs: null
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.00
+auto_stack: True
+auto_unbind: False
+patience: 250
+stop_crit: "softmaxacc"
+watch_freq: 0
+metrics: {"softmaxloss": 1, "softmaxacc": 1, "acc": 1}
+save: False

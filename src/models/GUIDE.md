@@ -61,6 +61,57 @@ def sync_tensors(self, after: str, verify: bool=False):
     """
 ```
 
+**Uncertainty Quantification Methods:**
+
+| Method | Input | Output | Description |
+|--------|-------|--------|-------------|
+| `cache_log_Z()` | — | `float` | Compute and cache log partition function |
+| `marginal_log_probability(data, eps)` | `(batch, D)` | `(batch,)` | Log marginal p(x) = log(sum_c |psi(x,c)|^2) - log(Z) |
+
+**How `marginal_log_probability` works:**
+```python
+embs = self.classifier.embed(data)             # (batch, D, in_dim)
+amplitudes = self.classifier.forward(data=embs) # (batch, num_classes) — single contraction
+unnorm_px = self.classifier.abs_square(amplitudes).sum(dim=-1)  # (batch,) — sum_c |psi(x,c)|^2
+log_px = log(unnorm_px) - log_Z                   # normalized log p(x)
+```
+
+**Differentiability:** Differentiable w.r.t. input data (for purification) but NOT w.r.t. model parameters (`_log_Z` is a detached constant). This is correct for purification (which optimizes over inputs, not model params).
+
+**log Z caching:** `_log_Z` is computed once via `generator.log_partition_function()` and stored as a Python float. It is persisted in checkpoints via `save()`/`load()`. Call `cache_log_Z()` to recompute after model parameter changes.
+
+### Complex Born Machines / dtype support
+
+`BornMachine.__init__` determines dtype early — before initializing the classifier — so the embedding can be dtype-aware:
+
+1. If `tensors` is provided (loading a checkpoint), dtype is inferred from `tensors[0].dtype`.
+2. Otherwise, the string `cfg.init_kwargs.dtype` (e.g. `"complex64"`) is looked up in an internal map; missing or `None` defaults to `torch.float32`.
+
+The resolved dtype is stored as `self.dtype` and passed to the embedding factory (`get.embedding(..., dtype=_dtype)`).
+
+`BornClassifier.__init__` then sets the `abs_square` lambda based on the tensor dtype:
+
+```python
+if _dtype.is_complex:
+    self.abs_square = lambda t: t.real**2 + t.imag**2
+else:
+    self.abs_square = lambda t: t**2
+```
+
+**CRITICAL**: Always use `self.classifier.abs_square(amplitudes)` (not `torch.square`) when converting amplitudes to Born probabilities. `torch.square` on a complex tensor returns a complex result, not the real-valued |ψ|², causing silent correctness bugs.
+
+To enable complex Born Machines, add `dtype: "complex64"` to the born config YAML:
+```yaml
+init_kwargs:
+  dtype: "complex64"
+  in_dim: 3
+  bond_dim: 10
+```
+
+**Known issue**: Adam optimizer with complex parameters requires **torch ≥ 2.1.0** (foreach bug fix). Training with complex dtypes on older torch versions produces NaN updates.
+
+---
+
 ### BornClassifier (`classifier.py`)
 
 Extends `tensorkrowch.models.MPSLayer` for classification using the Born rule.
@@ -83,16 +134,18 @@ Born Rule: |amplitude|² / Σ|amplitudes|² = p(c|x)
 |--------|-------|--------|-------------|
 | `embed(data)` | `(batch, D)` | `(batch, D, in_dim)` | Embed raw features |
 | `forward(data)` | `(batch, D, in_dim)` | `(batch, num_cls)` | **Amplitudes** (not probabilities!) |
-| `parallel(embs)` | `(batch, D, in_dim)` | `(batch, num_cls)` | Probabilities (squared & normalized) |
+| `amplitudes(data)` | `(batch, D)` | `(batch, num_cls)` | Raw amplitude forward pass (alias for `forward()` after embedding) — use with softmax-based losses, **not** Born-rule classification |
+| `parallel(embs)` | `(batch, D, in_dim)` | `(batch, num_cls)` | Probabilities (squared & normalized via `abs_square`) |
 | `probabilities(data)` | `(batch, D)` | `(batch, num_cls)` | End-to-end: data → p(c|x) |
 | `prepare(...)` | — | — | Reset and prepare for training |
 
 **CRITICAL WARNING** (`classifier.py:112`):
 ```python
 # The forward() method returns AMPLITUDES, not probabilities!
-# To get probabilities, use:
-p = torch.square(self.forward(data=embs))
+# To get probabilities, use abs_square (handles both real and complex):
+p = self.abs_square(self.forward(data=embs))
 return p / p.sum(dim=-1, keepdim=True)
+# Do NOT use torch.square() — it returns complex output for complex tensors!
 ```
 
 ### BornGenerator (`generator/generator.py`)
@@ -155,6 +208,7 @@ def sequential(self, embs: Dict[int, torch.Tensor]) -> torch.Tensor:
 | `sample_single_class(cls, cfg)` | API: sample from specific class (handles batching) |
 | `sample_all_classes(cfg)` | API: sample from all classes |
 | `prepare()` | Reset MPS state before sampling |
+| `renormalize_(target=1.0)` | Rescale tensors in-place so Z → target (default 1.0). Called by `GenerativeTrainer` after each optimizer step when `hard_every > 0`. |
 
 **Output Shapes:**
 - `sample_single_class(cls, cfg)` → `(num_spc, data_dim)`
@@ -368,12 +422,61 @@ bm.sync_tensors(after="gan", verify=True)
    assert bm.generator.tensors[0].grad is not None
    ```
 
+## Debugging: Uncertainty Quantification
+
+### Verify marginal_log_probability
+```python
+# 1. Verify marginal_log_probability produces valid values
+bm = BornMachine.load("path/to/checkpoint.pt")
+bm.to(device)
+bm.cache_log_Z()
+print(f"log Z = {bm._log_Z}")  # Should be a finite positive number
+
+# Load test data
+data = datahandler.data["test"].to(device)
+log_px = bm.marginal_log_probability(data)
+print(f"log p(x) range: [{log_px.min():.2f}, {log_px.max():.2f}]")
+assert torch.isfinite(log_px).all(), "Non-finite log probabilities detected"
+# Note: log p(x) CAN be positive — p(x) is a density, not a probability mass,
+# so p(x) > 1 is valid at high-density regions as long as the integral ≈ 1.
+
+# 2. Verify partition function consistency
+# On a fine grid over input_range, sum of p(x) * dx should approximate 1.0
+grid = torch.linspace(*bm.input_range, 200, device=device)
+grid_2d = torch.stack(torch.meshgrid(grid, grid, indexing='ij'), dim=-1).reshape(-1, 2)
+log_px_grid = bm.marginal_log_probability(grid_2d)
+dx = (bm.input_range[1] - bm.input_range[0]) / 200
+integral = torch.exp(log_px_grid).sum() * dx**2
+print(f"Integral of p(x) over grid: {integral:.4f}")  # Should be close to 1.0
+
+# 3. Verify gradient flow for purification
+data_sample = data[:5].clone().requires_grad_(True)
+log_px = bm.marginal_log_probability(data_sample)
+(-log_px.sum()).backward()
+assert data_sample.grad is not None, "No gradient on input data"
+print(f"Gradient norm: {data_sample.grad.norm():.4e}")  # Should be non-zero
+
+# 4. Verify purification moves points toward higher likelihood
+from src.utils.purification.minimal import LikelihoodPurification
+purifier = LikelihoodPurification(norm="inf", num_steps=20)
+# Add noise to create low-likelihood inputs
+noisy = data[:10] + 0.1 * torch.randn_like(data[:10])
+noisy = noisy.clamp(*bm.input_range)
+log_px_before = bm.marginal_log_probability(noisy).detach()
+purified, log_px_after = purifier.purify(bm, noisy, radius=0.15, device=device)
+print(f"Mean log p(x) before: {log_px_before.mean():.2f}")
+print(f"Mean log p(x) after:  {log_px_after.mean():.2f}")
+# Check that purification improves likelihood on average (individual points may
+# decrease slightly due to discrete optimization steps and projection back into Lp ball)
+assert log_px_after.mean() >= log_px_before.mean() - 1e-3, "Purification should improve mean likelihood"
+```
+
 ## File-by-File Reference
 
 | File | Lines | Key Classes/Functions |
 |------|-------|----------------------|
-| `born.py` | ~200 | `BornMachine` |
-| `classifier.py` | ~132 | `BornClassifier` |
+| `born.py` | ~312 | `BornMachine` |
+| `classifier.py` | ~156 | `BornClassifier` |
 | `generator/generator.py` | ~475 | `BornGenerator` |
 | `generator/differential_sampling.py` | ~132 | `os_secant`, `main` |
 | `discriminator/discriminator.py` | ~281 | `Critic` |

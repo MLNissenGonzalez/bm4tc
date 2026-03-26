@@ -48,6 +48,15 @@ from matplotlib import cm
 from scipy.interpolate import griddata
 import warnings
 
+from analysis.utils.statistics import (
+    clean_column_name,
+    compute_pareto_frontier,
+    plot_pareto_frontier,
+    get_pareto_runs,
+    compute_metric_correlations,
+    plot_correlation_heatmap,
+)
+
 # %%
 # =============================================================================
 # CONFIGURATION - EDIT THIS SECTION FOR YOUR EXPERIMENT
@@ -396,13 +405,6 @@ def get_available_columns(df: pd.DataFrame, candidates: list, verbose: bool = Tr
                 available.append(best_match)
 
     return available
-
-
-def clean_column_name(col: str) -> str:
-    """Convert column name to readable label."""
-    name = col.replace("config/", "").replace("summary/", "")
-    name = name.replace("_", " ").replace("/", " / ")
-    return name.title()
 
 
 def is_log_scale_param(param: str) -> bool:
@@ -1088,171 +1090,6 @@ if not df.empty:
 # Points on the frontier define the "efficient boundary" of what's achievable.
 
 # %%
-def compute_pareto_frontier(
-    x: np.ndarray,
-    y: np.ndarray,
-    maximize_x: bool = True,
-    maximize_y: bool = True,
-) -> np.ndarray:
-    """
-    Compute indices of Pareto-optimal points.
-
-    Args:
-        x, y: Arrays of metric values
-        maximize_x, maximize_y: Whether higher is better for each metric
-
-    Returns:
-        Boolean array indicating Pareto-optimal points
-    """
-    n = len(x)
-    is_pareto = np.ones(n, dtype=bool)
-
-    # Flip signs if minimizing
-    x_comp = x if maximize_x else -x
-    y_comp = y if maximize_y else -y
-
-    for i in range(n):
-        if not is_pareto[i]:
-            continue
-        # Check if any other point dominates point i
-        for j in range(n):
-            if i == j or not is_pareto[j]:
-                continue
-            # j dominates i if j is >= in both and > in at least one
-            if (x_comp[j] >= x_comp[i] and y_comp[j] >= y_comp[i] and
-                (x_comp[j] > x_comp[i] or y_comp[j] > y_comp[i])):
-                is_pareto[i] = False
-                break
-
-    return is_pareto
-
-
-def plot_pareto_frontier(
-    df: pd.DataFrame,
-    metric1: str,
-    metric2: str,
-    maximize1: bool = True,
-    maximize2: bool = True,
-    figsize: tuple = (10, 8),
-    show_labels: bool = True,
-) -> plt.Figure:
-    """
-    Plot scatter of two metrics with Pareto frontier highlighted.
-
-    Args:
-        df: DataFrame with HPO results
-        metric1, metric2: Column names for the two metrics (x and y axis)
-        maximize1, maximize2: Whether higher is better for each metric
-        figsize: Figure size
-        show_labels: Whether to label Pareto-optimal points with run names
-
-    Returns:
-        matplotlib Figure
-    """
-    cols = get_available_columns(df, [metric1, metric2], verbose=True)
-    if len(cols) < 2:
-        print(f"Could not find both metrics: {metric1}, {metric2}")
-        return None
-
-    metric1, metric2 = cols[0], cols[1]
-
-    valid_mask = df[metric1].notna() & df[metric2].notna()
-    valid_df = df[valid_mask].copy()
-
-    if len(valid_df) < 2:
-        print("Not enough valid data points for Pareto analysis")
-        return None
-
-    x = valid_df[metric1].astype(float).values
-    y = valid_df[metric2].astype(float).values
-
-    # Compute Pareto frontier
-    is_pareto = compute_pareto_frontier(x, y, maximize1, maximize2)
-    n_pareto = is_pareto.sum()
-
-    # Sort Pareto points for line plotting
-    pareto_x = x[is_pareto]
-    pareto_y = y[is_pareto]
-    sort_idx = np.argsort(pareto_x)
-    pareto_x_sorted = pareto_x[sort_idx]
-    pareto_y_sorted = pareto_y[sort_idx]
-
-    # Create plot
-    fig, ax = plt.subplots(figsize=figsize, dpi=DPI)
-
-    # Plot all points
-    ax.scatter(x[~is_pareto], y[~is_pareto], c="lightgray", s=40, alpha=0.6,
-               edgecolors="white", linewidth=0.5, label=f"Dominated (n={len(x) - n_pareto})")
-
-    # Plot Pareto-optimal points
-    ax.scatter(pareto_x, pareto_y, c="red", s=80, alpha=0.9,
-               edgecolors="darkred", linewidth=1, label=f"Pareto-optimal (n={n_pareto})", zorder=5)
-
-    # Draw Pareto frontier line
-    ax.plot(pareto_x_sorted, pareto_y_sorted, "r--", alpha=0.7, linewidth=2, zorder=4)
-
-    # Optionally label Pareto points with run names
-    if show_labels and "run_name" in valid_df.columns and n_pareto <= 15:
-        pareto_names = valid_df.loc[valid_df.index[is_pareto], "run_name"].values
-        for i, (px, py) in enumerate(zip(pareto_x, pareto_y)):
-            name = pareto_names[i] if i < len(pareto_names) else ""
-            # Shorten name for display
-            short_name = name.split("-")[-1][:8] if "-" in name else name[:8]
-            ax.annotate(short_name, (px, py), textcoords="offset points",
-                        xytext=(5, 5), fontsize=7, alpha=0.8)
-
-    ax.set_xlabel(clean_column_name(metric1) + (" (↑ better)" if maximize1 else " (↓ better)"))
-    ax.set_ylabel(clean_column_name(metric2) + (" (↑ better)" if maximize2 else " (↓ better)"))
-    ax.set_title(f"Pareto Frontier: {clean_column_name(metric1)} vs {clean_column_name(metric2)}")
-
-    ax.legend(loc="best")
-    ax.grid(True, alpha=0.3)
-
-    # Add summary stats
-    stats_text = f"Total runs: {len(x)}\nPareto-optimal: {n_pareto} ({100*n_pareto/len(x):.1f}%)"
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
-            verticalalignment="top", bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
-
-    fig.tight_layout()
-    return fig
-
-
-def get_pareto_runs(
-    df: pd.DataFrame,
-    metric1: str,
-    metric2: str,
-    maximize1: bool = True,
-    maximize2: bool = True,
-) -> pd.DataFrame:
-    """Return DataFrame of Pareto-optimal runs sorted by metric1."""
-    cols = get_available_columns(df, [metric1, metric2], verbose=False)
-    if len(cols) < 2:
-        return pd.DataFrame()
-
-    metric1, metric2 = cols[0], cols[1]
-
-    valid_mask = df[metric1].notna() & df[metric2].notna()
-    valid_df = df[valid_mask].copy()
-
-    if len(valid_df) < 2:
-        return pd.DataFrame()
-
-    x = valid_df[metric1].astype(float).values
-    y = valid_df[metric2].astype(float).values
-
-    is_pareto = compute_pareto_frontier(x, y, maximize1, maximize2)
-
-    pareto_df = valid_df[is_pareto].copy()
-
-    # Select columns to display
-    config_cols = [c for c in pareto_df.columns if c.startswith("config/")]
-    display_cols = ["run_name"] + config_cols + [metric1, metric2]
-    display_cols = [c for c in display_cols if c in pareto_df.columns]
-
-    return pareto_df[display_cols].sort_values(metric1, ascending=not maximize1)
-
-
-# %%
 # Plot Pareto frontier
 if not df.empty and PARETO_METRICS and len(PARETO_METRICS) >= 2:
     print("\n=== Pareto Frontier Analysis ===")
@@ -1392,74 +1229,6 @@ def compute_param_metric_correlations(df: pd.DataFrame, params: list, metrics: l
 # This helps understand trade-offs (e.g., accuracy vs robustness).
 
 # %%
-def compute_metric_metric_correlations(df: pd.DataFrame, metrics: list) -> pd.DataFrame:
-    """
-    Compute Pearson correlations between all pairs of metrics.
-
-    Args:
-        df: DataFrame with HPO results
-        metrics: List of metric column names
-
-    Returns:
-        DataFrame with correlation matrix (metrics x metrics)
-    """
-    metrics = get_available_columns(df, metrics, verbose=False)
-
-    if len(metrics) < 2:
-        print("Need at least 2 metrics for correlation analysis")
-        return pd.DataFrame()
-
-    # Build correlation matrix
-    n = len(metrics)
-    corr_matrix = np.full((n, n), np.nan)
-    metric_names = [clean_column_name(m) for m in metrics]
-
-    for i, m1 in enumerate(metrics):
-        for j, m2 in enumerate(metrics):
-            valid_mask = df[m1].notna() & df[m2].notna()
-            if valid_mask.sum() > 2:
-                x = df.loc[valid_mask, m1].astype(float)
-                y = df.loc[valid_mask, m2].astype(float)
-                corr_matrix[i, j] = np.corrcoef(x, y)[0, 1]
-
-    return pd.DataFrame(corr_matrix, index=metric_names, columns=metric_names)
-
-
-def plot_correlation_heatmap(
-    corr_df: pd.DataFrame,
-    title: str = "Correlations",
-    figsize: tuple = (10, 8),
-) -> plt.Figure:
-    """Plot correlation matrix as heatmap with values."""
-    if corr_df.empty:
-        print("No correlation data to plot")
-        return None
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=DPI)
-
-    im = ax.imshow(corr_df.values, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
-
-    # Labels
-    ax.set_xticks(range(len(corr_df.columns)))
-    ax.set_xticklabels(corr_df.columns, rotation=45, ha="right", fontsize=9)
-    ax.set_yticks(range(len(corr_df.index)))
-    ax.set_yticklabels(corr_df.index, fontsize=9)
-
-    # Add correlation values
-    for i in range(len(corr_df.index)):
-        for j in range(len(corr_df.columns)):
-            val = corr_df.iloc[i, j]
-            if not np.isnan(val):
-                color = "white" if abs(val) > 0.5 else "black"
-                ax.text(j, i, f"{val:.2f}", ha="center", va="center", color=color, fontsize=8)
-
-    ax.set_title(title)
-    fig.colorbar(im, ax=ax, label="Pearson Correlation", shrink=0.8)
-    fig.tight_layout()
-
-    return fig
-
-
 def plot_metric_scatter_matrix(df: pd.DataFrame, metrics: list, figsize: tuple = (12, 12)) -> plt.Figure:
     """
     Create scatter plot matrix showing relationships between all metric pairs.
@@ -1534,7 +1303,7 @@ if not df.empty:
 
     # Metric-Metric correlations
     print("\n=== Metric-Metric Correlations ===")
-    metric_metric_corr = compute_metric_metric_correlations(df, all_metrics)
+    metric_metric_corr = compute_metric_correlations(df, all_metrics)
 
     if not metric_metric_corr.empty:
         print(metric_metric_corr.round(3).to_string())

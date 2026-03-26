@@ -6,7 +6,7 @@ Optionally performs classification pretraining first.
 
 Usage:
     # Train generative model (with classification pretraining)
-    python -m experiments.generative +experiments=generative/default
+    python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
 
     # Quick test
     python -m experiments.generative +experiments=tests/generative tracking.mode=disabled
@@ -20,6 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
+from src.tracking import evaluate_loaded_model, log_dataset_viz
 # Think about initializing the generative loss in the trainer?
 from src.utils import schemas, set_seed, get
 from src.data import DataHandler
@@ -60,6 +61,12 @@ def main(cfg: schemas.Config):
 
     # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
+    log_dataset_viz(datahandler)
+
+    if model_path is not None:
+        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
+        bornmachine.reset()
+        bornmachine.unset_data_nodes()
 
     if model_path is None:
         # Classification pretraining (optional)
@@ -68,6 +75,8 @@ def main(cfg: schemas.Config):
             pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
             pre_trainer.train()
             # Move back to device after pretraining (it moves to CPU at end)
+            bornmachine.reset()
+            bornmachine.unset_data_nodes()
             bornmachine.to(device)
         else:
             logger.info("Skipping classification pretraining.")

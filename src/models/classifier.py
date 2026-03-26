@@ -17,7 +17,7 @@ class BornClassifier(tk.models.MPSLayer):
 
     def __init__(
             self,
-            embedding: Callable[[torch.Tensor, int], torch.Tensor],
+            embedding: Callable[[torch.Tensor], torch.Tensor],
             n_features: Optional[int] = None,
             in_dim: Optional[Union[int, Sequence[int]]] = None,
             out_dim: Optional[int] = None,
@@ -33,11 +33,17 @@ class BornClassifier(tk.models.MPSLayer):
             ):
         super().__init__(
             n_features=n_features, in_dim=in_dim, out_dim=out_dim,
-            bond_dim=bond_dim, out_position=out_position, 
+            bond_dim=bond_dim, out_position=out_position,
             boundary=boundary, tensors=tensors, n_batches=n_batches,
             init_method=init_method, device=device, dtype=dtype, **kwargs
         )
         self.embedding = embedding
+        self.dtype = self.tensors[0].dtype
+        _dtype = self.dtype
+        if _dtype.is_complex:
+            self.abs_square = lambda t: t.real**2 + t.imag**2
+        else:
+            self.abs_square = lambda t: t**2
 
     def embed(self, data: torch.Tensor) -> torch.Tensor:
         """
@@ -49,8 +55,24 @@ class BornClassifier(tk.models.MPSLayer):
         Returns:
             Embedded tensor of shape (batch_size, data_dim, phys_dim).
         """
-        in_dim = self.in_dim[0]
-        return self.embedding(data, in_dim)
+        return self.embedding(data)
+
+    def amplitudes(self, data: torch.Tensor) -> torch.Tensor:
+        """
+        Compute raw MPS output amplitudes for embedded inputs.
+
+        This is a semantically explicit alias for the inherited
+        MPSLayer.forward() method. Amplitudes are signed and unnormalized
+        — use this for softmax-based losses, NOT for Born-rule classification.
+
+        Args:
+            embs: Embedded inputs of shape (batch_size, D, phys_dim).
+
+        Returns:
+            Tensor of shape (batch_size, num_classes) with raw amplitudes ψ.
+        """
+        embs = self.embed(data)
+        return self.forward(data=embs)
 
     def prepare(
             self,
@@ -74,8 +96,9 @@ class BornClassifier(tk.models.MPSLayer):
         self.to(device)
         if train_cfg is not None:
             self.auto_stack, self._auto_unbind = train_cfg.auto_stack, train_cfg.auto_unbind
+        _dtype = self.tensors[0].dtype if self.tensors else torch.get_default_dtype()
         self.trace(torch.zeros(1, len(self.in_features),
-                        self.in_dim[0]).to(device))
+                        self.in_dim[0], dtype=_dtype, device=device))
         
     def parallel(
             self,  # could use MPSLayer class for this one actually
@@ -108,9 +131,9 @@ class BornClassifier(tk.models.MPSLayer):
             raise TypeError(
                 "embs input must be a tensor of shape (batch_size, D, phys_dim).")
 
-        
-        p = torch.square(self.forward(data=embs))
-        return p / p.sum(dim=-1, keepdim=True)
+        amplitudes = self.forward(data=embs)
+        p = self.abs_square(amplitudes)
+        return p / p.sum(dim=-1, keepdim=True).clamp(min=torch.finfo(p.dtype).tiny)
         
     
     def probabilities(self, data: torch.Tensor) -> torch.Tensor:

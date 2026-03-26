@@ -1,5 +1,5 @@
 # @package _global_
-experiment: test_ganstyle_hpo
+experiment: test_hpo
 
 defaults:
   - override /dataset: test

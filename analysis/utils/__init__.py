@@ -23,6 +23,15 @@ from .mia import (
     MIAEvaluation,
 )
 
+from .uq import (
+    UQConfig,
+    UQResults,
+    UQEvaluation,
+    PurificationMetrics,
+    compute_thresholds,
+    compute_log_px,
+)
+
 from .mia_utils import (
     load_run_config,
     load_run_config_from_wandb,
@@ -30,7 +39,36 @@ from .mia_utils import (
     download_wandb_checkpoint,
 )
 
+from .statistics import (
+    clean_column_name,
+    compute_statistics,
+    get_best_run,
+    create_summary_table,
+    compute_pareto_frontier,
+    get_pareto_runs,
+    compute_metric_correlations,
+    plot_accuracy_histogram,
+    plot_mean_with_std,
+    plot_scatter_vs_metric,
+    plot_accuracy_vs_strength,
+    plot_accuracy_vs_strength_band,
+    plot_pareto_frontier,
+    plot_correlation_heatmap,
+)
+
+from .evaluate import (
+    EvalConfig,
+    evaluate_run,
+    evaluate_pretrained_model,
+    evaluate_sweep,
+    resolve_stop_criterion,
+)
+
 from .resolve import (
+    resolve_regime_from_path,
+    resolve_embedding_from_path,
+    embedding_range_size,
+    _EMBEDDING_RANGE_SIZE,
     resolve_params,
     resolve_metrics,
     resolve_primary_metric,
@@ -69,12 +107,23 @@ __all__ = [
     "MIAFeatureExtractor",
     "MIAResults",
     "MIAEvaluation",
+    # UQ evaluation
+    "UQConfig",
+    "UQResults",
+    "UQEvaluation",
+    "PurificationMetrics",
+    "compute_thresholds",
+    "compute_log_px",
     # Config loading utilities
     "load_run_config",
     "load_run_config_from_wandb",
     "find_model_checkpoint",
     "download_wandb_checkpoint",
     # HPO resolver utilities
+    "resolve_regime_from_path",
+    "resolve_embedding_from_path",
+    "embedding_range_size",
+    "_EMBEDDING_RANGE_SIZE",
     "resolve_params",
     "resolve_metrics",
     "resolve_primary_metric",
@@ -91,4 +140,25 @@ __all__ = [
     "REGIME_METRIC_PREFIX",
     "REGIME_DEFAULT_PARAMS",
     "PARAM_ALIASES",
+    # Statistics & visualization
+    "clean_column_name",
+    "compute_statistics",
+    "get_best_run",
+    "create_summary_table",
+    "compute_pareto_frontier",
+    "get_pareto_runs",
+    "compute_metric_correlations",
+    "plot_accuracy_histogram",
+    "plot_mean_with_std",
+    "plot_scatter_vs_metric",
+    "plot_accuracy_vs_strength",
+    "plot_accuracy_vs_strength_band",
+    "plot_pareto_frontier",
+    "plot_correlation_heatmap",
+    # Post-hoc evaluation
+    "EvalConfig",
+    "evaluate_run",
+    "evaluate_pretrained_model",
+    "evaluate_sweep",
+    "resolve_stop_criterion",
 ]

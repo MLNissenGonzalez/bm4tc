@@ -1,0 +1,46 @@
+# @package _global_
+experiment: seed_sweep
+descriptor: nll_hard_pretrained
+
+defaults:
+  - override /born: legendre/d3D120c64
+  - override /dataset: mnist/mnist_full
+  - override /trainer/classification: null
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: ???  # FILL: best cls seed sweep checkpoint
+
+tracking:
+  seed: 42
+
+trainer:
+  generative:
+    max_epoch: 1000
+    batch_size: 512
+    patience: 300
+    stop_crit: "acc"
+    watch_freq: 0
+    save: true
+    norm_control:
+      target: null        # captured from pretrained BM at start of train()
+      hard_every: ???     # FILL FROM GRID SWEEP
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???           # FILL FROM GRID SWEEP
+        weight_decay: 0.0
+    criterion:
+      name: "nll"
+      kwargs: {eps: 1e-8}
+    metrics: {"genloss": 1, "acc": 1}
+
+hydra:
+  sweep:
+    dir: outputs/seed_sweep/gen/legendre/d3D120c64/mnist_full_${now:%d%m}
+    subdir: ${hydra.job.num}
+  sweeper:
+    params:
+      tracking.seed: range(1, 4)

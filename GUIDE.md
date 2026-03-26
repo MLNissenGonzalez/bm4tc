@@ -12,7 +12,7 @@ The research hypothesis is that generative models (which learn p(x,c) rather tha
 
 Born Machines model probability distributions using the Born Rule from quantum mechanics:
 - **Probability = |amplitude|²** — the probability of an outcome is the squared magnitude of an amplitude
-- Inputs are mapped to a higher-dimensional **Hilbert Space** via embeddings (currently Fourier, also supports Legendre/polynomial)
+- Inputs are mapped to a higher-dimensional **Hilbert Space** via embeddings (Fourier, Legendre, and Hermite)
 - Each input feature is embedded independently; the complete input is a "product state"
 - The Born Machine is a **tensor network** with structured factorization
 
@@ -137,10 +137,10 @@ adversarial_training_mps/
 │   │   └── adversarial/       # Adversarial training configs (PGD-AT, TRADES)
 │   ├── tracking/              # W&B tracking configs
 │   ├── experiments/           # Full experiment configs (override defaults)
-│   │   ├── classification/   # Classification experiments (incl. hpo/, best/, seed_sweeps/)
-│   │   ├── adversarial/      # Adversarial training experiments (incl. hpo/)
-│   │   ├── generative/       # Generative NLL experiments (incl. seed_sweep/)
-│   │   ├── ganstyle/         # GAN-style experiments
+│   │   ├── classification/   # Classification experiments (by architecture, then phase)
+│   │   ├── adversarial/      # Adversarial training experiments (by architecture, then phase)
+│   │   ├── generative/       # Generative NLL experiments (by architecture, then phase)
+│   │   ├── ganstyle/         # GAN-style experiments (by architecture)
 │   │   └── tests/            # Quick test experiments
 │   └── hydra/                 # Hydra-specific configs
 │       └── job_logging/      # Logging configs
@@ -148,19 +148,25 @@ adversarial_training_mps/
 │   ├── classification.py      # Classification-only training
 │   ├── ganstyle.py           # Classification + GAN-style training
 │   ├── adversarial.py        # Classification + Adversarial training
-│   └── generative.py         # Classification + Generative NLL training
+│   ├── generative.py         # Classification + Generative NLL training
+│   └── softmax_sanity.py     # Softmax interpretation sanity check (raw amplitudes as logits)
 ├── src/                       # Main source code
 │   ├── models/               # Model definitions (see src/models/GUIDE.md)
 │   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
 │   ├── tracking/             # Evaluation & logging
 │   ├── data/                 # Data loading & preprocessing
-│   └── utils/                # Utilities, schemas, embeddings, criterions
+│   └── utils/                # Utilities, schemas, embeddings, criterions, purification
 ├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
 │   ├── mia_analysis.py      # MIA privacy analysis notebook
-│   ├── visualize_distributions.py  # Distribution visualization
-│   ├── run_statistics.py    # Basic sweep statistics
-│   └── utils/               # W&B API utilities, MIA utils, resolver
+│   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
+│   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
+│   ├── queue_analysis.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
+│   ├── queue_visualize.py   # Batch-regenerate distribution visualizations
+│   ├── cls_reg_analysis.py  # Post-training cls_reg sweep evaluation
+│   ├── dev_comb_analysis.py # Combined cls+gen dual-model sweep evaluation
+│   ├── visualize/           # Visualization helpers (distributions, evolution plots)
+│   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -178,13 +184,13 @@ adversarial_training_mps/
 1. Create/modify an experiment config in `configs/experiments/`
 2. Run with `+experiments=<path>` to apply it
 
-**Example experiment config** (`configs/experiments/classification/D18.yaml`):
+**Example experiment config** (`configs/experiments/classification/fourier_d30D18/D18.yaml`):
 ```yaml
 # @package _global_
-experiment: classification_D18
+experiment: default
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online
@@ -196,13 +202,13 @@ defaults:
 
 ```bash
 # Run with experiment config (RECOMMENDED)
-python -m experiments.classification +experiments=classification/D18
+python -m experiments.classification +experiments=classification/fourier_d30D18/D18
 
 # Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/default
+python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
 
 # Multirun sweep (define sweep params in experiment config)
-python -m experiments.classification --multirun +experiments=classification/D18_sweep
+python -m experiments.classification --multirun +experiments=classification/fourier_d30D18/D18_sweep
 ```
 
 **Command-line overrides** are useful for quick tests but not for production experiments:
@@ -269,7 +275,16 @@ embedding: "fourier"
 | Add new dataset | `src/data/gen_n_load.py` |
 | Configure experiments | `configs/` directory |
 | Add adversarial attack | `src/utils/evasion/minimal.py` |
+| Purify adversarial examples | `src/utils/purification/minimal.py` |
+| Compute marginal p(x) | `src/models/born.py` (`marginal_log_probability`) |
+| UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
 | Analyze HPO results | `analysis/hpo_analysis.py` |
+| Batch-run sweep analysis | `analysis/queue_analysis.py` |
+| Batch-regenerate distribution plots | `analysis/queue_visualize.py` |
+| Post-training cls_reg sweep evaluation | `analysis/cls_reg_analysis.py` |
+| Combined cls+gen dual-model evaluation | `analysis/dev_comb_analysis.py` |
+| Softmax sanity-check experiment | `experiments/softmax_sanity.py` |
+| Fill seed_sweep configs from HPO | `configs/tools/fill_hpo.py` |
 | Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
 
 ### Critical code sections to understand:
@@ -279,22 +294,41 @@ embedding: "fourier"
 3. **`BornGenerator._single_class`** (`src/models/generator/generator.py:143`) — Sequential sampling
 4. **`os_secant`** (`src/models/generator/differential_sampling.py:46`) — Differentiable sampling
 5. **`Trainer.train`** (`src/trainer/classification.py:235`) — Main training loop
+6. **`BornMachine.marginal_log_probability`** (`src/models/born.py`) — Marginal p(x) for UQ
 
 ## Known Issues & Gotchas
 
 1. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
 
+5. **Complex Born Machines require torch ≥ 2.1.0** — Adam optimizer has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates. Always use torch ≥ 2.1.0 when training with `dtype: "complex64"` or `"complex128"` configs.
+
 2. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
 
 3. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
+
+4. **`randn_eye` amplitude collapse for non-Fourier embeddings on high-dimensional data** —
+   `randn_eye` places the identity matrix at physical index 0 of every MPS tensor, so the
+   initial amplitude is `φ_0(x)^n_sites`.  For Fourier `φ_0 = 1.0` (safe), but for Legendre
+   `φ_0 = √(1/2) ≈ 0.707`.  On MNIST (`n_sites = 785`) this gives
+   amplitude `≈ 10⁻¹¹⁸`, squared `≈ 10⁻²³⁶` — complete float32 underflow.
+   All Born probabilities become 0, NLL stays at `-log(eps) ≈ 13.8` (constant), gradients are
+   zero throughout, and training silently fails.  **Fixed in `BornMachine.__init__`**: after
+   `randn_eye` initialization the code checks `φ_0`, and if it differs from 1 rescales all
+   tensors by `1/φ_0` so the initial amplitude is restored to `≈ 1`.  This is exact for
+   embeddings with a constant zeroth component (Legendre: `φ_0 = √(1/2)` → scale `√2`);
+   for embeddings where `φ_0` varies with input (Hermite, Chebyshev) `canonical` initialization
+   is required instead — the rescaling only restores amplitude `≈ 1` at `x=0` for these embeddings,
+   while typical data has `φ_0(x) = exp(-x²/2)/π^{1/4} ≪ 1` at most sites, so underflow persists.
+   All Hermite configs have been updated to `init_method: canonical` for this reason.
 
 ## Future Directions (from README)
 
 1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
 2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
-3. **MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)
-4. **MPS as discriminator backbone**: Using MPS features as input to critic
-5. **More datasets**: Univariate time series dataset planned (`configs/dataset/timeseries/`)
+3. ~~**Uncertainty quantification**: Marginal p(x) for detection and purification~~ — **DONE**: `src/models/born.py` (marginal_log_probability), `src/utils/purification/` (LikelihoodPurification), `analysis/utils/uq.py` (UQEvaluation)
+4. ~~**MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)~~ — **DONE**: `d3D10c64` (complex64) and `d3D10` (float32) configs added for MNIST and UCR time-series datasets; legendre embedding with complex MPS is the recommended configuration.
+5. **MPS as discriminator backbone**: Using MPS features as input to critic
+6. ~~**More datasets**: Univariate time series dataset planned~~ — **DONE**: 7 UCR time-series datasets added (`configs/dataset/ucr_ts/`). The 5 new datasets (ChlorineConcentration, SyntheticControl, CricketX/Y/Z) were chosen to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers, enabling direct comparison with their results.
 
 ## Quick Reference: Common Commands
 
@@ -304,13 +338,13 @@ conda env create -f environment.yml
 conda activate <env_name>
 
 # Run classification experiment (using experiment config)
-python -m experiments.classification +experiments=classification/D18
+python -m experiments.classification +experiments=classification/fourier_d30D18/D18
 
 # Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/default
+python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
 
 # Run generative NLL experiment
-python -m experiments.generative +experiments=generative/hpo
+python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
 
 # Quick test run
 python -m experiments.classification +experiments=tests/classification
@@ -328,7 +362,7 @@ python -m experiments.adversarial trainer/adversarial=pgd_at dataset=2Dtoy/moons
 python -m experiments.adversarial trainer/adversarial=trades dataset=2Dtoy/moons_2k
 
 # Adversarial HPO on moons dataset
-python -m experiments.adversarial --multirun +experiments=adversarial/hpo/moons
+python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/moons
 
 # Check W&B dashboard
 # Visit: https://wandb.ai/<entity>/<project>

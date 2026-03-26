@@ -1,0 +1,12 @@
+name: "mnist_1k"
+gen_dow_kwargs:
+  name: "mnist_1k"
+  size: 100           # 100 per class = 1000 total
+  seed: 42
+  noise: null
+  circ_factor: null
+  dow_link: null
+split: [0.7, 0.15, 0.15]
+split_seed: 42
+overwrite: false
+scaler: linear

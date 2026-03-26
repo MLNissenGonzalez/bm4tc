@@ -70,6 +70,32 @@ class EvasionConfig:
     step_size: float | None = None  # defaults to 2.5 * strength / num_steps if None
     random_start: bool = True
 
+@dataclass
+class PurificationConfig:
+    """Configuration for likelihood-based purification of adversarial examples.
+
+    Parameters
+    ----------
+    norm : int | str
+        Lp norm for perturbation ball ("inf" or int >= 1).
+    num_steps : int
+        Number of gradient descent iterations for purification.
+    step_size : float | None
+        Step size per iteration. If None, defaults to 2.5 * radius / num_steps.
+    random_start : bool
+        Whether to start from random point within the radius ball.
+    radii : list
+        List of purification radii to evaluate (like strengths in EvasionConfig).
+    eps : float
+        Clamping floor for numerical stability in log p(x).
+    """
+    norm: int | str = "inf"
+    num_steps: int = 20
+    step_size: float | None = None
+    random_start: bool = False
+    radii: list = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    eps: float = 1e-12
+
 
 # --- Data config ---
 @dataclass
@@ -98,6 +124,7 @@ class DataGenDowConfig:
     noise: Optional[float]
     circ_factor: Optional[float]
     dow_link: Optional[List[str]]
+    dow_password: Optional[str] = None  # password for protected zip downloads
 
 @dataclass
 class DatasetConfig:
@@ -123,6 +150,8 @@ class DatasetConfig:
     split: Tuple[float, float, float]
     split_seed: int
     overwrite: bool = False
+    use_ucr_split: bool = False  # if True, honour original UCR train/test boundary
+    scaler: str = "minmax"
 
 cs.store(group="dataset", name="schema", node=DatasetConfig)
 
@@ -215,20 +244,20 @@ class CriticConfig:
 cs.store(group="trainer/ganstyle/critic", name="schema", node=CriticConfig)
 # --- Trainer configs ---  
 
-@dataclass 
+@dataclass
 class ClassificationConfig:
     max_epoch: int
     batch_size: int  # samples loaded per categorisation step for all classes involved
     optimizer: OptimizerConfig
-    criterion: CriterionConfig 
-    stop_crit: str  # "acc", "clsloss", "genloss", "fid", or "rob"
-    patience: int
-    watch_freq: int
+    criterion: CriterionConfig
     metrics: Dict[str, int] # to eval, values give evaluation frequency of given metric
-    save: bool
+    stop_crit: str = "acc"  # "acc", "clsloss", "genloss", "fid", or "rob"
+    patience: int = 250
+    watch_freq: int = 0  # gradient logging step interval; 0 = disabled (default)
+    save: bool = False
     auto_stack: bool = True
     auto_unbind: bool = False
-    
+
 
 cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
      
@@ -258,7 +287,7 @@ class GANStyleConfig:
     info_freq : int
         Frequency (in epochs) to log progress information.
     watch_freq : int
-        Step interval for gradient logging and monitoring.
+        Step interval for gradient logging and monitoring. Set to 0 to disable gradient logging (default).
     acc_drop_tol : float
         Accuracy drop tolerance; triggers retraining if validation accuracy falls below (best_acc - acc_drop_tol).
     retrain : PretrainMPSConfig
@@ -312,7 +341,7 @@ class AdversarialConfig:
     patience : int
         Number of epochs without improvement before early stopping.
     watch_freq : int
-        Frequency of gradient logging to W&B.
+        Frequency of gradient logging to W&B. Set to 0 to disable gradient logging (default).
     metrics : Dict[str, int]
         Metrics to evaluate and their frequencies.
     trades_beta : float
@@ -355,6 +384,32 @@ cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
 
 
 @dataclass
+class NormControlConfig:
+    """
+    Unified control for Born Machine norm management during generative training.
+
+    Both mechanisms share the same ``target`` Z value.
+    Set ``hard_every=0`` to disable hard renorm; set ``soft_strength=0.0`` to
+    disable the soft penalty. Both can be enabled simultaneously.
+
+    Parameters
+    ----------
+    target : float | None
+        Target partition function Z. None = capture from BornMachine at the
+        start of ``train()`` (i.e. the pretrained value). Default 1.0.
+    hard_every : int
+        Hard-renormalize toward target every N optimizer steps.
+        0 = disabled. Default 1 (every step).
+    soft_strength : float
+        Coefficient for the soft penalty  strength * (Z - target)².
+        0.0 = disabled. Default 0.0.
+    """
+    target: Optional[float] = 1.0
+    hard_every: int = 1
+    soft_strength: float = 0.0
+
+
+@dataclass
 class GenerativeConfig:
     """
     Configuration for generative training using NLL minimization.
@@ -368,7 +423,8 @@ class GenerativeConfig:
     criterion: CriterionConfig  # generative NLL criterion (user implements)
     stop_crit: str  # "acc", "genloss", "fid", or "rob"
     patience: int
-    watch_freq: int
+    watch_freq: int  # gradient logging step interval; 0 = disabled (default)
+    norm_control: NormControlConfig  # norm management (hard renorm and/or soft penalty)
     metrics: Dict[str, int]  # {"loss": 1, "fid": 10, "viz": 10}
     save: bool = False
     auto_stack: bool = True
@@ -428,6 +484,7 @@ class Config:
     trainer: TrainerConfig
     tracking: TrackingConfig
     experiment: str = "default"
+    descriptor: str = ""
 
 cs.store(name="base_config", node=Config)
 

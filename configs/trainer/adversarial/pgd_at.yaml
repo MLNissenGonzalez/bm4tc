@@ -1,7 +1,7 @@
 # PGD Adversarial Training (Madry et al.)
 # Trains on adversarial examples: Loss = L(x_adv, y)
 max_epoch: 100
-batch_size: 64
+batch_size: 256
 method: "pgd_at"
 
 optimizer:
@@ -17,7 +17,7 @@ criterion:
 
 evasion:
   method: "PGD"
-  norm: "inf"
+  norm: 2
   criterion:
     name: "negative log-likelihood"
     kwargs:
@@ -29,7 +29,7 @@ evasion:
 
 stop_crit: "rob"
 patience: 30
-watch_freq: 500
+watch_freq: 0
 
 metrics: {"clsloss": 1, "acc": 1, "rob": 5}
 

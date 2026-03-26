@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from src.utils.schemas import DatasetConfig, DataGenDowConfig
 import os
 import numpy.typing as npt
+from pathlib import Path
+from typing import Optional
 
 import logging
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ class LabelledDataset:
     size: int
     num_feat: int
     num_cls: int
+    ucr_train_size: Optional[int] = None  # non-None only for UCR datasets
 
 
 # -----------------------------
@@ -42,8 +45,19 @@ _DATA_DIR = os.path.abspath(
 # -----------------------------
 _TWO_DIM_DATA = ["moons", "circles", "spirals"]
 _SK_DATA = []   # placeholders for sklearn datasets
-_NIST_DATA = []  # placeholders for MNIST, FashionMNIST, etc.
-_TS_DATA = [] # placeholder for time-series data
+_NIST_DATA = ["mnist"]
+_TS_DATA = ["ecg200", "italypowerdemand", "chlorineconcentration",
+            "syntheticcontrol", "cricketx", "crickety", "cricketz"]
+
+_UCR_TS_DATASET_DIRS = {          # canonical → folder name inside ucr_ts/
+    "ecg200": "ECG200",
+    "italypowerdemand": "ItalyPowerDemand",
+    "chlorineconcentration": "ChlorineConcentration",
+    "syntheticcontrol": "SyntheticControl",
+    "cricketx": "CricketX",
+    "crickety": "CricketY",
+    "cricketz": "CricketZ",
+}
 
 _CANONICAL_FOLDERS = _TWO_DIM_DATA + _SK_DATA + _NIST_DATA + _TS_DATA
 
@@ -139,7 +153,62 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-# TODO: Add code to download and prepreprocess MNIST dataset (ADDED AS ISSUE, highpriority)
+def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Download and preprocess MNIST dataset.
+
+    Combines train (60k) + test (10k) splits into one pool and optionally
+    subsamples a balanced set of ``cfg.size`` samples per class.
+
+    Parameters
+    ----------
+    cfg : DataGenDowConfig
+        Must contain:
+        - ``size``: int or None — samples per class; None means use all.
+        - ``seed``: int — RNG seed for subsampling.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(X_np, y_np)`` where ``X_np`` has shape (N, 784) in float32 ∈ [0, 1]
+        and ``y_np`` has shape (N,) as int.
+    """
+    import torchvision.datasets as tv_datasets
+
+    # yann.lecun.com returns HTTP 200 with garbage content → MD5 fails → RuntimeError
+    # (not URLError), so torchvision's mirror fallback is never triggered. Force the
+    # working S3 mirror directly.
+    tv_datasets.MNIST.mirrors = ["https://ossci-datasets.s3.amazonaws.com/mnist/"]
+
+    # Raw files go to _DATA_DIR/MNIST/raw/ (torchvision convention)
+    train_ds = tv_datasets.MNIST(root=_DATA_DIR, train=True, download=True)
+    test_ds = tv_datasets.MNIST(root=_DATA_DIR, train=False, download=True)
+
+    # Access tensors directly — avoids iterating the full dataset
+    data = np.concatenate(
+        [train_ds.data.numpy(), test_ds.data.numpy()], axis=0
+    )  # (70000, 28, 28), uint8
+    targets = np.concatenate(
+        [train_ds.targets.numpy(), test_ds.targets.numpy()], axis=0
+    )  # (70000,), int64
+
+    # Flatten spatial dims and normalise to float32 in [0, 1]
+    data = data.reshape(-1, 784).astype(np.float32) / 255.0  # (70000, 784)
+    targets = targets.astype(int)
+
+    if cfg.size is not None:
+        rng = np.random.RandomState(cfg.seed)
+        indices = []
+        for c in range(10):
+            class_idx = np.where(targets == c)[0]
+            chosen = rng.choice(class_idx, size=cfg.size, replace=False)
+            indices.append(chosen)
+        indices = np.concatenate(indices)
+        rng.shuffle(indices)
+        data = data[indices]
+        targets = targets[indices]
+
+    logger.info(f"MNIST loaded: {data.shape[0]} samples, {data.shape[1]} features")
+    return data, targets
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -149,7 +218,84 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
 
-# TODO: Add code to download and prepreprocess Timeseries dataset 
+# UCR 2018 archive: https://www.cs.ucr.edu/~eamonn/time_series_data_2018/UCRArchive_2018.zip
+# Password: "someone"
+
+
+def _download_and_extract_ucr(url: str, password: str, folder_name: str, dest_dir: Path) -> None:
+    """Download the full UCR 2018 zip and extract only the requested dataset folder."""
+    import urllib.request
+    import zipfile
+    import tempfile
+    import shutil
+
+    logger.info(f"Downloading UCR archive from {url} (this may take a while)...")
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        urllib.request.urlretrieve(url, tmp_path)
+        logger.info(f"Download complete. Extracting '{folder_name}'...")
+        prefix = f"UCRArchive_2018/{folder_name}/"
+        with zipfile.ZipFile(tmp_path, "r") as zf:
+            members = [m for m in zf.namelist() if m.startswith(prefix)]
+            if not members:
+                raise FileNotFoundError(
+                    f"Could not find '{prefix}' inside the archive."
+                )
+            for member in members:
+                zf.extract(member, path=tmp_path + "_extracted", pwd=password.encode())
+        extracted_src = Path(tmp_path + "_extracted") / "UCRArchive_2018" / folder_name
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for item in extracted_src.iterdir():
+            shutil.move(str(item), str(dest_dir / item.name))
+        shutil.rmtree(tmp_path + "_extracted", ignore_errors=True)
+        logger.info(f"Extracted '{folder_name}' to {dest_dir}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _ucr_ts_loader(cfg: DataGenDowConfig):
+    """Load a UCR time-series dataset from TSV files.
+
+    Returns (X, t, ucr_train_size) where ucr_train_size is the number of
+    original training samples (before merging with test).
+    """
+    canonical, _ = _parse_dataset_name(cfg.name)
+    folder = _UCR_TS_DATASET_DIRS[canonical]
+    ts_dir = Path(_DATA_DIR) / "ucr_ts" / folder
+
+    if not ts_dir.exists():
+        if cfg.dow_link:
+            url = cfg.dow_link[0]
+            password = getattr(cfg, "dow_password", None) or "someone"
+            _download_and_extract_ucr(url, password, folder, ts_dir)
+        else:
+            raise FileNotFoundError(
+                f"UCR dataset directory not found: {ts_dir}. "
+                "Set dow_link in the dataset config to enable auto-download."
+            )
+
+    prefix = folder  # e.g. "ECG200"
+    train_raw = np.loadtxt(ts_dir / f"{prefix}_TRAIN.tsv")   # (N_train, 1+T)
+    test_raw  = np.loadtxt(ts_dir / f"{prefix}_TEST.tsv")    # (N_test,  1+T)
+
+    ucr_train_size = len(train_raw)
+
+    raw = np.vstack([train_raw, test_raw])
+    labels_raw = raw[:, 0]
+    X = raw[:, 1:].astype(np.float32)
+
+    # Remap labels to 0-indexed integers
+    unique = sorted(np.unique(labels_raw))
+    label_map = {v: i for i, v in enumerate(unique)}
+    t = np.array([label_map[v] for v in labels_raw], dtype=int)
+
+    logger.info(
+        f"UCR '{folder}' loaded: {len(X)} samples, {X.shape[1]} time steps, "
+        f"UCR train size = {ucr_train_size}"
+    )
+    return X, t, ucr_train_size
 
 # ---------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------
@@ -204,11 +350,16 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
 
     if canonical in _TWO_DIM_DATA:
         X, t = _two_dim_generator(cfg)
+        np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
+    elif canonical in _NIST_DATA:
+        X, t = _nist_generator(cfg)
+        np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
+    elif canonical in _TS_DATA:
+        X, t, ucr_train_size = _ucr_ts_loader(cfg)
+        np.savez(os.path.join(path, f"{variant}.npz"),
+                 X=X, y=t, ucr_train_size=np.array(ucr_train_size))
     else:
-        # TODO: Extend this block to handle _SK_DATA or _NIST_DATA
         raise ValueError(f"Dataset {name} not supported.")
-
-    np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
 
 
 def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
@@ -261,10 +412,14 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     if overwrite or not os.path.exists(dataset_file):
         _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
+        logger.info(f"Generated dataset '{variant}' and saved to {dataset_file}")
+    else:
+        logger.info(f"Loaded dataset from {dataset_file}")
     data = np.load(dataset_file)
 
     X: npt.NDArray[np.float32] = data["X"]  # shape: (size, n_feat)
     t: npt.NDArray[np.int_] = data["y"]     # shape: (size,)
+    ucr_train_size = int(data["ucr_train_size"]) if "ucr_train_size" in data else None
     logger.debug(f"{X.shape=}, {t.shape=}")
     return LabelledDataset(
         name=variant,
@@ -272,5 +427,6 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
         t=t,
         size=X.shape[0],
         num_feat=X.shape[1],
-        num_cls=len(np.unique(t))
+        num_cls=len(np.unique(t)),
+        ucr_train_size=ucr_train_size,
     )

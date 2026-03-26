@@ -15,6 +15,9 @@ Usage:
     # Fine-tune a pretrained model
     python -m experiments.adversarial trainer/adversarial=pgd_at model_path=/path/to/model
 
+    # HPO on moons dataset (fourier d30D18 architecture)
+    python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/moons
+
     # Quick test
     python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
 """
@@ -27,6 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
+from src.tracking import evaluate_loaded_model, log_dataset_viz
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
@@ -69,6 +73,10 @@ def main(cfg: schemas.Config):
 
     # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
+    log_dataset_viz(datahandler)
+
+    if model_path is not None:
+        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
 
     if model_path is None:
         # Classification pretraining

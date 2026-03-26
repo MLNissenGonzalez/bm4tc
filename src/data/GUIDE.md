@@ -112,13 +112,27 @@ for naturals in datahandler.discrimination["train"]:
 
 ### Supported Datasets
 
-Currently implemented 2D toy datasets:
+2D toy datasets:
 
 | Name | Description | Generator |
 |------|-------------|-----------|
 | `moons` | Two interleaving half circles | `sklearn.datasets.make_moons` |
 | `circles` | Concentric circles | `sklearn.datasets.make_circles` |
 | `spirals` | Two spirals | Custom implementation |
+
+UCR univariate time-series datasets (downloaded from the UCR archive, `use_ucr_split: true` to use canonical train/test boundary):
+
+| Name | UCR folder | Train | Test | Features | Classes |
+|------|------------|-------|------|----------|---------|
+| `ecg200` | ECG200 | 100 | 100 | 96 | 2 |
+| `italypowerdemand` | ItalyPowerDemand | 67 | 1029 | 24 | 2 |
+| `chlorineconcentration` | ChlorineConcentration | 467 | 3840 | 166 | 3 |
+| `syntheticcontrol` | SyntheticControl | 300 | 300 | 60 | 6 |
+| `cricketx` | CricketX | 390 | 390 | 300 | 12 |
+| `crickety` | CricketY | 390 | 390 | 300 | 12 |
+| `cricketz` | CricketZ | 390 | 390 | 300 | 12 |
+
+The five datasets ChlorineConcentration, SyntheticControl, CricketX/Y/Z were selected to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers, allowing direct comparison with their results.
 
 ### Dataset Configuration
 

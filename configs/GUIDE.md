@@ -18,10 +18,10 @@ This directory contains all Hydra configuration files for experiments.
 ```yaml
 # configs/experiments/classification/my_experiment.yaml
 # @package _global_
-experiment: my_experiment_name
+experiment: my_experiment
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online
@@ -40,24 +40,43 @@ configs/
 ├── GUIDE.md                    # This file
 ├── config.yaml                 # Main config with defaults
 ├── born/                       # BornMachine architecture configs
-│   ├── d4D3.yaml              # in_dim=4, bond_dim=3
-│   ├── d10D3.yaml             # in_dim=10, bond_dim=3
-│   ├── d10D4.yaml             # in_dim=10, bond_dim=4
-│   ├── d10D6.yaml             # in_dim=10, bond_dim=6
-│   ├── d30D4.yaml             # in_dim=30, bond_dim=4
-│   ├── d30D10.yaml            # in_dim=30, bond_dim=10
-│   ├── d30D18.yaml            # in_dim=30, bond_dim=18
-│   └── test.yaml              # Minimal test config
+│   ├── fourier/               # Fourier embedding configs
+│   │   ├── d2D2.yaml         # in_dim=2, bond_dim=2
+│   │   ├── d3D3.yaml         # in_dim=3, bond_dim=3
+│   │   ├── d3D10.yaml        # in_dim=3, bond_dim=10  ← UCR time-series
+│   │   ├── d3D20.yaml        # in_dim=3, bond_dim=20  ← UCR time-series
+│   │   ├── d4D3.yaml         # in_dim=4, bond_dim=3
+│   │   ├── d6D4.yaml         # in_dim=6, bond_dim=4
+│   │   ├── d10D3.yaml        # in_dim=10, bond_dim=3
+│   │   ├── d10D4.yaml        # in_dim=10, bond_dim=4
+│   │   ├── d10D6.yaml        # in_dim=10, bond_dim=6
+│   │   ├── d30D4.yaml        # in_dim=30, bond_dim=4
+│   │   ├── d30D10.yaml       # in_dim=30, bond_dim=10
+│   │   ├── d30D18.yaml       # in_dim=30, bond_dim=18
+│   │   └── test.yaml         # Minimal test config
+│   ├── legendre/              # Legendre polynomial embedding configs
+│   │   ├── d3D10.yaml        # in_dim=3, bond_dim=10  ← UCR time-series
+│   │   ├── d3D20.yaml        # in_dim=3, bond_dim=20  ← UCR time-series
+│   │   ├── d2D2.yaml ... d30D18.yaml
+│   └── hermite/               # Hermite polynomial embedding configs
+│       ├── d2D2.yaml ... d30D18.yaml
 ├── dataset/                    # Dataset configs
 │   ├── test.yaml              # Minimal test config
-│   └── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
-│       ├── circles_2k.yaml    # 2k samples, circles
-│       ├── circles_4k.yaml    # 4k samples, circles
-│       ├── moons_2k.yaml      # 2k samples, moons
-│       ├── moons_4k.yaml      # 4k samples, moons
-│       ├── spirals_2k.yaml    # 2k samples, spirals
-│       └── spirals_4k.yaml    # 4k samples, spirals
-│   # Future: mnist/, timeseries/
+│   ├── 2Dtoy/                 # 2D toy datasets (moons, circles, spirals)
+│   │   ├── circles_2k.yaml    # 2k samples, circles
+│   │   ├── circles_4k.yaml    # 4k samples, circles
+│   │   ├── moons_2k.yaml      # 2k samples, moons
+│   │   ├── moons_4k.yaml      # 4k samples, moons
+│   │   ├── spirals_2k.yaml    # 2k samples, spirals
+│   │   └── spirals_4k.yaml    # 4k samples, spirals
+│   └── ucr_ts/                # UCR time-series datasets
+│       ├── ecg200.yaml
+│       ├── italypowerdemand.yaml
+│       ├── chlorineconcentration.yaml
+│       ├── syntheticcontrol.yaml
+│       ├── cricketx.yaml
+│       ├── crickety.yaml
+│       └── cricketz.yaml
 ├── trainer/
 │   ├── classification/        # Classifier training configs
 │   │   ├── adam500_loss.yaml # Adam, 500 epochs, stop on loss
@@ -91,41 +110,45 @@ configs/
 ├── tracking/                  # W&B and evaluation configs
 │   ├── online.yaml           # Online W&B logging
 │   └── test.yaml             # Test config
-├── experiments/              # Full experiment configs
+├── experiments/              # Full experiment configs (organized by task/embedding/arch/phase)
 │   ├── classification/       # Classification experiments
-│   │   ├── D18.yaml         # Classification with D=18
-│   │   ├── D18_sweep.yaml   # Sweep over architectures
-│   │   ├── best/            # Best configs per dataset
-│   │   │   ├── circles_4k.yaml
-│   │   │   ├── moons_4k.yaml
-│   │   │   └── spirals_4k.yaml
-│   │   ├── hpo/             # HPO experiments
-│   │   │   ├── lr_hpo.yaml
-│   │   │   ├── lrwd_hpo.yaml
-│   │   │   └── sanity_check.yaml
-│   │   └── seed_sweeps/     # Seed sweep experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       └── spirals.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   ├── d30D18/      # in_dim=30, bond_dim=18
+│   │   │   │   ├── best/    # Best configs per dataset
+│   │   │   │   ├── hpo/     # HPO experiments
+│   │   │   │   └── seed_sweeps/
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6}/  # Other architectures
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── adversarial/          # Adversarial training experiments
-│   │   └── hpo/             # HPO experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       ├── spirals.yaml
-│   │       └── hpo_test.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   ├── d30D18/
+│   │   │   │   ├── best/    # Best HPO configs per dataset
+│   │   │   │   ├── hpo/
+│   │   │   │   └── seed_sweeps/
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d10D4}/  # Other architectures
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   └── legendre/        # Legendre embedding (same arch structure)
 │   ├── generative/           # Generative NLL experiments
-│   │   ├── hpo.yaml
-│   │   └── seed_sweep/      # Seed sweep experiments
-│   │       ├── circles.yaml
-│   │       ├── moons.yaml
-│   │       └── spirals.yaml
+│   │   ├── fourier/         # Fourier embedding
+│   │   │   └── {d2D2,d3D3,d4D3,d6D4,d10D6,d30D18}/
+│   │   │       ├── hpo/
+│   │   │       └── seed_sweeps/
+│   │   ├── legendre/        # Legendre embedding (same arch structure)
+│   │   └── hermite/         # Hermite polynomial embedding
+│   │       └── {d4D3,d6D4,d10D6,d30D18}/
+│   │           ├── hpo/
+│   │           └── seed_sweeps/
 │   ├── ganstyle/             # GAN experiments
-│   │   ├── default.yaml
-│   │   ├── hpo.yaml
-│   │   ├── no_retrain.yaml
-│   │   ├── critic_sweep.yaml
-│   │   └── wgan_sweep.yaml
-│   └── tests/                # Test experiments
+│   │   └── fourier_d30D18/
+│   │       ├── critic_sweep.yaml
+│   │       ├── default.yaml
+│   │       ├── hpo.yaml
+│   │       ├── no_retrain.yaml
+│   │       └── wgan_sweep.yaml
+│   └── tests/                # Test experiments (unchanged)
 │       ├── classification.yaml
 │       ├── classification_hpo.yaml
 │       ├── classifications.yaml
@@ -135,6 +158,8 @@ configs/
 │       ├── adversarial.yaml
 │       ├── generative.yaml
 │       └── generative_hpo.yaml
+├── tools/                    # Config maintenance scripts
+│   └── fill_hpo.py          # Patch seed_sweep configs with HPO results
 └── hydra/                    # Hydra-specific configs
     └── job_logging/
         ├── debug.yaml        # Verbose logging
@@ -160,9 +185,9 @@ defaults:
 
 hydra:
   run:
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y_%I%p%M}
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m_%H%M}
   sweep:
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y}
+    dir: outputs/${experiment}_${training_regime:}_d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${born.embedding}_${dataset.name}_${now:%d%m}
     subdir: ${hydra.job.num}
   output_subdir: .hydra
 ```
@@ -174,7 +199,7 @@ hydra:
 Naming convention: `d{in_dim}D{bond_dim}`
 
 ```yaml
-# born/d10D4.yaml
+# born/fourier/d10D4.yaml
 init_kwargs:
   in_dim: 10           # Physical/embedding dimension
   bond_dim: 4          # Bond dimension (expressivity)
@@ -191,7 +216,7 @@ embedding: "fourier"   # Embedding type
 | `bond_dim` | Bond dimension | Higher = more expressive but slower |
 | `boundary` | `"obc"` or `"pbc"` | Open vs periodic boundaries |
 | `init_method` | Tensor initialization | `"randn"`, `"randn_eye"`, etc. |
-| `embedding` | `"fourier"` or `"legendre"` | Input mapping type |
+| `embedding` | `"fourier"`, `"legendre"`, or `"hermite"` | Input mapping type |
 
 ### dataset/ — Dataset Configs
 
@@ -223,6 +248,28 @@ overwrite: false       # Regenerate dataset even if cached (for seed sweeps)
 ```
 - `dataset: 2Dtoy/moons_4k` (do not forget the subfolder)
 - Set `overwrite: true` when sweeping over dataset seeds to ensure fresh data each run
+
+**UCR Time-Series Datasets** (`dataset/ucr_ts/`):
+```yaml
+# dataset/ucr_ts/ecg200.yaml
+name: "ecg200"
+gen_dow_kwargs:
+  name: "ecg200"
+  size: null
+  seed: 42
+  noise: null
+  circ_factor: null
+  dow_link:
+    - "https://www.cs.ucr.edu/~eamonn/time_series_data_2018/UCRArchive_2018.zip"
+  dow_password: "someone"
+split: [0.5, 0.25, 0.25]   # only used if use_ucr_split: false
+split_seed: 42
+use_ucr_split: true         # use the canonical UCR train/test boundary
+overwrite: false
+```
+- `dataset: ucr_ts/ecg200` (subfolder required)
+- `use_ucr_split: true` uses the canonical UCR train/test split; the valid set is carved from the UCR training portion
+- The five datasets ChlorineConcentration, SyntheticControl, CricketX/Y/Z were selected to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers
 
 ### trainer/classification/ — Classifier Training
 
@@ -308,15 +355,15 @@ criterion:
 **Available critic configs:**
 | Config | Hidden Layers | Description |
 |--------|---------------|-------------|
-| `d2` | `[8.0, 8.0]` | Shallow, 2 layers |
+| `d2w8` | `[8.0, 8.0]` | Shallow, 2 layers, width 8 |
 | `d3` | `[8.0, 8.0, 8.0]` | Medium, 3 layers |
 | `d4` | `[8.0, 8.0, 8.0, 8.0]` | Deep, 4 layers |
-| `d5` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers |
+| `d5w8` | `[8.0, 8.0, 8.0, 8.0, 8.0]` | Very deep, 5 layers, width 8 |
 
 **Sweeping over critic architectures:**
 ```bash
 # Command line multirun
-python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2,d3,d4,d5'
+python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2w8,d3,d4,d5w8'
 ```
 
 ```yaml
@@ -324,7 +371,7 @@ python -m experiments.ganstyle --multirun 'trainer/ganstyle/critic=d2,d3,d4,d5'
 hydra:
   sweeper:
     params:
-      trainer/ganstyle/critic: d2, d3, d4, d5
+      trainer/ganstyle/critic: d2w8, d3, d4, d5w8
 ```
 
 ### trainer/generative/ — Generative Training
@@ -381,10 +428,26 @@ Experiment configs override defaults. The main experiment directories are:
 - `ganstyle/` — GAN-style training experiments
 - `tests/` — Quick test experiments
 
+### cls_reg — Classifier-Regularized Fine-Tuning
+
+`cls_reg` configs fine-tune a pre-trained classifier checkpoint using either adversarial or generative
+training for a small number of epochs. The key parameters are:
+
+- `model_path`: Path to a classifier checkpoint from a completed `seed_sweep/cls` run. Set this after
+  running `fill_hpo.py` (or manually).
+- `max_epoch`: Swept over `choice(1, 2, 4, 8, 16, 32, 64, 128)` — the fine-tuning budget (log-scale).
+- `tracking.seed × max_epoch`: 5 seeds × 8 epoch budgets = 40 runs per config.
+
+**Hyperparameter note:** `lr`, `weight_decay` (and `clean_weight` for adversarial) are filled from the
+corresponding **generative or adversarial HPO** results via `fill_hpo.py`. These hyperparameters were
+optimized for full training runs (300–1000 epochs), not for fine-tuning. As a result, the fine-tuning
+will be slightly suboptimal compared to what a dedicated cls_reg HPO would achieve — the learning rate
+may be too aggressive or conservative for short fine-tuning schedules.
+
 ```yaml
 # experiments/tests/classification.yaml
 # @package _global_
-experiment: classification_test
+experiment: test
 
 defaults:
   - override /trainer/ganstyle: null      # Disable GAN training
@@ -393,21 +456,21 @@ defaults:
 
 The `# @package _global_` directive makes overrides apply at the root level.
 
-**Best configs** (`experiments/classification/best/`):
+**Best configs** (`experiments/classification/fourier_d30D18/best/`):
 Store validated best configurations for each dataset:
 ```yaml
-# experiments/classification/best/moons_4k.yaml
+# experiments/classification/fourier_d30D18/best/moons.yaml
 # @package _global_
-experiment: best_moons_4k
+experiment: best
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   # ... validated hyperparameters
 ```
 
-**Seed sweeps** (`experiments/classification/seed_sweeps/`):
+**Seed sweeps** (`experiments/classification/fourier_d30D18/seed_sweeps/`):
 Run the same config with different random seeds for statistical analysis.
 
 ## Running Experiments
@@ -421,10 +484,10 @@ Define sweep parameters in an experiment config:
 ```yaml
 # configs/experiments/classification/D18_sweep.yaml
 # @package _global_
-experiment: D18_sweep
+experiment: lrwd_grid
 
 defaults:
-  - override /born: d30D18
+  - override /born: fourier/d30D18
   - override /dataset: 2Dtoy/moons_4k
   # ... other settings
 
@@ -447,12 +510,12 @@ defaults:
 
 **HPO Experiment Config Example**:
 ```yaml
-# configs/experiments/classification/hpo/lrwd_hpo.yaml
+# configs/experiments/classification/fourier_d30D18/hpo/lrwd_hpo.yaml
 # @package _global_
-experiment: classification_hpo
+experiment: lrwd_hpo
 
 defaults:
-  - override /born: d10D4
+  - override /born: fourier/d10D4
   - override /dataset: 2Dtoy/moons_4k
   - override /trainer/classification: adam500_loss
   - override /tracking: online
@@ -525,6 +588,18 @@ See `experiments/GUIDE.md` for running HPO experiments.
                          ▼
                   Command line (final overrides)
 ```
+
+**IMPORTANT — Defaults List Ordering:**
+In Hydra, the **last entry for a config group** in the `defaults` list wins. In `config.yaml`, defaults from the main file are appended *after* the experiment's defaults. This means that the non-override entries in `config.yaml` (e.g., `- dataset: 2Dtoy/circles_2k`) will silently override any `- override /dataset: ...` in your experiment config, because the `config.yaml` entry comes last.
+
+For example, this was the root cause of a bug where adversarial training always reverted to the `circles_2k` dataset: the experiment config had `- override /dataset: 2Dtoy/moons_4k`, but `config.yaml` listed `- dataset: 2Dtoy/circles_2k` after it, which took precedence. The fix is to use `override` in `config.yaml` itself (which is already done for Hydra logging entries) or to ensure your experiment config entries are not silently shadowed.
+
+**IMPORTANT — Dict Deep-Merge:**
+Hydra/OmegaConf **deep-merges** dicts rather than replacing them. If the base trainer config has `metrics: {"clsloss": 1, "acc": 1, "rob": 1}` and your experiment config sets `metrics: {"clsloss": 1}`, the result is `{"clsloss": 1, "acc": 1, "rob": 1}` — the keys from the base survive. To disable unwanted metrics, explicitly set them to `null`:
+```yaml
+metrics: {"clsloss": 1, "acc": null, "rob": null}
+```
+The `PerformanceEvaluator` skips metrics with null/falsy freq values.
 
 ## Schema ↔ Config Mapping
 

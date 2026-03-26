@@ -1,0 +1,36 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: legendre/d3D10c64
+  - override /dataset: ucr_ts/ecg200
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  classification:
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0006358358856676254    # FILL FROM HPO
+        weight_decay: 3.139575515829448e-07  # FILL FROM HPO
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-6
+    metrics: {"clsloss": 1, "acc": 1}
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,11)

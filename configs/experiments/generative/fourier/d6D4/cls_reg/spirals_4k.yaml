@@ -1,0 +1,46 @@
+# @package _global_
+experiment: cls_reg
+
+defaults:
+  - override /born: fourier/d6D4
+  - override /dataset: 2Dtoy/spirals_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: outputs/seed_sweep/cls/fourier/d6D4/spirals_4k_DDMM/2/models/<checkpoint>  # FILL: run fill_hpo.py after d6D4 cls seed_sweep
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+
+trainer:
+  generative:
+    max_epoch: 1            # placeholder; swept via hydra sweeper
+    batch_size: 256
+    patience: 100           # >= max max_epoch -> no early stopping during sweep
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.00010318554867474568
+        weight_decay: 1.2601639723276828e-08
+    criterion:
+      name: "nll"
+      kwargs:
+        eps: 1e-8
+    metrics: {"genloss": 1, "acc": 1, "rob": 1}
+
+hydra:
+  sweeper:
+    params:
+      trainer.generative.max_epoch: choice(1,5,10,50,100)
+      tracking.seed: range(1,6)

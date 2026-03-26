@@ -1,0 +1,44 @@
+# @package _global_
+experiment: grid_sweep
+descriptor: nll_soft_pretrained
+
+defaults:
+  - override /born: legendre/d15D40c64
+  - override /dataset: ucr_ts/italypowerdemand
+  - override /trainer/classification: null
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: ???  # FILL: best cls seed sweep checkpoint
+
+tracking:
+  seed: 42
+
+trainer:
+  generative:
+    max_epoch: 1000
+    batch_size: 128
+    patience: 300
+    stop_crit: "acc"
+    watch_freq: 0
+    save: false
+    norm_control:
+      target: null        # captured from pretrained BM at start of train()
+      hard_every: 0       # disabled
+      soft_strength: 1e-3 # overridden by grid sweep
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4          # overridden by grid sweep
+        weight_decay: 0.0
+    criterion:
+      name: "nll"
+      kwargs: {eps: 1e-8}
+    metrics: {"genloss": 1, "acc": 1}
+
+hydra:
+  sweeper:
+    params:
+      trainer.generative.optimizer.kwargs.lr: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2)
+      trainer.generative.norm_control.soft_strength: choice(1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 3e-1, 1.0, 3.0)

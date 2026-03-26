@@ -58,3 +58,6 @@ analysis/scratchbook.ipynb
 /mathqi/mnissen/adversarial_training_mps/.github
 .claude/
 .vscode/
+
+tutorial_mnist_script.py
+data/

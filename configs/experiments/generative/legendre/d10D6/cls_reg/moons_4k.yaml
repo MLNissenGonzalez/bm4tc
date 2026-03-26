@@ -1,0 +1,46 @@
+# @package _global_
+experiment: cls_reg # python -m experiments.generative +experiments=generative/legendre/d10D6/cls_reg/moons_4k --multirun
+
+defaults:
+  - override /born: legendre/d10D6
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: outputs/seed_sweep/cls/legendre/d10D6/moons_4k_1203/0/models/moons_4k_pre_mps_bd6_legendre10_300adamlr0.041376293143363094wd1.1024958579569868e-09
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+
+trainer:
+  generative:
+    max_epoch: 1            # placeholder; swept via hydra sweeper
+    batch_size: 256
+    patience: 100           # >= max max_epoch -> no early stopping during sweep
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0002636875533972306              # FILL FROM HPO (gen)
+        weight_decay: 1.7699302940633323e-08    # FILL FROM HPO (gen)
+    criterion:
+      name: "nll"
+      kwargs:
+        eps: 1e-8
+    metrics: {"genloss": 1, "acc": 1, "rob": 1}
+
+hydra:
+  sweeper:
+    params:
+      trainer.generative.max_epoch: choice(1,2,4,8,16,32,64,128)
+      tracking.seed: range(1,6)

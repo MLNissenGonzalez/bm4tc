@@ -1,0 +1,12 @@
+name: "mnist_full"
+gen_dow_kwargs:
+  name: "mnist_full"
+  size: null          # use all available samples per class
+  seed: 42
+  noise: null
+  circ_factor: null
+  dow_link: null
+split: [0.8, 0.1, 0.1]
+split_seed: 42
+overwrite: false
+scaler: linear

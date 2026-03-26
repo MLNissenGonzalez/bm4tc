@@ -1,10 +1,12 @@
 import src.utils.schemas as schemas
 import torch
+from types import SimpleNamespace
 from typing import *
 import logging
 from src.models.born import BornMachine
 from src.data.handler import DataHandler
 import src.utils.get as get
+from src.utils.criterions import ClassificationSoftmaxNLL
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +34,11 @@ class BaseMetric:
         self.datahandler = datahandler
         self.device = device
     
-    def _labels_n_probs(
-            self, 
-            bornmachine: BornMachine,
-            split: str,
-            context: Dict[str, Any]
-            ):
-        """
-        Method to precompute class probabilities if not already in context.
-        """
-        
-        if "labels_n_probs" not in context:
-            context["labels_n_probs"] = []
-            with torch.no_grad():
-                for data, labels in self.datahandler.classification[split]:
-                    data = data.to(self.device)
-                    probs = bornmachine.class_probabilities(data).cpu()
-                    context["labels_n_probs"].append((labels, probs))
+    _scores_cache_key: str  # set by each subclass
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        """Cache (labels, scores) in context. Must be overridden by subclasses."""
+        raise NotImplementedError
 
 
     def _generate(
@@ -82,6 +72,8 @@ class BaseMetric:
 class ClassificationLossMetric(BaseMetric):
     """Compute classification loss (NLL) on the dataset."""
 
+    _scores_cache_key = "labels_n_probs"
+
     def __init__(self, freq, cfg: schemas.Config, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
         if hasattr(cfg.trainer, "classification") and hasattr(cfg.trainer.classification, "criterion"):
@@ -89,36 +81,110 @@ class ClassificationLossMetric(BaseMetric):
         else:
             crit_cfg = schemas.CriterionConfig(name="negative log-likelihood", kwargs={"eps": 1e-8})
             self.criterion = get.criterion(mode="classification", cfg=crit_cfg)
+
+    def _labels_n_scores(self, bornmachine, split, context):
+        if "labels_n_probs" not in context:
+            context["labels_n_probs"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    probs = bornmachine.class_probabilities(data).cpu()
+                    context["labels_n_probs"].append((labels, probs))
+
     def evaluate(self, bornmachine, split, context):
         bornmachine.classifier.eval()
         losses = []
-        self._labels_n_probs(bornmachine, split, context)
+        self._labels_n_scores(bornmachine, split, context)
 
         with torch.no_grad():
-            for labels, probs in context["labels_n_probs"]:
+            for labels, probs in context[self._scores_cache_key]:
                 loss = self.criterion(probs, labels).mean().item()
                 losses.append(loss)
 
-        # Compute mean loss
         return sum(losses) / len(losses) if losses else float('nan')
 
 class AccuracyMetric(BaseMetric):
     """Compute clean classification accuracy on the dataset."""
 
+    _scores_cache_key = "labels_n_probs"
+
     def __init__(self, freq, cfg, datahandler, device):
         super().__init__(freq, cfg, datahandler, device)
+
+    def _labels_n_scores(self, bornmachine, split, context):
+        if "labels_n_probs" not in context:
+            context["labels_n_probs"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    probs = bornmachine.class_probabilities(data).cpu()
+                    context["labels_n_probs"].append((labels, probs))
 
     def evaluate(self, bornmachine: BornMachine, split, context):
         bornmachine.classifier.eval()
         correct, num_pred = 0, 0
-        self._labels_n_probs(bornmachine, split, context)
+        self._labels_n_scores(bornmachine, split, context)
 
         with torch.no_grad():
-            for labels, probs in context["labels_n_probs"]:        
-                predictions = torch.argmax(probs, dim=1) # (batch_size,)
+            for labels, scores in context[self._scores_cache_key]:
+                predictions = torch.argmax(scores, dim=1)
                 correct += (predictions == labels).sum().item()
                 num_pred += labels.shape[0]
-        
+
+        return correct / num_pred if num_pred > 0 else float('nan')
+
+# For the sanity check
+class SoftmaxLossMetric(BaseMetric):
+    """Compute softmax NLL on the dataset using raw MPS amplitudes as logits."""
+
+    _scores_cache_key = "labels_n_amplitudes"
+
+    def __init__(self, freq, cfg: schemas.Config, datahandler, device):
+        super().__init__(freq, cfg, datahandler, device)
+        self.criterion = ClassificationSoftmaxNLL()
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        if "labels_n_amplitudes" not in context:
+            context["labels_n_amplitudes"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    scores = bornmachine.classifier.amplitudes(data).cpu()
+                    context["labels_n_amplitudes"].append((labels, scores))
+
+    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        bornmachine.classifier.eval()
+        losses = []
+        self._labels_n_scores(bornmachine, split, context)
+        with torch.no_grad():
+            for labels, amplitudes in context[self._scores_cache_key]:
+                losses.append(self.criterion(amplitudes, labels).item())
+        return sum(losses) / len(losses) if losses else float('nan')
+
+
+class SoftmaxAccuracyMetric(BaseMetric):
+    """Accuracy using argmax of raw MPS amplitudes (matches softmax training objective)."""
+
+    _scores_cache_key = "labels_n_amplitudes"
+
+    def _labels_n_scores(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        if "labels_n_amplitudes" not in context:
+            context["labels_n_amplitudes"] = []
+            with torch.no_grad():
+                for data, labels in self.datahandler.classification[split]:
+                    data = data.to(self.device)
+                    scores = bornmachine.classifier.amplitudes(data).cpu()
+                    context["labels_n_amplitudes"].append((labels, scores))
+
+    def evaluate(self, bornmachine: BornMachine, split: str, context: Dict[str, Any]):
+        bornmachine.classifier.eval()
+        correct, num_pred = 0, 0
+        self._labels_n_scores(bornmachine, split, context)
+        with torch.no_grad():
+            for labels, amplitudes in context[self._scores_cache_key]:
+                preds = torch.argmax(amplitudes, dim=1)
+                correct += (preds == labels).sum().item()
+                num_pred += labels.shape[0]
         return correct / num_pred if num_pred > 0 else float('nan')
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -162,7 +228,7 @@ class VisualizationMetric(BaseMetric):
 
     def evaluate(self, bornmachine: BornMachine, split, context):
         self._generate(bornmachine, context)
-        ax = visualise_samples(context["synths"])
+        ax = visualise_samples(context["synths"], input_range=self.datahandler.input_range)
         return ax
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -221,11 +287,19 @@ class GenerativeLossMetric(BaseMetric):
 
     def evaluate(self, bornmachine, split, context):
         """Compute mean generative NLL over the dataset."""
+        import math
         losses = []
         with torch.no_grad():
             for data, labels in self.datahandler.classification[split]:
                 data, labels = data.to(self.device), labels.to(self.device)
-                loss = self.criterion(bornmachine, data, labels).item()
+                try:
+                    loss = self.criterion(bornmachine, data, labels).item()
+                except RuntimeError as e:
+                    logger.warning(f"Generative loss computation failed ({e}), skipping batch.")
+                    continue
+                if not math.isfinite(loss):
+                    logger.warning(f"Non-finite generative loss ({loss}), skipping batch.")
+                    continue
                 losses.append(loss)
         return sum(losses) / len(losses) if losses else float('nan')
 
@@ -250,7 +324,9 @@ class MetricFactory:
         """Create a metric instance by name (clsloss, genloss, acc, fid, rob, viz)."""
         mapping = {
             "clsloss": ClassificationLossMetric,
+            "softmaxloss": SoftmaxLossMetric,
             "acc": AccuracyMetric,
+            "softmaxacc": SoftmaxAccuracyMetric,
             "fid": FIDMetric,
             "rob": RobustnessMetric,
             "viz": VisualizationMetric,
@@ -279,15 +355,19 @@ class PerformanceEvaluator:
 
         self.metrics = {}
         self.update_freq = 1
-        # Only metrics in the config get initialized.
+        # Only metrics with a truthy freq get initialized.
+        # Setting a metric to null/0 in an experiment config disables it
+        # (useful to counteract Hydra's deep-merge of dict values).
         for metric_name, freq in train_cfg.metrics.items():
+            if not freq:
+                continue
             metric : BaseMetric = MetricFactory.create(
                 metric_name=metric_name, freq=freq,
                 cfg=cfg, datahandler=datahandler, device=device
             )
             self.metrics[metric_name] = metric
             stop_crit = getattr(train_cfg, 'stop_crit', None)
-            if stop_crit and metric_name == stop_crit: 
+            if stop_crit and metric_name == stop_crit:
                 metric.freq = 1
             self.update_freq = max(self.update_freq, freq)
             
@@ -327,3 +407,29 @@ class PerformanceEvaluator:
                 else:
                     logger.warning(f"Skipping logging for metric '{name}' - unsupported type: {type(result)}")
         return results
+
+
+def evaluate_loaded_model(
+        cfg: schemas.Config,
+        bornmachine: BornMachine,
+        datahandler: DataHandler,
+        device: torch.device
+):
+    """Evaluate a loaded model before training begins, logging diagnostics to W&B under 'loaded' stage."""
+    from .wandb_utils import record
+
+    if datahandler.data_dim is not None and datahandler.data_dim < 10:
+        train_cfg = SimpleNamespace(
+        metrics={"clsloss": 1, "genloss": 1, "acc": 1, "viz": 1},
+        stop_crit=None,
+    )    
+    else: 
+        train_cfg = SimpleNamespace(
+        metrics={"clsloss": 1, "genloss": 1, "acc": 1},
+        stop_crit=None,
+    )
+    
+    evaluator = PerformanceEvaluator(cfg, datahandler, train_cfg, device)
+    results = evaluator.evaluate(bornmachine, split="valid", step=0)
+    record(results, stage="loaded", set="valid")
+    return results

@@ -1,0 +1,7 @@
+init_kwargs:
+  in_dim: 3       # absorbed by SimpEmbedding; output is always 3-dimensional
+  bond_dim: 10
+  boundary: "obc"
+  init_method: "randn_eye"
+  std: 1e-9
+embedding: "simp"

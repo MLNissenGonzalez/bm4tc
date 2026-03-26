@@ -44,17 +44,17 @@ class Trainer:
             device: Torch device for training.
         """
         self.datahandler = datahandler
-        if self.datahandler.classification == None:
-            self.datahandler.get_classification_loaders()
-            
         self.device = device
         self.cfg, self.stage = cfg, stage # needed in summary of training
-    
+
         if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
             self.train_cfg = cfg.trainer.classification
         elif stage == "re":
             self.train_cfg = cfg.trainer.ganstyle.retrain
         else: raise f"{stage} not recognised."
+
+        if self.datahandler.classification == None:
+            self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
         wandb.define_metric(f"{stage}/train/loss", summary="none")
         metrics = self.train_cfg.metrics
@@ -68,13 +68,13 @@ class Trainer:
     def _best_perf_factory(self, metrics: Dict[str, int]):
         self.best = dict.fromkeys(metrics.keys())
         for metric_name in self.best.keys():
-            if metric_name in ["acc", "rob"]:
+            if metric_name in ["acc", "rob", "softmaxacc"]:
                 self.best[metric_name] = 0.0
-            elif metric_name in ["clsloss", "genloss", "fid"]:
+            elif metric_name in ["clsloss", "softmaxloss", "genloss", "fid"]:
                 self.best[metric_name] = float("Inf")
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
-        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
+        valid_criteria = ["clsloss", "softmaxloss", "genloss", "acc", "softmaxacc", "fid", "rob"]
         if self.stopping_criterion_name not in valid_criteria:
             raise ValueError(
                 f"Invalid stop_crit '{self.stopping_criterion_name}'. "
@@ -94,6 +94,11 @@ class Trainer:
 
             probs = self.bornmachine.class_probabilities(data)
             loss : torch.Tensor = self.criterion(probs, labels)
+
+            if torch.isnan(loss):
+                logger.warning("NaN loss detected — aborting epoch.")
+                self._nan_detected = True
+                break
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -133,9 +138,9 @@ class Trainer:
         )
 
         # Check whether the monitored metric improved
-        if self.stopping_criterion_name in ["acc", "rob"]:
+        if self.stopping_criterion_name in ["acc", "rob", "softmaxacc"]:
             improved = current_value > former_best
-        elif self.stopping_criterion_name in ["clsloss", "genloss", "fid"]:
+        elif self.stopping_criterion_name in ["clsloss", "softmaxloss", "genloss", "fid"]:
             improved = current_value < former_best
         else:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
@@ -150,9 +155,9 @@ class Trainer:
                          if k.startswith("rob/") and isinstance(v, (int, float))]
             goal_value = sum(rob_values) / len(rob_values) if rob_values else 0.0
             reached_goal = goal_value > self.goal["rob"]
-        elif goal_key in ["acc"]:
+        elif goal_key in ["acc", "softmaxacc"]:
             reached_goal = self.valid_perf.get(goal_key, 0.0) > self.goal[goal_key]
-        elif goal_key in ["clsloss", "genloss", "fid"]:
+        elif goal_key in ["clsloss", "softmaxloss", "genloss", "fid"]:
             reached_goal = self.valid_perf.get(goal_key, float("Inf")) < self.goal[goal_key]
         else:
             reached_goal = False
@@ -200,7 +205,8 @@ class Trainer:
         
         self.bornmachine.reset()
         self.bornmachine.to("cpu")
-        del self.valid_perf
+        if hasattr(self, 'valid_perf'):
+            del self.valid_perf
         # Save model
         if self.train_cfg.save:  
             run_dir = Path(
@@ -209,21 +215,7 @@ class Trainer:
             # Models subfolder inside it
             folder = run_dir / "models"
             folder.mkdir(parents=True, exist_ok=True)
-            # Filename construction
-            optimizer_cfg = self.train_cfg.optimizer
-            lr = optimizer_cfg.kwargs.lr or ""
-            weight_decay = optimizer_cfg.kwargs.weight_decay or ""
-
-
-            filename_components = [
-                f"{self.cfg.dataset.name}",
-                f"{self.stage}_mps_bd{self.cfg.born.init_kwargs.bond_dim}",
-                f"{self.cfg.born.embedding}{self.cfg.born.init_kwargs.in_dim}",
-                f"{self.train_cfg.max_epoch}{optimizer_cfg.name}lr{lr}wd{weight_decay}"
-            ]
-            
-
-            filename = "_".join(filename_components)
+            filename = "cls"
 
             # Saving
             save_path = folder / filename
@@ -241,6 +233,7 @@ class Trainer:
                   If reached, training stops regardless of patience.
         """
         self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.epoch = 0  # guard: stays 0 if max_epoch=0
         self.best_epoch = 0
         self.epoch_times = []
 
@@ -256,8 +249,12 @@ class Trainer:
             # Train and evaluate for one epoch
             self.epoch = epoch + 1
             self._train_epoch()
-            # TODO: Write a prior check if generative eval-metrics are requested. If not, skip sync_tensors here.
-            self.bornmachine.sync_tensors(after="classification", verify=False) # needed for generative-performance eval-metrics
+            if getattr(self, '_nan_detected', False):
+                logger.warning("NaN loss detected — stopping training. Reporting clsloss=inf to HPO.")
+                self.best["clsloss"] = float("inf")
+                break
+            if not {"fid", "viz", "genloss"}.isdisjoint(self.train_cfg.metrics.keys()):
+                self.bornmachine.sync_tensors(after="classification", verify=False) # needed for generative-performance eval-metrics
             self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
             record(results=self.valid_perf, stage=self.stage, set="valid")
 

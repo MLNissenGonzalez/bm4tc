@@ -1,13 +1,14 @@
 experiment: default
+descriptor: ""
 
 defaults:
   - _self_ # has to be here such that overrides work
-  - dataset: 2Dtoy/circles_2k
-  - born: d4D3
+  - dataset: 2Dtoy/circles_4k
+  - born: fourier/d4D3
   - trainer/classification: test
-  - trainer/ganstyle: test
+  - trainer/ganstyle: null
   - trainer/generative: null
-  - trainer/adversarial: test
+  - trainer/adversarial: null
   - tracking: test
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none
@@ -15,11 +16,11 @@ defaults:
 hydra:
   run:
     # For single runs
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y_%I%p%M} 
+    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m_%H%M}
 
   sweep:
     # For multiruns
-    dir: outputs/${experiment}_${dataset.name}_${now:%d%b%y}
+    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m}
     subdir: ${hydra.job.num}
 
   output_subdir: .hydra

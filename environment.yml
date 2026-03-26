@@ -13,12 +13,13 @@ dependencies:
   - tqdm                                                                                                                                                                              
   - pip                                                                                                                                                                               
   - pip:                                                                                                                                                                              
-      - torch==2.0.1                                                                                                                                                                  
-      - torchvision                                                                                                                                                                   
-      - torchaudio                                                                                                                                                                    
+      - torch==2.1.0
+      - torchvision==0.16.0
+      - torchaudio==2.1.0
       - tensorkrowch                                                                                                                                                                  
       - opt_einsum==3.2                                                                                                                                                               
       - hydra-core                                                                                                                                                                    
       - hydra-optuna-sweeper                                                                                                                                                          
       - wandb 
       - pandas
+      - h5py

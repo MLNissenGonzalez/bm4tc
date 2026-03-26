@@ -42,22 +42,70 @@ class BornMachine:
             cfg.init_kwargs.out_dim = num_classes
         OmegaConf.set_struct(cfg, True) # Re-enable struct mode for safety
         
-        # 1. Initialize embedding 
-        self.embedding_name = cfg.embedding
-        self.embedding = get.embedding(self.embedding_name)
-        self.input_range = get.range_from_embedding(self.embedding_name)
+        # 1. Determine dtype early so the embedding can be dtype-aware
+        _DTYPE_MAP = {
+            "float32": torch.float32, "float64": torch.float64,
+            "complex64": torch.complex64, "complex128": torch.complex128,
+        }
+        if tensors is not None:
+            _dtype = tensors[0].dtype
+        else:
+            _raw = OmegaConf.to_object(cfg.init_kwargs).get("dtype")
+            _dtype = _DTYPE_MAP.get(_raw, torch.float32)
 
-        # 2. Intialize classifier, either from tensors, or configuration file
+        # 2. Initialize embedding (dtype-aware)
+        self.embedding_name = cfg.embedding
+        self.embedding = get.embedding(self.embedding_name, cfg.init_kwargs.in_dim, dtype=_dtype)
+        self.input_range = get.range_from_embedding(self.embedding_name)
+        self.dtype = _dtype
+
+        # 3. Intialize classifier, either from tensors, or configuration file
+        init_cfg = None
         if tensors is not None:
             self.classifier = BornClassifier(embedding=self.embedding, tensors=tensors)
         else:
             init_cfg = OmegaConf.to_object(cfg.init_kwargs)
+            if init_cfg.get("dtype") is not None:
+                init_cfg["dtype"] = _DTYPE_MAP[init_cfg["dtype"]]
             self.classifier = BornClassifier(embedding=self.embedding, device=device, **init_cfg)
 
         # Save out_position if not done yet.
         OmegaConf.set_struct(cfg, False)
         cfg.init_kwargs.out_position = self.classifier.out_position
         OmegaConf.set_struct(cfg, True)
+
+        # Amplitude correction for randn_eye with non-unit phi_0 embeddings.
+        #
+        # randn_eye places identity at physical index 0 of each MPS tensor:
+        #   T[:, 0, :] ≈ I,  T[:, k>0, :] ≈ std * randn
+        # The initial amplitude for any input is therefore ≈ phi_0(x)^n_sites.
+        #
+        # For Fourier:  phi_0 = 1.0  →  amplitude ≈ 1^n_sites = 1  ✓
+        # For Legendre: phi_0 = sqrt(0.5) ≈ 0.707  →  on MNIST (n_sites=785):
+        #   amplitude ≈ 0.707^785 ≈ 10^{-118}  →  |ψ|² ≈ 10^{-236}
+        #   → float32 underflow → all Born probs = 0 → NLL = -log(eps) = const
+        #   → zero gradients → silent training failure.
+        #
+        # Fix: rescale every tensor by 1/phi_0 so (phi_0 * 1/phi_0)^n_sites = 1.
+        if init_cfg is not None and init_cfg.get('init_method') == 'randn_eye':
+            _x0 = torch.zeros(1)
+            _phi_0 = float(self.embedding(_x0).view(-1)[0])
+            if abs(_phi_0 - 1.0) > 1e-6:
+                _n_sites = len(self.classifier.tensors)
+                _expected_amp = _phi_0 ** _n_sites
+                _scale = 1.0 / _phi_0
+                logger.warning(
+                    f"[BornMachine] 'randn_eye' + '{self.embedding_name}': phi_0={_phi_0:.4f} "
+                    f"(expected 1.0). Initial amplitude ≈ {_expected_amp:.2e} for "
+                    f"n_sites={_n_sites} — float32 underflow risk. Rescaling all tensors "
+                    f"by 1/phi_0={_scale:.4f}. "
+                    f"NOTE: this rescaling is exact only when phi_0 is constant (e.g. Legendre). "
+                    f"For embeddings with input-varying phi_0 (Hermite, Chebyshev) use "
+                    f"init_method='canonical' instead to avoid persistent underflow."
+                )
+                with torch.no_grad():
+                    for _t in self.classifier.tensors:
+                        _t.data.mul_(_scale)
 
         # 3. Create generator with shared tensors
         self.generator = BornGenerator(tensors=self.classifier.tensors, 
@@ -75,10 +123,63 @@ class BornMachine:
         self.num_sites = len(self.classifier.tensors)
         self.cfg = cfg
         self.device = device
+        self._log_Z: float | None = None
         
     # ==========================================================
     # Forward APIs
     # ==========================================================
+    def cache_log_Z(self) -> float:
+        """
+        Compute and cache the log partition function log(Z).
+
+        Syncs tensors (classification -> generator), then computes
+        log(Z) via generator.log_partition_function() (contracts MPS
+        with itself via virtual_mps). The result is stored as a
+        detached Python float (not a gradient target).
+
+        Returns:
+            The cached log Z value.
+        """
+        self.sync_tensors(after="classification")
+        self.generator.reset()
+        with torch.no_grad():
+            log_Z = self.generator.log_partition_function()
+        self._log_Z = float(log_Z.detach().cpu())
+        logger.info(f"[BornMachine] Cached log Z = {self._log_Z:.6f}")
+        return self._log_Z
+
+    def marginal_log_probability(self, data: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+        """
+        Compute the marginal log-probability log p(x) = log(sum_c |psi(x,c)|^2) - log(Z).
+
+        Uses the classifier to get all class amplitudes in a single MPS
+        contraction, then squares and sums over classes.
+
+        Differentiability note:
+            This is differentiable w.r.t. input data (essential for
+            purification), but NOT end-to-end differentiable w.r.t. model
+            parameters. The amplitude computation uses classifier params
+            and IS differentiable through them and through the input, but
+            _log_Z is stored as a detached constant. Since classifier and
+            generator share the same tensor values (via sync_tensors),
+            this is mathematically correct for inference. Purification
+            optimizes over inputs (not model params), so this is fine.
+
+        Args:
+            data: Input tensor of shape (batch_size, data_dim).
+            eps: Clamping floor for numerical stability in log.
+
+        Returns:
+            Tensor of shape (batch_size,) with log p(x) values.
+        """
+        if self._log_Z is None:
+            self.cache_log_Z()
+
+        embs = self.classifier.embed(data)
+        amplitudes = self.classifier.forward(data=embs)  # (batch, num_classes)
+        unnorm_px = self.classifier.abs_square(amplitudes).sum(dim=-1)  # (batch,)
+        return torch.log(unnorm_px.clamp(min=eps)) - self._log_Z
+
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """
         Compute class probabilities p(c|x) using the classifier.
@@ -173,6 +274,7 @@ class BornMachine:
         state = {
             "tensors": self.classifier.tensors,
             "config": OmegaConf.to_container(self.cfg, resolve=True),
+            "log_Z": self._log_Z,
         }
         torch.save(state, path)
 
@@ -190,12 +292,21 @@ class BornMachine:
         checkpoint = torch.load(path)
         cfg: schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
-        logger.info(f"[BornMachine] loaded from {path}")
+        born_machine._log_Z = checkpoint.get("log_Z", None)
+        if born_machine._log_Z is not None:
+            logger.info(f"[BornMachine] loaded from {path} (log Z = {born_machine._log_Z:.6f})")
+        else:
+            logger.info(f"[BornMachine] loaded from {path}")
         return born_machine
 
     def reset(self):
         """Reset internal state of both classifier and generator MPS networks."""
         self.classifier.reset()
         self.generator.reset()
+        
+    def unset_data_nodes(self):
+        """Unset data nodes in both classifier and generator."""
+        self.classifier.unset_data_nodes()
+        self.generator.unset_data_nodes()
 
     

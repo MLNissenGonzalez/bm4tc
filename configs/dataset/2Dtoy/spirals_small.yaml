@@ -1,0 +1,10 @@
+name: "spirals_small"
+gen_dow_kwargs:
+  name: "spirals_small"
+  size: 200
+  seed: 25
+  noise: 1.0
+split: [0.15, 0.425, 0.425] # train, val, test
+split_seed: 11
+overwrite: false
+scaler: minmax

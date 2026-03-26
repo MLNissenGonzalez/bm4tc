@@ -6,6 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
+from src.tracking import log_dataset_viz
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
@@ -37,6 +38,7 @@ def main(cfg: schemas.Config):
 
     # Preprocessing (uses split_seed, independent of tracking.seed)
     datahandler.split_and_rescale(bornmachine)
+    log_dataset_viz(datahandler)
 
     # Trainer
     trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
