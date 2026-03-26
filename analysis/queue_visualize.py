@@ -42,13 +42,34 @@ def analysis_output_dir(sweep_dir: Path) -> Path:
     return ANALYSIS_ROOT / rel
 
 
+_UCR_NAMES = {
+    "ecg200", "italypowerdemand", "chlorineconcentration",
+    "syntheticcontrol", "cricketx", "crickety", "cricketz",
+}
+
+
+def get_viz_type(sweep_dir: Path) -> str:
+    """Return 'mnist', 'ts', or '2d' based on the dataset name in the sweep path."""
+    base = get_dataset_base(sweep_dir).lower()
+    if "mnist" in base:
+        return "mnist"
+    for name in _UCR_NAMES:
+        if name in base:
+            return "ts"
+    return "2d"
+
+
 def is_analyzed(sweep_dir: Path) -> bool:
     return (analysis_output_dir(sweep_dir) / "evaluation_data.csv").exists()
 
 
 def is_visualized(sweep_dir: Path) -> bool:
     ana_dir = analysis_output_dir(sweep_dir)
-    return (ana_dir / "best_class_dist.png").exists()
+    return (
+        (ana_dir / "best_class_dist.png").exists()
+        or (ana_dir / "mnist_samples.png").exists()
+        or (ana_dir / "ts_samples.png").exists()
+    )
 
 
 def best_run_from_csv(ana_dir: Path) -> str | None:
@@ -157,8 +178,15 @@ def main():
             print(f"  WARNING: Could not determine best run for {rel}, skipping.")
             continue
 
+        viz_type = get_viz_type(sweep_dir)
+        if viz_type == "mnist":
+            module = "analysis.visualize.mnist_samples"
+        elif viz_type == "ts":
+            module = "analysis.visualize.ts_samples"
+        else:
+            module = "analysis.visualize.distributions"
         cmd = [
-            "python", "-m", "analysis.visualize.distributions",
+            "python", "-m", module,
             "--run", run_path,
             "--save-dir", str(ana_dir),
         ]
