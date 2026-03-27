@@ -394,9 +394,17 @@ class NormControlConfig:
 
     Parameters
     ----------
-    target : float | None
-        Target partition function Z. None = capture from BornMachine at the
-        start of ``train()`` (i.e. the pretrained value). Default 1.0.
+    target : float | str | None
+        Target partition function Z. Three forms accepted:
+
+        - ``None``: capture Z from the pretrained BornMachine at train start.
+        - ``float``: use this literal value (e.g. ``1.0``, ``100``).
+        - ``str``: Python expression evaluated with ``n_features``,
+          ``data_dim``, ``sqrt``, ``log``, ``exp`` in scope (e.g.
+          ``"n_features"``, ``"sqrt(data_dim)"``, ``"n_features * 2"``).
+          String values **must be quoted** in YAML.
+
+        Default 1.0.
     hard_every : int
         Hard-renormalize toward target every N optimizer steps.
         0 = disabled. Default 1 (every step).
@@ -404,7 +412,7 @@ class NormControlConfig:
         Coefficient for the soft penalty  strength * (Z - target)².
         0.0 = disabled. Default 0.0.
     """
-    target: Optional[float] = 1.0
+    target: Optional[Union[float, str]] = 1.0
     hard_every: int = 1
     soft_strength: float = 0.0
 

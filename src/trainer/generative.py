@@ -108,6 +108,58 @@ class Trainer:
         if self.stopping_criterion_name == "rob" and "rob" not in self.best:
             self.best["rob"] = 0.0
 
+    def _resolve_nc_target(self) -> float:
+        """
+        Resolve NormControlConfig.target to a plain float.
+
+        Three cases:
+        - None  : read Z from the current BornMachine via log_partition_function().
+        - str   : evaluate as a Python expression with n_features, data_dim,
+                  sqrt, log, exp in scope.
+        - float : return as-is.
+        """
+        import math as _math
+        raw = self._nc.target
+
+        if raw is None:
+            with torch.no_grad():
+                log_Z0 = self.bornmachine.generator.log_partition_function()
+            target = torch.exp(log_Z0).item()
+            logger.info(f"NormControl: target Z (pretrained) = {target:.6g}")
+            return target
+
+        if isinstance(raw, str):
+            n_features = self.bornmachine.generator.n_features
+            data_dim   = self.datahandler.data_dim
+            _ns = {
+                "__builtins__": {},
+                "n_features": n_features,
+                "data_dim":   data_dim,
+                "sqrt": _math.sqrt,
+                "log":  _math.log,
+                "exp":  _math.exp,
+            }
+            try:
+                result = eval(raw, _ns)  # noqa: S307
+            except Exception as exc:
+                raise ValueError(
+                    f"NormControl: could not evaluate target expression "
+                    f"{raw!r} (n_features={n_features}, data_dim={data_dim}): {exc}"
+                ) from exc
+            target = float(result)
+            if target <= 0:
+                raise ValueError(
+                    f"NormControl: target expression {raw!r} evaluated to "
+                    f"{target}, but Z must be positive."
+                )
+            logger.info(
+                f"NormControl: target Z (expression {raw!r}) = {target:.6g} "
+                f"[n_features={n_features}, data_dim={data_dim}]"
+            )
+            return target
+
+        return float(raw)
+
     def _train_epoch(self):
         """Execute one training epoch: forward pass, loss, backward, optimizer step."""
         losses = []
@@ -290,14 +342,8 @@ class Trainer:
         self.bornmachine.generator.out_features = []
         self.bornmachine.to(self.device)
 
-        # Resolve norm control target (None = capture from pretrained BM)
-        if self._nc.target is None:
-            with torch.no_grad():
-                log_Z0 = self.bornmachine.generator.log_partition_function()
-            self._nc_target = torch.exp(log_Z0).item()
-            logger.info(f"NormControl: target Z (pretrained) = {self._nc_target:.6g}")
-        else:
-            self._nc_target = float(self._nc.target)
+        # Resolve norm control target (None / float / expression string)
+        self._nc_target = self._resolve_nc_target()
         if self._nc.soft_strength > 0.0:
             self.norm_regularizer = NormRegularizer(
                 strength=self._nc.soft_strength, target=self._nc_target
