@@ -101,9 +101,38 @@ def os_secant(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
 # --------------main function-------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------------------
 
+def multinomial_sampling(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    """
+    Sample from the discretized conditional distribution using torch.multinomial.
+
+    Hard (non-differentiable) sampling: draws one bin index per batch element
+    proportional to the unnormalized weights in p, then returns the corresponding
+    grid value from z. Fully vectorized and GPU-native.
+
+    Parameters
+    ----------
+    p : torch.Tensor
+        Unnormalized probability weights, shape (batch, num_bins). Must be >= 0
+        (guaranteed by the Born rule's abs_square).
+    z : torch.Tensor
+        Grid of candidate values, shape (num_bins,).
+
+    Returns
+    -------
+    torch.Tensor
+        Sampled grid values, shape (batch,).
+    """
+    p_clean = torch.nan_to_num(p.float(), nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
+    # Fall back to uniform if an entire row is zero (e.g. collapsed probability mass)
+    row_sums = p_clean.sum(dim=-1, keepdim=True)
+    p_clean = torch.where(row_sums > 0, p_clean, torch.ones_like(p_clean))
+    indices = torch.multinomial(p_clean, num_samples=1).squeeze(1)  # (batch,)
+    return z[indices]
+
+
 _SAMPLING_MAP = {
     "secant": os_secant,
-    # add more methods here
+    "multinomial": multinomial_sampling,
 }
 
 

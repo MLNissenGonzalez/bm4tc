@@ -1,6 +1,7 @@
 import math
 import torch
 import tensorkrowch as tk
+from tqdm import tqdm
 from src.models.generator.differential_sampling import main as diff_sampling
 from typing import *
 import src.utils.schemas as schemas
@@ -239,7 +240,7 @@ class BornGenerator(tk.models.MPS):
         # [num_samples * num_bins, phys_dim]
         in_emb = in_emb.reshape(num_spc * num_bins, self.in_dim).to(self.device)
 
-        for site in range(data_dim + 1):
+        for site in tqdm(range(data_dim + 1), desc="sites", leave=False):
             if site == self.cls_pos:
                 continue# TODO: Add docstrings for API versions of sampling method.
 
@@ -327,7 +328,7 @@ class BornGenerator(tk.models.MPS):
         """
 
         samples = []
-        for cls_emb in self.cls_embs:
+        for cls_idx, cls_emb in enumerate(tqdm(self.cls_embs, desc="classes", leave=False)):
             cls_samples = self._single_class(method, cls_emb, num_spc, num_bins)  # shape (num_spc, data_dim)
             samples.append(cls_samples)
 
@@ -359,8 +360,8 @@ class BornGenerator(tk.models.MPS):
         else:
             num_batches = (cfg.num_spc + cfg.batch_spc - 1) // cfg.batch_spc
             batches = []
-            for _ in range(num_batches):  # could compute these batches in parallel, not to bad
-                batch = self._all_classes(method=cfg.method, num_spc=cfg.batch_spc, 
+            for _ in tqdm(range(num_batches), desc="sampling batches"):
+                batch = self._all_classes(method=cfg.method, num_spc=cfg.batch_spc,
                                           num_bins=cfg.num_bins).cpu()
                 batches.append(batch)
 
