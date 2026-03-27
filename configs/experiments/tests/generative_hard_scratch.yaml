@@ -1,0 +1,39 @@
+# @package _global_
+# Test config mirroring grid_sweep_hard for d15D40c64 on ECG200 (from scratch).
+# Use to reproduce / debug errors in the hard-renorm from-scratch pipeline.
+experiment: test
+
+defaults:
+  - override /born: legendre/d15D40c64
+  - override /dataset: ucr_ts/ecg200
+  - override /trainer/classification: null
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: test
+
+model_path: null
+
+tracking:
+  seed: 42
+
+trainer:
+  generative:
+    max_epoch: 4
+    batch_size: 128
+    patience: 10
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: false
+    norm_control:
+      target: "n_features"
+      hard_every: 10
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4
+        weight_decay: 0.0
+    criterion:
+      name: "nll"
+      kwargs: {eps: 1e-8}
+    metrics: {"genloss": 1, "acc": 1}

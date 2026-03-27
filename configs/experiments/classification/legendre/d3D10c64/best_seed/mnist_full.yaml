@@ -1,0 +1,31 @@
+# @package _global_
+experiment: best_seed
+
+defaults:
+  - override /born: legendre/d3D10c64
+  - override /dataset: mnist/mnist_full
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 4  # FILL: best seed from wandb
+
+trainer:
+  classification:
+    max_epoch: 30
+    batch_size: 500
+    patience: 30
+    stop_crit: "acc"
+    watch_freq: 0
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.00012875453679515064
+        weight_decay: 1.9871716741049672e-12
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+        eps: 1e-8
+    metrics: {"clsloss": 1, "acc": 1}
