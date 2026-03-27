@@ -261,6 +261,18 @@ class BornMachine:
         self.device = device
         return self
 
+    def eval(self):
+        """Set classifier and generator to evaluation mode."""
+        self.classifier.eval()
+        self.generator.eval()
+        return self
+
+    def train(self):
+        """Set classifier and generator to training mode."""
+        self.classifier.train()
+        self.generator.train()
+        return self
+
     # ==========================================================
     # Checkpoint handling
     # ==========================================================
