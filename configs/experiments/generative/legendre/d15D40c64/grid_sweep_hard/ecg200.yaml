@@ -10,7 +10,7 @@ defaults:
   - override /trainer/adversarial: null
   - override /tracking: online
 
-model_path: ???  # FILL: best cls seed sweep checkpoint
+model_path: null
 
 tracking:
   seed: 42
@@ -24,7 +24,7 @@ trainer:
     watch_freq: 0
     save: false
     norm_control:
-      target: null        # captured from pretrained BM at start of train()
+      target: "n_features"
       hard_every: 1       # overridden by grid sweep
       soft_strength: 0.0
     optimizer:
