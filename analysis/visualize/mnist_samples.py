@@ -144,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--run", required=True, help="Path to Hydra run directory.")
     parser.add_argument("--num-bins", type=int, default=10,
                         help="Discretization bins per pixel (default: 10).")
-    parser.add_argument("--num-spc", type=int, default=3,
+    parser.add_argument("--num-spc", type=int, default=1,
                         help="Samples to draw per class (default: 3).")
     parser.add_argument("--binarize", action="store_true",
                         help="Threshold pixel values at 0.5 before display.")

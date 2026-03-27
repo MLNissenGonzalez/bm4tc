@@ -54,8 +54,8 @@ def _inverse_transform(scaler, X_np: np.ndarray) -> np.ndarray:
 def sample_ts(
     run_dir: str | Path,
     num_spc: int = 100,
-    num_bins: int = 100,
-    batch_spc: int = 5,
+    num_bins: int = 50,
+    batch_spc: int = 10,
     device: str = "cpu",
     save_path: Path | None = None,
 ) -> plt.Figure:
@@ -94,7 +94,7 @@ def sample_ts(
     logger.info(f"num_classes={num_cls}, input_range={bm.input_range}")
 
     sampling_cfg = SamplingConfig(
-        method="secant",
+        method="multinomial",
         num_spc=num_spc,
         num_bins=num_bins,
         batch_spc=batch_spc,
@@ -165,11 +165,11 @@ if __name__ == "__main__":
         description="Sample and visualize time-series curves from a trained BornMachine."
     )
     parser.add_argument("--run", required=True, help="Path to Hydra run directory.")
-    parser.add_argument("--num-spc", type=int, default=100,
+    parser.add_argument("--num-spc", type=int, default=10,
                         help="Curves to sample per class (default: 100).")
-    parser.add_argument("--num-bins", type=int, default=100,
+    parser.add_argument("--num-bins", type=int, default=10,
                         help="Discretization bins per feature (default: 100).")
-    parser.add_argument("--batch-spc", type=int, default=5,
+    parser.add_argument("--batch-spc", type=int, default=10,
                         help="Samples per batch — lower reduces memory use (default: 5).")
     parser.add_argument("--save-dir", default=None,
                         help="Directory to save ts_samples.png. Defaults to "
