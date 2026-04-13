@@ -1,0 +1,51 @@
+# @package _global_
+experiment: grid_sweep
+descriptor: mixed_scratch
+
+defaults:
+  - override /born: legendre/d10D6
+  - override /dataset: 2Dtoy/moons_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  generative:
+    max_epoch: 300
+    batch_size: 256
+    patience: 300
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: false
+    norm_control:
+      target: 1.0
+      hard_every: 0
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4          # overridden by grid sweep
+        weight_decay: 0.0
+    criterion:
+      name: "mixed_nll"
+      kwargs: {eps: 1e-8, alpha: 0.1}  # alpha overridden by grid sweep
+    metrics: {"genloss": 1, "acc": 1, "clsloss": 1}
+
+hydra:
+  sweep:
+    dir: outputs/grid_sweep/gen/legendre/d10D6/moons_4k_${now:%d%m}
+    subdir: ${hydra.job.num}
+  sweeper:
+    params:
+      trainer.generative.optimizer.kwargs.lr: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2)
+      trainer.generative.criterion.kwargs.alpha: choice(0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0)

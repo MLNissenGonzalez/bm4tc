@@ -1,0 +1,50 @@
+# @package _global_
+experiment: seed_sweep
+descriptor: mixed_scratch
+
+defaults:
+  - override /born: legendre/d10D6
+  - override /dataset: 2Dtoy/circles_4k
+  - override /trainer/classification: null
+  - override /trainer/generative: test
+  - override /trainer/ganstyle: null
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  generative:
+    max_epoch: 300
+    batch_size: 256
+    patience: 300
+    stop_crit: "genloss"
+    watch_freq: 0
+    save: true
+    norm_control:
+      target: 1.0
+      hard_every: 0
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???           # FILL FROM GRID SWEEP
+        weight_decay: 0.0
+    criterion:
+      name: "mixed_nll"
+      kwargs: {eps: 1e-8, alpha: ???}  # FILL FROM GRID SWEEP
+    metrics: {"genloss": 1, "acc": 1, "clsloss": 1}
+
+hydra:
+  sweep:
+    dir: outputs/seed_sweep/gen/legendre/d10D6/circles_4k_${now:%d%m}
+    subdir: ${hydra.job.num}
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
