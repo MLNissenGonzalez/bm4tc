@@ -35,7 +35,7 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 
 **Produced by:** `sweep_analysis.py` (single sweep) or batch-triggered by `queue_analysis.py`.
 
-**Location:** `analysis/outputs/seed_sweep/{type}/{embedding}/{arch}/{dataset}_{DDMM}/evaluation_data.csv`
+**Location:** `analysis/outputs/{seed_sweep|alpha_curve}/{type}/{embedding}/{arch}/{dataset}_{DDMM}/evaluation_data.csv`
 
 **One row per run** in the seed sweep.
 
@@ -45,7 +45,7 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 |--------|------|-------------|
 | `run_name` | str | Numbered sub-directory name (e.g. `"3"`) |
 | `run_path` | str | Absolute path to the run directory |
-| `config/{key}` | varies | Hydra config values extracted during analysis (e.g. `config/seed`, `config/bond_dim`). Which keys are present depends on the `config_keys` list in `sweep_analysis.py`. |
+| `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.generative.criterion.kwargs.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep_analysis.py`. |
 
 ### Metric columns
 
@@ -131,7 +131,7 @@ df[[c for c in df.columns if "purify_acc" in c]].agg(["mean", "std"])
 | `run_path` | str | Path to run directory (or pretrained checkpoint path for `max_epoch=0` rows) |
 | `range_size` | float | Embedding input range size (see conventions above) |
 | `run_name` | str | Numbered sub-directory name |
-| `config/seed` | str | Seed from Hydra config (may duplicate `seed`) |
+| `config/tracking.seed` | str | Seed from Hydra config (may duplicate `seed`) |
 
 ### Metric columns
 
@@ -309,7 +309,7 @@ summary_df = pd.DataFrame(summary_rows)
 
 | CSV location | Script | Grouping key | Row = | Diff columns saved? |
 |---|---|---|---|---|
-| `seed_sweep/{type}/{emb}/{arch}/{ds}/evaluation_data.csv` | `sweep_analysis.py` | `config/seed` | one run | N/A |
+| `{seed_sweep\|alpha_curve}/{type}/{emb}/{arch}/{ds}/evaluation_data.csv` | `sweep_analysis.py` | `config/tracking.seed` | one run | N/A |
 | `seed_sweep/cls_reg/{regime}/{emb}/{arch}/{ds}/evaluation_data.csv` | `cls_reg_analysis.py` | `max_epoch` + `seed` | one (run, epoch) | No — recomputed from `max_epoch=0` rows |
 | `seed_sweep/comb/{emb}/{arch}/{ds}/evaluation_data.csv` | `dev_comb_analysis.py` | `cls_epoch` + `seed` | one run | No — recomputed as `gen/` − `cls/` |
 

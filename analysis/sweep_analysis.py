@@ -53,9 +53,15 @@ import torch
 SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30D18fourier_moons_4k_1702"
 _cli = argparse.ArgumentParser(add_help=False)
 _cli.add_argument("sweep_dir", nargs="?", default=None)
+_cli.add_argument("--no-viz", action="store_true", help="Skip best-run distribution plots.")
+_cli.add_argument("--no-mia", action="store_true", help="Skip membership inference attack.")
 _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
     SWEEP_DIR = _cli_args.sweep_dir
+if _cli_args.no_viz:
+    COMPUTE_DISTRIBUTIONS = False
+if _cli_args.no_mia:
+    COMPUTE_MIA = False
 
 # Training regime: "pre", "gen", "adv", "gan".
 # Auto-detected from SWEEP_DIR (which encodes the regime via the ${training_regime:} resolver).
@@ -87,6 +93,7 @@ COMPUTE_CLS_LOSS = False
 COMPUTE_GEN_LOSS = False
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
+COMPUTE_DISTRIBUTIONS = True  # Set False (or pass --no-viz) to skip best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
@@ -168,6 +175,7 @@ CONFIG_KEYS = [
     "dataset.name",
     "tracking.seed",
     "dataset.gen_dow_kwargs.seed",
+    "trainer.generative.criterion.kwargs.alpha",
 ]
 
 # %% [markdown]
@@ -713,7 +721,7 @@ if not df.empty and SANITY_CHECK_METRICS:
 # ## 5. Learned Distribution Visualization
 
 # %%
-if not df.empty and best_run is not None:
+if COMPUTE_DISTRIBUTIONS and not df.empty and best_run is not None:
     best_run_path = best_run.get("run_path")
     if best_run_path:
         print(f"\n--- Visualizing distributions for best run ({best_run['run_name']}) ---")

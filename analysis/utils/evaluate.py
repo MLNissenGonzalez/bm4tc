@@ -751,7 +751,7 @@ def evaluate_sweep(
                 for key in config_keys:
                     try:
                         val = OmegaConf.select(cfg, key)
-                        col_name = "config/" + key.split(".")[-1]
+                        col_name = "config/" + key
                         row[col_name] = val
                     except Exception:
                         pass

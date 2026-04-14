@@ -26,7 +26,7 @@ trainer:
     patience: 300
     stop_crit: "genloss"
     watch_freq: 0
-    save: false
+    save: true
     norm_control:
       target: 1.0
       hard_every: 0
