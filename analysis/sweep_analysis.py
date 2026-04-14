@@ -58,10 +58,6 @@ _cli.add_argument("--no-mia", action="store_true", help="Skip membership inferen
 _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
     SWEEP_DIR = _cli_args.sweep_dir
-if _cli_args.no_viz:
-    COMPUTE_DISTRIBUTIONS = False
-if _cli_args.no_mia:
-    COMPUTE_MIA = False
 
 # Training regime: "pre", "gen", "adv", "gan".
 # Auto-detected from SWEEP_DIR (which encodes the regime via the ${training_regime:} resolver).
@@ -177,6 +173,12 @@ CONFIG_KEYS = [
     "dataset.gen_dow_kwargs.seed",
     "trainer.generative.criterion.kwargs.alpha",
 ]
+
+# --- CLI overrides (applied after config block so they take effect) ---
+if _cli_args.no_viz:
+    COMPUTE_DISTRIBUTIONS = False
+if _cli_args.no_mia:
+    COMPUTE_MIA = False
 
 # %% [markdown]
 # ## 2. Per-Model Evaluation
@@ -586,12 +588,18 @@ if not df.empty and COMPUTE_MIA:
     if TRAIN_CP_COL in df.columns and TEST_CP_COL in df.columns:
         train_arrays = [np.array(x) for x in df[TRAIN_CP_COL].dropna() if x is not None]
         test_arrays = [np.array(x) for x in df[TEST_CP_COL].dropna() if x is not None]
-        if train_arrays:
+        if train_arrays and len(set(a.shape for a in train_arrays)) == 1:
             mean_train = np.mean(train_arrays, axis=0).tolist()
             df["eval/mia_mean_train_correct_probs"] = [mean_train] * len(df)
-        if test_arrays:
+        elif train_arrays:
+            print("Warning: mia_train_correct_probs arrays have inhomogeneous shapes "
+                  "(e.g. varying split sizes across seeds) — skipping sweep-mean.")
+        if test_arrays and len(set(a.shape for a in test_arrays)) == 1:
             mean_test = np.mean(test_arrays, axis=0).tolist()
             df["eval/mia_mean_test_correct_probs"] = [mean_test] * len(df)
+        elif test_arrays:
+            print("Warning: mia_test_correct_probs arrays have inhomogeneous shapes "
+                  "(e.g. varying split sizes across seeds) — skipping sweep-mean.")
 
 if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
     print(f"\nAdversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH}):")
