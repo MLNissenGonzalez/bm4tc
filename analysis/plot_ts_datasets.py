@@ -2,10 +2,8 @@
 """
 Visualise raw UCR time-series datasets present in .datasets/.
 
-For each dataset produces a figure with:
-  - One row per class
-  - Left panel : all samples (low alpha) + class mean
-  - Right panel: first 10 individual samples
+For each dataset produces a figure with one column per class showing
+all samples (low alpha) overlaid with the class mean.
 
 Usage
 -----
@@ -25,7 +23,7 @@ DATA_DIR   = ROOT / ".datasets"
 OUT_DIR    = ROOT / "analysis" / "outputs" / "ts_datasets"
 
 DPI     = 150
-FIGSIZE_PER_CLASS = (11, 2.2)   # per-class row height
+FIGSIZE_PER_CLASS = (4.5, 3.0)  # per-class column width, height
 
 CLASS_COLOURS = ["steelblue", "darkorange", "seagreen", "firebrick",
                  "mediumpurple", "saddlebrown", "hotpink"]
@@ -68,47 +66,26 @@ def plot_dataset(name: str):
     t_axis    = np.arange(T)
 
     fig, axes = plt.subplots(
-        n_classes, 2,
-        figsize=(FIGSIZE_PER_CLASS[0], FIGSIZE_PER_CLASS[1] * n_classes),
+        1, n_classes,
+        figsize=(FIGSIZE_PER_CLASS[0] * n_classes, FIGSIZE_PER_CLASS[1]),
         squeeze=False,
     )
-    fig.suptitle(
-        f"{PRETTY_NAMES.get(name, name)}  "
-        f"(N={len(X)}, T={T}, classes={n_classes}"
-        + (f", UCR train={ucr_train_size}" if ucr_train_size else "")
-        + ")",
-        fontsize=12,
-    )
 
-    for row, cls in enumerate(classes):
+    for col, cls in enumerate(classes):
         colour  = CLASS_COLOURS[cls % len(CLASS_COLOURS)]
         mask    = y == cls
         X_cls   = X[mask]
         n_cls   = len(X_cls)
         mean_ts = X_cls.mean(axis=0)
 
-        # ---- Left: all samples + mean ---------------------------------
-        ax_l = axes[row, 0]
+        ax = axes[0, col]
         for i in range(n_cls):
-            ax_l.plot(t_axis, X_cls[i], color=colour, alpha=0.06, linewidth=0.6)
-        ax_l.plot(t_axis, mean_ts, color=colour, linewidth=2.0, label="mean")
-        ax_l.set_title(f"Class {cls}  (n={n_cls}) — all samples + mean", fontsize=9)
-        ax_l.set_xlabel("Time step")
-        ax_l.set_ylabel("Value")
-        ax_l.legend(fontsize=8)
-        ax_l.grid(True, alpha=0.25)
-
-        # ---- Right: first 10 samples ----------------------------------
-        ax_r = axes[row, 1]
-        n_show = min(10, n_cls)
-        for i in range(n_show):
-            ax_r.plot(t_axis, X_cls[i], color=colour,
-                      alpha=0.7 + 0.03 * i, linewidth=1.0,
-                      label=f"sample {i}" if n_show <= 5 else None)
-        ax_r.set_title(f"Class {cls} — first {n_show} samples", fontsize=9)
-        ax_r.set_xlabel("Time step")
-        ax_r.set_ylabel("Value")
-        ax_r.grid(True, alpha=0.25)
+            ax.plot(t_axis, X_cls[i], color=colour, alpha=0.06, linewidth=0.6)
+        ax.plot(t_axis, mean_ts, color=colour, linewidth=2.0, label="mean")
+        ax.set_xlabel("Time step")
+        ax.set_ylabel("Value")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.25)
 
     fig.tight_layout()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
