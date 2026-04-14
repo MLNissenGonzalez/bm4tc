@@ -85,8 +85,8 @@ print(f"Embedding: '{_EMBEDDING or 'unknown'}'  →  input range size: {_RANGE_S
 COMPUTE_ACC = True
 COMPUTE_ROB = True
 COMPUTE_MIA = True
-COMPUTE_CLS_LOSS = False
-COMPUTE_GEN_LOSS = False
+COMPUTE_CLS_LOSS = True
+COMPUTE_GEN_LOSS = True
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 COMPUTE_DISTRIBUTIONS = True  # Set False (or pass --no-viz) to skip best-run distribution plots
