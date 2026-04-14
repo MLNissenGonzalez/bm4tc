@@ -174,6 +174,39 @@ def plot_dataset_grid(
 # Main
 # =============================================================================
 
+def plot_4k_datasets(
+    specs: list[DatasetSpec],
+    save_path: Optional[str] = None,
+):
+    """Plot only the _4k datasets in a single row, no axis labels, minimal spacing."""
+    specs_4k = [s for s in specs if "_4k" in s.name.lower()]
+    n = len(specs_4k)
+    fig, axes = plt.subplots(1, n, figsize=(2.5 * n, 2.5))
+
+    for ax, spec in zip(axes, specs_4k):
+        X, t = generate_dataset(spec)
+        n_train = round(spec.split[0] * len(X))
+        rng = np.random.RandomState(spec.split_seed)
+        idx = rng.permutation(len(X))[:n_train]
+        X, t = X[idx], t[idx]
+        create_2d_scatter(X=X, t=t, title=None, ax=ax, show_legend=False)
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.tick_params(left=False, bottom=False)
+
+    fig.subplots_adjust(wspace=0.02, hspace=0.02, left=0.01, right=0.99, top=0.99, bottom=0.01)
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {save_path}")
+
+    return fig
+
+
 if __name__ == "__main__":
     out_dir = project_root / "analysis" / "outputs" / "datasets"
 
@@ -195,5 +228,10 @@ if __name__ == "__main__":
         save_path=out_dir / "configured_datasets.png",
     )
 
-    print("\nDone! Check analysis/outputs/datasets/configured_datasets.png")
+    plot_4k_datasets(
+        specs,
+        save_path=out_dir / "4k_datasets.png",
+    )
+
+    print("\nDone! Check analysis/outputs/datasets/")
     plt.show()
