@@ -305,7 +305,6 @@ def visualize_from_run_dir(
     fig_jnt = plot_joint_marginal(
         joint, grid_x1, grid_x2,
         input_range=input_range,
-        train_data=train_data, train_labels=train_labels, num_classes=num_classes,
         save_path=joint_path,
     )
 
@@ -412,8 +411,6 @@ if __name__ == "__main__":
         ), plot_joint_marginal(
             joint, grid_x1, grid_x2,
             input_range=input_range,
-            train_data=train_data, train_labels=train_labels,
-            num_classes=bm.out_dim if SHOW_DATA else None,
             save_path=save_dir / "best_joint.png",
         )
         plt.show()
