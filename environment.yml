@@ -1,4 +1,4 @@
-name: tn_adv_train                                                                                                                                                                    
+name: bm4tc                                                                                                                                                                    
 channels:                                                                                                                                                                             
   - nvidia                                                                                                                                                                            
   - defaults                                                                                                                                                                          

@@ -235,12 +235,12 @@ Dataset configs are organized by dataset type in subdirectories:
 ```
 dataset/
 ├── test.yaml          # Minimal test config
-├── 2Dtoy/             # 2D toy datasets (current)
+├── 2Dtoy/             # 2D toy datasets
 │   ├── moons_*.yaml
 │   ├── circles_*.yaml
 │   └── spirals_*.yaml
-├── mnist/             # MNIST (planned)
-└── timeseries/        # Univariate time series (planned)
+├── mnist/             # MNIST (mnist_1k.yaml, mnist_full.yaml)
+└── ucr_ts/            # UCR univariate time-series datasets
 ```
 
 **2D Toy Datasets** (`dataset/2Dtoy/`):

@@ -121,7 +121,7 @@ The `BornGenerator` uses **sequential contraction** (not parallel like the class
 ## Directory Structure
 
 ```
-adversarial_training_mps/
+bm4tc/
 ├── GUIDE.md                    # This file
 ├── README.md                   # Original readme (may be outdated)
 ├── environment.yml             # Conda environment specification
@@ -335,7 +335,7 @@ embedding: "fourier"
 ```bash
 # Setup environment
 conda env create -f environment.yml
-conda activate <env_name>
+conda activate bm4tc
 
 # Run classification experiment (using experiment config)
 python -m experiments.classification +experiments=classification/fourier_d30D18/D18
