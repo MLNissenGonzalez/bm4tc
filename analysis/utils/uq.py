@@ -57,6 +57,12 @@ class UQConfig:
     attack_strengths: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
     attack_num_steps: int = 20
 
+    # Gibbs purification params
+    run_gibbs: bool = False
+    gibbs_n_sweeps: List[int] = field(default_factory=lambda: [1, 3, 5])
+    gibbs_num_bins: int = 200
+    gibbs_batch_size: int = 8
+
 
 def compute_log_px(
     born,
@@ -162,6 +168,9 @@ class UQResults:
     adv_accuracies: Dict[float, float]
     detection_rates: Dict[Tuple[float, float], float]
     purification_results: Dict[Tuple[float, float], PurificationMetrics]
+    gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = field(
+        default_factory=dict
+    )
 
     def summary(self) -> str:
         """Return a formatted summary of UQ evaluation results."""
@@ -426,6 +435,55 @@ class UQEvaluation:
                     f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                 )
 
+        # 5. Gibbs purification
+        gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
+
+        if cfg.run_gibbs:
+            from src.utils.purification.gibbs import GibbsPurification
+
+            gibbs_purifier = GibbsPurification(
+                num_bins=cfg.gibbs_num_bins,
+                gibbs_batch_size=cfg.gibbs_batch_size,
+            )
+            for eps in cfg.attack_strengths:
+                all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
+                all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
+
+                with torch.no_grad():
+                    adv_probs = born.class_probabilities(all_adv.to(device))
+                    adv_preds = adv_probs.argmax(dim=1).cpu()
+                    misclassified = adv_preds != all_labels
+
+                for n_sw in cfg.gibbs_n_sweeps:
+                    logger.info(f"Gibbs purification (eps={eps}, n_sweeps={n_sw})...")
+                    x_purified, log_px_after = gibbs_purifier.purify(
+                        born, all_adv, n_sw, device
+                    )
+
+                    with torch.no_grad():
+                        pur_probs = born.class_probabilities(x_purified.to(device))
+                        pur_preds = pur_probs.argmax(dim=1).cpu()
+                    correct_after = pur_preds == all_labels
+                    acc_after = correct_after.float().mean().item()
+                    misclassified_before = misclassified.sum().item()
+                    recovered = (misclassified & correct_after).sum().item()
+                    recovery = (
+                        recovered / misclassified_before
+                        if misclassified_before > 0
+                        else 1.0
+                    )
+                    gibbs_purification_results[(eps, n_sw)] = PurificationMetrics(
+                        accuracy_after_purify=acc_after,
+                        recovery_rate=recovery,
+                        mean_log_px_before=float(adv_log_px[eps].mean()),
+                        mean_log_px_after=float(log_px_after.mean()),
+                        rejection_rate=0.0,
+                    )
+                    logger.info(
+                        f"  eps={eps}, sweeps={n_sw}: "
+                        f"acc={acc_after:.4f}, recovery={recovery:.2%}"
+                    )
+
         return UQResults(
             clean_log_px=clean_log_px,
             clean_accuracy=clean_accuracy,
@@ -434,4 +492,5 @@ class UQEvaluation:
             adv_accuracies=adv_accuracies,
             detection_rates=detection_rates,
             purification_results=purification_results,
+            gibbs_purification_results=gibbs_purification_results,
         )

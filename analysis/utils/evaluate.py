@@ -305,6 +305,10 @@ def evaluate_run(
             for (eps, radius), metrics in uq_results.purification_results.items():
                 results[f"eval/uq_purify_acc/{eps}/{radius}"] = metrics.accuracy_after_purify
                 results[f"eval/uq_purify_recovery/{eps}/{radius}"] = metrics.recovery_rate
+
+            for (eps, n_sweeps), metrics in uq_results.gibbs_purification_results.items():
+                results[f"eval/gibbs_purify_acc/{eps}/{n_sweeps}"] = metrics.accuracy_after_purify
+                results[f"eval/gibbs_purify_recovery/{eps}/{n_sweeps}"] = metrics.recovery_rate
         except Exception as e:
             logger.warning(f"UQ evaluation failed: {e}")
             results["eval/uq_clean_accuracy"] = np.nan
@@ -464,6 +468,9 @@ def evaluate_pretrained_model(
             for (eps, radius), m in uq_results.purification_results.items():
                 results[f"eval/uq_purify_acc/{eps}/{radius}"] = m.accuracy_after_purify
                 results[f"eval/uq_purify_recovery/{eps}/{radius}"] = m.recovery_rate
+            for (eps, n_sweeps), m in uq_results.gibbs_purification_results.items():
+                results[f"eval/gibbs_purify_acc/{eps}/{n_sweeps}"] = m.accuracy_after_purify
+                results[f"eval/gibbs_purify_recovery/{eps}/{n_sweeps}"] = m.recovery_rate
         except Exception as e:
             logger.warning(f"UQ failed: {e}")
 
@@ -647,6 +654,10 @@ def evaluate_model_at_path(
             for (eps, radius), metrics in uq_results.purification_results.items():
                 results[f"eval/uq_purify_acc/{eps}/{radius}"] = metrics.accuracy_after_purify
                 results[f"eval/uq_purify_recovery/{eps}/{radius}"] = metrics.recovery_rate
+
+            for (eps, n_sweeps), metrics in uq_results.gibbs_purification_results.items():
+                results[f"eval/gibbs_purify_acc/{eps}/{n_sweeps}"] = metrics.accuracy_after_purify
+                results[f"eval/gibbs_purify_recovery/{eps}/{n_sweeps}"] = metrics.recovery_rate
         except Exception as e:
             logger.warning(f"UQ evaluation failed: {e}")
             results["eval/uq_clean_accuracy"] = np.nan

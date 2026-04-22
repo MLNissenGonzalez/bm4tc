@@ -89,6 +89,8 @@ All metric columns are prefixed `eval/`. Optional groups depend on which metrics
 | `eval/uq_detection/{pct}pct/{eps}` | Detection rate at threshold calibrated to `{pct}`th percentile of clean log p(x), at attack eps `eps` |
 | `eval/uq_purify_acc/{eps}/{radius}` | Accuracy after likelihood purification (attack `eps`, purification ball `radius`) |
 | `eval/uq_purify_recovery/{eps}/{radius}` | Recovery rate: fraction of previously-wrong examples corrected by purification |
+| `eval/gibbs_purify_acc/{eps}/{n_sweeps}` | Accuracy after Gibbs-sampling purification (attack `eps`, `n_sweeps` full feature sweeps). Only present when `COMPUTE_GIBBS_PURIFICATION=True`. |
+| `eval/gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification: fraction of pre-purification misclassified samples that become correct. |
 
 ### Companion file: `sweep_analysis_summary.txt`
 

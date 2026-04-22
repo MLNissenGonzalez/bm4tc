@@ -89,6 +89,7 @@ COMPUTE_CLS_LOSS = True
 COMPUTE_GEN_LOSS = True
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
+COMPUTE_GIBBS_PURIFICATION = False  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
 COMPUTE_DISTRIBUTIONS = True  # Set False (or pass --no-viz) to skip best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
@@ -136,6 +137,16 @@ MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range; None = disabled.
 UQ_CONFIG = {
     "radii": [0.10 * _RANGE_SIZE],   # single radius: 10% of input range (was [0.15, 0.3])
     "percentiles": [1, 5, 10, 20],
+}
+
+# --- GIBBS PURIFICATION SETTINGS (only used when COMPUTE_GIBBS_PURIFICATION=True) ---
+# Memory cost: (gibbs_batch_size × num_bins)² × 4 bytes.
+#   bs=8,  bins=200 → ~10 MB density matrix
+#   bs=32, bins=200 → ~160 MB density matrix
+GIBBS_CONFIG = {
+    "n_sweeps": [1, 3, 5],   # evaluate each sweep count independently
+    "num_bins": 200,          # grid resolution over the input range
+    "gibbs_batch_size": 8,    # samples processed per sequential() call
 }
 
 # --- EVALUATION SETTINGS ---
@@ -209,6 +220,13 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         "attack_num_steps": EVASION_CONFIG.get("num_steps", 20),
         **UQ_CONFIG,  # radii, percentiles (may override num_steps if user adds it)
     }
+    if COMPUTE_GIBBS_PURIFICATION:
+        _full_uq_config["run_gibbs"] = True
+        _full_uq_config["gibbs_n_sweeps"] = GIBBS_CONFIG["n_sweeps"]
+        _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
+        _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
+elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
+    print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
 
 # %%
 from analysis.utils import EvalConfig, evaluate_sweep
