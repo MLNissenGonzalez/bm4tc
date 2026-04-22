@@ -95,14 +95,14 @@ COMPUTE_DISTRIBUTIONS = True  # Set False (or pass --no-viz) to skip best-run di
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
 # Set to None to use each run's own evasion config.
-# Strengths are expressed as FRACTIONS of the input range:
-#   Fourier (range 1.0): multiply by 1.0 → same value
+# Strengths are expressed as FRACTIONS of the input range (max margin ~0.15 of range):
+#   Fourier (range 1.0): same as absolute value
 #   Legendre (range 2.0): multiply by 2.0
-_STRENGTH_FRACTIONS = [0.05, 0.10, 0.2, 0.5, 0.8]
+_STRENGTH_FRACTIONS = [0.05, 0.1, 0.15]
 EVASION_CONFIG = {
     "method": "PGD",
-    "norm": 2,                                            # L2 (was "inf")
-    "num_steps": 20,
+    "norm": 2,
+    "num_steps": 40,
     "strengths": [s * _RANGE_SIZE for s in _STRENGTH_FRACTIONS],
 }
 
@@ -130,8 +130,7 @@ MIA_FEATURES = {
 # --- MIA ADVERSARIAL SETTINGS ---
 # Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
 # Attack settings (method, norm, num_steps) are derived from EVASION_CONFIG.
-MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range; None = disabled.
-                                       # Added to EVASION_CONFIG["strengths"] automatically.
+MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range; already in EVASION_CONFIG["strengths"], deduped automatically.
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
@@ -165,7 +164,7 @@ DPI = 100
 # --- PARETO SETTINGS ---
 # Robustness strength for Pareto frontier selection.
 # Set to None to auto-select the weakest non-zero strength.
-PARETO_ROB_STRENGTH = 0.10 * _RANGE_SIZE   # 10% of input range (was 0.15 absolute)
+PARETO_ROB_STRENGTH = 0.10 * _RANGE_SIZE   # 10% of input range
 
 # --- SANITY CHECK ---
 # Map eval column -> W&B summary column for comparison.

@@ -80,10 +80,8 @@ def best_run_from_csv(ana_dir: Path) -> str | None:
     df = pd.read_csv(csv)
     if "run_path" not in df.columns:
         return None
-    if "eval/valid/acc" in df.columns:
-        row = df.loc[df["eval/valid/acc"].idxmax()]
-    else:
-        row = df.iloc[0]
+    df["_idx"] = pd.to_numeric(df["run_path"].apply(lambda p: Path(p).name), errors="coerce")
+    row = df.loc[df["_idx"].idxmin()]
     return row["run_path"]
 
 

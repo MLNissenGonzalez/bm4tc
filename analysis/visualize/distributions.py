@@ -248,7 +248,9 @@ def plot_joint_marginal(
     lo, hi = input_range
     res = grid_x1.shape[0]
     marginal = joint.numpy().sum(axis=1).reshape(res, res)
-    pcm = ax.pcolormesh(grid_x1, grid_x2, marginal, cmap=cmap, shading="auto")
+    vmin, vmax = float(marginal.min()), float(marginal.max())
+    pcm = ax.pcolormesh(grid_x1, grid_x2, marginal, cmap=cmap, shading="auto",
+                        vmin=vmin, vmax=vmax)
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal")
