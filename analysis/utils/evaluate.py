@@ -200,7 +200,8 @@ def evaluate_run(
                 logger.warning(f"Metric '{metric_name}' failed on split '{split}': {e}")
                 results[f"eval/{split}/{metric_name}"] = np.nan
 
-    # Valid-split (and any non-test split) rob via MetricFactory.
+    # This is only for non-seed-sweep evals.
+    # Valid-split (and any non-test split) rob via MetricFactory. 
     # UQ only evaluates on test; valid rob still uses MetricFactory directly.
     if eval_cfg.compute_rob:
         for split in [s for s in eval_cfg.splits if s != "test"]:
@@ -315,6 +316,8 @@ def evaluate_run(
 
     # 10. Test-split rob: reuse UQ's adv_accuracies where possible to avoid
     #     generating adversarial examples twice on the test set.
+    # TODO: Check whether this is necessary or if strengths of purification are always equal to strengths of raw rob acc.
+    #       If yes, then cut this last block and save robust accuracies in block 9.
     if eval_cfg.compute_rob and "test" in eval_cfg.splits:
         _uq_adv_acc_cache: Dict[float, float] = {}
         if eval_cfg.compute_uq and uq_results is not None:

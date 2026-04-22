@@ -49,3 +49,11 @@ hydra:
     params:
       trainer.generative.criterion.kwargs.alpha: choice(0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0)
       tracking.seed: range(1, 6)
+
+# kwargs from pure generative:
+#   lr: 0.0002636875533972306    # FILL FROM HPO
+#   weight_decay: 1.7699302940633323e-08  # FILL FROM HPO
+
+# kwargs from pure classification:
+#   lr: 0.041376293143363094    # FILL FROM HPO
+#   weight_decay: 1.1024958579569868e-09  # FILL FROM HPO
