@@ -37,7 +37,7 @@ def find_sweep_dirs(root: Path):
 
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
-    """Mirror sweep path under analysis/outputs/ (matches sweep_analysis.py logic)."""
+    """Mirror sweep path under analysis/outputs/ (matches seed_sweep_analysis.py logic)."""
     rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 

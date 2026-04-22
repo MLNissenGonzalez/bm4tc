@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Run sweep_analysis.py for completed but unanalyzed sweeps.
+Run seed_sweep_analysis.py for completed but unanalyzed seed sweeps.
 
 Scans both outputs/seed_sweep/ and outputs/alpha_curve/ for multirun.yaml
 markers.  Distribution plots are intentionally skipped (--no-viz is always
@@ -8,16 +8,16 @@ passed); use queue_visualize.py to regenerate them separately.
 
 Usage
 -----
-    python analysis/queue_analysis.py                                    # all unanalyzed
-    python analysis/queue_analysis.py --dry-run                          # print commands only
-    python analysis/queue_analysis.py --filter-experiment alpha_curve    # alpha_curve sweeps only
-    python analysis/queue_analysis.py --filter-embedding hermite
-    python analysis/queue_analysis.py --filter-dataset  circles          # substring match
-    python analysis/queue_analysis.py --filter-arch     d4D3
-    python analysis/queue_analysis.py --filter-type     gen              # gen | cls | adv
-    python analysis/queue_analysis.py --filter-embedding fourier --filter-dataset moons_4k
-    python analysis/queue_analysis.py --force                            # re-run already analyzed
-    python analysis/queue_analysis.py --list                             # show status of all sweeps
+    python analysis/queue_seed_sweep.py                                    # all unanalyzed
+    python analysis/queue_seed_sweep.py --dry-run                          # print commands only
+    python analysis/queue_seed_sweep.py --filter-experiment alpha_curve    # alpha_curve sweeps only
+    python analysis/queue_seed_sweep.py --filter-embedding hermite
+    python analysis/queue_seed_sweep.py --filter-dataset  circles          # substring match
+    python analysis/queue_seed_sweep.py --filter-arch     d4D3
+    python analysis/queue_seed_sweep.py --filter-type     gen              # gen | cls | adv
+    python analysis/queue_seed_sweep.py --filter-embedding fourier --filter-dataset moons_4k
+    python analysis/queue_seed_sweep.py --force                            # re-run already analyzed
+    python analysis/queue_seed_sweep.py --list                             # show status of all sweeps
 """
 
 import argparse
@@ -43,7 +43,7 @@ def find_sweep_dirs(root: Path):
 
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
-    """Mirror sweep path under analysis/outputs/ (matches sweep_analysis.py logic)."""
+    """Mirror sweep path under analysis/outputs/ (matches seed_sweep_analysis.py logic)."""
     rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
@@ -75,7 +75,7 @@ def get_dataset_base(sweep_dir: Path) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run sweep_analysis.py for unanalyzed sweeps (seed_sweep + alpha_curve)."
+        description="Run seed_sweep_analysis.py for unanalyzed sweeps (seed_sweep + alpha_curve)."
     )
     parser.add_argument("--dry-run", action="store_true",
                         help="Print commands without executing.")
@@ -148,7 +148,7 @@ def main():
     for sweep_dir, exp_name, root in todo:
         rel = sweep_dir.relative_to(ROOT)
         # --no-viz: distribution plots are handled separately by queue_visualize.py
-        cmd = ["python", "analysis/sweep_analysis.py", str(rel), "--no-viz"]
+        cmd = ["python", "analysis/seed_sweep_analysis.py", str(rel), "--no-viz"]
         print(" ".join(cmd))
         if not args.dry_run:
             result = subprocess.run(cmd, cwd=ROOT)

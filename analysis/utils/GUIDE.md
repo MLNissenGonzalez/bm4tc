@@ -40,7 +40,7 @@ self.scaler = MinMaxScaler(feature_range=self.input_range, clip=True)
 
 **Attack epsilons must be expressed in these units.** A perturbation of epsilon=0.1 L∞ means each feature can shift by at most 0.1 in the rescaled space. For Fourier that is 10% of the range; for Hermite the same 0.1 is only 1.25% of the range — 8× weaker in relative terms.
 
-`sweep_analysis.py` therefore uses **range-relative fractions** multiplied by `_RANGE_SIZE` (from `analysis/utils/resolve.py`):
+`seed_sweep_analysis.py` therefore uses **range-relative fractions** multiplied by `_RANGE_SIZE` (from `analysis/utils/resolve.py`):
 
 ```python
 _STRENGTH_FRACTIONS = [0.05, 0.10, 0.2, 0.5, 0.8]
@@ -76,7 +76,7 @@ where `α = 2.5ε / T` by default (T = num_steps). The projection Π keeps δ in
 
 **Implementation note**: The current code (`evasion/minimal.py`) does **not clamp** `x + δ` to the embedding's input domain. This means adversarial examples can stray slightly outside the valid range at the boundaries. For Hermite the Gaussian damping `exp(-x²/2)` suppresses out-of-range embedding components naturally; for Fourier the cos/sin functions remain well-defined but are off-distribution.
 
-**In `sweep_analysis.py` the default attack is PGD with L2 norm, 20 steps.**
+**In `seed_sweep_analysis.py` the default attack is PGD with L2 norm, 20 steps.**
 
 ### Robustness metric
 
@@ -215,7 +215,7 @@ Step 10 avoids generating adversarial examples twice when UQ and rob use the sam
 
 ## `resolve.py` — auto-detection from path
 
-`sweep_analysis.py` calls these at startup to configure itself:
+`seed_sweep_analysis.py` calls these at startup to configure itself:
 
 ```python
 _EMBEDDING = resolve_embedding_from_path(SWEEP_DIR)
@@ -246,7 +246,7 @@ Both functions tokenize the path on `/` and `_` and match against known strings.
 
 1. **PGD does not clamp to input domain**: adversarial examples can stray outside the embedding's valid range at the boundaries. Purification corrects this (final clamp to `input_range`), but the attack itself does not.
 
-2. **L2 norm by default in sweep_analysis.py**: The training-time evasion config (in `configs/tracking/online.yaml`) also uses L2. They should match for meaningful sanity checks.
+2. **L2 norm by default in seed_sweep_analysis.py**: The training-time evasion config (in `configs/tracking/online.yaml`) also uses L2. They should match for meaningful sanity checks.
 
 3. **FID disabled for data_dim > 100**: FID is meaningless in high-dimensional spaces where covariance estimation is unreliable.
 

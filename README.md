@@ -76,10 +76,10 @@ python -m experiments.classification +experiments=tests/classification tracking.
 
 ```bash
 # Analyse all completed but unanalysed sweeps
-python analysis/queue_analysis.py
+python analysis/queue_seed_sweep.py
 
 # Analyse a specific sweep
-python analysis/sweep_analysis.py outputs/seed_sweep/gen/legendre/d10D6/moons_4k_1802
+python analysis/seed_sweep_analysis.py outputs/seed_sweep/gen/legendre/d10D6/moons_4k_1802
 
 # Regenerate distribution plots for analysed sweeps
 python analysis/queue_visualize.py
@@ -100,8 +100,8 @@ bm4tc/
 │   ├── data/           # DataHandler, dataset generation and loading
 │   └── utils/          # Schemas, embeddings, losses, PGD/FGM attacks, purification
 ├── analysis/
-│   ├── sweep_analysis.py   # Post-hoc metrics for one sweep
-│   ├── queue_analysis.py   # Batch runner over all sweeps
+│   ├── seed_sweep_analysis.py   # Post-hoc metrics for one sweep
+│   ├── queue_seed_sweep.py   # Batch runner over all sweeps
 │   ├── queue_visualize.py  # Batch distribution plot regenerator
 │   ├── utils/              # evaluate.py, uq.py, mia.py, resolve.py, statistics.py
 │   └── outputs/            # Generated analysis artifacts (git-ignored)

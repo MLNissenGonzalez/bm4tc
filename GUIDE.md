@@ -160,8 +160,8 @@ bm4tc/
 │   ├── hpo_analysis.py      # HPO experiment analysis notebook
 │   ├── mia_analysis.py      # MIA privacy analysis notebook
 │   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
-│   ├── sweep_analysis.py    # Post-hoc sweep analysis notebook
-│   ├── queue_analysis.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
+│   ├── seed_sweep_analysis.py    # Post-hoc sweep analysis notebook
+│   ├── queue_seed_sweep.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
 │   ├── queue_visualize.py   # Batch-regenerate distribution visualizations
 │   ├── cls_reg_analysis.py  # Post-training cls_reg sweep evaluation
 │   ├── dev_comb_analysis.py # Combined cls+gen dual-model sweep evaluation
@@ -283,7 +283,7 @@ embedding: "fourier"
 | Compute marginal p(x) | `src/models/born.py` (`marginal_log_probability`) |
 | UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
 | Analyze HPO results | `analysis/hpo_analysis.py` |
-| Batch-run sweep analysis | `analysis/queue_analysis.py` |
+| Batch-run sweep analysis | `analysis/queue_seed_sweep.py` |
 | Batch-regenerate distribution plots | `analysis/queue_visualize.py` |
 | Post-training cls_reg sweep evaluation | `analysis/cls_reg_analysis.py` |
 | Combined cls+gen dual-model evaluation | `analysis/dev_comb_analysis.py` |
