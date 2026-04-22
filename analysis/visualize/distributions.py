@@ -43,6 +43,29 @@ from src.data.handler import DataHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Filename stem → "discriminative" | "generative" (backward compat for old checkpoints)
+_CHECKPOINT_REGIME = {
+    "cls": "discriminative", "adv": "discriminative",
+    "gen": "generative",     "gan": "generative",
+}
+
+
+def _infer_regime(bm: "BornMachine", checkpoint_path: Path) -> str:
+    """Return 'discriminative' or 'generative', from checkpoint metadata or filename."""
+    if bm._last_regime is not None:
+        return bm._last_regime
+    stem = checkpoint_path.stem
+    regime = _CHECKPOINT_REGIME.get(stem)
+    if regime is None:
+        logger.warning(
+            f"Cannot infer regime from checkpoint name '{stem}'; "
+            f"defaulting to 'discriminative'."
+        )
+        regime = "discriminative"
+    else:
+        logger.info(f"Inferred regime '{regime}' from checkpoint name '{stem}'.")
+    return regime
+
 # %%
 # =============================================================================
 # CONFIGURATION - EDIT THIS SECTION FOR YOUR EXPERIMENT
@@ -271,6 +294,14 @@ def visualize_from_run_dir(
     bm.to(device)
     logger.info(f"Loaded model from {checkpoint_path}")
 
+    # Ensure classifier and generator are in sync before computing joint probs.
+    # For discriminatively trained models the classifier is canonical; for
+    # generatively trained models the generator is canonical.
+    regime = _infer_regime(bm, checkpoint_path)
+    sync_after = "classification" if regime == "discriminative" else "generation"
+    bm.sync_tensors(after=sync_after)
+    logger.info(f"Synced tensors (regime='{regime}', after='{sync_after}')")
+
     # Load and prepare data
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
@@ -335,6 +366,11 @@ def load_model_and_data():
     logger.info(f"Loading model from: {checkpoint_path}")
     bm = BornMachine.load(str(checkpoint_path))
     bm.to(device)
+
+    regime = _infer_regime(bm, checkpoint_path)
+    sync_after = "classification" if regime == "discriminative" else "generation"
+    bm.sync_tensors(after=sync_after)
+    logger.info(f"Synced tensors (regime='{regime}', after='{sync_after}')")
 
     # Reconstruct DataHandler
     logger.info(f"Loading dataset: {cfg.dataset.name}")

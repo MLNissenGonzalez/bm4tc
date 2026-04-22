@@ -124,6 +124,8 @@ class BornMachine:
         self.cfg = cfg
         self.device = device
         self._log_Z: float | None = None
+        # "discriminative" (cls/adv) or "generative" (gen/gan) — set by sync_tensors
+        self._last_regime: str | None = None
         
     # ==========================================================
     # Forward APIs
@@ -237,6 +239,7 @@ class BornMachine:
                    "generation" -> copy generator tensors to classifier.
             verify: If True, log verification that tensors match after sync.
         """
+        self._last_regime = "discriminative" if after == "classification" else "generative"
         # self.to("cpu")  # ensure host memory copy
         self.classifier.reset()
         self.generator.reset()
@@ -287,6 +290,7 @@ class BornMachine:
             "tensors": self.classifier.tensors,
             "config": OmegaConf.to_container(self.cfg, resolve=True),
             "log_Z": self._log_Z,
+            "regime": self._last_regime,
         }
         torch.save(state, path)
 
@@ -305,6 +309,7 @@ class BornMachine:
         cfg: schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
         born_machine._log_Z = checkpoint.get("log_Z", None)
+        born_machine._last_regime = checkpoint.get("regime", None)
         if born_machine._log_Z is not None:
             logger.info(f"[BornMachine] loaded from {path} (log Z = {born_machine._log_Z:.6f})")
         else:
