@@ -56,6 +56,7 @@ class DatasetSpec:
     circ_factor: Optional[float] = None
     split: tuple = field(default_factory=lambda: (0.5, 0.25, 0.25))
     split_seed: int = 11
+    scaler: str = "minmax"
 
 
 def _dataset_type(name: str) -> str:
@@ -88,9 +89,16 @@ def load_specs(config_dir: Path) -> list[DatasetSpec]:
             circ_factor=g.get("circ_factor"),
             split=tuple(cfg.get("split", [0.5, 0.25, 0.25])),
             split_seed=cfg.get("split_seed", 11),
+            scaler=cfg.get("scaler", "minmax"),
         ))
     specs.sort(key=lambda s: (_TYPE_ORDER.get(_dataset_type(s.name), 99), s.size, s.name))
     return specs
+
+
+def _make_scaler(name: str):
+    from sklearn.preprocessing import MinMaxScaler as _MMS
+    from src.data.handler import LinearScaler as _LS
+    return {"minmax": _MMS, "linear": _LS}.get(name.lower(), _MMS)(feature_range=(0., 1.))
 
 
 # %%
@@ -150,6 +158,7 @@ def plot_dataset_grid(
         rng = np.random.RandomState(spec.split_seed)
         idx = rng.permutation(len(X))[:n_train]
         X, t = X[idx], t[idx]
+        X = _make_scaler(spec.scaler).fit_transform(X)
         create_2d_scatter(X=X, t=t, title=_make_label(spec), ax=axes[row, col], show_legend=False)
 
     for i in range(n, n_rows * n_cols):
@@ -189,6 +198,7 @@ def plot_4k_datasets(
         rng = np.random.RandomState(spec.split_seed)
         idx = rng.permutation(len(X))[:n_train]
         X, t = X[idx], t[idx]
+        X = _make_scaler(spec.scaler).fit_transform(X)
         create_2d_scatter(X=X, t=t, title=None, ax=ax, show_legend=False)
         ax.set_xlabel("")
         ax.set_ylabel("")
