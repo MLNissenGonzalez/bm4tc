@@ -178,7 +178,7 @@ All outputs go to `analysis/outputs/<sweep_path>/`:
 | File | Description |
 |------|-------------|
 | `evaluation_data.csv` | **One row per run**, all metrics. This is the primary output. |
-| `sweep_analysis_summary.txt` | Human-readable summary: statistics table, Pareto runs, acc-vs-eps band, correlations |
+| `evaluation_summary.txt` | Human-readable summary: statistics table, Pareto runs, acc-vs-eps band, correlations |
 | `best_run_samples.png` | Generated samples from the best model (**not** produced when `--no-viz`) |
 | `best_class_dist.png` | p(c\|x) conditional heatmap for best model (**not** produced when `--no-viz`) |
 | `best_joint.png` | Marginal p(x) heatmap for best model (**not** produced when `--no-viz`) |
@@ -354,7 +354,7 @@ outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
 
 analysis/outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
   ├── evaluation_data.csv          ← always written
-  ├── sweep_analysis_summary.txt   ← always written
+  ├── evaluation_summary.txt   ← always written
   ├── best_class_dist.png          ← only if COMPUTE_DISTRIBUTIONS (not via queue_seed_sweep)
   └── best_joint.png               ← only if COMPUTE_DISTRIBUTIONS (not via queue_seed_sweep)
 ```

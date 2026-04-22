@@ -92,7 +92,7 @@ All metric columns are prefixed `eval/`. Optional groups depend on which metrics
 | `eval/gibbs_purify_acc/{eps}/{n_sweeps}` | Accuracy after Gibbs-sampling purification (attack `eps`, `n_sweeps` full feature sweeps). Only present when `COMPUTE_GIBBS_PURIFICATION=True`. |
 | `eval/gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification: fraction of pre-purification misclassified samples that become correct. |
 
-### Companion file: `sweep_analysis_summary.txt`
+### Companion file: `evaluation_summary.txt`
 
 Human-readable table with mean ± std across seeds, Pareto-frontier runs, and acc-vs-eps band. Contains no data not derivable from `evaluation_data.csv`.
 
