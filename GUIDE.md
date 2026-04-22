@@ -167,6 +167,10 @@ bm4tc/
 │   ├── dev_comb_analysis.py # Combined cls+gen dual-model sweep evaluation
 │   ├── visualize/           # Visualization helpers (distributions, evolution plots)
 │   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
+├── tests/                    # pytest test suite (139 tests)
+│   ├── conftest.py           # Session-scoped BornMachine fixture (fourier, complex64, data_dim=4)
+│   ├── unit/                 # Fast tests (~90): embeddings, criterions, sampling, purification, stats, resolve
+│   └── integration/          # Slow tests (~49, @pytest.mark.slow): born machine, generator, gibbs, UQ
 ├── .datasets/                # Generated/downloaded datasets (git-ignored)
 ├── outputs/                  # Experiment outputs (git-ignored)
 ├── wandb/                    # W&B local files
@@ -286,6 +290,9 @@ embedding: "fourier"
 | Softmax sanity-check experiment | `experiments/softmax_sanity.py` |
 | Fill seed_sweep configs from HPO | `configs/tools/fill_hpo.py` |
 | Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
+| Run fast tests (no model) | `pytest -m "not slow" -q` |
+| Run full test suite | `pytest -q` |
+| Run single test file | `pytest tests/integration/test_born_machine.py -v` |
 
 ### Critical code sections to understand:
 
