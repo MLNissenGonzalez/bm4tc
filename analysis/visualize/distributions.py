@@ -216,13 +216,15 @@ def plot_class_conditional(
     train_data=None, train_labels=None, num_classes=None,
     cmap="viridis", save_path=None,
 ) -> plt.Figure:
-    """Square figure: p(c=1|x) heatmap, no title/labels, with colorbar."""
+    """Square figure: p(c=1|x) heatmap, no title/labels, no colorbar."""
     fig, ax = plt.subplots(figsize=(4, 4))
     lo, hi = input_range
     res = grid_x1.shape[0]
     prob1 = conditional.numpy()[:, 1].reshape(res, res)
+    vmin = float(np.percentile(prob1, 2))
+    vmax = float(np.percentile(prob1, 98))
     pcm = ax.pcolormesh(grid_x1, grid_x2, prob1, cmap=cmap,
-                        shading="auto", vmin=0.0, vmax=1.0)
+                        shading="auto", vmin=vmin, vmax=vmax)
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal")
@@ -230,7 +232,6 @@ def plot_class_conditional(
     ax.set_yticks([])
     if train_data is not None and num_classes is not None:
         _overlay_data(ax, train_data, train_labels, num_classes)
-    fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     if save_path:
         _save_fig(fig, save_path)
@@ -243,12 +244,20 @@ def plot_joint_marginal(
     train_data=None, train_labels=None, num_classes=None,
     cmap="viridis", save_path=None,
 ) -> plt.Figure:
-    """Square figure: p(x) = sum_c p(x,c) marginal, no title/labels, with colorbar."""
+    """Square figure: class-normalized joint Σ_c p(x,c)/max_x p(x,c), no colorbar.
+
+    Each class is rescaled so its peak contributes equally, preventing a
+    high-probability class from washing out the spatial structure of rarer classes.
+    """
     fig, ax = plt.subplots(figsize=(4, 4))
     lo, hi = input_range
     res = grid_x1.shape[0]
-    marginal = joint.numpy().sum(axis=1).reshape(res, res)
-    vmin, vmax = float(marginal.min()), float(marginal.max())
+    joint_np = joint.numpy()                               # (N, num_classes)
+    class_max = joint_np.max(axis=0)                       # (num_classes,)
+    class_max = np.where(class_max == 0, 1.0, class_max)  # guard div-by-zero
+    marginal = (joint_np / class_max).sum(axis=1).reshape(res, res)
+    vmin = float(np.percentile(marginal, 2))
+    vmax = float(np.percentile(marginal, 98))
     pcm = ax.pcolormesh(grid_x1, grid_x2, marginal, cmap=cmap, shading="auto",
                         vmin=vmin, vmax=vmax)
     ax.set_xlim(lo, hi)
@@ -258,7 +267,6 @@ def plot_joint_marginal(
     ax.set_yticks([])
     if train_data is not None and num_classes is not None:
         _overlay_data(ax, train_data, train_labels, num_classes)
-    fig.colorbar(pcm, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     if save_path:
         _save_fig(fig, save_path)
