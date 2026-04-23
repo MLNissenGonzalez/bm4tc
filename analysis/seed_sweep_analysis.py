@@ -84,13 +84,13 @@ print(f"Embedding: '{_EMBEDDING or 'unknown'}'  →  input range size: {_RANGE_S
 # --- METRIC TOGGLES ---
 COMPUTE_ACC = True
 COMPUTE_ROB = True
-COMPUTE_MIA = True
+COMPUTE_MIA = False
 COMPUTE_CLS_LOSS = True
 COMPUTE_GEN_LOSS = True
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
-COMPUTE_GIBBS_PURIFICATION = False  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
-COMPUTE_DISTRIBUTIONS = True  # Set False (or pass --no-viz) to skip best-run distribution plots
+COMPUTE_GIBBS_PURIFICATION = True  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
+COMPUTE_DISTRIBUTIONS = False  # Set False (or pass --no-viz) to skip best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
