@@ -143,9 +143,10 @@ UQ_CONFIG = {
 #   bs=8,  bins=200 → ~10 MB density matrix
 #   bs=32, bins=200 → ~160 MB density matrix
 GIBBS_CONFIG = {
-    "n_sweeps": [1, 3, 5],   # evaluate each sweep count independently
-    "num_bins": 200,          # grid resolution over the input range
-    "gibbs_batch_size": 8,    # samples processed per sequential() call
+    "n_sweeps": [1, 3, 5],       # evaluate each sweep count independently
+    "num_bins": 200,              # grid resolution over the input range
+    "gibbs_batch_size": 8,        # samples processed per sequential() call
+    "cumulative_radius": 0.1,     # relative to input range (delta_abs = rel * (hi - lo)); None = unrestricted
 }
 
 # --- EVALUATION SETTINGS ---
@@ -224,6 +225,7 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         _full_uq_config["gibbs_n_sweeps"] = GIBBS_CONFIG["n_sweeps"]
         _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
         _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
+        _full_uq_config["gibbs_cumulative_radius"] = GIBBS_CONFIG.get("cumulative_radius")
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
 

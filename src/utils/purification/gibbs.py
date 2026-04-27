@@ -1,7 +1,7 @@
 """Gibbs-sampling purification for Born Machines (class-marginalized)."""
 
 import torch
-from typing import Tuple
+from typing import Optional, Tuple
 
 from src.models.generator.differential_sampling import multinomial_sampling
 
@@ -20,11 +20,22 @@ class GibbsPurification:
             sequential() call.  Controls density-matrix memory:
             (gibbs_batch_size × num_bins)² × 4 bytes.
             At bs=8, bins=200: ~10 MB.  At bs=32, bins=200: ~160 MB.
+        cumulative_radius: Relative perturbation budget as a fraction of the
+            input range size (b - a).  Each sweep restricts resampling of
+            feature i to [x̄_i ± delta_abs/n_sweeps] where
+            delta_abs = cumulative_radius * (hi - lo).  Intervals are clamped
+            to input_range.  If None, samples from the full input range.
     """
 
-    def __init__(self, num_bins: int, gibbs_batch_size: int = 8):
+    def __init__(
+        self,
+        num_bins: int,
+        gibbs_batch_size: int = 8,
+        cumulative_radius: Optional[float] = 0.1,
+    ):
         self.num_bins = num_bins
         self.gibbs_batch_size = gibbs_batch_size
+        self.cumulative_radius = cumulative_radius
 
     def purify(
         self,
@@ -51,12 +62,18 @@ class GibbsPurification:
         generator = born.generator
         cls_pos = generator.cls_pos
         n_samples = len(x_adv)
+        lo, hi = born.input_range
 
-        input_space = torch.linspace(
-            born.input_range[0], born.input_range[1], self.num_bins, device=device
-        )
+        input_space = torch.linspace(lo, hi, self.num_bins, device=device)
         # (num_bins, in_dim) — fixed grid embedding, same for every feature and sweep
         in_emb_grid = generator.embedding(input_space)
+
+        # Convert relative radius to absolute, then split across sweeps.
+        per_sweep_delta: Optional[float] = (
+            self.cumulative_radius * (hi - lo) / n_sweeps
+            if self.cumulative_radius is not None
+            else None
+        )
 
         results = []
         for batch_start in range(0, n_samples, self.gibbs_batch_size):
@@ -65,6 +82,10 @@ class GibbsPurification:
             x_cur = batch.clone()
 
             for _ in range(n_sweeps):
+                # Snapshot feature values at sweep start; restriction intervals are
+                # centered on these values, not on the within-sweep updated values.
+                x_bar = x_cur.clone() if per_sweep_delta is not None else None
+
                 for s in range(generator.n_features):
                     if s == cls_pos:
                         continue
@@ -94,6 +115,15 @@ class GibbsPurification:
 
                     generator.prepare()
                     p = generator.sequential(embs).view(bs, self.num_bins)
+
+                    if per_sweep_delta is not None:
+                        # Restrict each sample's conditional to [x̄_k ± delta] ∩ [lo, hi].
+                        # Vectorised: lo_k/hi_k are (bs, 1), input_space is (num_bins,).
+                        lo_k = (x_bar[:, k] - per_sweep_delta).clamp(lo, hi).unsqueeze(1)
+                        hi_k = (x_bar[:, k] + per_sweep_delta).clamp(lo, hi).unsqueeze(1)
+                        mask = (input_space[None, :] >= lo_k) & (input_space[None, :] <= hi_k)
+                        p = p * mask
+
                     x_cur[:, k] = multinomial_sampling(p, input_space)
 
             results.append(x_cur.cpu())
