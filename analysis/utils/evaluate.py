@@ -66,6 +66,7 @@ class EvalConfig:
     mia_adversarial_step_size: Optional[float] = None
     mia_adversarial_norm: Any = "inf"
     uq_config: Optional[Dict[str, Any]] = None
+    joint_uq_config: Optional[Dict[str, Any]] = None  # second UQ pass with JOINT_PGD
     device: str = "cuda"
 
 
@@ -313,6 +314,35 @@ def evaluate_run(
         except Exception as e:
             logger.warning(f"UQ evaluation failed: {e}")
             results["eval/uq_clean_accuracy"] = np.nan
+
+    # 9b. Joint-attack UQ: second pass with JOINT_PGD, reusing cached log Z.
+    if eval_cfg.compute_uq and eval_cfg.joint_uq_config is not None:
+        try:
+            from .uq import UQEvaluation, UQConfig
+
+            joint_uq_config = UQConfig(**eval_cfg.joint_uq_config)
+            joint_uq_eval = UQEvaluation(config=joint_uq_config)
+            joint_uq_results = joint_uq_eval.evaluate(
+                bm,
+                datahandler.classification["test"],
+                device,
+            )
+
+            for eps, acc in joint_uq_results.adv_accuracies.items():
+                results[f"eval/uq_joint_adv_acc/{eps}"] = acc
+
+            for (pct, eps), rate in joint_uq_results.detection_rates.items():
+                results[f"eval/uq_joint_detection/{pct}pct/{eps}"] = rate
+
+            for (eps, radius), metrics in joint_uq_results.purification_results.items():
+                results[f"eval/uq_joint_purify_acc/{eps}/{radius}"] = metrics.accuracy_after_purify
+                results[f"eval/uq_joint_purify_recovery/{eps}/{radius}"] = metrics.recovery_rate
+
+            for (eps, n_sweeps), metrics in joint_uq_results.gibbs_purification_results.items():
+                results[f"eval/gibbs_joint_purify_acc/{eps}/{n_sweeps}"] = metrics.accuracy_after_purify
+                results[f"eval/gibbs_joint_purify_recovery/{eps}/{n_sweeps}"] = metrics.recovery_rate
+        except Exception as e:
+            logger.warning(f"Joint-attack UQ evaluation failed: {e}")
 
     # 10. Test-split rob: reuse UQ's adv_accuracies where possible to avoid
     #     generating adversarial examples twice on the test set.

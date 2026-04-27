@@ -191,9 +191,94 @@ class ProjectedGradientDescent:
         return ad_examples.detach()
 
 
+class JointProjectedGradientDescent:
+    """PGD maximising max_{c'≠c} ln|ψ(x̃, c')|²  (joint generative attack).
+
+    Loss per step: –mean( max_{c'≠c}  2·log|ψ(x̃, c')| )
+    The worst-case wrong class is re-selected dynamically at every gradient step.
+    """
+
+    def __init__(
+            self,
+            norm: int | str = "inf",
+            num_steps: int = 10,
+            step_size: float | None = None,
+            random_start: bool = True,
+            eps: float = 1e-12,
+    ):
+        self.norm = norm
+        self.num_steps = num_steps if num_steps is not None else 10
+        self.step_size = step_size
+        self.random_start = random_start
+        self.eps = eps
+
+    def _project(self, perturbation: torch.Tensor, strength: float) -> torch.Tensor:
+        if self.norm == "inf":
+            return perturbation.clamp(-strength, strength)
+        elif isinstance(self.norm, int):
+            norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
+            scale = torch.clamp(norms / strength, min=1.0)
+            return perturbation / scale
+        else:
+            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
+
+    def _random_init(self, shape: torch.Size, strength: float, device: torch.device) -> torch.Tensor:
+        if self.norm == "inf":
+            return (2 * torch.rand(shape, device=device) - 1) * strength
+        elif isinstance(self.norm, int):
+            delta = torch.randn(shape, device=device)
+            delta = normalizing(delta, self.norm) * strength * torch.rand(shape[0], 1, device=device)
+            return delta
+        else:
+            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
+
+    def generate(
+            self,
+            born: BornMachine,
+            naturals: torch.Tensor,
+            labels: torch.LongTensor,
+            strength: float = 0.1,
+            device: torch.device | str = "cpu"
+    ):
+        """Generate adversarial examples using the joint generative attack."""
+        born.to(device)
+        naturals = naturals.to(device).detach()
+        labels   = labels.to(device)
+
+        step_size = self.step_size if self.step_size is not None \
+                    else 2.5 * strength / self.num_steps
+
+        delta = (self._random_init(naturals.shape, strength, device)
+                 if self.random_start else torch.zeros_like(naturals))
+
+        batch = len(labels)
+        K = born.out_dim
+        true_class_mask = torch.zeros(batch, K, dtype=torch.bool, device=device)
+        true_class_mask[torch.arange(batch), labels] = True
+
+        for _ in range(self.num_steps):
+            delta.requires_grad_(True)
+            amplitudes  = born.classifier.amplitudes(naturals + delta)          # (B, K)
+            log_joint   = 2 * torch.log(amplitudes.abs().clamp(min=self.eps))   # (B, K)
+            log_joint_w = log_joint.masked_fill(true_class_mask, float('-inf'))
+            loss        = -log_joint_w.max(dim=-1).values.mean()
+
+            born.classifier.zero_grad()
+            if delta.grad is not None:
+                delta.grad.zero_()
+            loss.backward()
+
+            grad  = delta.grad.detach()
+            delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
+            delta = self._project(delta, strength)
+
+        return (naturals + delta).detach()
+
+
 _METHOD_MAP = {
-    "FGM": FastGradientMethod,
-    "PGD": ProjectedGradientDescent
+    "FGM":       FastGradientMethod,
+    "PGD":       ProjectedGradientDescent,
+    "JOINT_PGD": JointProjectedGradientDescent,
 }
 
 
@@ -234,6 +319,13 @@ class RobustnessEvaluation:
             self.method = method_cls(
                 norm=norm,
                 criterion=criterion,
+                num_steps=num_steps,
+                step_size=step_size,
+                random_start=random_start
+            )
+        elif method == "JOINT_PGD":
+            self.method = method_cls(
+                norm=norm,
                 num_steps=num_steps,
                 step_size=step_size,
                 random_start=random_start

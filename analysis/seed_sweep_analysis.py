@@ -90,6 +90,7 @@ COMPUTE_GEN_LOSS = True
 COMPUTE_FID = False
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 COMPUTE_GIBBS_PURIFICATION = True  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
+COMPUTE_JOINT_ATTACK = True  # Joint generative attack (JOINT_PGD) alongside standard PGD
 COMPUTE_DISTRIBUTIONS = False  # Set False (or pass --no-viz) to skip best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
@@ -229,6 +230,10 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
 
+_full_joint_uq_config = None
+if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and _full_uq_config is not None:
+    _full_joint_uq_config = {**_full_uq_config, "attack_method": "JOINT_PGD"}
+
 # %%
 from analysis.utils import EvalConfig, evaluate_sweep
 
@@ -249,6 +254,7 @@ eval_cfg = EvalConfig(
     mia_adversarial_step_size=None,
     mia_adversarial_norm=EVASION_CONFIG.get("norm", "inf") if EVASION_CONFIG else "inf",
     uq_config=_full_uq_config if COMPUTE_UQ else None,
+    joint_uq_config=_full_joint_uq_config,
     device=DEVICE,
 )
 
@@ -368,6 +374,16 @@ if COMPUTE_UQ and not df.empty:
     UQ_PURIFY_RECOVERY_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_purify_recovery/"))
     UQ_DETECTION_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_detection/"))
     GIBBS_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/gibbs_purify_acc/"))
+
+JOINT_ADV_ACC_COLS = []
+JOINT_PURIFY_ACC_COLS = []
+JOINT_DETECTION_COLS = []
+GIBBS_JOINT_PURIFY_ACC_COLS = []
+if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and not df.empty:
+    JOINT_ADV_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_joint_adv_acc/"))
+    JOINT_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_joint_purify_acc/"))
+    JOINT_DETECTION_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_joint_detection/"))
+    GIBBS_JOINT_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/gibbs_joint_purify_acc/"))
 
 print(f"TEST_ACC:     {TEST_ACC}")
 print(f"TEST_ROB:     {TEST_ROB}")
@@ -784,6 +800,46 @@ if not df.empty:
             _dstds  = [_sstd( f"eval/uq_detection/{p}pct/{_det_eps_s}") for p in _det_pcts]
             f.write(f"{'mean':<6}" + "".join(_sfmt(v) for v in _dmeans) + "\n")
             f.write(f"{'std':<6}"  + "".join(_sfmt(v) for v in _dstds)  + "\n")
+            f.write("\n")
+
+        # --- Joint Attack table ---
+        if COMPUTE_JOINT_ATTACK and JOINT_ADV_ACC_COLS:
+            _joint_eps_keys = {}
+            for _c in JOINT_ADV_ACC_COLS:
+                _s = _c.split("/")[-1]
+                _joint_eps_keys[float(_s)] = _s
+            _joint_all_eps = sorted(_joint_eps_keys.keys())
+            _joint_purify_radii = sorted(set(c.split("/")[-1] for c in JOINT_PURIFY_ACC_COLS)) if JOINT_PURIFY_ACC_COLS else []
+            _joint_det_pcts = sorted(set(
+                int(c.split("/")[-2].replace("pct", "")) for c in JOINT_DETECTION_COLS
+            )) if JOINT_DETECTION_COLS else []
+            _gibbs_joint_ns = sorted(set(int(c.split("/")[-1]) for c in GIBBS_JOINT_PURIFY_ACC_COLS)) if GIBBS_JOINT_PURIFY_ACC_COLS else []
+
+            _joint_rows = []
+            _joint_rows.append(("No defense", [_smean(f"eval/uq_joint_adv_acc/{_joint_eps_keys[_e]}") for _e in _joint_all_eps]))
+            if _joint_det_pcts:
+                _min_pct = _joint_det_pcts[0]
+                _joint_rows.append((f"Detection (τ={_min_pct}%)", [
+                    _smean(f"eval/uq_joint_detection/{_min_pct}pct/{_joint_eps_keys[_e]}") for _e in _joint_all_eps
+                ]))
+            for _r in _joint_purify_radii:
+                _joint_rows.append((f"Purify (r={_r})", [
+                    _smean(f"eval/uq_joint_purify_acc/{_joint_eps_keys[_e]}/{_r}") for _e in _joint_all_eps
+                ]))
+            for _n in _gibbs_joint_ns:
+                _joint_rows.append((f"Gibbs (k={_n})", [
+                    _smean(f"eval/gibbs_joint_purify_acc/{_joint_eps_keys[_e]}/{_n}") for _e in _joint_all_eps
+                ]))
+
+            _jlabel_w = max((len(r[0]) for r in _joint_rows), default=12) + 2
+            _jeps_hdr = [_joint_eps_keys[_e] for _e in _joint_all_eps]
+
+            f.write("-" * 60 + "\n")
+            f.write("Joint Attack (JOINT_PGD) — Accuracy vs Perturbation Strength\n")
+            f.write("-" * 60 + "\n\n")
+            f.write(" " * _jlabel_w + "".join(h.rjust(_col_w) for h in _jeps_hdr) + "\n")
+            for _lbl, _vals in _joint_rows:
+                f.write(f"{_lbl:<{_jlabel_w}}" + "".join(_sfmt(v) for v in _vals) + "\n")
             f.write("\n")
 
         # --- MIA ---
