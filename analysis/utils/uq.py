@@ -172,6 +172,12 @@ class UQResults:
     gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = field(
         default_factory=dict
     )
+    clean_purification_results: Dict[float, PurificationMetrics] = field(
+        default_factory=dict
+    )
+    clean_gibbs_purification_results: Dict[int, PurificationMetrics] = field(
+        default_factory=dict
+    )
 
     def summary(self) -> str:
         """Return a formatted summary of UQ evaluation results."""
@@ -436,8 +442,45 @@ class UQEvaluation:
                     f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                 )
 
-        # 5. Gibbs purification
+        # 5. Clean purification (natural examples, no attack)
+        clean_purification_results: Dict[float, PurificationMetrics] = {}
+        for radius in cfg.radii:
+            logger.info(f"Clean purification (radius={radius})...")
+            all_correct = 0
+            all_total = 0
+            all_log_px_before = []
+            all_log_px_after = []
+
+            for batch_data, batch_labels in clean_loader:
+                batch_data = batch_data.to(device)
+                batch_labels = batch_labels.to(device)
+
+                with torch.no_grad():
+                    log_px_before = born.marginal_log_probability(batch_data, eps=cfg.eps)
+
+                purified, log_px_after = purifier.purify(born, batch_data, radius, device)
+
+                with torch.no_grad():
+                    preds = born.class_probabilities(purified).argmax(dim=1)
+                    all_correct += (preds == batch_labels).sum().item()
+                    all_total += len(batch_labels)
+
+                all_log_px_before.append(log_px_before.cpu())
+                all_log_px_after.append(log_px_after.cpu())
+
+            acc = all_correct / all_total
+            clean_purification_results[radius] = PurificationMetrics(
+                accuracy_after_purify=acc,
+                recovery_rate=float("nan"),
+                mean_log_px_before=torch.cat(all_log_px_before).mean().item(),
+                mean_log_px_after=torch.cat(all_log_px_after).mean().item(),
+                rejection_rate=0.0,
+            )
+            logger.info(f"  radius={radius}: clean_purify_acc={acc:.4f}")
+
+        # 6. Gibbs purification
         gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
+        clean_gibbs_purification_results: Dict[int, PurificationMetrics] = {}
 
         if cfg.run_gibbs:
             from src.utils.purification.gibbs import GibbsPurification
@@ -486,6 +529,27 @@ class UQEvaluation:
                         f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                     )
 
+            # Clean Gibbs purification
+            all_clean = torch.cat([b for b, _ in clean_loader])
+            all_clean_labels = torch.cat([lb for _, lb in clean_loader])
+            for n_sw in cfg.gibbs_n_sweeps:
+                logger.info(f"Clean Gibbs purification (n_sweeps={n_sw})...")
+                x_purified, log_px_after = gibbs_purifier.purify(
+                    born, all_clean, n_sw, device
+                )
+                with torch.no_grad():
+                    pur_probs = born.class_probabilities(x_purified.to(device))
+                    pur_preds = pur_probs.argmax(dim=1).cpu()
+                acc = (pur_preds == all_clean_labels).float().mean().item()
+                clean_gibbs_purification_results[n_sw] = PurificationMetrics(
+                    accuracy_after_purify=acc,
+                    recovery_rate=float("nan"),
+                    mean_log_px_before=float(clean_log_px.mean()),
+                    mean_log_px_after=float(log_px_after.mean()),
+                    rejection_rate=0.0,
+                )
+                logger.info(f"  sweeps={n_sw}: clean_gibbs_acc={acc:.4f}")
+
         return UQResults(
             clean_log_px=clean_log_px,
             clean_accuracy=clean_accuracy,
@@ -495,4 +559,6 @@ class UQEvaluation:
             detection_rates=detection_rates,
             purification_results=purification_results,
             gibbs_purification_results=gibbs_purification_results,
+            clean_purification_results=clean_purification_results,
+            clean_gibbs_purification_results=clean_gibbs_purification_results,
         )

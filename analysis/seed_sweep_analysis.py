@@ -368,12 +368,16 @@ UQ_PURIFY_ACC_COLS = []
 UQ_PURIFY_RECOVERY_COLS = []
 UQ_DETECTION_COLS = []
 GIBBS_PURIFY_ACC_COLS = []
+UQ_CLEAN_PURIFY_ACC_COLS = []
+GIBBS_CLEAN_PURIFY_ACC_COLS = []
 if COMPUTE_UQ and not df.empty:
     UQ_ADV_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_adv_acc/"))
     UQ_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_purify_acc/"))
     UQ_PURIFY_RECOVERY_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_purify_recovery/"))
     UQ_DETECTION_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_detection/"))
     GIBBS_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/gibbs_purify_acc/"))
+    UQ_CLEAN_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/uq_clean_purify_acc/"))
+    GIBBS_CLEAN_PURIFY_ACC_COLS = sorted(c for c in df.columns if c.startswith("eval/gibbs_clean_purify_acc/"))
 
 JOINT_ADV_ACC_COLS = []
 JOINT_PURIFY_ACC_COLS = []
@@ -731,8 +735,12 @@ if not df.empty:
     _det_pcts = sorted(set(
         int(c.split("/")[-2].replace("pct", "")) for c in UQ_DETECTION_COLS
     )) if UQ_DETECTION_COLS else []
-    _purify_radii = sorted(set(c.split("/")[-1] for c in UQ_PURIFY_ACC_COLS)) if UQ_PURIFY_ACC_COLS else []
-    _gibbs_ns = sorted(set(int(c.split("/")[-1]) for c in GIBBS_PURIFY_ACC_COLS)) if GIBBS_PURIFY_ACC_COLS else []
+    _purify_radii = sorted(set(
+        c.split("/")[-1] for c in UQ_PURIFY_ACC_COLS + UQ_CLEAN_PURIFY_ACC_COLS
+    )) if (UQ_PURIFY_ACC_COLS or UQ_CLEAN_PURIFY_ACC_COLS) else []
+    _gibbs_ns = sorted(set(
+        int(c.split("/")[-1]) for c in GIBBS_PURIFY_ACC_COLS + GIBBS_CLEAN_PURIFY_ACC_COLS
+    )) if (GIBBS_PURIFY_ACC_COLS or GIBBS_CLEAN_PURIFY_ACC_COLS) else []
 
     # Build main table rows: (label, [mean_per_eps])
     _table_rows = []
@@ -751,12 +759,14 @@ if not df.empty:
 
     # Row(s) 3: likelihood purification (one row per radius)
     for _r in _purify_radii:
-        _purify = [float("nan")] + [_smean(f"eval/uq_purify_acc/{_eps_key[_e]}/{_r}") for _e in _all_eps[1:]]
+        _clean_pur = _smean(f"eval/uq_clean_purify_acc/{_r}")
+        _purify = [_clean_pur] + [_smean(f"eval/uq_purify_acc/{_eps_key[_e]}/{_r}") for _e in _all_eps[1:]]
         _table_rows.append((f"Purify (r={_r})", _purify))
 
     # Row(s) 4: Gibbs purification (one row per n_sweeps)
     for _n in _gibbs_ns:
-        _gibbs = [float("nan")] + [_smean(f"eval/gibbs_purify_acc/{_eps_key[_e]}/{_n}") for _e in _all_eps[1:]]
+        _clean_gibbs = _smean(f"eval/gibbs_clean_purify_acc/{_n}")
+        _gibbs = [_clean_gibbs] + [_smean(f"eval/gibbs_purify_acc/{_eps_key[_e]}/{_n}") for _e in _all_eps[1:]]
         _table_rows.append((f"Gibbs (k={_n})", _gibbs))
 
     # Column widths
