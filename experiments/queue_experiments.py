@@ -43,6 +43,8 @@ TYPE_SHORT = {
     "gen": "generative",
 }
 
+TYPE_ABBREV = {v: k for k, v in TYPE_SHORT.items()}
+
 KIND_SHORT = {
     "seed": "seed_sweep",   # convenience alias
 }
@@ -76,9 +78,10 @@ def get_experiment_field(config_path, kind):
     return "seed_sweep" if kind.startswith("seed_sweep") else kind
 
 
-def is_already_run(experiment, embedding, arch, dataset_name):
+def is_already_run(experiment, typ, embedding, arch, dataset_name):
     """Return True if an output directory exists for this config."""
-    pattern = f"outputs/{experiment}/*/{embedding}/{arch}/{dataset_name}_*"
+    abbrev = TYPE_ABBREV.get(typ, "*")
+    pattern = f"outputs/{experiment}/{abbrev}/{embedding}/{arch}/{dataset_name}_*"
     return any(ROOT.glob(pattern))
 
 
@@ -187,7 +190,7 @@ def main():
 
     if args.list:
         for c in configs:
-            ran = is_already_run(c["experiment"], c["embedding"],
+            ran = is_already_run(c["experiment"], c["type"], c["embedding"],
                                  c["arch"], c["dataset_name"])
             status = "ran" if ran else "   "
             print(f"[{status}] {c['experiment_key']}")
@@ -195,7 +198,7 @@ def main():
 
     todo    = [c for c in configs
                if args.force or not is_already_run(
-                   c["experiment"], c["embedding"],
+                   c["experiment"], c["type"], c["embedding"],
                    c["arch"], c["dataset_name"])]
     skipped = len(configs) - len(todo)
 

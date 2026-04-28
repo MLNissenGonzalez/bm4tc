@@ -10,7 +10,7 @@ defaults:
   - override /trainer/generative: null
   - override /tracking: online
 
-model_path: outputs/seed_sweep/cls/legendre/d10D6/spirals_small_1203/11/models/spirals_small_pre_mps_bd6_legendre10_300adamlr0.04489889473473751wd5.6356024972912e-07
+model_path: outputs/seed_sweep/cls/legendre/d10D6/spirals_small_2804/3/models/cls
 
 dataset:
   split_seed: 11
