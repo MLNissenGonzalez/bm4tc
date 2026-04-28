@@ -34,7 +34,7 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.01   # best single lr across all alphas (grid sweep avg)
+        lr: ${geom_lr:${trainer.generative.criterion.kwargs.alpha},0.041376293143363094,0.0002636875533972306}  # geom interp; resolver in experiments/generative.py
         weight_decay: 0.0
     criterion:
       name: "mixed_nll"

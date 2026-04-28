@@ -169,7 +169,8 @@ configs/
 │       ├── generative.yaml
 │       └── generative_hpo.yaml
 ├── tools/                    # Config maintenance scripts
-│   └── fill_hpo.py          # Patch seed_sweep configs with HPO results
+│   ├── fill_hpo.py          # Patch seed_sweep configs with HPO results
+│   └── alpha_lr_interp.py   # Compute & patch geom-LR for alpha_curve_mixed configs
 └── hydra/                    # Hydra-specific configs
     └── job_logging/
         ├── debug.yaml        # Verbose logging
@@ -404,6 +405,43 @@ save: false
 auto_stack: true
 auto_unbind: false
 ```
+
+**Mixed NLL criterion** (`criterion.name: "mixed_nll"`):
+
+Combines classification and generative NLL via a mixing parameter `alpha`:
+
+```
+loss = (1-alpha) * ClassificationNLL + alpha * GenerativeNLL
+```
+
+**Alpha convention** (opposite of what the name might suggest):
+| alpha | Regime |
+|-------|--------|
+| `0.0` | pure classification |
+| `0.5` | equal mixture |
+| `1.0` | pure generative |
+
+```yaml
+criterion:
+  name: "mixed_nll"
+  kwargs: {eps: 1e-8, alpha: 0.5}
+```
+
+**Alpha-curve experiments** sweep over alpha to trace the classification/generative trade-off. Because the optimal learning rate differs by up to 250× between the two extremes, the `alpha_curve_mixed` configs use the `geom_lr` OmegaConf resolver (registered in `experiments/generative.py`) to interpolate the LR geometrically:
+
+```
+lr(alpha) = lr_cls^(1-alpha) * lr_gen^alpha
+```
+
+where `lr_cls` is the HPO-best LR for pure classification (`alpha=0`) and `lr_gen` for pure generative (`alpha=1`). In config YAML this looks like:
+
+```yaml
+optimizer:
+  kwargs:
+    lr: ${geom_lr:${trainer.generative.criterion.kwargs.alpha},<lr_cls>,<lr_gen>}
+```
+
+The anchor values are sourced from HPO and stored as comments in the config files. Use `configs/tools/alpha_lr_interp.py` to recompute and patch the configs if the HPO anchors change.
 
 ### tracking/ — Experiment Tracking
 

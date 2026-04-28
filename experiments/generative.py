@@ -17,8 +17,24 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__),
                 "..", "src"))  # make src importable
 
+import math
+
 import hydra
+from omegaconf import OmegaConf
 import logging
+
+# Geometric LR interpolation for alpha_curve_mixed configs.
+# MixedNLL convention: alpha=0 → pure classification, alpha=1 → pure generative.
+# lr_cls: optimal LR at alpha=0 (pure classification HPO)
+# lr_gen: optimal LR at alpha=1 (pure generative HPO)
+# Usage: lr: ${geom_lr:${...alpha},lr_cls,lr_gen}
+OmegaConf.register_new_resolver(
+    "geom_lr",
+    lambda alpha, lr_cls, lr_gen: math.exp(
+        (1 - float(alpha)) * math.log(float(lr_cls)) + float(alpha) * math.log(float(lr_gen))
+    ),
+    replace=True,
+)
 from src.tracking.wandb_utils import init_wandb
 from src.tracking import evaluate_loaded_model, log_dataset_viz
 # Think about initializing the generative loss in the trainer?

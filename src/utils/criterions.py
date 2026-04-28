@@ -157,12 +157,19 @@ class GenerativeNLL(nn.Module):
 
 class MixedNLL(nn.Module):
     """
-    Compute (1-alpha)ClassicationNLL + alpha*GenerativeNLL 
-            = ClassificationNLL - alpha * ln(p(x)).mean() 
-            = Sum_(x,c) -ln (bm(x,c)) + ln (sum_c' bm(x,c')) + alpha * (bm.log_partition() - ln(sum_c' bm(x,c'))
-            = Sum_(x,c) -ln (bm(x,c)) + (1-alpha) * ln(sum_c' bm(x,c')) + alpha * bm.log_partition()
+    Compute (1-alpha)*ClassificationNLL + alpha*GenerativeNLL
 
-    where bm(x,c) is the forward call of the born machine, which is tn(x,c).abs_square(), i.e. the unnormalized probability of the tensor network. 
+    Alpha convention:
+        alpha=0  →  pure classification loss
+        alpha=1  →  pure generative (NLL) loss
+
+    Derivation:
+        = ClassificationNLL - alpha * ln(p(x)).mean()
+        = Sum_(x,c) -ln(bm(x,c)) + ln(sum_c' bm(x,c'))
+          + alpha * (bm.log_partition() - ln(sum_c' bm(x,c')))
+        = Sum_(x,c) -ln(bm(x,c)) + (1-alpha)*ln(sum_c' bm(x,c')) + alpha*bm.log_partition()
+
+    where bm(x,c) = tn(x,c).abs_square() is the unnormalized joint probability.
     """
 
     def __init__(self, eps: float = 1e-12, alpha: float = 0.1):
