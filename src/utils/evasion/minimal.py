@@ -194,7 +194,7 @@ class ProjectedGradientDescent:
 class JointProjectedGradientDescent:
     """PGD maximising max_{c'≠c} ln|ψ(x̃, c')|²  (joint generative attack).
 
-    Loss per step: –mean( max_{c'≠c}  2·log|ψ(x̃, c')| )
+    Loss per step: +mean( max_{c'≠c}  2·log|ψ(x̃, c')| )  — gradient ascent.
     The worst-case wrong class is re-selected dynamically at every gradient step.
     """
 
@@ -261,7 +261,7 @@ class JointProjectedGradientDescent:
             amplitudes  = born.classifier.amplitudes(naturals + delta)          # (B, K)
             log_joint   = 2 * torch.log(amplitudes.abs().clamp(min=self.eps))   # (B, K)
             log_joint_w = log_joint.masked_fill(true_class_mask, float('-inf'))
-            loss        = -log_joint_w.max(dim=-1).values.mean()
+            loss        = log_joint_w.max(dim=-1).values.mean()
 
             born.classifier.zero_grad()
             if delta.grad is not None:
