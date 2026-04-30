@@ -10,9 +10,9 @@ All lines show mean ± 1 std across seeds.
 
 Usage
 -----
-    python analysis/alpha_curve_plots.py                          # all datasets
-    python analysis/alpha_curve_plots.py --filter-dataset ecg     # substring match
-    python analysis/alpha_curve_plots.py <sweep_dir>              # single sweep dir
+    python analysis/visualize/alpha_curve_plots.py                          # all datasets
+    python analysis/visualize/alpha_curve_plots.py --filter-dataset ecg     # substring match
+    python analysis/visualize/alpha_curve_plots.py <sweep_dir>              # single sweep dir
 """
 
 import argparse
@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-ROOT         = Path(__file__).parent.parent
+ROOT         = Path(__file__).parent.parent.parent
 OUTPUTS_ROOT = ROOT / "analysis" / "outputs" / "alpha_curve"
 
 ALPHA_COL   = "config/trainer.generative.criterion.kwargs.alpha"
