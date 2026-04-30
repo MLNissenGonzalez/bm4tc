@@ -217,6 +217,11 @@ def plot_alpha_dists(csv_path: Path, max_alpha: int, resolution: int,
             continue
 
         if grid_x1 is None:
+            if bm.num_sites != 2:
+                print(f"  Skipping: dataset has {bm.num_sites} input features "
+                      f"(distribution plots are only supported for 2D toy data).")
+                del bm
+                return
             input_range                 = bm.input_range
             grid_x1, grid_x2, grid_points = make_grid(input_range, resolution)
             num_classes                 = bm.out_dim
@@ -278,7 +283,7 @@ def main():
     parser.add_argument("--resolution", type=int, default=150,
                         help="Grid resolution per axis (default: 150).")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--filter-dataset", metavar="DS",
+    parser.add_argument("--dataset", metavar="DS",
                         help="Only process sweeps whose dataset name contains DS.")
     args = parser.parse_args()
 
@@ -298,8 +303,8 @@ def main():
             sys.exit(1)
         csvs = find_csvs(OUTPUTS_ROOT)
 
-    if args.filter_dataset:
-        csvs = [c for c in csvs if args.filter_dataset in _dataset_base(c)]
+    if args.dataset:
+        csvs = [c for c in csvs if args.dataset in _dataset_base(c)]
 
     if not csvs:
         print("No evaluation_data.csv files found.")
