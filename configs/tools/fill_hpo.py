@@ -39,6 +39,12 @@ from analysis.utils.wandb_fetcher import (
 
 VALID_TYPES = ["adversarial", "classification", "generative"]
 
+# Pairs of (hpo_dirname, seed_sweep_dirname) to match and fill
+HPO_SEED_PAIRS = [
+    ("hpo",       "seed_sweep"),
+    ("hpo_mixed", "seed_sweep_mixed_alpha05"),
+]
+
 TYPE_SHORT = {
     "cls": "classification",
     "adv": "adversarial",
@@ -149,6 +155,7 @@ def query_wandb(
     minimize: bool,
     entity: str,
     project: str,
+    hpo_dir_name: str = "hpo",
 ) -> Optional[Dict[str, Any]]:
     """Query W&B for the best finished HPO run matching the combo."""
     if not WANDB_AVAILABLE:
@@ -159,8 +166,8 @@ def query_wandb(
     in_dim, bond_dim, dtype_suffix = parse_arch(arch)
     archinfo = f"d{in_dim}D{bond_dim}{dtype_suffix}{embedding}"
 
-    # Group naming: hpo_{training_type}_{archinfo}_{dataset}_{date}
-    group_pattern = f"^hpo_{training_type}_{archinfo}_{dataset}_"
+    # Group naming: {hpo_dir_name}_{training_type}_{archinfo}_{dataset}_{date}
+    group_pattern = f"^{hpo_dir_name}_{training_type}_{archinfo}_{dataset}_"
 
     try:
         api = wandb.Api()
@@ -212,6 +219,7 @@ def query_local(
     metric_key: str,
     minimize: bool,
     outputs_dir: Path,
+    hpo_dir_name: str = "hpo",
 ) -> Optional[Dict[str, Any]]:
     """Walk outputs dir to find matching HPO trials; return params from best."""
     in_dim, bond_dim, dtype_suffix = parse_arch(arch)
@@ -228,7 +236,7 @@ def query_local(
             continue
 
         # Filter: must be an HPO run for this exact combo
-        if _get_nested_value(cfg, "experiment") != "hpo":
+        if _get_nested_value(cfg, "experiment") != hpo_dir_name:
             continue
         if _get_nested_value(cfg, "dataset.name") != dataset:
             continue
@@ -309,7 +317,7 @@ def patch_yaml(content: str, params: Dict[str, Any], overwrite: bool = False) ->
 # =============================================================================
 
 def discover_combos(configs_root: Path) -> List[Dict]:
-    """Discover all combos that have both hpo/ and seed_sweep/ yamls."""
+    """Discover all combos that have both an hpo/ and seed_sweep/ yaml (all HPO_SEED_PAIRS)."""
     combos = []
     for typ in VALID_TYPES:
         type_dir = configs_root / "experiments" / typ
@@ -324,24 +332,26 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                 if not arch_dir.is_dir():
                     continue
                 arch = arch_dir.name
-                hpo_dir = arch_dir / "hpo"
-                seed_dir = arch_dir / "seed_sweep"
-                if not hpo_dir.is_dir() or not seed_dir.is_dir():
-                    continue
-                for hpo_path in sorted(hpo_dir.glob("*.yaml")):
-                    dataset = hpo_path.stem
-                    seed_path = seed_dir / f"{dataset}.yaml"
-                    if not seed_path.exists():
+                for hpo_dir_name, seed_dir_name in HPO_SEED_PAIRS:
+                    hpo_dir = arch_dir / hpo_dir_name
+                    seed_dir = arch_dir / seed_dir_name
+                    if not hpo_dir.is_dir() or not seed_dir.is_dir():
                         continue
-                    combos.append({
-                        "type":       typ,
-                        "type_short": type_short,
-                        "embedding":  embedding,
-                        "arch":       arch,
-                        "dataset":    dataset,
-                        "hpo_path":   hpo_path,
-                        "seed_path":  seed_path,
-                    })
+                    for hpo_path in sorted(hpo_dir.glob("*.yaml")):
+                        dataset = hpo_path.stem
+                        seed_path = seed_dir / f"{dataset}.yaml"
+                        if not seed_path.exists():
+                            continue
+                        combos.append({
+                            "type":         typ,
+                            "type_short":   type_short,
+                            "embedding":    embedding,
+                            "arch":         arch,
+                            "dataset":      dataset,
+                            "hpo_path":     hpo_path,
+                            "seed_path":    seed_path,
+                            "hpo_dir_name": hpo_dir_name,
+                        })
     return combos
 
 
@@ -370,6 +380,7 @@ def process_combo(
     dataset       = combo["dataset"]
     hpo_cfg_path  = combo["hpo_path"]
     seed_cfg_path = combo["seed_path"]
+    hpo_dir_name  = combo.get("hpo_dir_name", "hpo")
 
     print(f"\n[{training_type}/{embedding}/{arch}/{dataset}]")
 
@@ -387,12 +398,14 @@ def process_combo(
         params = query_wandb(
             dataset, training_type, embedding, arch,
             metric_key, minimize, entity, project,
+            hpo_dir_name=hpo_dir_name,
         )
 
     if params is None and source in ("local", "both"):
         params = query_local(
             dataset, training_type, embedding, arch,
             metric_key, minimize, outputs_dir,
+            hpo_dir_name=hpo_dir_name,
         )
 
     if not params:
@@ -485,7 +498,8 @@ def main() -> None:
     if args.list:
         for c in combos:
             status = "OK " if is_filled(c["seed_path"]) else "   "
-            print(f"[{status}] {c['type_short']}/{c['embedding']}/{c['arch']}/{c['dataset']}")
+            hpo_tag = f" ({c['hpo_dir_name']})" if c.get("hpo_dir_name", "hpo") != "hpo" else ""
+            print(f"[{status}] {c['type_short']}/{c['embedding']}/{c['arch']}/{c['dataset']}{hpo_tag}")
         return
 
     # Apply filters
