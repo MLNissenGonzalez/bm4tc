@@ -27,12 +27,13 @@ import pandas as pd
 ROOT         = Path(__file__).parent.parent.parent
 OUTPUTS_ROOT = ROOT / "analysis" / "outputs" / "alpha_curve"
 
-ALPHA_COL   = "config/trainer.generative.criterion.kwargs.alpha"
-ROB_COL     = "eval/test/rob/0.2"       # 10% of legendre range (2.0)
-PURIF_COL   = "eval/uq_purify_acc/0.2/0.2"
-ACC_COL     = "eval/test/acc"
-CLSLOSS_COL = "eval/test/clsloss"
-GENLOSS_COL = "eval/test/genloss"
+ALPHA_COL        = "config/trainer.generative.criterion.kwargs.alpha"
+ROB_COL          = "eval/test/rob/0.2"
+PURIF_COL        = "eval/uq_purify_acc/0.2/0.2"
+GIBBS_PURIF_COL  = "eval/gibbs_purify_acc/0.2/1"
+ACC_COL          = "eval/test/acc"
+CLSLOSS_COL      = "eval/test/clsloss"
+GENLOSS_COL      = "eval/test/genloss"
 
 DPI     = 150
 FIGSIZE = (11, 4.5)
@@ -98,15 +99,25 @@ def plot_alpha_curve(csv_path: Path):
     # ------------------------------------------------------------------
     # Left: accuracy
     # ------------------------------------------------------------------
-    plot_line(ax_l, agg_by_alpha(df, ACC_COL),   "Clean acc",       "steelblue",  "-")
-    plot_line(ax_l, agg_by_alpha(df, ROB_COL),   "Rob (no purif)",  "darkorange", "--")
-    plot_line(ax_l, agg_by_alpha(df, PURIF_COL), "Rob (purif r=0.2)", "seagreen", "-.")
+    acc_result   = agg_by_alpha(df, ACC_COL)
+    rob_result   = agg_by_alpha(df, ROB_COL)
+    purif_result = agg_by_alpha(df, PURIF_COL)
+    gibbs_result = agg_by_alpha(df, GIBBS_PURIF_COL)
 
-    ax_l.set_xlabel("α  (0 = cls,  1 = gen)")
+    plot_line(ax_l, acc_result,   "Clean acc",              "steelblue",    "-")
+    plot_line(ax_l, rob_result,   "Rob (no purif)",         "darkorange",   "--")
+    plot_line(ax_l, purif_result, "Rob (purif δ=0.2)",      "seagreen",     "-.")
+    plot_line(ax_l, gibbs_result, "Rob (Gibbs δ=0.2, k=1)", "mediumpurple", ":")
+
+    all_means = [r[1] for r in [acc_result, rob_result, purif_result, gibbs_result] if r is not None]
+    y_min = (min(m.min() for m in all_means) - 0.05) if all_means else 0.0
+    y_min = max(0.0, y_min)
+
+    ax_l.set_xlabel("α")
     ax_l.set_ylabel("Accuracy")
     _apply_alpha_xaxis(ax_l)
-    ax_l.set_ylim(0, 1)
-    ax_l.legend(fontsize=8, loc="best")
+    ax_l.set_ylim(y_min, 1.05)
+    ax_l.legend(fontsize=11, loc="best")
     ax_l.grid(True, alpha=0.3)
     ax_l.set_title("Accuracy vs α  (ε = 0.2)")
 
@@ -126,7 +137,7 @@ def plot_alpha_curve(csv_path: Path):
     plot_line(ax_r,  cls_result, "Cls NLL", "darkred",    "-")
     plot_line(ax_r2, gen_result, "Gen NLL", "steelblue",  "-")
 
-    ax_r.set_xlabel("α  (0 = cls,  1 = gen)")
+    ax_r.set_xlabel("α")
     ax_r.set_ylabel("Cls NLL", color="darkred")
     ax_r2.set_ylabel("Gen NLL", color="steelblue")
     ax_r.tick_params(axis="y", labelcolor="darkred")
