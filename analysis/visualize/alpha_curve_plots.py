@@ -43,11 +43,24 @@ _ALPHA_LABELS = ['0', '1e-5', '1e-4', '1e-3', '1e-2', '5e-2', '0.1', '0.5', '0.8
 _SYMLOG_THRESH = 5e-6
 
 
-def _apply_alpha_xaxis(ax):
-    ax.set_xscale('symlog', linthresh=_SYMLOG_THRESH)
-    ax.set_xlim(0, 1)
-    ax.set_xticks(_ALPHA_TICKS)
-    ax.set_xticklabels(_ALPHA_LABELS, rotation=45, ha='right', fontsize=11)
+def _detect_alpha_scale(alphas: np.ndarray) -> str:
+    """Return 'log' if interior alphas span >2 orders of magnitude, else 'linear'."""
+    interior = alphas[(alphas > 0) & (alphas < 1)]
+    if len(interior) < 2:
+        return "linear"
+    return "log" if (interior.max() / interior.min()) > 100 else "linear"
+
+
+def _apply_alpha_xaxis(ax, scale: str = "linear"):
+    if scale == "log":
+        ax.set_xscale('symlog', linthresh=_SYMLOG_THRESH)
+        ax.set_xlim(0, 1)
+        ax.set_xticks(_ALPHA_TICKS)
+        ax.set_xticklabels(_ALPHA_LABELS, rotation=45, ha='right', fontsize=11)
+    else:
+        ax.set_xlim(-0.02, 1.02)
+        ax.set_xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        ax.tick_params(axis='x', labelsize=11)
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +107,7 @@ def plot_alpha_curve(csv_path: Path):
         print(f"  Skipping {dataset}: '{ALPHA_COL}' column not found.")
         return
 
+    alpha_scale = _detect_alpha_scale(df[ALPHA_COL].dropna().to_numpy())
     fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=FIGSIZE)
 
     # ------------------------------------------------------------------
@@ -115,7 +129,7 @@ def plot_alpha_curve(csv_path: Path):
 
     ax_l.set_xlabel("α")
     ax_l.set_ylabel("Accuracy")
-    _apply_alpha_xaxis(ax_l)
+    _apply_alpha_xaxis(ax_l, alpha_scale)
     ax_l.set_ylim(y_min, 1.05)
     ax_l.legend(fontsize=11, loc="best")
     ax_l.grid(True, alpha=0.3)
@@ -142,7 +156,7 @@ def plot_alpha_curve(csv_path: Path):
     ax_r2.set_ylabel("Gen NLL", color="steelblue")
     ax_r.tick_params(axis="y", labelcolor="darkred")
     ax_r2.tick_params(axis="y", labelcolor="steelblue")
-    _apply_alpha_xaxis(ax_r)
+    _apply_alpha_xaxis(ax_r, alpha_scale)
     ax_r.grid(True, alpha=0.3)
     ax_r.set_title("NLL Loss vs α")
 
