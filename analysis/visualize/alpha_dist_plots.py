@@ -167,9 +167,9 @@ def _assemble_figures(panels, grid_x1, grid_x2, input_range, num_classes):
         _render_px(               ax_px[0, col],   joint,       grid_x1, grid_x2, input_range, td, tl, nc)
 
         title = f"α = {alpha:.2g}"
-        ax_comb[0, col].set_title(title, fontsize=14)
-        ax_pcx[0,  col].set_title(title, fontsize=14)
-        ax_px[0,   col].set_title(title, fontsize=14)
+        ax_comb[0, col].set_title(title, fontsize=16)
+        ax_pcx[0,  col].set_title(title, fontsize=16)
+        ax_px[0,   col].set_title(title, fontsize=16)
 
     for fig in (fig_comb, fig_pcx, fig_px):
         fig.tight_layout()
