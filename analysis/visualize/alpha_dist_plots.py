@@ -182,7 +182,7 @@ def _assemble_figures(panels, grid_x1, grid_x2, input_range, num_classes):
 # ---------------------------------------------------------------------------
 
 def plot_alpha_dists(csv_path: Path, max_alpha: int, resolution: int,
-                     show_data: bool, device_str: str):
+                     show_data: bool, device_str: str, alphas: list | None = None):
     df = pd.read_csv(csv_path)
     output_dir = csv_path.parent
 
@@ -194,7 +194,10 @@ def plot_alpha_dists(csv_path: Path, max_alpha: int, resolution: int,
         return
 
     all_alphas = sorted(float(a) for a in df[ALPHA_COL].dropna().unique())
-    selected   = _subsample_alphas(all_alphas, max_alpha)
+    if alphas is not None:
+        selected = alphas
+    else:
+        selected = _subsample_alphas(all_alphas, max_alpha)
     best_runs  = _best_run_per_alpha(df)
     device     = torch.device(device_str)
 
@@ -278,6 +281,8 @@ def main():
                         help="Path to a single sweep dir (default: all under analysis/outputs/alpha_curve/).")
     parser.add_argument("--max", type=int, default=8, metavar="N",
                         help="Maximum number of alpha columns (≥ 3; α=0 and α=1 always included). Default: 8.")
+    parser.add_argument("--alphas", type=float, nargs="+", metavar="A",
+                        help="Exact alpha values to show, in order. Overrides --max.")
     parser.add_argument("--no-data", action="store_true",
                         help="Suppress training-data scatter overlay.")
     parser.add_argument("--resolution", type=int, default=150,
@@ -319,6 +324,7 @@ def main():
             resolution=args.resolution,
             show_data=not args.no_data,
             device_str=args.device,
+            alphas=args.alphas,
         )
 
     print("\nDone.")

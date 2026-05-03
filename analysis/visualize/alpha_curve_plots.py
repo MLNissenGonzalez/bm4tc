@@ -46,7 +46,7 @@ def _apply_alpha_xaxis(ax):
     ax.set_xscale('symlog', linthresh=_SYMLOG_THRESH)
     ax.set_xlim(0, 1)
     ax.set_xticks(_ALPHA_TICKS)
-    ax.set_xticklabels(_ALPHA_LABELS, rotation=45, ha='right', fontsize=7)
+    ax.set_xticklabels(_ALPHA_LABELS, rotation=45, ha='right', fontsize=11)
 
 
 # ---------------------------------------------------------------------------
@@ -54,15 +54,16 @@ def _apply_alpha_xaxis(ax):
 # ---------------------------------------------------------------------------
 
 def agg_by_alpha(df: pd.DataFrame, col: str):
-    """Return (alpha_vals, means, stds) sorted by alpha, or None if col missing."""
+    """Return (alpha_vals, means, stderr) sorted by alpha, or None if col missing."""
     if col not in df.columns:
         return None
     g = (
         df.groupby(ALPHA_COL)[col]
-        .agg(["mean", "std"])
+        .agg(["mean", "std", "count"])
         .sort_index()
     )
-    return g.index.values, g["mean"].values, g["std"].fillna(0).values
+    stderr = g["std"].fillna(0) / np.sqrt(g["count"].clip(lower=1))
+    return g.index.values, g["mean"].values, stderr.values
 
 
 def plot_line(ax, result, label, color, linestyle="-"):
@@ -93,7 +94,6 @@ def plot_alpha_curve(csv_path: Path):
         return
 
     fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=FIGSIZE)
-    fig.suptitle(dataset, fontsize=12)
 
     # ------------------------------------------------------------------
     # Left: accuracy
