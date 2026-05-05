@@ -204,7 +204,7 @@ def compute_joint_probs(bm: BornMachine, grid_points, device, normalize=True, ba
     return joint
 
 
-def _overlay_data_subtle(ax, data, labels, num_classes):
+def _overlay_data(ax, data, labels, num_classes):
     """Subtle scatter for decision boundary: white fill, thin class-colored edge, low alpha."""
     if torch.is_tensor(data):
         data = data.detach().cpu().numpy()
@@ -250,7 +250,7 @@ def plot_decision_boundary(
     ax.set_xticks([])
     ax.set_yticks([])
     if train_data is not None and num_classes is not None:
-        _overlay_data_subtle(ax, train_data, train_labels, num_classes)
+        _overlay_data(ax, train_data, train_labels, num_classes)
     fig.tight_layout()
     if save_path:
         _save_fig(fig, save_path)
