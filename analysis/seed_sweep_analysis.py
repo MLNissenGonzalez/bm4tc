@@ -714,8 +714,7 @@ if COMPUTE_DISTRIBUTIONS and not df.empty and best_run is not None:
                 device=DEVICE,
                 save_dir=str(output_dir),
             )
-            # directly saves best_class_dist.png + best_joint.png
-            print(f"Saved best_class_dist.png + best_joint.png")
+            print(f"Saved best_joint.png + decision_boundary.png")
             plt.show()
         except Exception as e:
             print(f"Warning: Could not generate distribution visualization: {e}")

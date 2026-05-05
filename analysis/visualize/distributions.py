@@ -257,30 +257,6 @@ def plot_decision_boundary(
     return fig
 
 
-def plot_class_conditional(
-    conditional, grid_x1, grid_x2,
-    input_range=(0.0, 1.0),
-    class_idx=1, cmap=None, save_path=None,
-) -> plt.Figure:
-    """Square figure: p(c=class_idx|x) heatmap, white→class-color, no colorbar."""
-    if cmap is None:
-        cmap = _cls_cmap(class_idx)
-    fig, ax = plt.subplots(figsize=(4, 4))
-    lo, hi = input_range
-    res = grid_x1.shape[0]
-    prob = conditional.numpy()[:, class_idx].reshape(res, res)
-    ax.pcolormesh(grid_x1, grid_x2, prob, cmap=cmap,
-                  shading="auto", vmin=0.0, vmax=1.0)
-    ax.set_xlim(lo, hi)
-    ax.set_ylim(lo, hi)
-    ax.set_aspect("equal")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    fig.tight_layout()
-    if save_path:
-        _save_fig(fig, save_path)
-    return fig
-
 
 def plot_joint_marginal(
     joint, grid_x1, grid_x2,
@@ -334,7 +310,7 @@ def visualize_from_run_dir(
         save_dir: Directory to save figures. If None, does not save.
 
     Returns:
-        Tuple of (fig_cls, fig_jnt) Matplotlib Figure objects.
+        Tuple of (fig_jnt, fig_db) Matplotlib Figure objects.
     """
     device = torch.device(device)
     run_dir = Path(run_dir)
@@ -376,15 +352,9 @@ def visualize_from_run_dir(
     joint = compute_joint_probs(bm, grid_points, device, normalize=normalize_joint)
 
     # Determine save paths
-    class_path = (Path(save_dir) / "best_class_dist.png") if save_dir else None
     joint_path = (Path(save_dir) / "best_joint.png") if save_dir else None
     db_path    = (Path(save_dir) / "decision_boundary.png") if save_dir else None
 
-    fig_cls = plot_class_conditional(
-        conditional, grid_x1, grid_x2,
-        input_range=input_range,
-        save_path=class_path,
-    )
     fig_jnt = plot_joint_marginal(
         joint, grid_x1, grid_x2,
         input_range=input_range,
@@ -397,7 +367,7 @@ def visualize_from_run_dir(
         eps=boundary_eps, save_path=db_path,
     )
 
-    return fig_cls, fig_jnt, fig_db
+    return fig_jnt, fig_db
 
 
 # %% [markdown]
@@ -452,7 +422,7 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
 
     if cli_args.run is not None:
-        fig_cls, fig_jnt, fig_db = visualize_from_run_dir(
+        fig_jnt, fig_db = visualize_from_run_dir(
             run_dir=cli_args.run,
             resolution=cli_args.resolution,
             normalize_joint=NORMALIZE_JOINT,
@@ -497,11 +467,6 @@ if __name__ == "__main__":
             save_dir = project_root / save_dir
 
         num_classes = bm.out_dim if SHOW_DATA else None
-        fig_cls = plot_class_conditional(
-            conditional, grid_x1, grid_x2,
-            input_range=input_range,
-            save_path=save_dir / "best_class_dist.png",
-        )
         fig_jnt = plot_joint_marginal(
             joint, grid_x1, grid_x2,
             input_range=input_range,

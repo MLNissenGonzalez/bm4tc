@@ -118,8 +118,7 @@ def _render_decision_boundary(ax, conditional, grid_x1, grid_x2, input_range,
         _overlay_data(ax, train_data, train_labels, num_classes)
 
 
-def _render_px(ax, joint, grid_x1, grid_x2, input_range,
-               train_data=None, train_labels=None, num_classes=None):
+def _render_px(ax, joint, grid_x1, grid_x2, input_range):
     lo, hi    = input_range
     res       = grid_x1.shape[0]
     joint_np  = joint.numpy()
@@ -135,8 +134,6 @@ def _render_px(ax, joint, grid_x1, grid_x2, input_range,
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
-    if train_data is not None and num_classes is not None:
-        _overlay_data(ax, train_data, train_labels, num_classes)
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +159,9 @@ def _assemble_figures(panels, grid_x1, grid_x2, input_range, num_classes):
         nc = num_classes  if show_data else None
 
         _render_decision_boundary(ax_comb[0, col], conditional, grid_x1, grid_x2, input_range, td, tl, nc)
-        _render_px(               ax_comb[1, col], joint,       grid_x1, grid_x2, input_range, td, tl, nc)
+        _render_px(               ax_comb[1, col], joint,       grid_x1, grid_x2, input_range)
         _render_decision_boundary(ax_pcx[0, col],  conditional, grid_x1, grid_x2, input_range, td, tl, nc)
-        _render_px(               ax_px[0, col],   joint,       grid_x1, grid_x2, input_range, td, tl, nc)
+        _render_px(               ax_px[0, col],   joint,       grid_x1, grid_x2, input_range)
 
         title = f"α = {alpha:.2g}"
         ax_comb[0, col].set_title(title, fontsize=16)
