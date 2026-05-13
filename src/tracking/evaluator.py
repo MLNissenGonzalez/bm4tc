@@ -182,30 +182,6 @@ class SoftmaxAccuracyMetric(BaseMetric):
                 num_pred += labels.shape[0]
         return correct / num_pred if num_pred > 0 else float('nan')
 
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#--------FID-like metric---------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-#-----------------------------------------------------------------------------------------------------------------------------------------------------------------
-from .fid_like import FIDEvaluation
-
-
-class FIDMetric(BaseMetric):
-    """Compute FID-like score comparing synthetic samples to real data."""
-
-    def __init__(self, freq, cfg, datahandler, device):
-        super().__init__(freq, cfg, datahandler, device)
-        self.fid = FIDEvaluation(cfg, datahandler, device)
-
-    def evaluate(self, bornmachine: BornMachine, split, context):        
-        self._generate(bornmachine, context)
-        try:
-            fid_score = self.fid.evaluate(context["synths"])
-            return fid_score
-        except ValueError as e:
-            logger.warning(str(e))
-            return float('nan')
-
     
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -318,7 +294,6 @@ class MetricFactory:
             "softmaxloss": SoftmaxLossMetric,
             "acc": AccuracyMetric,
             "softmaxacc": SoftmaxAccuracyMetric,
-            "fid": FIDMetric,
             "rob": RobustnessMetric,
             "viz": VisualizationMetric,
             "genloss": GenerativeLossMetric,
@@ -338,7 +313,7 @@ class PerformanceEvaluator:
             self,
             cfg: schemas.Config,
             datahandler: DataHandler,
-            train_cfg: schemas.ClassificationConfig | schemas.GANStyleConfig | schemas.AdversarialConfig,
+            train_cfg: schemas.ClassificationConfig | schemas.AdversarialConfig | schemas.GenerativeConfig,
             device: torch.device
     ):
         if getattr(datahandler, "classification") is None:

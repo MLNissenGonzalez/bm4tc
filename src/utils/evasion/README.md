@@ -1,1 +1,0 @@
-In this module, evasion attacks are implemented (`minimal`) or imported from the "[Adversarial Robustness Toolbox (ART)](https://github.com/Trusted-AI/adversarial-robustness-toolbox)".

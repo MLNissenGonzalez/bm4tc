@@ -21,7 +21,7 @@ from src.utils.criterions import NormRegularizer
 import logging
 logger = logging.getLogger(__name__)
 
-
+# decouple from configs. 
 class Trainer:
     """
     Generative trainer for BornMachine using NLL minimization.

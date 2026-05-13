@@ -1,10 +1,9 @@
 import pytest
 import torch
-from src.models.generator.differential_sampling import (
+from src.models.generator.sampling import (
     pre_select,
-    os_secant,
     multinomial_sampling,
-    main,
+    sample,
 )
 
 BATCH = 8
@@ -84,38 +83,19 @@ def test_multinomial_posinf_handled(grid):
     assert torch.isfinite(samples).all()
 
 
-# ---- os_secant ----
+# ---- sample dispatcher ----
 
-def test_os_secant_output_in_range(uniform_p, grid):
-    samples = os_secant(uniform_p, grid)
-    step = (grid[-1] - grid[0]) / (len(grid) - 1)
-    assert (samples >= grid.min() - step).all()
-    assert (samples <= grid.max() + step).all()
-
-
-def test_os_secant_output_shape(uniform_p, grid):
-    samples = os_secant(uniform_p, grid)
+def test_sample_multinomial_dispatch(uniform_p, grid):
+    samples = sample(uniform_p, grid, "multinomial")
     assert samples.shape == (BATCH,)
 
 
-# ---- main dispatcher ----
-
-def test_main_multinomial_dispatch(uniform_p, grid):
-    samples = main(uniform_p, grid, "multinomial")
-    assert samples.shape == (BATCH,)
-
-
-def test_main_secant_dispatch(uniform_p, grid):
-    samples = main(uniform_p, grid, "secant")
-    assert samples.shape == (BATCH,)
-
-
-def test_main_unknown_method_raises(uniform_p, grid):
+def test_sample_unknown_method_raises(uniform_p, grid):
     with pytest.raises(ValueError):
-        main(uniform_p, grid, "nonexistent_method")
+        sample(uniform_p, grid, "nonexistent_method")
 
 
-def test_main_batch_size_1(grid):
+def test_sample_batch_size_1(grid):
     p = torch.ones(1, BINS)
-    samples = main(p, grid, "multinomial")
+    samples = sample(p, grid, "multinomial")
     assert samples.shape == (1,)

@@ -18,7 +18,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
 import logging
 
-from src.utils.evasion.minimal import ProjectedGradientDescent
+from src.utils.evasion import ProjectedGradientDescent
 from src.utils.schemas import CriterionConfig
 
 logger = logging.getLogger(__name__)
