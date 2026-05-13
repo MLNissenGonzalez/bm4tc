@@ -10,7 +10,7 @@ from experiments.logging import make_logger
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
-from src.trainer import ClassificationTrainer
+from src.trainer import DiscriminativeTrainer
 import torch
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def main(cfg: schemas.Config):
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
+    trainer = DiscriminativeTrainer(bornmachine, cfg.trainer.discriminative, datahandler, device)
     trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
 
     run.finish()

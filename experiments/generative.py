@@ -38,7 +38,7 @@ from experiments.logging import make_logger
 from src.utils import schemas, set_seed, get
 from src.data import DataHandler
 from src.models import BornMachine
-from src.trainer import ClassificationTrainer, GenerativeTrainer
+from src.trainer import DiscriminativeTrainer, GenerativeTrainer
 import torch
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ def main(cfg: schemas.Config):
     if model_path is None:
         if getattr(cfg.trainer, 'discriminative', None) is not None:
             logger.info("Running classification pretraining.")
-            pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
+            pre_trainer = DiscriminativeTrainer(bornmachine, cfg.trainer.discriminative, datahandler, device)
             pre_trainer.train(on_epoch_end=logger_cb, output_dir=models_dir)
             bornmachine.reset()
             bornmachine.unset_data_nodes()
@@ -89,7 +89,7 @@ def main(cfg: schemas.Config):
     gen_trainer = None
     if cfg.trainer.generative is not None:
         logger.info("Starting generative training.")
-        gen_trainer = GenerativeTrainer(bornmachine, cfg, datahandler, device)
+        gen_trainer = GenerativeTrainer(bornmachine, cfg.trainer.generative, datahandler, device)
         gen_trainer.train(on_epoch_end=logger_cb, output_dir=models_dir)
     else:
         logger.error("No generative training config provided!")

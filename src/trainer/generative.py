@@ -5,7 +5,8 @@ from pathlib import Path
 import time
 import torch
 from typing import Callable, Dict, Optional
-from src.utils import schemas, get
+from src.utils import get
+from src.utils.schemas import GenerativeConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.utils.criterions import NormRegularizer
@@ -19,21 +20,19 @@ _ACC_METRICS = {"acc", "rob"}
 _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
-class Trainer:
+class GenerativeTrainer:
     """Generative trainer for BornMachine using NLL minimization."""
 
     def __init__(
             self,
             bornmachine: BornMachine,
-            cfg: schemas.Config,
+            train_cfg: GenerativeConfig,
             datahandler: DataHandler,
             device: torch.device
     ):
         self.datahandler = datahandler
         self.device = device
-        self.cfg = cfg
-        self.stage = "gen"
-        self.train_cfg = cfg.trainer.generative
+        self.train_cfg = train_cfg
 
         if getattr(self.datahandler, "classification", None) is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
@@ -112,7 +111,7 @@ class Trainer:
             try:
                 nll_loss = self.criterion(self.bornmachine, data, labels)
             except RuntimeError as e:
-                logger.warning(f"Norm collapse during training ({e}). Stopping early.")
+                logger.warning(f"Norm or amplitude over-/underflow ({e}). Stopping early.")
                 self._norm_collapsed = True
                 break
 

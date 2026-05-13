@@ -2,8 +2,8 @@ import time
 import torch
 from pathlib import Path
 from typing import Callable, Dict, Optional
-import src.utils.schemas as schemas
 import src.utils.get as get
+from src.utils.schemas import DiscriminativeConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.trainer.eval import eval_dis
@@ -16,25 +16,19 @@ _ACC_METRICS = {"acc", "rob"}
 _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
-class Trainer:
-    """Classification trainer for BornMachine discriminative training."""
+class DiscriminativeTrainer:
+    """Discriminative trainer for BornMachine classification."""
 
     def __init__(
             self,
             bornmachine: BornMachine,
-            cfg: schemas.Config,
-            stage: str,
+            train_cfg: DiscriminativeConfig,
             datahandler: DataHandler,
             device: torch.device
     ):
         self.datahandler = datahandler
         self.device = device
-        self.cfg, self.stage = cfg, stage
-
-        if stage == "pre":
-            self.train_cfg = cfg.trainer.discriminative
-        else:
-            raise ValueError(f"Stage '{stage}' not recognised. Use 'pre'.")
+        self.train_cfg = train_cfg
 
         if self.datahandler.classification is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
@@ -116,7 +110,7 @@ class Trainer:
             output_dir.mkdir(parents=True, exist_ok=True)
             self.bornmachine.save(path=str(output_dir / "cls"))
 
-        logger.info(f"Classification-Trainer for {self.stage}-training finished.")
+        logger.info("Discriminative training finished.")
 
     def train(
             self,

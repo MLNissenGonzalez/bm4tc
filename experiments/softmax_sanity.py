@@ -26,18 +26,18 @@ from experiments.logging import make_logger
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
-from src.trainer import ClassificationTrainer
+from src.trainer import DiscriminativeTrainer
 
 logger = logging.getLogger(__name__)
 
 
-class SoftmaxSanityTrainer(ClassificationTrainer):
+class SoftmaxSanityTrainer(DiscriminativeTrainer):
     """
-    Variant of ClassificationTrainer that feeds raw MPS amplitudes to the
+    Variant of DiscriminativeTrainer that feeds raw MPS amplitudes to the
     loss criterion instead of Born-rule probabilities.
 
     Only _train_epoch is overridden. All other logic (early stopping,
-    evaluation, checkpointing) is inherited unchanged from ClassificationTrainer.
+    evaluation, checkpointing) is inherited unchanged from DiscriminativeTrainer.
     """
 
     def _train_epoch(self):
@@ -82,7 +82,7 @@ def main(cfg: schemas.Config):
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    trainer = SoftmaxSanityTrainer(bornmachine, cfg, "pre", datahandler, device)
+    trainer = SoftmaxSanityTrainer(bornmachine, cfg.trainer.discriminative, datahandler, device)
     trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
 
     run.finish()
