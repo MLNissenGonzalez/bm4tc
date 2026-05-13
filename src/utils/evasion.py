@@ -294,6 +294,34 @@ _METHOD_MAP = {
 }
 
 
+def build_attack(
+    evasion_cfg: EvasionConfig,
+) -> FastGradientMethod | ProjectedGradientDescent | JointProjectedGradientDescent:
+    """Construct an attack object from an EvasionConfig."""
+    method = evasion_cfg.method
+    if method == "PGD":
+        return ProjectedGradientDescent(
+            norm=evasion_cfg.norm,
+            criterion=evasion_cfg.criterion,
+            num_steps=evasion_cfg.num_steps,
+            step_size=evasion_cfg.step_size,
+            random_start=evasion_cfg.random_start,
+        )
+    if method == "FGM":
+        return FastGradientMethod(
+            norm=evasion_cfg.norm,
+            criterion=evasion_cfg.criterion,
+        )
+    if method == "JOINT_PGD":
+        return JointProjectedGradientDescent(
+            norm=evasion_cfg.norm,
+            num_steps=evasion_cfg.num_steps,
+            step_size=evasion_cfg.step_size,
+            random_start=evasion_cfg.random_start,
+        )
+    raise ValueError(f"Unknown attack method: {method!r}. Expected 'FGM', 'PGD', or 'JOINT_PGD'.")
+
+
 class RobustnessEvaluation:
     """
     Evaluate adversarial robustness of a BornMachine classifier.

@@ -8,7 +8,7 @@ from src.utils.get import OptimizerConfig
 from src.utils.criterions import CriterionConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_dis
+from src.trainer.eval import eval_metrics
 
 
 @dataclass
@@ -155,7 +155,8 @@ class DiscriminativeTrainer:
                 self.best["dis_loss"] = float("inf")
                 break
 
-            dis_loss, acc = eval_dis(
+            self.bornmachine.sync_tensors(after="classification", verify=False)
+            dis_loss, acc, _ = eval_metrics(
                 self.bornmachine, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc}

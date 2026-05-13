@@ -294,3 +294,15 @@ def range_from_embedding(embedding: str):
         raise ValueError(f"Embedding {embedding} not recognised. "
                          f"Available: {list(_EMBEDDING_TO_RANGE.keys())}")
     return rang
+
+
+# Total input-range size per embedding, derived from _EMBEDDING_TO_RANGE.
+# Used by analysis to convert fraction-based attack strengths to absolute eps.
+_EMBEDDING_RANGE_SIZE: dict[str, float] = {
+    k: float(hi - lo) for k, (lo, hi) in _EMBEDDING_TO_RANGE.items()
+}
+
+
+def embedding_range_size(embedding: str | None) -> float:
+    """Return the total size of the input range for an embedding. Falls back to 1.0."""
+    return _EMBEDDING_RANGE_SIZE.get((embedding or "").replace(" ", "").lower(), 1.0)

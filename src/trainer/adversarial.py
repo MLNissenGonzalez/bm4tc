@@ -11,7 +11,7 @@ from src.utils.criterions import CriterionConfig
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_dis, eval_rob
+from src.trainer.eval import eval_metrics, eval_rob
 
 
 @dataclass
@@ -215,7 +215,7 @@ class AdversarialTrainer:
             self._train_epoch(epsilon)
 
             self.bornmachine.sync_tensors(after="classification", verify=False)
-            dis_loss, acc = eval_dis(
+            dis_loss, acc, _ = eval_metrics(
                 self.bornmachine, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc}

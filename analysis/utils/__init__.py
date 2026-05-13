@@ -59,9 +59,7 @@ from .statistics import (
 from .evaluate import (
     EvalConfig,
     evaluate_run,
-    evaluate_pretrained_model,
     evaluate_sweep,
-    resolve_stop_criterion,
 )
 
 from .resolve import (
@@ -72,6 +70,7 @@ from .resolve import (
     resolve_params,
     resolve_metrics,
     resolve_primary_metric,
+    resolve_stop_criterion,
     filter_varied_params,
     format_resolved_config,
     config_path_to_column,
@@ -158,7 +157,6 @@ __all__ = [
     # Post-hoc evaluation
     "EvalConfig",
     "evaluate_run",
-    "evaluate_pretrained_model",
     "evaluate_sweep",
     "resolve_stop_criterion",
 ]
