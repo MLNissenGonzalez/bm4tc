@@ -1,3 +1,3 @@
-from .discriminative import Trainer as ClassificationTrainer
-from .adversarial import Trainer as AdversarialTrainer
-from .generative import Trainer as GenerativeTrainer
+from .discriminative import DiscriminativeTrainer
+from .adversarial import AdversarialTrainer
+from .generative import GenerativeTrainer

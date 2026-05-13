@@ -9,9 +9,6 @@ Usage:
     # Train from scratch with PGD-AT
     python -m experiments.adversarial trainer/adversarial=pgd_at dataset=moons_2k
 
-    # Train from scratch with TRADES
-    python -m experiments.adversarial trainer/adversarial=trades dataset=moons_2k
-
     # Fine-tune a pretrained model
     python -m experiments.adversarial trainer/adversarial=pgd_at model_path=/path/to/model
 
@@ -34,7 +31,7 @@ from experiments.logging import make_logger
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
-from src.trainer import ClassificationTrainer, AdversarialTrainer
+from src.trainer import DiscriminativeTrainer, AdversarialTrainer
 import torch
 
 logger = logging.getLogger(__name__)
@@ -69,7 +66,7 @@ def main(cfg: schemas.Config):
 
     if model_path is None:
         if cfg.trainer.discriminative is not None:
-            pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
+            pre_trainer = DiscriminativeTrainer(bornmachine, cfg.trainer.discriminative, datahandler, device)
             pre_trainer.train(on_epoch_end=logger_cb, output_dir=models_dir)
             bornmachine.to(device)
         else:
@@ -78,7 +75,7 @@ def main(cfg: schemas.Config):
     adv_trainer = None
     if cfg.trainer.adversarial is not None:
         logger.info(f"Starting adversarial training with method: {cfg.trainer.adversarial.method}")
-        adv_trainer = AdversarialTrainer(bornmachine, cfg, "adv", datahandler, device)
+        adv_trainer = AdversarialTrainer(bornmachine, cfg.trainer.adversarial, datahandler, device)
         adv_trainer.train(on_epoch_end=logger_cb, output_dir=models_dir)
     else:
         logger.error("No adversarial training config provided!")

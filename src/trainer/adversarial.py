@@ -1,17 +1,11 @@
-"""
-Adversarial Training for Born Machine classifiers.
-
-Implements two adversarial training methods:
-- PGD-AT (Madry et al.): Train on adversarial examples
-- TRADES (Zhang et al.): Clean loss + KL regularization for robustness
-"""
+"""PGD Adversarial Training for Born Machine classifiers."""
 
 import time
 import torch
 from pathlib import Path
 from typing import Callable, Dict, Optional
-import src.utils.schemas as schemas
 import src.utils.get as get
+from src.utils.schemas import AdversarialConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.utils.evasion import ProjectedGradientDescent, FastGradientMethod
@@ -25,34 +19,23 @@ _ACC_METRICS = {"acc", "rob"}
 _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
-class Trainer:
-    """
-    Adversarial training trainer for BornMachine classifiers.
-
-    Supports two methods:
-    - PGD-AT: Replace inputs with adversarial examples, minimize L(x_adv, y)
-    - TRADES: Minimize L(x, y) + beta * KL(p(x) || p(x_adv))
-    """
+class AdversarialTrainer:
+    """PGD adversarial training for BornMachine classifiers."""
 
     def __init__(
             self,
             bornmachine: BornMachine,
-            cfg: schemas.Config,
-            stage: str,
+            train_cfg: AdversarialConfig,
             datahandler: DataHandler,
             device: torch.device
     ):
         self.datahandler = datahandler
         self.device = device
-        self.cfg = cfg
-        self.stage = stage
-        self.train_cfg = cfg.trainer.adversarial
+        self.train_cfg = train_cfg
 
         if self.datahandler.classification is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
-        if self.train_cfg.method not in ["pgd_at", "trades"]:
-            raise ValueError(f"Unknown adversarial training method: {self.train_cfg.method}")
 
         self._init_best()
 
@@ -111,12 +94,7 @@ class Trainer:
             device=self.device
         )
 
-    def _compute_kl_divergence(self, clean_probs, adv_probs, eps=1e-12):
-        clean_probs = clean_probs.clamp(min=eps)
-        adv_probs = adv_probs.clamp(min=eps)
-        return (clean_probs * (clean_probs.log() - adv_probs.log())).sum(dim=1).mean()
-
-    def _train_epoch_pgd_at(self, epsilon: float):
+    def _train_epoch(self, epsilon: float):
         losses = []
         self.bornmachine.classifier.train()
 
@@ -146,39 +124,6 @@ class Trainer:
 
         self._train_loss = sum(losses) / len(losses) if losses else float("nan")
 
-    def _train_epoch_trades(self, epsilon: float):
-        total_losses = []
-        self.bornmachine.classifier.train()
-        beta = self.train_cfg.trades_beta
-
-        for data, labels in self.datahandler.classification["train"]:
-            data, labels = data.to(self.device), labels.to(self.device)
-            self.step += 1
-
-            clean_probs = self.bornmachine.class_probabilities(data)
-            clean_loss = self.criterion(clean_probs, labels)
-
-            self.bornmachine.classifier.eval()
-            adv_data = self._generate_adversarial(data, labels, epsilon)
-            self.bornmachine.classifier.train()
-
-            adv_probs = self.bornmachine.class_probabilities(adv_data)
-            kl_loss = self._compute_kl_divergence(clean_probs.detach(), adv_probs)
-            loss = clean_loss + beta * kl_loss
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-            total_losses.append(loss.detach().cpu().item())
-
-        self._train_loss = sum(total_losses) / len(total_losses) if total_losses else float("nan")
-
-    def _train_epoch(self, epsilon: float):
-        if self.train_cfg.method == "pgd_at":
-            self._train_epoch_pgd_at(epsilon)
-        elif self.train_cfg.method == "trades":
-            self._train_epoch_trades(epsilon)
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
