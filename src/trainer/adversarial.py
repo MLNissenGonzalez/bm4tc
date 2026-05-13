@@ -2,14 +2,35 @@
 
 import time
 import torch
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
 import src.utils.get as get
-from src.utils.schemas import AdversarialConfig
+from src.utils.get import OptimizerConfig
+from src.utils.criterions import CriterionConfig
+from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.utils.evasion import ProjectedGradientDescent, FastGradientMethod
 from src.trainer.eval import eval_dis, eval_rob
+
+
+@dataclass
+class AdversarialConfig:
+    max_epoch: int = 100
+    batch_size: int = 64
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    criterion: CriterionConfig = field(default_factory=CriterionConfig)
+    evasion: EvasionConfig = field(default_factory=EvasionConfig)
+    stop_crit: str = "acc"
+    patience: int = 250
+    eval_rob_freq: int = 5
+    clean_weight: float = 0.0
+    curriculum: bool = False
+    curriculum_start: float = 0.0
+    curriculum_end_epoch: Optional[int] = None
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
 
 import logging
 logger = logging.getLogger(__name__)

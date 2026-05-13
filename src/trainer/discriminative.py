@@ -1,12 +1,27 @@
 import time
 import torch
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
 import src.utils.get as get
-from src.utils.schemas import DiscriminativeConfig
+from src.utils.get import OptimizerConfig
+from src.utils.criterions import CriterionConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.trainer.eval import eval_dis
+
+
+@dataclass
+class DiscriminativeConfig:
+    max_epoch: int = 100
+    batch_size: int = 64
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    criterion: CriterionConfig = field(default_factory=CriterionConfig)
+    stop_crit: str = "acc"
+    patience: int = 250
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
 
 import logging
 logger = logging.getLogger(__name__)

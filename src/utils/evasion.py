@@ -2,10 +2,22 @@
 
 import torch
 from torch.utils.data import DataLoader
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Optional
 import src.utils.get as get
 from src.models import *
-from src.utils.schemas import CriterionConfig
+from src.utils.criterions import CriterionConfig
+
+
+@dataclass
+class EvasionConfig:
+    method: str = "FGM"
+    norm: int | str = "inf"
+    criterion: CriterionConfig = field(default_factory=CriterionConfig)
+    strengths: list = field(default_factory=lambda: [0.1, 0.3])
+    num_steps: int = 10
+    step_size: Optional[float] = None
+    random_start: bool = True
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):

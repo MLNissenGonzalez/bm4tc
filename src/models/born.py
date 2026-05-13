@@ -1,12 +1,32 @@
 import torch
-from typing import *
+from dataclasses import dataclass, field
+from typing import Iterable, List, Optional, Set, Text
 from .classifier import BornClassifier
-from .generator import BornGenerator
-import src.utils.schemas as schemas
+from .generator import BornGenerator, SamplingConfig
 from omegaconf import OmegaConf
 import src.utils.get as get
 import logging
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MPSInitConfig:
+    in_dim: int = 4
+    bond_dim: int = 3
+    out_position: Optional[int] = None
+    boundary: Text = "obc"
+    init_method: Text = "randn"
+    std: float = 1e-9
+    n_features: Optional[int] = None
+    out_dim: Optional[int] = None
+    dtype: Optional[str] = None
+
+
+@dataclass
+class BornMachineConfig:
+    init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
+    embedding: str = "fourier"
+    model_path: Optional[str] = None
 
 
 # Think about subclassing tk.models.TensorNetwork
@@ -16,7 +36,7 @@ class BornMachine:
     Handles shared tensors, device movement, checkpointing, and parameter access.
     """
 
-    def __init__(self, cfg: schemas.BornMachineConfig,
+    def __init__(self, cfg: BornMachineConfig,
                  data_dim: int | None = None, num_classes: int | None = None,
                  device: torch.device | None = None,
                  tensors: List[torch.Tensor] | None = None):
@@ -194,7 +214,7 @@ class BornMachine:
         """
         return self.classifier.probabilities(data)
 
-    def sample(self, cfg: schemas.SamplingConfig, cls: Optional[int] = None) -> torch.Tensor:
+    def sample(self, cfg: SamplingConfig, cls: Optional[int] = None) -> torch.Tensor:
         """
         Sample from the learned distribution x ~ p(x|c) using the generator.
 
@@ -306,7 +326,7 @@ class BornMachine:
             A new BornMachine instance with loaded tensors and config.
         """
         checkpoint = torch.load(path)
-        cfg: schemas.BornMachineConfig = OmegaConf.create(checkpoint["config"])
+        cfg: BornMachineConfig = OmegaConf.create(checkpoint["config"])
         born_machine = cls(cfg=cfg, tensors=checkpoint["tensors"])
         born_machine._log_Z = checkpoint.get("log_Z", None)
         born_machine._last_regime = checkpoint.get("regime", None)

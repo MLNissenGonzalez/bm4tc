@@ -30,7 +30,7 @@ import torch
 from analysis.utils import load_run_config, find_model_checkpoint
 from src.models import BornMachine
 from src.data.handler import DataHandler
-from src.utils.schemas import SamplingConfig
+from src.models.generator.generator import SamplingConfig
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

@@ -2,11 +2,19 @@ import math
 import torch
 import tensorkrowch as tk
 from tqdm import tqdm
+from dataclasses import dataclass
 from src.models.generator.sampling import sample as diff_sampling
-from typing import *
-import src.utils.schemas as schemas
+from typing import Callable, Dict, List, Optional, Tuple
 import logging
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SamplingConfig:
+    method: str = "multinomial"
+    num_spc: int = 10
+    num_bins: int = 50
+    batch_spc: int = 10
 
 # TODO: Add docstrings for API versions of sampling method.
 class BornGenerator(tk.models.MPS):
@@ -267,7 +275,7 @@ class BornGenerator(tk.models.MPS):
         samples = torch.stack(tensors=samples, dim=1)  # shape (num_spc, data_dim)
         return samples
 
-    def sample_single_class(self, cls: int, cfg: schemas.SamplingConfig) -> torch.Tensor:
+    def sample_single_class(self, cls: int, cfg: SamplingConfig) -> torch.Tensor:
         """
         Sample from the generator for a single class.
 
@@ -337,7 +345,7 @@ class BornGenerator(tk.models.MPS):
         return samples
 
     
-    def sample_all_classes(self, cfg: schemas.SamplingConfig) -> torch.Tensor:
+    def sample_all_classes(self, cfg: SamplingConfig) -> torch.Tensor:
         """
         Sample from the generator for all classes.
 

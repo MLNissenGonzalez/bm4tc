@@ -1,7 +1,7 @@
 import pytest
 import torch
 from tests.conftest import DATA_DIM, NUM_CLASSES
-import src.utils.schemas as schemas
+from src.models.generator.generator import SamplingConfig
 
 pytestmark = pytest.mark.slow
 
@@ -54,13 +54,13 @@ def test_virtual_mps_shares_parameters(born_machine):
 
 
 def test_sample_single_class_shape(born_machine):
-    cfg = schemas.SamplingConfig(method="multinomial", num_spc=4, num_bins=10, batch_spc=8)
+    cfg = SamplingConfig(method="multinomial", num_spc=4, num_bins=10, batch_spc=8)
     samples = born_machine.sample(cfg, cls=0)
     assert samples.shape == (4, DATA_DIM)
 
 
 def test_sample_single_class_in_range(born_machine):
-    cfg = schemas.SamplingConfig(method="multinomial", num_spc=4, num_bins=10, batch_spc=8)
+    cfg = SamplingConfig(method="multinomial", num_spc=4, num_bins=10, batch_spc=8)
     samples = born_machine.sample(cfg, cls=0)
     lo, hi = born_machine.input_range
     assert (samples >= lo - 1e-5).all()

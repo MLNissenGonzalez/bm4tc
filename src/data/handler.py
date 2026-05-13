@@ -1,7 +1,6 @@
 from src.models import BornMachine
 import torch
-import src.utils.schemas as schemas
-from src.data.gen_n_load import load_dataset, LabelledDataset
+from src.data.gen_n_load import load_dataset, LabelledDataset, DatasetConfig
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from typing import *
@@ -80,7 +79,7 @@ class DataHandler:
         discrimination: DataLoaders for GAN-style training (samples per class).
     """
 
-    def __init__(self, cfg: schemas.DatasetConfig):
+    def __init__(self, cfg: DatasetConfig):
         """
         Initialize DataHandler with dataset configuration.
 

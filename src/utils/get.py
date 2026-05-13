@@ -1,8 +1,14 @@
 import tensorkrowch as tk
-from typing import *
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, Tuple
 import numpy as np
-import src.utils.schemas as schemas
 import torch.optim as optim
+
+
+@dataclass
+class OptimizerConfig:
+    name: str = "adam"
+    kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
 
 
 def indim_and_ncls(mps: tk.models.MPS) -> Tuple[int, int]:
@@ -44,7 +50,7 @@ _OPTIMIZER_MAP = {
 }
 
 
-def optimizer(params, config: schemas.OptimizerConfig) -> optim.Optimizer:
+def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
     """
     Select and instantiate a PyTorch optimizer.
 

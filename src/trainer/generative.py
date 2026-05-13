@@ -1,16 +1,38 @@
 """Generative trainer for BornMachine using NLL minimization."""
 
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
 import time
 import torch
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union
 from src.utils import get
-from src.utils.schemas import GenerativeConfig
+from src.utils.get import OptimizerConfig
+from src.utils.criterions import CriterionConfig, NormRegularizer
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.utils.criterions import NormRegularizer
 from src.trainer.eval import eval_dis, eval_gen
+
+
+@dataclass
+class NormControlConfig:
+    target: Optional[Union[float, str]] = 1.0
+    hard_every: int = 1
+    soft_strength: float = 0.0
+
+
+@dataclass
+class GenerativeConfig:
+    max_epoch: int = 100
+    batch_size: int = 64
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    criterion: CriterionConfig = field(default_factory=CriterionConfig)
+    stop_crit: str = "gen_loss"
+    patience: int = 250
+    norm_control: NormControlConfig = field(default_factory=NormControlConfig)
+    save: bool = False
+    auto_stack: bool = True
+    auto_unbind: bool = False
 
 import logging
 logger = logging.getLogger(__name__)

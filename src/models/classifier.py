@@ -1,7 +1,9 @@
-from typing import *
+from typing import Callable, List, Optional, Sequence, Set, Text, Tuple, Union, TYPE_CHECKING
 import torch
 import tensorkrowch as tk
-import src.utils.schemas as schemas
+
+if TYPE_CHECKING:
+    from src.trainer.discriminative import DiscriminativeConfig
 
 class BornClassifier(tk.models.MPSLayer):
     """
@@ -78,7 +80,7 @@ class BornClassifier(tk.models.MPSLayer):
             self,
             tensors: List[torch.Tensor] | None = None,
             device: torch.device | None = None,
-            train_cfg: schemas.DiscriminativeConfig | None = None):
+            train_cfg: "Optional[DiscriminativeConfig]" = None):
         """
         Prepare the MPS for classification training or inference.
 
