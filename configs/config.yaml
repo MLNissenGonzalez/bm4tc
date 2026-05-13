@@ -3,8 +3,8 @@ descriptor: ""
 
 defaults:
   - _self_ # has to be here such that overrides work
-  - dataset: 2Dtoy/circles_4k
-  - born: fourier/d4D3
+  - dataset: 2Dtoy/circles
+  - born: fourier/d4r3
   - trainer/discriminative: test
   - trainer/ganstyle: null
   - trainer/generative: null
@@ -16,11 +16,11 @@ defaults:
 hydra:
   run:
     # For single runs
-    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m_%H%M}
+    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m_%H%M}
 
   sweep:
     # For multiruns
-    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}D${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m}
+    dir: outputs/${experiment}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}${dtype_suffix:}/${dataset.name}_${now:%d%m}
     subdir: ${hydra.job.num}
 
   output_subdir: .hydra

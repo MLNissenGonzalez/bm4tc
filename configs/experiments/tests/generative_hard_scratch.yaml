@@ -1,10 +1,10 @@
 # @package _global_
-# Test config mirroring grid_sweep_hard for d15D40c64 on ECG200 (from scratch).
+# Test config mirroring grid_sweep_hard for d15r40c64 on ECG200 (from scratch).
 # Use to reproduce / debug errors in the hard-renorm from-scratch pipeline.
 experiment: test
 
 defaults:
-  - override /born: legendre/d15D40c64
+  - override /born: legendre/d15r40c64
   - override /dataset: ucr_ts/ecg200
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null

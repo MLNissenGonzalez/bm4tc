@@ -523,7 +523,7 @@ def main() -> None:
     parser.add_argument("--embedding", nargs="+", metavar="EMB",
                         help="fourier | legendre | hermite | chebychev1 | chebychev2")
     parser.add_argument("--arch", nargs="+", metavar="ARCH",
-                        help="d4D3 | d6D4 | d10D6 | d30D18")
+                        help="d4r3 | d6r4 | d10r6 | d30r18")
     parser.add_argument("--dataset", nargs="+", metavar="STR",
                         help="Substring match on dataset name")
     parser.add_argument("--date", nargs="+", metavar="STR",

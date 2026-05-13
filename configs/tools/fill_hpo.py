@@ -71,8 +71,8 @@ STAGE_PREFIXES = {
 }
 
 def parse_arch(arch: str):
-    """'d3D10' → (3, 10, '')  |  'd3D10c64' → (3, 10, 'c64')"""
-    m = re.match(r"d(\d+)D(\d+)(c\d+)?$", arch)
+    """'d3r10' → (3, 10, '')  |  'd3r10c64' → (3, 10, 'c64')"""
+    m = re.match(r"d(\d+)r(\d+)(c\d+)?$", arch)
     if m:
         return int(m.group(1)), int(m.group(2)), m.group(3) or ""
     return None, None, ""
@@ -466,7 +466,7 @@ def main() -> None:
     parser.add_argument("--filter-embedding", metavar="EMB",
                         help="fourier | legendre | hermite | chebychev1 | chebychev2")
     parser.add_argument("--filter-arch", metavar="ARCH",
-                        help="e.g. d4D3, d10D6")
+                        help="e.g. d4r3, d10r6")
     parser.add_argument("--source", choices=["wandb", "local", "both"], default="both",
                         help="Where to look for HPO results (default: both, wandb first)")
     parser.add_argument("--entity", default=DEFAULT_ENTITY,

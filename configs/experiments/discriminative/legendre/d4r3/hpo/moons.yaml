@@ -3,8 +3,8 @@ experiment: hpo
 
 descriptor: size
 defaults:
-  - override /born: legendre/d4D3
-  - override /dataset: 2Dtoy/moons_4k
+  - override /born: legendre/d4r3
+  - override /dataset: 2Dtoy/moons
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online

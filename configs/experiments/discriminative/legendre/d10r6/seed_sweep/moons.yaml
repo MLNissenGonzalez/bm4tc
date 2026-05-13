@@ -2,8 +2,8 @@
 experiment: seed_sweep
 
 defaults:
-  - override /born: legendre/d10D6
-  - override /dataset: 2Dtoy/moons_4k
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/moons
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online

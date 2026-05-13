@@ -3,7 +3,7 @@ experiment: grid_sweep
 descriptor: mixed_scratch
 
 defaults:
-  - override /born: legendre/d5D100c64
+  - override /born: legendre/d5r100c64
   - override /dataset: ucr_ts/cricketx
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null

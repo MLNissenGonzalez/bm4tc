@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_MIXED = PROJECT_ROOT / "configs" / "experiments" / "generative" / "legendre" / "d10D6" / "alpha_curve_mixed"
+_MIXED = PROJECT_ROOT / "configs" / "experiments" / "generative" / "legendre" / "d10r6" / "alpha_curve_mixed"
 
 ALPHA_VALUES = [0.0, 1e-5, 1e-4, 1e-3, 1e-2, 5e-2, 1e-1, 5e-1, 8e-1, 1.0]
 

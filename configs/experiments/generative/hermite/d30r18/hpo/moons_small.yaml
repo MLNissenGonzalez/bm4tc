@@ -3,7 +3,7 @@ experiment: hpo
 
 descriptor: size
 defaults:
-  - override /born: hermite/d30D18
+  - override /born: hermite/d30r18
   - override /dataset: 2Dtoy/moons_small
   - override /trainer/discriminative: null
   - override /trainer/generative: test

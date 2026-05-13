@@ -1,6 +1,6 @@
-name: "moons_4k"
+name: "moons"
 gen_dow_kwargs:
-  name: "moons_4k"
+  name: "moons"
   size: 4000
   seed: 25
   noise: 0.05

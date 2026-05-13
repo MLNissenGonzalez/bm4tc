@@ -3,8 +3,8 @@ experiment: seed_sweep
 descriptor: mixed_scratch
 
 defaults:
-  - override /born: legendre/d10D6
-  - override /dataset: 2Dtoy/circles_4k
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/circles
   - override /trainer/discriminative: null
   - override /trainer/generative: test
   - override /trainer/ganstyle: null
@@ -42,7 +42,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/seed_sweep/gen/legendre/d10D6/circles_4k_${now:%d%m}
+    dir: outputs/seed_sweep/gen/legendre/d10r6/circles_4k_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

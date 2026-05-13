@@ -3,7 +3,7 @@ experiment: grid_sweep
 descriptor: nll_hard_pretrained
 
 defaults:
-  - override /born: legendre/d5D100c64
+  - override /born: legendre/d5r100c64
   - override /dataset: ucr_ts/cricketx
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null

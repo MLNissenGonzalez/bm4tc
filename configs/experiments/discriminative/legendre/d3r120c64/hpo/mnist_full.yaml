@@ -3,7 +3,7 @@ experiment: hpo
 descriptor: cls
 
 defaults:
-  - override /born: legendre/d3D120c64
+  - override /born: legendre/d3r120c64
   - override /dataset: mnist/mnist_full
   - override /trainer/generative: null
   - override /trainer/ganstyle: null

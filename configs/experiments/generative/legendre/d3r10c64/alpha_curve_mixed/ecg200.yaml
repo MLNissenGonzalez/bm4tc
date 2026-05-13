@@ -3,7 +3,7 @@ experiment: alpha_curve
 descriptor: mixed_scratch
 
 defaults:
-  - override /born: legendre/d3D10c64
+  - override /born: legendre/d3r10c64
   - override /dataset: ucr_ts/ecg200
   - override /trainer/discriminative: null
   - override /trainer/generative: test
@@ -37,7 +37,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/alpha_curve/gen/legendre/d3D10c64/ecg200_${now:%d%m}
+    dir: outputs/alpha_curve/gen/legendre/d3r10c64/ecg200_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

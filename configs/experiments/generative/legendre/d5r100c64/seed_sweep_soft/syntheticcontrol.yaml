@@ -3,7 +3,7 @@ experiment: seed_sweep
 descriptor: nll_soft_pretrained
 
 defaults:
-  - override /born: legendre/d5D100c64
+  - override /born: legendre/d5r100c64
   - override /dataset: ucr_ts/syntheticcontrol
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null
@@ -38,7 +38,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/seed_sweep/gen/legendre/d5D100c64/syntheticcontrol_${now:%d%m}
+    dir: outputs/seed_sweep/gen/legendre/d5r100c64/syntheticcontrol_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

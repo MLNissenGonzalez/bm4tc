@@ -2,7 +2,7 @@
 experiment: seed_sweep
 
 defaults:
-  - override /born: fourier/d30D18
+  - override /born: fourier/d30r18
   - override /dataset: 2Dtoy/circles_small
   - override /trainer/discriminative: null
   - override /trainer/generative: test

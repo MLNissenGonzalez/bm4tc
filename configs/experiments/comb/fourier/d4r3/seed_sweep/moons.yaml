@@ -2,8 +2,8 @@
 experiment: dev_comb
 
 defaults:
-  - override /born: fourier/d4D3
-  - override /dataset: 2Dtoy/moons_4k
+  - override /born: fourier/d4r3
+  - override /dataset: 2Dtoy/moons
   - override /trainer/discriminative: adam500_loss
   - override /trainer/generative: default
   - override /trainer/ganstyle: null
