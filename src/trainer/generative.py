@@ -11,7 +11,7 @@ from src.utils.get import OptimizerConfig
 from src.utils.criterions import CriterionConfig, NormRegularizer
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_dis, eval_gen
+from src.trainer.eval import eval_metrics
 
 
 @dataclass
@@ -241,10 +241,7 @@ class GenerativeTrainer:
 
             self.bornmachine.sync_tensors(after="generation", verify=False)
 
-            gen_loss = eval_gen(
-                self.bornmachine, self.datahandler.classification["valid"], self.device
-            )
-            dis_loss, acc = eval_dis(
+            dis_loss, acc, gen_loss = eval_metrics(
                 self.bornmachine, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"gen_loss": gen_loss, "dis_loss": dis_loss, "acc": acc}

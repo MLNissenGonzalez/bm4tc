@@ -11,7 +11,7 @@ from analysis.utils.resolve import (
 
 def test_resolve_regime_cls():
     result = resolve_regime_from_path("outputs/seed_sweep/cls/fourier/d4D3/moons_0102")
-    assert result == "pre"
+    assert result == "dis"
 
 
 def test_resolve_regime_gen():
@@ -26,7 +26,7 @@ def test_resolve_regime_adv():
 
 def test_resolve_regime_gan():
     result = resolve_regime_from_path("outputs/seed_sweep/gan/fourier/d4D3/moons_0102")
-    assert result == "gan"
+    assert result is None
 
 
 def test_resolve_regime_clsadv_priority():
@@ -84,10 +84,10 @@ def test_normalize_param_passthrough():
 
 # ---- resolve_params ----
 
-def test_resolve_params_pre_returns_lr_path():
-    result = resolve_params("pre", ["lr"])
+def test_resolve_params_dis_returns_lr_path():
+    result = resolve_params("dis", ["lr"])
     assert "lr" in result
-    assert "classification" in result["lr"]
+    assert "discriminative" in result["lr"]
 
 
 def test_resolve_params_unknown_regime_raises():
@@ -96,5 +96,5 @@ def test_resolve_params_unknown_regime_raises():
 
 
 def test_resolve_params_weight_decay_alias():
-    result = resolve_params("pre", ["wd"])
+    result = resolve_params("dis", ["wd"])
     assert "weight-decay" in result
