@@ -13,6 +13,5 @@ auto_stack: True
 auto_unbind: False
 patience: 100
 stop_crit: "rob"
-watch_freq: 0
 save: True
 

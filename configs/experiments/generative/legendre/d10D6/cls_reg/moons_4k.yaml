@@ -26,7 +26,6 @@ trainer:
     batch_size: 256
     patience: 100           # >= max max_epoch -> no early stopping during sweep
     stop_crit: "gen_loss"
-    watch_freq: 0
     save: true
     optimizer:
       name: "adam"

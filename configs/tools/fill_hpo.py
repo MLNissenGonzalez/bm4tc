@@ -77,7 +77,7 @@ def parse_arch(arch: str):
         return int(m.group(1)), int(m.group(2)), m.group(3) or ""
     return None, None, ""
 
-DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
+DEFAULT_ENTITY = "your-wandb-entity"
 DEFAULT_PROJECT = "gan_train"
 
 # Regex to match `key: ???  # optional comment` lines

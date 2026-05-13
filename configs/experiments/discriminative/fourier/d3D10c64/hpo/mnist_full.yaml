@@ -19,7 +19,6 @@ trainer:
     batch_size: 512
     patience: 60
     stop_crit: "acc"
-    watch_freq: 0
     auto_stack: True
     auto_unbind: False
     save: false

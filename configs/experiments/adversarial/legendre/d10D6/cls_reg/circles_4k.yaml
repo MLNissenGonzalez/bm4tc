@@ -20,7 +20,6 @@ dataset:
 tracking:
   seed: 42
   evasion:
-    method: "PGD"
     norm: 2
     criterion:
       name: "negative log-likelihood"
@@ -34,14 +33,10 @@ trainer:
   adversarial:
     max_epoch: 1            # placeholder; swept via hydra sweeper
     batch_size: 256
-    method: "pgd_at"
     stop_crit: "rob"
     patience: 100           # >= max max_epoch -> no early stopping during sweep
-    watch_freq: 0
-    metrics: {"rob": 1, "clsloss": 1, "acc": 1}
 
     evasion:
-      method: "PGD"
       norm: 2
       criterion:
         name: "negative log-likelihood"

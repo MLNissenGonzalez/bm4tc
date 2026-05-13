@@ -25,7 +25,7 @@ Options:
     --wandb-only     Skip local/analysis dirs; only remove W&B runs and artifacts
     --analysis-only  Scan analysis/outputs/ directly; delete only analysis dirs
                      (use after local+W&B runs are already deleted)
-    --entity         W&B entity (default: martin-nissen-gonzalez-heidelberg-university)
+    --entity         W&B entity (default: your-wandb-entity)
     --project        W&B project (default: gan_train)
 
 Examples:
@@ -64,7 +64,7 @@ from analysis.utils.wandb_fetcher import (
 
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 ANALYSIS_DIR = PROJECT_ROOT / "analysis" / "outputs"
-DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
+DEFAULT_ENTITY = "your-wandb-entity"
 DEFAULT_PROJECT = "gan_train"
 
 # Matches: <dataset>_<DDMM>  or  <dataset>_<DDMM>_<HHMM>

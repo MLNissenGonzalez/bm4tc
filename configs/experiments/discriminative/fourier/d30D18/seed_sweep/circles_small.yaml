@@ -21,7 +21,6 @@ trainer:
     batch_size: 256
     patience: 1000
     stop_crit: "dis_loss"
-    watch_freq: 0
     save: true
     optimizer:
       name: "adam"
