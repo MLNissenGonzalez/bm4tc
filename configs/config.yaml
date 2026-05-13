@@ -5,7 +5,7 @@ defaults:
   - _self_ # has to be here such that overrides work
   - dataset: 2Dtoy/circles_4k
   - born: fourier/d4D3
-  - trainer/classification: test
+  - trainer/discriminative: test
   - trainer/ganstyle: null
   - trainer/generative: null
   - trainer/adversarial: null

@@ -3,7 +3,7 @@ experiment: test_hpo
 
 defaults:
   - override /dataset: test
-  - override /trainer/classification: null
+  - override /trainer/discriminative: null
   - override /trainer/generative: test
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
@@ -12,7 +12,7 @@ defaults:
 
 trainer:
   generative:
-    stop_crit: "genloss"
+    stop_crit: "gen_loss"
     metrics: {"genloss": 1, "acc": 1, "fid": 1, "rob": 1, "viz": 1}
 
 hydra:

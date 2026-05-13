@@ -5,7 +5,7 @@ descriptor: nll_soft_pretrained
 defaults:
   - override /born: legendre/d5D100c64
   - override /dataset: ucr_ts/syntheticcontrol
-  - override /trainer/classification: null
+  - override /trainer/discriminative: null
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online

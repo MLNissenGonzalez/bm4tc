@@ -4,7 +4,7 @@ experiment: test_hpo
 defaults:
   - override /born: fourier/d10D4
   - override /dataset: test
-  - override /trainer/classification: test
+  - override /trainer/discriminative: test
   - override /tracking: test
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

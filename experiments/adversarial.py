@@ -30,7 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__),
 import hydra
 import logging
 from src.tracking.wandb_utils import init_wandb
-from src.tracking import evaluate_loaded_model, log_dataset_viz
+from src.tracking import log_dataset_viz
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
@@ -75,12 +75,9 @@ def main(cfg: schemas.Config):
     datahandler.split_and_rescale(bornmachine)
     log_dataset_viz(datahandler)
 
-    if model_path is not None:
-        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
-
     if model_path is None:
         # Classification pretraining
-        if cfg.trainer.classification is not None:
+        if cfg.trainer.discriminative is not None:
             pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
             pre_trainer.train()
             # Move back to device after pretraining (it moves to CPU at end)

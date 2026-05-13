@@ -64,3 +64,7 @@ data/
 
 # claude
 $HOME/
+
+.pytest_cache/
+pytest.ini
+reference/

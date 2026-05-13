@@ -5,7 +5,7 @@ descriptor: nll_scratch
 defaults:
   - override /born: legendre/d3D10c64
   - override /dataset: ucr_ts/ecg200
-  - override /trainer/classification: null       # no warm-start
+  - override /trainer/discriminative: null       # no warm-start
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: online
@@ -19,7 +19,7 @@ trainer:
     max_epoch: 1000
     batch_size: 128
     patience: 200
-    stop_crit: "genloss"
+    stop_crit: "gen_loss"
     watch_freq: 0
     save: false
     optimizer:

@@ -4,7 +4,7 @@ from omegaconf import OmegaConf
 def _training_regime(*, _root_):
     parts = []
     for key, code in [
-        ("trainer.classification", "cls"),
+        ("trainer.discriminative", "dis"),
         ("trainer.generative", "gen"),
         ("trainer.adversarial", "adv"),
     ]:

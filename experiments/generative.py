@@ -36,7 +36,7 @@ OmegaConf.register_new_resolver(
     replace=True,
 )
 from src.tracking.wandb_utils import init_wandb
-from src.tracking import evaluate_loaded_model, log_dataset_viz
+from src.tracking import log_dataset_viz
 # Think about initializing the generative loss in the trainer?
 from src.utils import schemas, set_seed, get
 from src.data import DataHandler
@@ -80,13 +80,12 @@ def main(cfg: schemas.Config):
     log_dataset_viz(datahandler)
 
     if model_path is not None:
-        evaluate_loaded_model(cfg, bornmachine, datahandler, device)
         bornmachine.reset()
         bornmachine.unset_data_nodes()
 
     if model_path is None:
         # Classification pretraining (optional)
-        if getattr(cfg.trainer, 'classification', None) is not None:
+        if getattr(cfg.trainer, 'discriminative', None) is not None:
             logger.info("Running classification pretraining.")
             pre_trainer = ClassificationTrainer(bornmachine, cfg, "pre", datahandler, device)
             pre_trainer.train()

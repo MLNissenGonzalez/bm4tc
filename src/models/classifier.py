@@ -78,7 +78,7 @@ class BornClassifier(tk.models.MPSLayer):
             self,
             tensors: List[torch.Tensor] | None = None,
             device: torch.device | None = None,
-            train_cfg: schemas.ClassificationConfig | None = None):
+            train_cfg: schemas.DiscriminativeConfig | None = None):
         """
         Prepare the MPS for classification training or inference.
 
