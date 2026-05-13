@@ -2,8 +2,8 @@
 experiment: dev_comb
 
 defaults:
-  - override /born: legendre/d10D6
-  - override /dataset: 2Dtoy/moons_4k
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/moons
   - override /trainer/discriminative: adam500_loss
   - override /trainer/generative: default
   - override /trainer/ganstyle: null

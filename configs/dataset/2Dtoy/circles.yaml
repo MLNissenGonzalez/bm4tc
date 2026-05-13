@@ -1,6 +1,6 @@
-name: "circles_4k"
+name: "circles"
 gen_dow_kwargs:
-  name: "circles_4k"
+  name: "circles"
   size: 4000
   seed: 25
   noise: 0.05

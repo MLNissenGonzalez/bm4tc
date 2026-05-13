@@ -2,7 +2,7 @@
 experiment: softmax_sweep
 
 defaults:
-  - override /born: legendre/d3D10
+  - override /born: legendre/d3r10
   - override /dataset: mnist/mnist_full
   - override /trainer/discriminative: softmax_adam50
   - override /trainer/ganstyle: null
@@ -12,7 +12,7 @@ defaults:
 hydra:
   sweeper:
     params:
-      born: legendre/d3D10, fourier/d3D10
+      born: legendre/d3r10, fourier/d3r10
       born.init_kwargs.init_method: randn, unit, canonical
       tracking.seed: 1, 2
       trainer.classification.optimizer.kwargs.lr: 1e-4, 1e-5

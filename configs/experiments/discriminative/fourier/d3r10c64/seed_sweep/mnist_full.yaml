@@ -2,7 +2,7 @@
 experiment: seed_sweep
 
 defaults:
-  - override /born: fourier/d3D10c64
+  - override /born: fourier/d3r10c64
   - override /dataset: mnist/mnist_full
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

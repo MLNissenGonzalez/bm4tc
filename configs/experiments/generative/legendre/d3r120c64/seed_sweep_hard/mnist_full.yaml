@@ -3,7 +3,7 @@ experiment: seed_sweep
 descriptor: nll_hard_pretrained
 
 defaults:
-  - override /born: legendre/d3D120c64
+  - override /born: legendre/d3r120c64
   - override /dataset: mnist/mnist_full
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null
@@ -38,7 +38,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/seed_sweep/gen/legendre/d3D120c64/mnist_full_${now:%d%m}
+    dir: outputs/seed_sweep/gen/legendre/d3r120c64/mnist_full_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

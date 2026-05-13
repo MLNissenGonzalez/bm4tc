@@ -3,7 +3,7 @@ experiment: hpo_scratch
 descriptor: nll_from_scratch
 
 defaults:
-  - override /born: legendre/d3D10c64
+  - override /born: legendre/d3r10c64
   - override /dataset: ucr_ts/chlorineconcentration
   - override /trainer/discriminative: null       # no warm-start
   - override /trainer/ganstyle: null

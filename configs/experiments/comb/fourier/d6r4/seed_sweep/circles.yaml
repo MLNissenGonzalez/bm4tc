@@ -2,8 +2,8 @@
 experiment: dev_comb
 
 defaults:
-  - override /born: fourier/d6D4
-  - override /dataset: 2Dtoy/circles_4k
+  - override /born: fourier/d6r4
+  - override /dataset: 2Dtoy/circles
   - override /trainer/discriminative: adam500_loss
   - override /trainer/generative: default
   - override /trainer/ganstyle: null

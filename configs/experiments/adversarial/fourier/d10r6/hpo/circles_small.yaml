@@ -2,7 +2,7 @@
 experiment: hpo
 
 defaults:
-  - override /born: fourier/d10D6
+  - override /born: fourier/d10r6
   - override /dataset: 2Dtoy/circles_small
   - override /trainer/discriminative: null
   - override /trainer/adversarial: pgd_at

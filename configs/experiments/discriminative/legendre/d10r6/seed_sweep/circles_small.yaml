@@ -2,7 +2,7 @@
 experiment: seed_sweep
 
 defaults:
-  - override /born: legendre/d10D6
+  - override /born: legendre/d10r6
   - override /dataset: 2Dtoy/circles_small
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

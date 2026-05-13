@@ -1,6 +1,6 @@
-name: "spirals_4k"
+name: "spirals"
 gen_dow_kwargs:
-  name: "spirals_4k"
+  name: "spirals"
   size: 4000
   seed: 25
   noise: 0.5

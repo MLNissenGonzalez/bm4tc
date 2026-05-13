@@ -3,7 +3,7 @@ experiment: grid_sweep
 descriptor: mixed_scratch
 
 defaults:
-  - override /born: legendre/d3D10c64
+  - override /born: legendre/d3r10c64
   - override /dataset: ucr_ts/syntheticcontrol
   - override /trainer/discriminative: null
   - override /trainer/ganstyle: null
@@ -36,7 +36,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/grid_sweep/gen/legendre/d3D10c64/syntheticcontrol_${now:%d%m}
+    dir: outputs/grid_sweep/gen/legendre/d3r10c64/syntheticcontrol_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

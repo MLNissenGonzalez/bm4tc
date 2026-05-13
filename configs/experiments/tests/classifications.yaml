@@ -10,4 +10,4 @@ defaults:
 hydra:
   sweeper:
     params:
-      born: d4D3, d10D4
+      born: d4r3, d10r4

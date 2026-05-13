@@ -3,8 +3,8 @@ experiment: hpo
 
 descriptor: size
 defaults:
-  - override /born: hermite/d10D6
-  - override /dataset: 2Dtoy/circles_4k
+  - override /born: hermite/d10r6
+  - override /dataset: 2Dtoy/circles
   - override /trainer/discriminative: null
   - override /trainer/generative: test
   - override /trainer/ganstyle: null

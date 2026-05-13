@@ -2,8 +2,8 @@
 experiment: hpo
 
 defaults:
-  - override /born: fourier/d10D6
-  - override /dataset: 2Dtoy/moons_4k
+  - override /born: fourier/d10r6
+  - override /dataset: 2Dtoy/moons
   - override /trainer/discriminative: null
   - override /trainer/adversarial: pgd_at
   - override /trainer/ganstyle: null

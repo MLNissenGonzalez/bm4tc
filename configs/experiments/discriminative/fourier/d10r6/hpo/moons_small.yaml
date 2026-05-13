@@ -3,7 +3,7 @@ experiment: hpo
 
 descriptor: size
 defaults:
-  - override /born: fourier/d10D6
+  - override /born: fourier/d10r6
   - override /dataset: 2Dtoy/moons_small
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

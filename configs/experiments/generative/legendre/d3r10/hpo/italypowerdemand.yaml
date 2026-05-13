@@ -3,7 +3,7 @@ experiment: hpo
 
 descriptor: nll
 defaults:
-  - override /born: legendre/d3D10
+  - override /born: legendre/d3r10
   - override /dataset: ucr_ts/italypowerdemand
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

@@ -3,7 +3,7 @@ experiment: hpo
 descriptor: cls
 
 defaults:
-  - override /born: legendre/d15D40c64
+  - override /born: legendre/d15r40c64
   - override /dataset: ucr_ts/ecg200
   - override /trainer/generative: null
   - override /trainer/ganstyle: null
