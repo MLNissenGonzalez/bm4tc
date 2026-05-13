@@ -1,5 +1,9 @@
 import pytest
 import torch
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: marks tests requiring model forward passes; skip with -m 'not slow'")
 from torch.utils.data import DataLoader, TensorDataset
 
 DATA_DIM = 4
