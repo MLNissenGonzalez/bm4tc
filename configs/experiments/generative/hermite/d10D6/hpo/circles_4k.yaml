@@ -5,7 +5,7 @@ descriptor: size
 defaults:
   - override /born: hermite/d10D6
   - override /dataset: 2Dtoy/circles_4k
-  - override /trainer/classification: null
+  - override /trainer/discriminative: null
   - override /trainer/generative: test
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
@@ -24,7 +24,7 @@ trainer:
     max_epoch: 150
     batch_size: 256
     patience: 150
-    stop_crit: "genloss"
+    stop_crit: "gen_loss"
     watch_freq: 0
     save: false
     optimizer:

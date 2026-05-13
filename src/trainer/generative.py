@@ -2,10 +2,8 @@
 Generative trainer for BornMachine using NLL minimization.
 
 Trains p(x|c) by minimizing negative log-likelihood.
-Simpler than GANStyleTrainer - no critic, no retraining.
 """
 
-import hydra
 import math
 from pathlib import Path
 import time
@@ -13,25 +11,26 @@ import torch
 from typing import Dict
 from src.utils import schemas, get
 import wandb
-from src.tracking import PerformanceEvaluator, record, log_grads
+from src.tracking import record, log_grads
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.utils.criterions import NormRegularizer
+from src.trainer.eval import eval_dis, eval_gen
 
 import logging
 logger = logging.getLogger(__name__)
 
-# decouple from configs. 
+_LOSS_METRICS = {"dis_loss", "gen_loss"}
+_ACC_METRICS = {"acc", "rob"}
+_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
+
+
 class Trainer:
     """
     Generative trainer for BornMachine using NLL minimization.
 
     Trains the generator view of the BornMachine by minimizing negative
-    log-likelihood of p(x|c). Follows the same pattern as ClassificationTrainer
-    with early stopping, metric tracking, and checkpoint saving.
-
-    The criterion must be a subclass of GenerativeNLL with user-implemented
-    normalization.
+    log-likelihood of p(x|c).
 
     Attributes:
         best: Dict of best metric values achieved during training.
@@ -45,16 +44,6 @@ class Trainer:
             datahandler: DataHandler,
             device: torch.device
     ):
-        """
-        Initialize the generative trainer.
-
-        Args:
-            bornmachine: BornMachine instance to train.
-            cfg: Complete configuration object.
-            datahandler: DataHandler with loaded datasets.
-            criterion: User-implemented GenerativeNLL subclass.
-            device: Torch device for training.
-        """
         self.datahandler = datahandler
         self.device = device
         self.cfg = cfg
@@ -64,60 +53,32 @@ class Trainer:
         if getattr(self.datahandler, "classification", None) is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
-        # Config-provided criterion
         self.criterion = get.criterion("generative", self.train_cfg.criterion)
 
         wandb.define_metric(f"{self.stage}/train/loss", summary="none")
-        self.evaluator = PerformanceEvaluator(cfg, self.datahandler, self.train_cfg, self.device)
 
-        # Norm control setup (target resolved lazily in train() after device placement)
         self._nc = self.train_cfg.norm_control
         self.norm_regularizer: NormRegularizer | None = None
         self._nc_target: float | None = None
         if self._nc.soft_strength > 0.0:
             wandb.define_metric(f"{self.stage}/train/norm_reg", summary="none")
 
-        # Ensure stop_crit is in metrics (for HPO)
-        metrics_for_best = dict(self.train_cfg.metrics)
-        if self.train_cfg.stop_crit not in metrics_for_best and self.train_cfg.stop_crit != "rob":
-            logger.warning(f"stop_crit '{self.train_cfg.stop_crit}' not in metrics, adding with freq=1")
-            metrics_for_best[self.train_cfg.stop_crit] = 1
-        self._best_perf_factory(metrics_for_best)
+        self._init_best()
 
-        # Trainer modifies weights of generator
         self.bornmachine = bornmachine
         self.best_tensors = [t.cpu().clone().detach() for t in self.bornmachine.generator.tensors]
 
-    def _best_perf_factory(self, metrics: Dict[str, int]):
-        """Initialize tracking for best metric values."""
-        self.best = dict.fromkeys(metrics.keys())
-        for metric_name in self.best.keys():
-            if metric_name in ["acc", "rob"]:
-                self.best[metric_name] = 0.0
-            elif metric_name in ["clsloss", "genloss", "fid"]:
-                self.best[metric_name] = float("Inf")
+    def _init_best(self):
+        self.best = {"gen_loss": float("inf"), "dis_loss": float("inf"), "acc": 0.0}
 
         self.stopping_criterion_name = self.train_cfg.stop_crit
-        valid_criteria = ["clsloss", "genloss", "acc", "fid", "rob"]
-        if self.stopping_criterion_name not in valid_criteria:
+        if self.stopping_criterion_name not in _VALID_STOP_CRIT:
             raise ValueError(
                 f"Invalid stop_crit '{self.stopping_criterion_name}'. "
-                f"Must be one of: {valid_criteria}"
+                f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
             )
-        # Always track rob for averaging (even if not in metrics explicitly)
-        if self.stopping_criterion_name == "rob" and "rob" not in self.best:
-            self.best["rob"] = 0.0
 
     def _resolve_nc_target(self) -> float:
-        """
-        Resolve NormControlConfig.target to a plain float.
-
-        Three cases:
-        - None  : read Z from the current BornMachine via log_partition_function().
-        - str   : evaluate as a Python expression with n_features, data_dim,
-                  sqrt, log, exp in scope.
-        - float : return as-is.
-        """
         import math as _math
         raw = self._nc.target
 
@@ -130,14 +91,14 @@ class Trainer:
 
         if isinstance(raw, str):
             n_features = self.bornmachine.generator.n_features
-            data_dim   = self.datahandler.data_dim
+            data_dim = self.datahandler.data_dim
             _ns = {
                 "__builtins__": {},
                 "n_features": n_features,
-                "data_dim":   data_dim,
+                "data_dim": data_dim,
                 "sqrt": _math.sqrt,
-                "log":  _math.log,
-                "exp":  _math.exp,
+                "log": _math.log,
+                "exp": _math.exp,
             }
             try:
                 result = eval(raw, _ns)  # noqa: S307
@@ -161,7 +122,6 @@ class Trainer:
         return float(raw)
 
     def _train_epoch(self):
-        """Execute one training epoch: forward pass, loss, backward, optimizer step."""
         losses = []
         self._norm_collapsed = False
 
@@ -169,15 +129,13 @@ class Trainer:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
-            # Generative NLL (criterion takes bornmachine, not just probs)
             try:
                 nll_loss = self.criterion(self.bornmachine, data, labels)
             except RuntimeError as e:
-                logger.warning(f"Norm collapse detected during training ({e}). Stopping training early.")
+                logger.warning(f"Norm collapse during training ({e}). Stopping early.")
                 self._norm_collapsed = True
                 break
 
-            # Soft norm regularization (optional, trainer-level so evaluator is unaffected)
             if self.norm_regularizer is not None:
                 reg_loss = self.norm_regularizer(self.bornmachine)
                 total_loss = nll_loss + reg_loss
@@ -191,11 +149,10 @@ class Trainer:
                       step=self.step, stage=self.stage)
             self.optimizer.step()
 
-            # Hard renormalization (conditional on frequency; hard_every=0 disables)
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.bornmachine.generator.renormalize_(target=self._nc_target)
 
-            losses.append(nll_loss.detach().cpu().item())  # NLL only for comparability
+            losses.append(nll_loss.detach().cpu().item())
 
             log_payload = {f"{self.stage}/train/loss": sum(losses) / len(losses)}
             if reg_loss is not None:
@@ -203,64 +160,38 @@ class Trainer:
             wandb.log(log_payload)
 
     def _update(self):
-        """
-        Epoch-wise check whether model performs better than previous best on validation set.
-
-        - If better: update best performance values and tensors. Reset patience counter.
-        - If not: Increase patience counter.
-
-        For rob metric: averages all rob/{strength} values since robustness is evaluated
-        at multiple perturbation strengths.
-        """
-        # Handle rob specially: average all rob/{strength} values
-        if self.stopping_criterion_name == "rob":
-            rob_values = [v for k, v in self.valid_perf.items()
-                        if k.startswith("rob/") and isinstance(v, (int, float))]
-            current_value = sum(rob_values) / len(rob_values) if rob_values else None
-        else:
-            current_value = self.valid_perf.get(self.stopping_criterion_name)
+        current_value = self.valid_perf.get(self.stopping_criterion_name)
 
         if current_value is None or not math.isfinite(current_value):
             return
 
-        former_best = self.best.get(self.stopping_criterion_name, 0.0 if self.stopping_criterion_name in ["acc", "rob"] else float("Inf"))
+        former_best = self.best.get(
+            self.stopping_criterion_name,
+            0.0 if self.stopping_criterion_name in _ACC_METRICS else float("inf")
+        )
 
-        # Check whether the monitored metric improved
-        if self.stopping_criterion_name in ["acc", "rob"]:
+        if self.stopping_criterion_name in _ACC_METRICS:
             improved = current_value > former_best
-        elif self.stopping_criterion_name in ["clsloss", "genloss", "fid"]:
+        elif self.stopping_criterion_name in _LOSS_METRICS:
             improved = current_value < former_best
         else:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
-        # Check if we reached target (optional shortcut)
         goal_key = list(self.goal.keys())[0] if self.goal else None
-        if self.goal is None:
-            reached_goal = False
-        elif goal_key == "rob":
-            # Handle rob goal by averaging rob/* values
-            rob_values = [v for k, v in self.valid_perf.items()
-                         if k.startswith("rob/") and isinstance(v, (int, float))]
-            goal_value = sum(rob_values) / len(rob_values) if rob_values else 0.0
-            reached_goal = goal_value > self.goal["rob"]
-        elif goal_key in ["acc"]:
-            reached_goal = self.valid_perf.get(goal_key, 0.0) > self.goal[goal_key]
-        elif goal_key in ["clsloss", "genloss", "fid"]:
-            reached_goal = self.valid_perf.get(goal_key, float("Inf")) < self.goal[goal_key]
-        else:
-            reached_goal = False
+        reached_goal = False
+        if goal_key is not None:
+            goal_val = self.valid_perf.get(goal_key)
+            if goal_val is not None:
+                if goal_key in _ACC_METRICS:
+                    reached_goal = goal_val > self.goal[goal_key]
+                else:
+                    reached_goal = goal_val < self.goal[goal_key]
 
-        isBetter = improved or reached_goal
-
-        if isBetter:
+        if improved or reached_goal:
             self.best = dict(self.valid_perf)
-            # Store averaged rob value if using rob as stopping criterion
-            if self.stopping_criterion_name == "rob":
-                self.best["rob"] = current_value
             self.best_tensors = [t.clone().detach() for t in self.bornmachine.generator.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
-
             if reached_goal:
                 self.patience_counter = self.train_cfg.patience + 1
                 logger.info("Goal reached.")
@@ -268,81 +199,45 @@ class Trainer:
             self.patience_counter += 1
 
     def _summarise_training(self):
-        """
-        1. Override generator tensors to best tensors.
-        2. Sync to classifier view.
-        3. Evaluate on test set.
-        4. Record results.
-        5. Optionally save model.
-        """
-        # Override generator with best tensors
+        """Restore best tensors and clean up. No test eval."""
         self.bornmachine.generator.reset()
         self.bornmachine.generator.initialize(tensors=self.best_tensors)
         self.bornmachine.sync_tensors(after="generation", verify=True)
         self.bornmachine.to(self.device)
 
-        # Evaluate on test
-        test_results = self.evaluator.evaluate(self.bornmachine, "test", self.epoch)
-
-        # Summarise training for wandb
-        for metric_name in ["fid", "genloss"]:
-            if metric_name in test_results.keys():
-                wandb.summary[f"{self.stage}/test/{metric_name}"] = test_results[metric_name]
-            if metric_name in self.best:
-                wandb.summary[f"{self.stage}/valid/{metric_name}"] = self.best[metric_name]
-
-        wandb.summary[f"{self.stage}/epoch/best"] = self.best_epoch
-        wandb.summary[f"{self.stage}/epoch/last"] = self.epoch
-        if self.epoch_times:
-            wandb.summary[f"{self.stage}/avg_epoch_time_s"] = sum(self.epoch_times) / len(self.epoch_times)
-
         self.bornmachine.reset()
         self.bornmachine.to("cpu")
-        if hasattr(self, 'valid_perf'):
+        if hasattr(self, "valid_perf"):
             del self.valid_perf
 
-        # Save model
         best_stop = self.best.get(self.stopping_criterion_name)
         if best_stop is not None and not math.isfinite(best_stop):
             logger.warning(
                 f"Best {self.stopping_criterion_name} is {best_stop} (non-finite); skipping model save."
             )
         elif self.train_cfg.save:
-            run_dir = Path(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-
+            import hydra
+            run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
             folder = run_dir / "models"
             folder.mkdir(parents=True, exist_ok=True)
-
-            filename = "gen"
-
-            save_path = folder / filename
-            self.bornmachine.save(path=str(save_path))
+            self.bornmachine.save(path=str(folder / "gen"))
             if wandb.run is not None and not wandb.run.disabled:
-                wandb.log_model(str(save_path))
+                wandb.log_model(str(folder / "gen"))
 
-        logger.info(f"Generative-Trainer finished.")
+        logger.info("Generative-Trainer finished.")
 
     def train(self, goal: Dict[str, float] | None = None):
-        """
-        Run the generative training loop.
-
-        Args:
-            goal: Optional target metrics to reach early (e.g., {"fid": 10.0}).
-                  If reached, training stops regardless of patience.
-        """
+        """Run the generative training loop."""
         self.step, self.patience_counter, self.goal = 0, 0, goal
-        self.epoch = 0  # guard: stays 0 if max_epoch=0
+        self.epoch = 0
         self.best_epoch = 0
         self.epoch_times = []
         self._norm_collapsed = False
 
-        # Prepare generator and optimizer
         self.bornmachine.generator.reset()
         self.bornmachine.generator.out_features = []
         self.bornmachine.to(self.device)
 
-        # Resolve norm control target (None / float / expression string)
         self._nc_target = self._resolve_nc_target()
         if self._nc.soft_strength > 0.0:
             self.norm_regularizer = NormRegularizer(
@@ -360,17 +255,21 @@ class Trainer:
             self._train_epoch()
 
             if self._norm_collapsed:
-                logger.info("Norm collapsed; ending training and summarising.")
+                logger.info("Norm collapsed; ending training.")
                 break
 
-            # Sync to classifier for evaluation metrics
+            # Sync to classifier view for eval_dis
             self.bornmachine.sync_tensors(after="generation", verify=False)
-            self.valid_perf = self.evaluator.evaluate(self.bornmachine, "valid", epoch)
+
+            gen_loss = eval_gen(
+                self.bornmachine, self.datahandler.classification["valid"], self.device
+            )
+            dis_loss, acc = eval_dis(
+                self.bornmachine, self.datahandler.classification["valid"], self.device
+            )
+            self.valid_perf = {"gen_loss": gen_loss, "dis_loss": dis_loss, "acc": acc}
             record(results=self.valid_perf, stage=self.stage, set="valid")
 
-            # In the evaluation step, could be that we sampled,
-            # thus bornmachine.in_features might not be all? 
-            # (actually, last step is conditioned on all inputs, thus in_featues is all)
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
 

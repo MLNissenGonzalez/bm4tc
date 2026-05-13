@@ -89,7 +89,7 @@ def main(cfg: schemas.Config):
 
     run.finish()
 
-    stop_crit = cfg.trainer.classification.stop_crit
+    stop_crit = cfg.trainer.discriminative.stop_crit
     objective = trainer.best.get(stop_crit, float("inf"))
     if stop_crit in ["acc", "rob"]:
         objective = -objective

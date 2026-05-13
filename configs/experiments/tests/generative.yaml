@@ -2,7 +2,7 @@
 experiment: test
 
 defaults:
-  - override /trainer/classification: null
+  - override /trainer/discriminative: null
   - override /trainer/generative: test
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null

@@ -195,12 +195,11 @@ cs.store(group="model/born", name="schema", node=BornMachineConfig)
 # --- Trainer configs ---
 
 @dataclass
-class ClassificationConfig:
+class DiscriminativeConfig:
     max_epoch: int
     batch_size: int
     optimizer: OptimizerConfig
     criterion: CriterionConfig
-    metrics: Dict[str, int]
     stop_crit: str = "acc"
     patience: int = 250
     watch_freq: int = 0
@@ -209,7 +208,7 @@ class ClassificationConfig:
     auto_unbind: bool = False
 
 
-cs.store(group="trainer/classification", name="schema", node=ClassificationConfig)
+cs.store(group="trainer/discriminative", name="schema", node=DiscriminativeConfig)
 
 
 @dataclass
@@ -269,7 +268,7 @@ class AdversarialConfig:
     stop_crit: str
     patience: int
     watch_freq: int
-    metrics: Dict[str, int]
+    eval_rob_freq: int = 5
     trades_beta: float = 6.0
     clean_weight: float = 0.0
     curriculum: bool = False
@@ -319,7 +318,6 @@ class GenerativeConfig:
     patience: int
     watch_freq: int
     norm_control: NormControlConfig
-    metrics: Dict[str, int]
     save: bool = False
     auto_stack: bool = True
     auto_unbind: bool = False
@@ -330,7 +328,7 @@ cs.store(group="trainer/generative", name="schema", node=GenerativeConfig)
 
 @dataclass
 class TrainerConfig:
-    classification: ClassificationConfig | None = None
+    discriminative: DiscriminativeConfig | None = None
     adversarial: AdversarialConfig | None = None
     generative: GenerativeConfig | None = None
 

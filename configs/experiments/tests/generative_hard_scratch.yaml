@@ -6,7 +6,7 @@ experiment: test
 defaults:
   - override /born: legendre/d15D40c64
   - override /dataset: ucr_ts/ecg200
-  - override /trainer/classification: null
+  - override /trainer/discriminative: null
   - override /trainer/ganstyle: null
   - override /trainer/adversarial: null
   - override /tracking: test
@@ -21,7 +21,7 @@ trainer:
     max_epoch: 4
     batch_size: 128
     patience: 10
-    stop_crit: "genloss"
+    stop_crit: "gen_loss"
     watch_freq: 0
     save: false
     norm_control:

@@ -51,7 +51,7 @@ def main(cfg: schemas.Config):
 
     # Return objective for HPO (Optuna sweeper uses this)
     # Uses the metric specified by stop_crit in the classification config
-    stop_crit = cfg.trainer.classification.stop_crit
+    stop_crit = cfg.trainer.discriminative.stop_crit
     objective = trainer.best.get(stop_crit, float("inf"))
     # Negate accuracy/robustness metrics for minimization (Optuna minimizes by default)
     if stop_crit in ["acc", "rob"]:
