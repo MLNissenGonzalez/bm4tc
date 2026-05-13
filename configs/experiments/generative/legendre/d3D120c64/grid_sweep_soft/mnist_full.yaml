@@ -21,7 +21,6 @@ trainer:
     batch_size: 16
     patience: 300
     stop_crit: "acc"
-    watch_freq: 0
     save: false
     norm_control:
       target: null        # captured from pretrained BM at start of train()

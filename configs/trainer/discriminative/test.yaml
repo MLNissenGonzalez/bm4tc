@@ -13,5 +13,4 @@ auto_stack: True
 auto_unbind: False
 patience: 50
 stop_crit: "dis_loss"
-watch_freq: 0
 save: False

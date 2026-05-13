@@ -1,7 +1,6 @@
 # Test configuration for adversarial training (minimal settings for quick testing)
 max_epoch: 10
 batch_size: 256
-method: "pgd_at"
 
 optimizer:
   name: "adam"
@@ -15,7 +14,6 @@ criterion:
     eps: 1e-8
 
 evasion:
-  method: "FGM"
   norm: "inf"
   criterion:
     name: "negative log-likelihood"
@@ -28,11 +26,9 @@ evasion:
 
 stop_crit: "rob"
 patience: 5
-watch_freq: 0
 
 eval_rob_freq: 1
 
-trades_beta: 6.0
 clean_weight: 0.0
 curriculum: false
 curriculum_start: 0.0

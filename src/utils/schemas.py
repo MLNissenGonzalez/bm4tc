@@ -202,7 +202,6 @@ class DiscriminativeConfig:
     criterion: CriterionConfig
     stop_crit: str = "acc"
     patience: int = 250
-    watch_freq: int = 0
     save: bool = False
     auto_stack: bool = True
     auto_unbind: bool = False
@@ -214,11 +213,7 @@ cs.store(group="trainer/discriminative", name="schema", node=DiscriminativeConfi
 @dataclass
 class AdversarialConfig:
     """
-    Configuration for adversarial training of the BornMachine classifier.
-
-    Supports two methods:
-    - "pgd_at": PGD Adversarial Training (Madry et al.)
-    - "trades": TRADES (Zhang et al.) — L(x,y) + beta * KL(p(x) || p(x_adv))
+    Configuration for PGD adversarial training of the BornMachine classifier.
 
     Parameters
     ----------
@@ -226,8 +221,6 @@ class AdversarialConfig:
         Maximum number of training epochs.
     batch_size : int
         Batch size for training.
-    method : str
-        Adversarial training method: "pgd_at" or "trades".
     optimizer : OptimizerConfig
         Optimizer configuration for training.
     criterion : CriterionConfig
@@ -235,17 +228,11 @@ class AdversarialConfig:
     evasion : EvasionConfig
         Attack configuration (method, norm, strengths, etc.).
     stop_crit : str
-        Metric to monitor for early stopping: "acc", "dis_loss", "gen_loss", or "rob".
+        Metric to monitor for early stopping: "acc", "dis_loss", or "rob".
     patience : int
         Number of epochs without improvement before early stopping.
-    watch_freq : int
-        Frequency of gradient logging. 0 = disabled.
-    metrics : Dict[str, int]
-        Metrics to evaluate and their frequencies.
-    trades_beta : float
-        Trade-off parameter for TRADES (ignored for pgd_at). Default 6.0.
     clean_weight : float
-        Weight for clean examples in pgd_at (0.0 = pure adversarial). Default 0.0.
+        Weight for clean examples (0.0 = pure adversarial). Default 0.0.
     curriculum : bool
         Whether to use curriculum learning over epsilon. Default False.
     curriculum_start : float
@@ -261,15 +248,12 @@ class AdversarialConfig:
     """
     max_epoch: int
     batch_size: int
-    method: str
     optimizer: OptimizerConfig
     criterion: CriterionConfig
     evasion: EvasionConfig
     stop_crit: str
     patience: int
-    watch_freq: int
     eval_rob_freq: int = 5
-    trades_beta: float = 6.0
     clean_weight: float = 0.0
     curriculum: bool = False
     curriculum_start: float = 0.0
@@ -316,7 +300,6 @@ class GenerativeConfig:
     criterion: CriterionConfig
     stop_crit: str
     patience: int
-    watch_freq: int
     norm_control: NormControlConfig
     save: bool = False
     auto_stack: bool = True

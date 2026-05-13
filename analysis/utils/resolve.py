@@ -157,9 +157,6 @@ PARAM_ALIASES: Dict[str, str] = {
     "in_dim": "in-dim",
     "indim": "in-dim",
     # Adversarial param aliases
-    "trades_beta": "trades-beta",
-    "tradesbeta": "trades-beta",
-    "beta": "trades-beta",
     "clean_weight": "clean-weight",
     "cleanweight": "clean-weight",
     "strength": "epsilon",
@@ -214,7 +211,6 @@ REGIME_PARAM_MAP: Dict[str, Dict[str, str]] = {
         "weight-decay": "trainer.adversarial.optimizer.kwargs.weight_decay",
         "batch-size": "trainer.adversarial.batch_size",
         "epsilon": "trainer.adversarial.evasion.strengths",
-        "trades-beta": "trainer.adversarial.trades_beta",
         "clean-weight": "trainer.adversarial.clean_weight",
         "bond-dim": "born.init_kwargs.bond_dim",
         "in-dim": "born.init_kwargs.in_dim",
@@ -265,7 +261,7 @@ REGIME_METRIC_PREFIX: Dict[str, str] = {
 REGIME_DEFAULT_PARAMS: Dict[str, List[str]] = {
     "pre": ["lr", "weight-decay", "batch-size"],
     "gen": ["lr", "weight-decay", "batch-size"],
-    "adv": ["lr", "weight-decay", "epsilon", "trades-beta"],
+    "adv": ["lr", "weight-decay", "epsilon", "clean-weight"],
     "gan": ["lr", "weight-decay", "critic-lr", "r-real"],
 }
 

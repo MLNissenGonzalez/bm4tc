@@ -19,7 +19,6 @@ trainer:
     batch_size: 128
     patience: 100
     stop_crit: "acc"
-    watch_freq: 0
     save: true
     optimizer:
       name: "adam"

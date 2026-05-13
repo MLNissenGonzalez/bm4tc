@@ -653,8 +653,6 @@ def extract_classification_config(run: Any) -> Dict[str, Any]:
         }),
         "patience": cls_config.get("patience", 250),
         "stop_crit": cls_config.get("stop_crit", "clsloss"),
-        "watch_freq": cls_config.get("watch_freq", 1000),
-        "metrics": cls_config.get("metrics", {"clsloss": 1, "acc": 1}),
         "save": False,  # Don't save intermediate models in HPO
         "auto_stack": cls_config.get("auto_stack", True),
         "auto_unbind": cls_config.get("auto_unbind", False),
@@ -779,7 +777,6 @@ def print_classification_config_yaml(
     print(f"    batch_size: {cls['batch_size']}")
     print(f"    patience: {cls['patience']}")
     print(f"    stop_crit: \"{cls['stop_crit']}\"")
-    print(f"    watch_freq: {cls['watch_freq']}")
     print(f"    save: {str(cls['save']).lower()}")
     print("    optimizer:")
     print(f"      name: \"{cls['optimizer']['name']}\"")
@@ -873,8 +870,6 @@ def get_best_classification_config(
                 "criterion": {"name": "negative log-likelihood", "kwargs": {"eps": 1e-8}},
                 "patience": 250,
                 "stop_crit": "clsloss",
-                "watch_freq": 1000,
-                "metrics": {"clsloss": 1, "acc": 1},
                 "save": False,
                 "auto_stack": True,
                 "auto_unbind": False,

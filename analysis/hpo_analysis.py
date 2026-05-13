@@ -66,7 +66,7 @@ from analysis.utils.statistics import (
 DATA_SOURCE = "wandb"  # Change to "local" to load from outputs/ folder
 
 # --- WANDB SETTINGS (used if DATA_SOURCE == "wandb") ---
-WANDB_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
+WANDB_ENTITY = "your-wandb-entity"
 WANDB_PROJECT = "gan_train"
 EXPERIMENT_PATTERN = "adv_hpo"  # Regex pattern to match run groups
 DATASET_NAME = "spirals_4k"  # e.g., "spirals_4k", "moons_4k", or None for all
@@ -89,7 +89,7 @@ REGIME = "adv"
 
 # Parameter shorthand names to analyze
 # Common: "lr", "weight-decay" (or "wd"), "batch-size" (or "bs"), "bond-dim", "in-dim", "seed"
-# For "adv": also "epsilon", "trades-beta", "clean-weight"
+# For "adv": also "epsilon", "clean-weight"
 # For "gan": also "critic-lr", "r-real", "num-spc"
 # Set to None to use regime defaults
 PARAM_SHORTHANDS = ["lr", "weight-decay", "batch-size"]
