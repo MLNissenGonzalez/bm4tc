@@ -1,1 +1,1 @@
-from .generator import BornGenerator
+from .generator import BornGenerator, SamplingConfig

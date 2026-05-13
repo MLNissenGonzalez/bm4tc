@@ -1,14 +1,20 @@
 """
 Classes for training criterions suitable for BornMachines which
-output amplitudes/probabilities, not logits. 
+output amplitudes/probabilities, not logits.
 """
 import torch
 from torch import nn
-from typing import TYPE_CHECKING
-from . import schemas
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
 if TYPE_CHECKING:
     from src.models import BornMachine
+
+
+@dataclass
+class CriterionConfig:
+    name: str = "nll"
+    kwargs: Optional[Dict[str, Any]] = None
 
 # TODO: Think about making both NLL losses share more code or call structures..
 
@@ -279,7 +285,7 @@ _LOSS_MAP = {
 }
 
 
-def criterion(mode: str, cfg: schemas.CriterionConfig) -> nn.Module:
+def criterion(mode: str, cfg: CriterionConfig) -> nn.Module:
     """
     Instantiates a loss function based on the configuration specification.
 
@@ -290,7 +296,7 @@ def criterion(mode: str, cfg: schemas.CriterionConfig) -> nn.Module:
 
     Parameters
     ----------
-    cfg : schemas.CriterionConfig
+    cfg : CriterionConfig
         Configuration object specifying:
         - `name`: name or alias of the desired loss function (e.g. "nll", "bce").
         - `kwargs`: optional dictionary of keyword arguments for initialization.

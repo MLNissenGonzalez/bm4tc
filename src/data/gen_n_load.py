@@ -5,12 +5,33 @@
 
 import sklearn.datasets
 import numpy as np
-from dataclasses import dataclass
-from src.utils.schemas import DatasetConfig, DataGenDowConfig
+from dataclasses import dataclass, field
 import os
 import numpy.typing as npt
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
+
+
+@dataclass
+class DataGenDowConfig:
+    name: str = "circles"
+    size: Optional[int] = None
+    seed: Optional[int] = None
+    noise: Optional[float] = None
+    circ_factor: Optional[float] = None
+    dow_link: Optional[List[str]] = None
+    dow_password: Optional[str] = None
+
+
+@dataclass
+class DatasetConfig:
+    name: str = "circles"
+    gen_dow_kwargs: DataGenDowConfig = field(default_factory=DataGenDowConfig)
+    split: Tuple[float, float, float] = field(default_factory=lambda: (0.7, 0.15, 0.15))
+    split_seed: int = 42
+    overwrite: bool = False
+    use_ucr_split: bool = False
+    scaler: str = "minmax"
 
 import logging
 logger = logging.getLogger(__name__)

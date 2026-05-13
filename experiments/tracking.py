@@ -1,17 +1,38 @@
-import src.utils.schemas as schemas
-import wandb
-import hydra
+"""Experiment tracking: local log.json writer and optional W&B integration."""
+import json
+import logging
+import matplotlib.pyplot as plt
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-import logging
+from typing import Any, Callable, Dict, Optional
+
+import wandb
+import hydra
 from omegaconf import OmegaConf
-import matplotlib.pyplot as plt
+
+from experiments.config import Config
 
 logger = logging.getLogger(__name__)
 
 
-def init_wandb(cfg: schemas.Config) -> wandb.Run:
+def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]:
+    """
+    Returns an on_epoch_end callback that writes epoch metrics to log.json
+    and optionally forwards them to a W&B run.
+    """
+    log_path = output_dir / "log.json"
+    records = []
+
+    def log(epoch: int, metrics: dict) -> None:
+        records.append({"epoch": epoch, **metrics})
+        log_path.write_text(json.dumps(records, indent=2))
+        if wandb_run is not None:
+            wandb_run.log({"epoch": epoch, **metrics})
+
+    return log
+
+
+def init_wandb(cfg: Config) -> wandb.Run:
     """
     Initialize a W&B run from a Hydra config.
 
@@ -54,7 +75,7 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     return run
 
 
-def log_dataset_viz(datahandler):
+def log_dataset_viz(datahandler) -> None:
     """Log a scatter plot of the full dataset to W&B under 'dataset/all'."""
     if datahandler.data_dim != 2:
         logger.info(f"Skipping dataset viz for data_dim={datahandler.data_dim} (only 2D supported)")

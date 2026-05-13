@@ -33,19 +33,20 @@ OmegaConf.register_new_resolver(
     replace=True,
 )
 
-from experiments.wandb_utils import init_wandb, log_dataset_viz
-from experiments.logging import make_logger
-from src.utils import schemas, set_seed, get
+from experiments.tracking import init_wandb, log_dataset_viz, make_logger
+from experiments.config import Config, register
+from src.utils import set_seed, get
 from src.data import DataHandler
 from src.models import BornMachine
 from src.trainer import DiscriminativeTrainer, GenerativeTrainer
 import torch
 
 logger = logging.getLogger(__name__)
+register()
 
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
-def main(cfg: schemas.Config):
+def main(cfg: Config):
     """Main entry point for generative training experiments."""
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

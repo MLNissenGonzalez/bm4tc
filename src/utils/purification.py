@@ -1,7 +1,18 @@
 # Likelihood-based purification for Born Machines
 
 import torch
-from typing import Tuple
+from dataclasses import dataclass, field
+from typing import Tuple, Optional, List
+
+
+@dataclass
+class PurificationConfig:
+    norm: int | str = "inf"
+    num_steps: int = 20
+    step_size: Optional[float] = None
+    random_start: bool = False
+    radii: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    eps: float = 1e-12
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):
