@@ -1,10 +1,9 @@
 import time
 import torch
-from typing import *
+from pathlib import Path
+from typing import Callable, Dict, Optional
 import src.utils.schemas as schemas
 import src.utils.get as get
-import wandb
-from src.tracking import log_grads, record
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.trainer.eval import eval_dis
@@ -18,16 +17,7 @@ _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
 class Trainer:
-    """
-    Classification trainer for BornMachine discriminative training.
-
-    Trains the MPS as a classifier using the Born rule. Supports early stopping
-    and checkpoint saving.
-
-    Attributes:
-        best: Dict of best metric values achieved during training.
-        best_tensors: Tensors from the best-performing epoch.
-    """
+    """Classification trainer for BornMachine discriminative training."""
 
     def __init__(
             self,
@@ -49,7 +39,6 @@ class Trainer:
         if self.datahandler.classification is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
-        wandb.define_metric(f"{stage}/train/loss", summary="none")
         self._init_best()
 
         self.bornmachine = bornmachine
@@ -81,13 +70,11 @@ class Trainer:
 
             self.optimizer.zero_grad()
             loss.backward()
-            log_grads(bm_view=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
-                      step=self.step, stage=self.stage)
             self.optimizer.step()
 
             losses.append(loss.detach().cpu().item())
 
-            wandb.log({f"{self.stage}/train/loss": sum(losses) / len(losses)})
+        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
@@ -105,29 +92,15 @@ class Trainer:
         else:
             improved = current_value < former_best
 
-        # Optional early exit on goal
-        goal_key = list(self.goal.keys())[0] if self.goal else None
-        reached_goal = False
-        if goal_key is not None:
-            goal_val = self.valid_perf.get(goal_key)
-            if goal_val is not None:
-                if goal_key in _ACC_METRICS:
-                    reached_goal = goal_val > self.goal[goal_key]
-                else:
-                    reached_goal = goal_val < self.goal[goal_key]
-
-        if improved or reached_goal:
+        if improved:
             self.best = dict(self.valid_perf)
             self.best_tensors = [t.clone().detach() for t in self.bornmachine.classifier.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
-            if reached_goal:
-                self.patience_counter = self.train_cfg.patience + 1
-                logger.info("Goal reached.")
         else:
             self.patience_counter += 1
 
-    def _summarise_training(self):
+    def _summarise_training(self, output_dir: Optional[Path]):
         """Restore best tensors and clean up. No test eval."""
         self.bornmachine.classifier.prepare(tensors=self.best_tensors, device=self.device,
                                             train_cfg=self.train_cfg)
@@ -139,21 +112,19 @@ class Trainer:
         if hasattr(self, "valid_perf"):
             del self.valid_perf
 
-        if self.train_cfg.save:
-            import hydra
-            from pathlib import Path
-            run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-            folder = run_dir / "models"
-            folder.mkdir(parents=True, exist_ok=True)
-            self.bornmachine.save(path=str(folder / "cls"))
-            if wandb.run is not None and not wandb.run.disabled:
-                wandb.log_model(str(folder / "cls"))
+        if self.train_cfg.save and output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.bornmachine.save(path=str(output_dir / "cls"))
 
         logger.info(f"Classification-Trainer for {self.stage}-training finished.")
 
-    def train(self, goal: Dict[str, float] | None = None):
+    def train(
+            self,
+            on_epoch_end: Optional[Callable[[int, Dict], None]] = None,
+            output_dir: Optional[Path] = None,
+    ):
         """Run the classification training loop."""
-        self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.step, self.patience_counter = 0, 0
         self.epoch = 0
         self.best_epoch = 0
         self.epoch_times = []
@@ -179,7 +150,13 @@ class Trainer:
                 self.bornmachine, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc}
-            record(results=self.valid_perf, stage=self.stage, set="valid")
+
+            if on_epoch_end is not None:
+                on_epoch_end(self.epoch, {
+                    "dis_loss/train": self._train_loss,
+                    "dis_loss/valid": dis_loss,
+                    "acc/valid":      acc,
+                })
 
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
@@ -187,4 +164,4 @@ class Trainer:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break
 
-        self._summarise_training()
+        self._summarise_training(output_dir)

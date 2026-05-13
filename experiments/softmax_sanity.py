@@ -17,9 +17,12 @@ Run:
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import hydra, torch, logging
-from src.tracking.wandb_utils import init_wandb
-from src.tracking import log_dataset_viz
+import hydra
+import torch
+import logging
+from pathlib import Path
+from experiments.wandb_utils import init_wandb, log_dataset_viz
+from experiments.logging import make_logger
 from src.utils import schemas, set_seed
 from src.data import DataHandler
 from src.models import BornMachine
@@ -35,10 +38,6 @@ class SoftmaxSanityTrainer(ClassificationTrainer):
 
     Only _train_epoch is overridden. All other logic (early stopping,
     evaluation, checkpointing) is inherited unchanged from ClassificationTrainer.
-
-    Note: evaluation still uses Born-rule probabilities (bm.class_probabilities)
-    because the PerformanceEvaluator is unchanged. Accuracy reported during
-    training therefore reflects Born-rule, not softmax, discrimination.
     """
 
     def _train_epoch(self):
@@ -58,15 +57,11 @@ class SoftmaxSanityTrainer(ClassificationTrainer):
 
             self.optimizer.zero_grad()
             loss.backward()
-            from src.tracking import log_grads
-            log_grads(bm_view=self.bornmachine.classifier,
-                      watch_freq=self.train_cfg.watch_freq,
-                      step=self.step, stage=self.stage)
             self.optimizer.step()
 
             losses.append(loss.detach().cpu().item())
-            import wandb
-            wandb.log({f"{self.stage}/train/loss": sum(losses) / len(losses)})
+
+        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
 
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
@@ -84,8 +79,11 @@ def main(cfg: schemas.Config):
     datahandler.split_and_rescale(bornmachine)
     log_dataset_viz(datahandler)
 
+    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+    logger_cb = make_logger(run_dir, wandb_run=run)
+
     trainer = SoftmaxSanityTrainer(bornmachine, cfg, "pre", datahandler, device)
-    trainer.train()
+    trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
 
     run.finish()
 

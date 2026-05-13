@@ -35,7 +35,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sklearn.datasets
 
-from src.tracking.visualisation import create_2d_scatter
+from src.analysis.viz import create_2d_scatter
 
 # %%
 # =============================================================================

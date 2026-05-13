@@ -1,17 +1,11 @@
-"""
-Generative trainer for BornMachine using NLL minimization.
-
-Trains p(x|c) by minimizing negative log-likelihood.
-"""
+"""Generative trainer for BornMachine using NLL minimization."""
 
 import math
 from pathlib import Path
 import time
 import torch
-from typing import Dict
+from typing import Callable, Dict, Optional
 from src.utils import schemas, get
-import wandb
-from src.tracking import record, log_grads
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.utils.criterions import NormRegularizer
@@ -26,16 +20,7 @@ _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
 class Trainer:
-    """
-    Generative trainer for BornMachine using NLL minimization.
-
-    Trains the generator view of the BornMachine by minimizing negative
-    log-likelihood of p(x|c).
-
-    Attributes:
-        best: Dict of best metric values achieved during training.
-        best_tensors: Tensors from the best-performing epoch.
-    """
+    """Generative trainer for BornMachine using NLL minimization."""
 
     def __init__(
             self,
@@ -55,13 +40,9 @@ class Trainer:
 
         self.criterion = get.criterion("generative", self.train_cfg.criterion)
 
-        wandb.define_metric(f"{self.stage}/train/loss", summary="none")
-
         self._nc = self.train_cfg.norm_control
         self.norm_regularizer: NormRegularizer | None = None
         self._nc_target: float | None = None
-        if self._nc.soft_strength > 0.0:
-            wandb.define_metric(f"{self.stage}/train/norm_reg", summary="none")
 
         self._init_best()
 
@@ -70,7 +51,6 @@ class Trainer:
 
     def _init_best(self):
         self.best = {"gen_loss": float("inf"), "dis_loss": float("inf"), "acc": 0.0}
-
         self.stopping_criterion_name = self.train_cfg.stop_crit
         if self.stopping_criterion_name not in _VALID_STOP_CRIT:
             raise ValueError(
@@ -140,13 +120,10 @@ class Trainer:
                 reg_loss = self.norm_regularizer(self.bornmachine)
                 total_loss = nll_loss + reg_loss
             else:
-                reg_loss = None
                 total_loss = nll_loss
 
             self.optimizer.zero_grad()
             total_loss.backward()
-            log_grads(bm_view=self.bornmachine.generator, watch_freq=self.train_cfg.watch_freq,
-                      step=self.step, stage=self.stage)
             self.optimizer.step()
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
@@ -154,10 +131,7 @@ class Trainer:
 
             losses.append(nll_loss.detach().cpu().item())
 
-            log_payload = {f"{self.stage}/train/loss": sum(losses) / len(losses)}
-            if reg_loss is not None:
-                log_payload[f"{self.stage}/train/norm_reg"] = reg_loss.detach().cpu().item()
-            wandb.log(log_payload)
+        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
 
     def _update(self):
         current_value = self.valid_perf.get(self.stopping_criterion_name)
@@ -177,28 +151,15 @@ class Trainer:
         else:
             raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
 
-        goal_key = list(self.goal.keys())[0] if self.goal else None
-        reached_goal = False
-        if goal_key is not None:
-            goal_val = self.valid_perf.get(goal_key)
-            if goal_val is not None:
-                if goal_key in _ACC_METRICS:
-                    reached_goal = goal_val > self.goal[goal_key]
-                else:
-                    reached_goal = goal_val < self.goal[goal_key]
-
-        if improved or reached_goal:
+        if improved:
             self.best = dict(self.valid_perf)
             self.best_tensors = [t.clone().detach() for t in self.bornmachine.generator.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
-            if reached_goal:
-                self.patience_counter = self.train_cfg.patience + 1
-                logger.info("Goal reached.")
         else:
             self.patience_counter += 1
 
-    def _summarise_training(self):
+    def _summarise_training(self, output_dir: Optional[Path]):
         """Restore best tensors and clean up. No test eval."""
         self.bornmachine.generator.reset()
         self.bornmachine.generator.initialize(tensors=self.best_tensors)
@@ -215,20 +176,19 @@ class Trainer:
             logger.warning(
                 f"Best {self.stopping_criterion_name} is {best_stop} (non-finite); skipping model save."
             )
-        elif self.train_cfg.save:
-            import hydra
-            run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-            folder = run_dir / "models"
-            folder.mkdir(parents=True, exist_ok=True)
-            self.bornmachine.save(path=str(folder / "gen"))
-            if wandb.run is not None and not wandb.run.disabled:
-                wandb.log_model(str(folder / "gen"))
+        elif self.train_cfg.save and output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.bornmachine.save(path=str(output_dir / "gen"))
 
         logger.info("Generative-Trainer finished.")
 
-    def train(self, goal: Dict[str, float] | None = None):
+    def train(
+            self,
+            on_epoch_end: Optional[Callable[[int, Dict], None]] = None,
+            output_dir: Optional[Path] = None,
+    ):
         """Run the generative training loop."""
-        self.step, self.patience_counter, self.goal = 0, 0, goal
+        self.step, self.patience_counter = 0, 0
         self.epoch = 0
         self.best_epoch = 0
         self.epoch_times = []
@@ -258,7 +218,6 @@ class Trainer:
                 logger.info("Norm collapsed; ending training.")
                 break
 
-            # Sync to classifier view for eval_dis
             self.bornmachine.sync_tensors(after="generation", verify=False)
 
             gen_loss = eval_gen(
@@ -268,7 +227,14 @@ class Trainer:
                 self.bornmachine, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"gen_loss": gen_loss, "dis_loss": dis_loss, "acc": acc}
-            record(results=self.valid_perf, stage=self.stage, set="valid")
+
+            if on_epoch_end is not None:
+                on_epoch_end(self.epoch, {
+                    "gen_loss/train": self._train_loss,
+                    "gen_loss/valid": gen_loss,
+                    "dis_loss/valid": dis_loss,
+                    "acc/valid":      acc,
+                })
 
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
@@ -277,4 +243,4 @@ class Trainer:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break
 
-        self._summarise_training()
+        self._summarise_training(output_dir)

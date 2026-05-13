@@ -679,7 +679,7 @@ if COMPUTE_DISTRIBUTIONS and not df.empty and best_run is not None:
 
         # Generated samples
         try:
-            from src.tracking.visualisation import visualise_samples
+            from src.analysis.viz import visualise_samples
             from analysis.utils import find_model_checkpoint
             from src.models import BornMachine
 
