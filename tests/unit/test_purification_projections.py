@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.utils.purification.minimal import LikelihoodPurification, normalizing
+from src.utils.purification import LikelihoodPurification, normalizing
 
 BATCH = 8
 DIM = 6

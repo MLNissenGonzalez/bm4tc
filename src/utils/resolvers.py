@@ -7,7 +7,6 @@ def _training_regime(*, _root_):
         ("trainer.classification", "cls"),
         ("trainer.generative", "gen"),
         ("trainer.adversarial", "adv"),
-        ("trainer.ganstyle", "gan"),
     ]:
         if OmegaConf.select(_root_, key) is not None:
             parts.append(code)

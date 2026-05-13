@@ -47,11 +47,10 @@ class Trainer:
         self.device = device
         self.cfg, self.stage = cfg, stage # needed in summary of training
 
-        if stage == "pre": # TODO: I am using train_cfg only here. think about maybe have early stopping only for classification, retrain and not for ganstyle training.
+        if stage == "pre":
             self.train_cfg = cfg.trainer.classification
-        elif stage == "re":
-            self.train_cfg = cfg.trainer.ganstyle.retrain
-        else: raise f"{stage} not recognised."
+        else:
+            raise ValueError(f"Stage '{stage}' not recognised. Use 'pre'.")
 
         if self.datahandler.classification == None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)

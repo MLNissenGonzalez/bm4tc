@@ -1,7 +1,7 @@
 import pytest
 import torch
 from tests.conftest import DATA_DIM
-from src.utils.purification.gibbs import GibbsPurification
+from src.utils.purification import GibbsPurification
 
 pytestmark = pytest.mark.slow
 

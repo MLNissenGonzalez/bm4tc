@@ -3,7 +3,7 @@ import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 from tests.conftest import DATA_DIM, NUM_CLASSES
-from src.utils.evasion.minimal import (
+from src.utils.evasion import (
     JointProjectedGradientDescent,
     RobustnessEvaluation,
 )

@@ -57,7 +57,7 @@ def init_wandb(cfg: schemas.Config) -> wandb.Run:
     # Regime
     regime_parts = []
     for key, code in [("trainer.classification", "cls"), ("trainer.generative", "gen"),
-                       ("trainer.adversarial", "adv"), ("trainer.ganstyle", "gan")]:
+                       ("trainer.adversarial", "adv")]:
         if OmegaConf.select(cfg, key) is not None:
             regime_parts.append(code)
     regime = "".join(regime_parts) or "none"

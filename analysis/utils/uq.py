@@ -273,9 +273,9 @@ class UQEvaluation:
         Returns:
             UQResults with all evaluation metrics.
         """
-        from src.utils.evasion.minimal import RobustnessEvaluation
+        from src.utils.evasion import RobustnessEvaluation
         from src.utils.schemas import CriterionConfig
-        from src.utils.purification.minimal import LikelihoodPurification
+        from src.utils.purification import LikelihoodPurification
 
         cfg = self.config
         born.to(device)
@@ -505,7 +505,7 @@ class UQEvaluation:
         clean_gibbs_purification_results: Dict[int, PurificationMetrics] = {}
 
         if cfg.run_gibbs:
-            from src.utils.purification.gibbs import GibbsPurification
+            from src.utils.purification import GibbsPurification
 
             gibbs_purifier = GibbsPurification(
                 num_bins=cfg.gibbs_num_bins,

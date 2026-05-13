@@ -17,7 +17,7 @@ import wandb
 from src.tracking import PerformanceEvaluator, log_grads, record
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.utils.evasion.minimal import ProjectedGradientDescent, FastGradientMethod
+from src.utils.evasion import ProjectedGradientDescent, FastGradientMethod
 
 import logging
 logger = logging.getLogger(__name__)
