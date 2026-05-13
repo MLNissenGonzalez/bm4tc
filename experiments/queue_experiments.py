@@ -32,7 +32,7 @@ VALID_TYPES = ["classification", "adversarial", "generative"]
 BASE_KINDS = ["seed_sweep", "hpo", "grid_sweep", "cls_reg"]
 
 TYPE_TO_MODULE = {
-    "classification": "experiments.classification",
+    "classification": "experiments.discriminative",
     "adversarial":    "experiments.adversarial",
     "generative":     "experiments.generative",
 }

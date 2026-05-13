@@ -8,11 +8,10 @@ Implements two adversarial training methods:
 
 import time
 import torch
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Callable, Dict, Optional
 import src.utils.schemas as schemas
 import src.utils.get as get
-import wandb
-from src.tracking import log_grads, record
 from src.data.handler import DataHandler
 from src.models import BornMachine
 from src.utils.evasion import ProjectedGradientDescent, FastGradientMethod
@@ -33,10 +32,6 @@ class Trainer:
     Supports two methods:
     - PGD-AT: Replace inputs with adversarial examples, minimize L(x_adv, y)
     - TRADES: Minimize L(x, y) + beta * KL(p(x) || p(x_adv))
-
-    Attributes:
-        best: Dict of best metric values achieved during training.
-        best_tensors: Tensors from the best-performing epoch.
     """
 
     def __init__(
@@ -58,15 +53,6 @@ class Trainer:
 
         if self.train_cfg.method not in ["pgd_at", "trades"]:
             raise ValueError(f"Unknown adversarial training method: {self.train_cfg.method}")
-
-        wandb.define_metric(f"{stage}/train/loss", summary="none")
-        wandb.define_metric(f"{stage}/train/epsilon", summary="none")
-        if self.train_cfg.method == "pgd_at" and self.train_cfg.clean_weight > 0:
-            wandb.define_metric(f"{stage}/train/clean_loss", summary="none")
-            wandb.define_metric(f"{stage}/train/adv_loss", summary="none")
-        if self.train_cfg.method == "trades":
-            wandb.define_metric(f"{stage}/train/clean_loss", summary="none")
-            wandb.define_metric(f"{stage}/train/kl_loss", summary="none")
 
         self._init_best()
 
@@ -155,16 +141,13 @@ class Trainer:
 
             self.optimizer.zero_grad()
             loss.backward()
-            log_grads(bm_view=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
-                      step=self.step, stage=self.stage)
             self.optimizer.step()
             losses.append(loss.detach().cpu().item())
 
-        avg_loss = sum(losses) / len(losses)
-        wandb.log({f"{self.stage}/train/loss": avg_loss, f"{self.stage}/train/epsilon": epsilon})
+        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
 
     def _train_epoch_trades(self, epsilon: float):
-        total_losses, clean_losses, kl_losses = [], [], []
+        total_losses = []
         self.bornmachine.classifier.train()
         beta = self.train_cfg.trades_beta
 
@@ -185,20 +168,11 @@ class Trainer:
 
             self.optimizer.zero_grad()
             loss.backward()
-            log_grads(bm_view=self.bornmachine.classifier, watch_freq=self.train_cfg.watch_freq,
-                      step=self.step, stage=self.stage)
             self.optimizer.step()
 
             total_losses.append(loss.detach().cpu().item())
-            clean_losses.append(clean_loss.detach().cpu().item())
-            kl_losses.append(kl_loss.detach().cpu().item())
 
-        wandb.log({
-            f"{self.stage}/train/loss": sum(total_losses) / len(total_losses),
-            f"{self.stage}/train/clean_loss": sum(clean_losses) / len(clean_losses),
-            f"{self.stage}/train/kl_loss": sum(kl_losses) / len(kl_losses),
-            f"{self.stage}/train/epsilon": epsilon
-        })
+        self._train_loss = sum(total_losses) / len(total_losses) if total_losses else float("nan")
 
     def _train_epoch(self, epsilon: float):
         if self.train_cfg.method == "pgd_at":
@@ -222,28 +196,15 @@ class Trainer:
         else:
             improved = current_value < former_best
 
-        goal_key = list(self.goal.keys())[0] if self.goal else None
-        reached_goal = False
-        if goal_key is not None:
-            goal_val = self.valid_perf.get(goal_key)
-            if goal_val is not None:
-                if goal_key in _ACC_METRICS:
-                    reached_goal = goal_val > self.goal[goal_key]
-                else:
-                    reached_goal = goal_val < self.goal[goal_key]
-
-        if improved or reached_goal:
+        if improved:
             self.best = dict(self.valid_perf)
             self.best_tensors = [t.clone().detach() for t in self.bornmachine.classifier.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
-            if reached_goal:
-                self.patience_counter = self.train_cfg.patience + 1
-                logger.info("Goal reached.")
         else:
             self.patience_counter += 1
 
-    def _summarise_training(self):
+    def _summarise_training(self, output_dir: Optional[Path]):
         """Restore best tensors and clean up. No test eval."""
         self.bornmachine.classifier.prepare(tensors=self.best_tensors, device=self.device,
                                             train_cfg=self.train_cfg)
@@ -254,23 +215,20 @@ class Trainer:
         self.bornmachine.to("cpu")
         del self.valid_perf
 
-        if self.train_cfg.save:
-            import hydra
-            from pathlib import Path
-            run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-            folder = run_dir / "models"
-            folder.mkdir(parents=True, exist_ok=True)
-            self.bornmachine.save(path=str(folder / "adv"))
-            if wandb.run is not None and not wandb.run.disabled:
-                wandb.log_model(str(folder / "adv"))
+        if self.train_cfg.save and output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.bornmachine.save(path=str(output_dir / "adv"))
 
         logger.info(f"Adversarial Trainer ({self.train_cfg.method}) finished.")
 
-    def train(self, goal: Optional[Dict[str, float]] = None):
+    def train(
+            self,
+            on_epoch_end: Optional[Callable[[int, Dict], None]] = None,
+            output_dir: Optional[Path] = None,
+    ):
         """Run the adversarial training loop."""
         self.step = 0
         self.patience_counter = 0
-        self.goal = goal
         self.best_epoch = 0
         self.epoch_times = []
 
@@ -303,7 +261,16 @@ class Trainer:
                 )
                 self.valid_perf["rob"] = rob
 
-            record(results=self.valid_perf, stage=self.stage, set="valid")
+            if on_epoch_end is not None:
+                metrics = {
+                    "dis_loss/train": self._train_loss,
+                    "epsilon/train":  epsilon,
+                    "dis_loss/valid": dis_loss,
+                    "acc/valid":      acc,
+                }
+                if "rob" in self.valid_perf:
+                    metrics["rob/valid"] = self.valid_perf["rob"]
+                on_epoch_end(self.epoch, metrics)
 
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
@@ -312,4 +279,4 @@ class Trainer:
                 logger.info(f"Early stopping after epoch {self.epoch}.")
                 break
 
-        self._summarise_training()
+        self._summarise_training(output_dir)
