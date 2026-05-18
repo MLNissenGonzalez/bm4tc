@@ -423,3 +423,33 @@ class RobustnessEvaluation:
 
         return strength_acc
 
+
+if __name__ == "__main__":
+    import sys
+    import torch
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    bm.sync_tensors(after="classification")
+
+    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
+    y = torch.randint(0, 2, (8,))
+    # Absolute epsilon = 0.05 * range_size(legendre=2.0) = 0.1
+    abs_eps = 0.05 * 2.0
+
+    for name, ec in [
+        ("FGM", EvasionConfig(method="FGM", strengths=[abs_eps])),
+        ("PGD", EvasionConfig(method="PGD", num_steps=3, strengths=[abs_eps])),
+    ]:
+        attack = build_attack(ec)
+        adv = attack.generate(born=bm, naturals=x, labels=y, strength=abs_eps, device=device)
+        assert adv.shape == x.shape, f"{name}: shape mismatch"
+        delta = (adv - x).abs().max().item()
+        print(f"  {name:5s}  max_delta={delta:.4f}  (eps_abs={abs_eps})")
+
+    print("evasion.py smoke test passed.")

@@ -306,3 +306,26 @@ _EMBEDDING_RANGE_SIZE: dict[str, float] = {
 def embedding_range_size(embedding: str | None) -> float:
     """Return the total size of the input range for an embedding. Falls back to 1.0."""
     return _EMBEDDING_RANGE_SIZE.get((embedding or "").replace(" ", "").lower(), 1.0)
+
+
+if __name__ == "__main__":
+    import torch
+
+    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2)  # (8, 2) in legendre range
+
+    classes = {
+        "legendre":   LegendreEmbedding,
+        "fourier":    FourierEmbedding,
+        "hermite":    HermiteEmbedding,
+        "chebychev1": ChebyshevT1Embedding,
+        "chebychev2": ChebyshevT2Embedding,
+        "poly":       PolyEmbedding,
+        "simp":       SimpEmbedding,
+    }
+    for name, cls in classes.items():
+        emb = cls(dim=2)
+        out = emb(x)
+        assert out.shape[0] == 8 and out.shape[1] == 2
+        print(f"  {name:12s}  input {tuple(x.shape)}  →  output {tuple(out.shape)}  finite={out.isfinite().all().item()}")
+
+    print("embeddings.py smoke test passed.")

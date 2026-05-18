@@ -185,7 +185,7 @@ class AdversarialTrainer:
             output_dir.mkdir(parents=True, exist_ok=True)
             self.bornmachine.save(path=str(output_dir / "adv"))
 
-        logger.info(f"Adversarial Trainer ({self.train_cfg.method}) finished.")
+        logger.info(f"Adversarial Trainer ({self.train_cfg.evasion.method}) finished.")
 
     def train(
             self,
@@ -205,7 +205,7 @@ class AdversarialTrainer:
 
         rob_freq = self.train_cfg.eval_rob_freq
 
-        logger.info(f"Adversarial training ({self.train_cfg.method}) begins.")
+        logger.info(f"Adversarial training ({self.train_cfg.evasion.method}) begins.")
 
         for epoch in range(self.train_cfg.max_epoch):
             epoch_start = time.perf_counter()
@@ -246,3 +246,46 @@ class AdversarialTrainer:
                 break
 
         self._summarise_training(output_dir)
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    import torch
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.data.handler import DataHandler
+    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
+    from src.utils.evasion import EvasionConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    ds_cfg = DatasetConfig(
+        name="spirals",
+        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
+        overwrite=True,
+    )
+    dh = DataHandler(ds_cfg)
+    dh.load()
+    dh.split_and_rescale(bm)
+
+    # epsilon=0.05 as fraction of legendre range (2.0) → 0.1 absolute
+    evasion_cfg = EvasionConfig(method="PGD", num_steps=3, strengths=[0.05])
+    train_cfg = AdversarialConfig(
+        max_epoch=10, batch_size=4, patience=250,
+        evasion=evasion_cfg, eval_rob_freq=2,
+    )
+    trainer = AdversarialTrainer(bornmachine=bm, train_cfg=train_cfg, datahandler=dh, device=device)
+
+    logged = []
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+
+    assert len(logged) == 10, f"Expected 10 epochs, got {len(logged)}"
+    rob_epochs = [m for _, m in logged if "rob/valid" in m]
+    assert len(rob_epochs) == 5, f"Expected 5 rob evals (every 2 epochs), got {len(rob_epochs)}"
+    last_ep, last_m = logged[-1]
+    print(f"  epoch={last_ep}  dis_loss/valid={last_m['dis_loss/valid']:.4f}  acc/valid={last_m['acc/valid']:.4f}")
+    print(f"  rob evals at epochs: {[ep for ep, m in logged if 'rob/valid' in m]}")
+    print("adversarial.py smoke test passed.")

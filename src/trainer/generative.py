@@ -262,3 +262,38 @@ class GenerativeTrainer:
                 break
 
         self._summarise_training(output_dir)
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    import torch
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.data.handler import DataHandler
+    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    ds_cfg = DatasetConfig(
+        name="spirals",
+        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
+        overwrite=True,
+    )
+    dh = DataHandler(ds_cfg)
+    dh.load()
+    dh.split_and_rescale(bm)
+
+    train_cfg = GenerativeConfig(max_epoch=10, batch_size=4, patience=250)
+    trainer = GenerativeTrainer(bornmachine=bm, train_cfg=train_cfg, datahandler=dh, device=device)
+
+    logged = []
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+
+    assert len(logged) == 10, f"Expected 10 epochs, got {len(logged)}"
+    last_ep, last_m = logged[-1]
+    assert "gen_loss/valid" in last_m and "dis_loss/valid" in last_m
+    print(f"  epoch={last_ep}  gen_loss/valid={last_m['gen_loss/valid']:.4f}  dis_loss/valid={last_m['dis_loss/valid']:.4f}")
+    print("generative.py smoke test passed.")
