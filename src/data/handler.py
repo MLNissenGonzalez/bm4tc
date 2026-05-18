@@ -276,3 +276,37 @@ class DataHandler:
             int(round(ratios[1] * num_spc)),
             int(round(ratios[2] * num_spc))
         ]
+
+
+if __name__ == "__main__":
+    import sys
+    import torch
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+
+    ds_cfg = DatasetConfig(
+        name="spirals",
+        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
+        overwrite=True,
+    )
+    dh = DataHandler(ds_cfg)
+    dh.load()
+    dh.split_and_rescale(bm)
+    dh.get_classification_loaders(batch_size=4)
+
+    lo, hi = bm.input_range
+    for split, loader in dh.classification.items():
+        x_batch, y_batch = next(iter(loader))
+        assert x_batch.shape[1] == 2, f"{split}: unexpected feature dim"
+        assert x_batch.min() >= lo - 1e-5 and x_batch.max() <= hi + 1e-5, \
+            f"{split}: data out of range [{lo}, {hi}]"
+        print(f"  {split:6s}  batch={tuple(x_batch.shape)}  range=[{x_batch.min():.3f}, {x_batch.max():.3f}]")
+
+    print("handler.py smoke test passed.")

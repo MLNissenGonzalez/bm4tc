@@ -326,3 +326,30 @@ def criterion(mode: str, cfg: CriterionConfig) -> nn.Module:
         raise ValueError(f"Loss '{cfg.name}' not recognised")
     # use empty dict if kwargs is None
     return OPTIONS[loss_key](**(cfg.kwargs or {}))
+
+
+if __name__ == "__main__":
+    import torch
+
+    probs  = torch.softmax(torch.randn(8, 2), dim=1)
+    labels = torch.randint(0, 2, (8,))
+    amps   = torch.randn(8, 2)
+
+    nll = ClassificationNLL()
+    loss = nll(probs, labels)
+    assert loss.isfinite(), "NLL loss non-finite"
+    print(f"  ClassificationNLL      loss={loss.item():.4f}")
+
+    softmax_nll = ClassificationSoftmaxNLL()
+    loss2 = softmax_nll(amps, labels)
+    assert loss2.isfinite(), "SoftmaxNLL loss non-finite"
+    print(f"  ClassificationSoftmaxNLL loss={loss2.item():.4f}")
+
+    cfg_nll  = CriterionConfig(name="nll")
+    cfg_bce  = CriterionConfig(name="bce")
+    c1 = criterion("classification", cfg_nll)
+    c2 = criterion("classification", cfg_bce)
+    assert c2(probs, labels.float()).isfinite()
+    print(f"  get_criterion('classification', nll/bce) OK")
+
+    print("criterions.py smoke test passed.")

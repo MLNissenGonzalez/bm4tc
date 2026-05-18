@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set, Text
 from .classifier import BornClassifier
 from .generator import BornGenerator, SamplingConfig
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig
 import src.utils.get as get
 import logging
 logger = logging.getLogger(__name__)
@@ -50,6 +50,10 @@ class BornMachine:
             device: Torch device for tensors.
             tensors: Pre-trained tensors to initialize from (for loading checkpoints).
         """
+        # Convert plain dataclass to OmegaConf config if needed (e.g. __main__ smoke tests).
+        if not isinstance(cfg, DictConfig):
+            import dataclasses
+            cfg = OmegaConf.create(dataclasses.asdict(cfg))
         # Edit init_kwargs if not fully instantiated yet.
         OmegaConf.set_struct(cfg, False) # Temporarily disable struct mode to set dynamic values
         if getattr(cfg.init_kwargs, "n_features", None) is None:
@@ -346,4 +350,32 @@ class BornMachine:
         self.classifier.unset_data_nodes()
         self.generator.unset_data_nodes()
 
-    
+
+if __name__ == "__main__":
+    import torch
+
+    device = torch.device("cpu")
+    cfg = BornMachineConfig(
+        embedding="legendre",
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
+    )
+    bm = BornMachine(cfg=cfg, data_dim=2, num_classes=2, device=device)
+    bm.sync_tensors(after="classification")
+
+    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
+    y = torch.randint(0, 2, (8,))
+
+    probs = bm.class_probabilities(x)
+    assert probs.shape == (8, 2), f"probs shape {probs.shape}"
+    assert (probs >= 0).all() and (probs.sum(dim=1) - 1).abs().max() < 1e-5, "probs invalid"
+    print(f"  class_probabilities  shape={tuple(probs.shape)}  sum_ok=True")
+
+    log_px = bm.marginal_log_probability(x)
+    assert log_px.shape == (8,) and log_px.isfinite().all(), "marginal_log_probability failed"
+    print(f"  marginal_log_prob    shape={tuple(log_px.shape)}  finite=True")
+
+    log_Z = bm.generator.log_partition_function()
+    assert log_Z.isfinite(), f"log_Z non-finite: {log_Z}"
+    print(f"  log_Z={log_Z.item():.4f}")
+
+    print("born.py smoke test passed.")

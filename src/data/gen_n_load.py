@@ -451,3 +451,17 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
         num_cls=len(np.unique(t)),
         ucr_train_size=ucr_train_size,
     )
+
+
+if __name__ == "__main__":
+    ds_cfg = DatasetConfig(
+        name="spirals",
+        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
+        overwrite=True,
+    )
+    ds = load_dataset(ds_cfg)
+    assert ds.X.shape == (64, 2), f"Unexpected shape: {ds.X.shape}"
+    assert ds.num_cls == 2, f"Unexpected num_cls: {ds.num_cls}"
+    assert ds.X.dtype in (np.float32, np.float64), f"Unexpected dtype: {ds.X.dtype}"
+    print(f"  spirals  shape={ds.X.shape}  classes={ds.num_cls}  dtype={ds.X.dtype}")
+    print("gen_n_load.py smoke test passed.")

@@ -76,3 +76,29 @@ def eval_softmax(bm, loader, device) -> tuple[float, float]:
     softmax_loss = sum(losses) / len(losses) if losses else float("nan")
     softmax_acc = correct / total if total > 0 else float("nan")
     return softmax_loss, softmax_acc
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    bm.sync_tensors(after="classification")
+    bm.cache_log_Z()
+
+    ds = TensorDataset(torch.zeros(8, 2), torch.randint(0, 2, (8,)))
+    loader = DataLoader(ds, batch_size=4)
+
+    dis_loss, acc, gen_loss = eval_metrics(bm, loader, device)
+    assert math.isfinite(dis_loss), f"dis_loss non-finite: {dis_loss}"
+    assert math.isfinite(acc), f"acc non-finite: {acc}"
+    assert math.isfinite(gen_loss), f"gen_loss non-finite: {gen_loss}"
+    print(f"  eval_metrics  dis_loss={dis_loss:.4f}  acc={acc:.4f}  gen_loss={gen_loss:.4f}")
+    print("eval.py smoke test passed.")

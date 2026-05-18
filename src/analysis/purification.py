@@ -297,3 +297,33 @@ class GibbsPurification:
         generator.prepare()
 
         return x_purified, log_px_after.detach().cpu()
+
+
+if __name__ == "__main__":
+    import sys
+    import torch
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    bm.sync_tensors(after="classification")
+
+    x_adv = torch.zeros(4, 2)
+    radius = 0.1
+
+    purifier = LikelihoodPurification(norm="inf", num_steps=5)
+    x_pur, log_px = purifier.purify(bm, x_adv, radius=radius, device=device)
+    assert x_pur.shape == x_adv.shape, "LikelihoodPurification: shape mismatch"
+    assert log_px.isfinite().all(), "LikelihoodPurification: non-finite log_px"
+    print(f"  LikelihoodPurification  shape={tuple(x_pur.shape)}  log_px_mean={log_px.mean().item():.4f}")
+
+    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, radius=0.1)
+    x_g, log_px_g = gibbs.purify(bm, x_adv, n_sweeps=1, device=device)
+    assert x_g.shape == x_adv.shape, "GibbsPurification: shape mismatch"
+    print(f"  GibbsPurification       shape={tuple(x_g.shape)}  log_px_mean={log_px_g.mean().item():.4f}")
+
+    print("purification.py smoke test passed.")

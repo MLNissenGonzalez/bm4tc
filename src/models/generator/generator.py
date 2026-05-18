@@ -559,3 +559,29 @@ class BornGenerator(tk.models.MPS):
                 data=embs, inline_input=True, inline_mats=True)  # prob. amplitude
 
         return self.abs_square(amplitude)
+
+
+if __name__ == "__main__":
+    import sys
+    import torch
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[3]))
+    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+
+    device = torch.device("cpu")
+    bm = BornMachine(
+        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+        data_dim=2, num_classes=2, device=device,
+    )
+    bm.sync_tensors(after="classification")
+
+    log_Z = bm.generator.log_partition_function()
+    assert log_Z.isfinite(), f"log_Z non-finite: {log_Z}"
+    print(f"  log_Z={log_Z.item():.6f}  finite=True")
+
+    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
+    y = torch.randint(0, 2, (8,))
+    sq = bm.generator.joint_probability(x, y)
+    assert sq.shape == (8,) and sq.isfinite().all()
+    print(f"  joint_probability  shape={tuple(sq.shape)}  finite=True")
+
+    print("generator.py smoke test passed.")
