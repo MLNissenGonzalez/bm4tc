@@ -228,7 +228,7 @@ REGIME = resolve_regime_from_path(SWEEP_DIR)
 # → "pre" | "gen" | "adv" | "gan"
 ```
 
-Both functions tokenize the path on `/` and `_` and match against known strings. This works for both new-style paths (`outputs/seed_sweep/gen/hermite/d4D3/moons_4k_2102`) and old-style flat names (`seed_sweep_adv_d30D18fourier_moons_4k_1202`).
+Both functions tokenize the path on `/` and `_` and match against known strings. This works for paths like `outputs/seed_sweep/gen/hermite/d4r3/moons_2102`.
 
 ---
 

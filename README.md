@@ -14,10 +14,9 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 | Script | Regime | Description |
 |--------|--------|-------------|
-| `experiments/classification.py` | `cls` | Discriminative classifier (NLL on p(c\|x)) |
+| `experiments/discriminative.py` | `dis` | Discriminative classifier (NLL on p(c\|x)) |
 | `experiments/generative.py` | `gen` | Classification pretraining + generative NLL on p(x,c) |
 | `experiments/adversarial.py` | `adv` | Classification pretraining + PGD-AT or TRADES adversarial training |
-| `experiments/ganstyle.py` | `gan` | Classification pretraining + GAN-style training with an MLP critic |
 
 ## Trustworthiness Evaluation
 
@@ -60,29 +59,26 @@ All experiments are run as Python modules from the project root. Configurations 
 
 ```bash
 # Single run
-python -m experiments.classification +experiments=classification/fourier/d4D3/hpo/moons
+python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
 
 # Multirun / seed sweep
-python -m experiments.generative --multirun +experiments=generative/legendre/d10D6/seed_sweep/moons_4k
+python -m experiments.generative --multirun +experiments=generative/legendre/d10r6/seed_sweep/circles
 
 # Batch-run all unrun configs in a filter set
 python -m experiments.queue_experiments --filter-type gen --filter-embedding legendre --dry-run
 
 # Disable W&B for local debugging
-python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
+python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
 ```
 
 ## Post-Hoc Analysis
 
 ```bash
-# Analyse all completed but unanalysed sweeps
-python analysis/queue_seed_sweep.py
-
 # Analyse a specific sweep
-python analysis/seed_sweep_analysis.py outputs/seed_sweep/gen/legendre/d10D6/moons_4k_1802
+python analysis/seed_sweep_analysis.py outputs/seed_sweep/gen/legendre/d10r6/circles_1802
 
-# Regenerate distribution plots for analysed sweeps
-python analysis/queue_visualize.py
+# Analyse all completed but unanalysed sweeps in batch
+python analysis/queue_seed_sweep.py
 ```
 
 Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
@@ -91,18 +87,16 @@ Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (classification, generative, adversarial, ganstyle)
+├── experiments/        # Entry-point scripts (discriminative, generative, adversarial)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
-│   ├── models/         # BornMachine, BornClassifier, BornGenerator, Critic
-│   ├── trainer/        # Training loops for each regime
-│   ├── tracking/       # PerformanceEvaluator, W&B utilities, FID, visualisation
+│   ├── models/         # BornMachine, BornClassifier, BornGenerator
+│   ├── trainer/        # Training loops + eval functions for each regime
+│   ├── analysis/       # viz.py, purification.py (no W&B dependency)
 │   ├── data/           # DataHandler, dataset generation and loading
-│   └── utils/          # Schemas, embeddings, losses, PGD/FGM attacks, purification
+│   └── utils/          # Embeddings, losses, PGD/FGM attacks, resolvers
 ├── analysis/
 │   ├── seed_sweep_analysis.py   # Post-hoc metrics for one sweep
-│   ├── queue_seed_sweep.py   # Batch runner over all sweeps
-│   ├── queue_visualize.py  # Batch distribution plot regenerator
 │   ├── utils/              # evaluate.py, uq.py, mia.py, resolve.py, statistics.py
 │   └── outputs/            # Generated analysis artifacts (git-ignored)
 └── environment.yml

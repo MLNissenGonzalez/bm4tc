@@ -1,39 +1,35 @@
 # Experiments Guide
 
-This directory contains the entry point scripts for running experiments.
+Entry point scripts for running experiments. All scripts are run as Python modules from the project root.
 
 ## Entry Points
 
 | Script | Purpose |
 |--------|---------|
-| `classification.py` | Classification-only training |
-| `ganstyle.py` | Classification pretraining + GAN-style training |
-| `adversarial.py` | Classification pretraining + Adversarial training |
-| `generative.py` | Classification pretraining + Generative NLL training |
-| `softmax_sanity.py` | Softmax interpretation sanity check (raw amplitudes as logits) |
-| `queue_experiments.py` | Batch-run/list HPO, grid_sweep, and seed_sweep configs (skip already-run) |
+| `discriminative.py` | Discriminative NLL training |
+| `generative.py` | Classification pretraining + generative NLL training |
+| `adversarial.py` | Classification pretraining + adversarial training (PGD-AT or TRADES) |
+| `softmax_sanity.py` | Softmax interpretation sanity check (raw amplitudes as softmax logits) |
+| `queue_experiments.py` | Batch-run/list HPO and seed_sweep configs (skip already-run) |
 
 ## Running Experiments
 
 ### Basic Usage
 
 ```bash
-# Classification experiment
-python -m experiments.classification +experiments=classification/fourier_d30D18/D18
-
-# GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
+# Discriminative experiment
+python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
 
 # Adversarial training experiment
-python -m experiments.adversarial +experiments=adversarial/fourier_d30D18/hpo/moons
+python -m experiments.adversarial +experiments=adversarial/fourier/d4r3/hpo/moons
 
 # Generative training experiment
-python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
+python -m experiments.generative +experiments=generative/fourier/d4r3/hpo/moons
 
-# Quick test run
-python -m experiments.classification +experiments=tests/classification
+# Quick test run (tiny config, no W&B)
+python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
 
-# Softmax sanity check (MPS with softmax loss instead of Born rule)
+# Softmax sanity check
 python -m experiments.softmax_sanity +experiments=tests/softmax/legendre_mnist
 ```
 
@@ -41,109 +37,91 @@ python -m experiments.softmax_sanity +experiments=tests/softmax/legendre_mnist
 
 ```bash
 # Fewer epochs
-python -m experiments.classification +experiments=tests/classification \
-    trainer.classification.max_epoch=10
+python -m experiments.discriminative +experiments=tests/discriminative \
+    trainer.discriminative.max_epoch=10
 
 # Disable W&B
-python -m experiments.classification +experiments=tests/classification \
+python -m experiments.discriminative +experiments=tests/discriminative \
     tracking.mode=disabled
 
 # Different learning rate
-python -m experiments.classification +experiments=tests/classification \
-    trainer.classification.optimizer.kwargs.lr=1e-3
+python -m experiments.discriminative +experiments=tests/discriminative \
+    trainer.discriminative.optimizer.kwargs.lr=1e-3
 ```
 
 ### Multirun (Grid Sweep)
 
 ```bash
-python -m experiments.classification --multirun +experiments=classification/fourier_d30D18/D18_sweep
+python -m experiments.discriminative --multirun +experiments=discriminative/fourier/d4r3/sweep
 ```
 
 ### Hyperparameter Optimization (Optuna)
 
 **Option 1**: Specify sweeper in experiment config (recommended):
 ```yaml
-# configs/experiments/classification/fourier_d30D18/hpo/lrwd_hpo.yaml
+# configs/experiments/discriminative/fourier/d4r3/hpo/lrwd_hpo.yaml
 defaults:
   - override /hydra/sweeper: optuna
 ```
 ```bash
-python -m experiments.classification --multirun +experiments=classification/fourier_d30D18/hpo/lrwd_hpo
+python -m experiments.discriminative --multirun +experiments=discriminative/fourier/d4r3/hpo/lrwd_hpo
 ```
 
 **Option 2**: Specify sweeper on command line:
 ```bash
-python -m experiments.classification --multirun \
+python -m experiments.discriminative --multirun \
     hydra/sweeper=optuna \
-    +experiments=classification/fourier_d30D18/D18
-```
-
-**Override HPO settings from command line**:
-```bash
-python -m experiments.classification --multirun \
-    +experiments=classification/fourier_d30D18/hpo/lrwd_hpo \
-    hydra.sweeper.n_trials=100 \
-    hydra.sweeper.n_jobs=4
+    +experiments=discriminative/fourier/d4r3/hpo/lrwd_hpo
 ```
 
 ## Output Directory Structure
 
-Each run creates an output directory:
-
+Each single run creates:
 ```
-outputs/
-└── {experiment}_{regime}_{archinfo}_{dataset}_{DDMM_HHMM}/
-    ├── .hydra/
+outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM_HHMM}/
+    .hydra/
     │   ├── config.yaml       # Resolved config (all values)
     │   ├── hydra.yaml        # Hydra settings
-    │   └── overrides.yaml    # Command line overrides used
-    ├── models/               # Saved model checkpoints (if save=True)
-    │   └── {dataset}_{model_info}.pt
-    └── wandb/                # W&B local files
-        └── ...
+    │   └── overrides.yaml    # Overrides used
+    ├── models/               # Saved model checkpoint (if save=True)
+    │   └── model.pt
+    └── log.json              # Epoch-level metrics (always written)
 ```
 
 For multirun/sweep:
 ```
-outputs/
-└── {experiment}_{regime}_{archinfo}_{dataset}_{DDMM}/
-    ├── 0/                    # First trial (job_num=0)
+outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
+    ├── 0/                    # First trial
     │   ├── .hydra/
-    │   └── ...
-    ├── 1/                    # Second trial (job_num=1)
-    │   └── ...
-    └── multirun.yaml         # Sweep configuration
+    │   ├── log.json
+    │   └── models/model.pt
+    ├── 1/                    # Second trial
+    └── multirun.yaml
 ```
 
 **Naming components:**
-- `{experiment}`: purpose-only label (e.g. `hpo`, `best`, `seed_sweep`)
-- `{regime}`: concatenation of active trainer codes (`cls`, `gen`, `adv`, `gan`)
-- `{archinfo}`: `d{in_dim}D{bond_dim}{embedding}` (e.g. `d30D18fourier`)
-- `{dataset}`: dataset name (e.g. `moons_4k`)
+- `{kind}`: `hpo` | `seed_sweep` | `alpha_curve` | `test`
+- `{regime}`: `dis` | `gen` | `adv`
+- `{arch}`: `d{in_dim}r{bond_dim}` — e.g. `d4r3`, `d30r18`
+- `{dataset}`: dataset name — e.g. `moons`, `circles`
 - `{date}`: `DDMM` for multiruns, `DDMM_HHMM` for single runs
 
 ## Useful Commands
 
 **Debug config** (print resolved config without running):
 ```bash
-python -m experiments.classification --cfg job +experiments=tests/classification
+python -m experiments.discriminative --cfg job +experiments=tests/discriminative
 ```
 
 **List available options**:
 ```bash
-python -m experiments.classification --help
-```
-
-**Dry run** (resolve config only):
-```bash
-python -m experiments.classification --info all +experiments=tests/classification
+python -m experiments.discriminative --help
 ```
 
 ## Batch-Running Experiments (`queue_experiments.py`)
 
-`queue_experiments.py` discovers all `hpo/`, `grid_sweep/`, and `seed_sweep/` configs under
-`configs/experiments/` and runs them sequentially, skipping any that already
-have a matching output directory.
+Discovers all `hpo/` and `seed_sweep/` configs under `configs/experiments/` and runs them
+sequentially, skipping any that already have a matching output directory.
 
 ### Usage
 
@@ -157,60 +135,31 @@ python -m experiments.queue_experiments --dry-run
 # Run everything that hasn't been run yet
 python -m experiments.queue_experiments
 
-# Re-run even if outputs already exist
-python -m experiments.queue_experiments --force
-
-# Filter by training type (cls | adv | gen)
+# Filter by training type (dis | adv | gen)
 python -m experiments.queue_experiments --filter-type gen --dry-run
 
 # Filter by embedding
 python -m experiments.queue_experiments --filter-embedding legendre --dry-run
 
-# Filter by architecture (exact match, e.g. d3D10)
-python -m experiments.queue_experiments --filter-arch d3D10 --dry-run
+# Filter by architecture (exact match)
+python -m experiments.queue_experiments --filter-arch d10r6 --dry-run
 
 # Filter by kind (hpo | seed_sweep)
 python -m experiments.queue_experiments --filter-kind hpo --dry-run
 
 # Filter by dataset (substring match)
-python -m experiments.queue_experiments --filter-dataset cricket --dry-run
-
-# Combine filters
-python -m experiments.queue_experiments \
-    --filter-type gen --filter-embedding hermite --filter-kind seed_sweep
+python -m experiments.queue_experiments --filter-dataset circles --dry-run
 ```
-
-### How it works
-
-1. **Discovery**: recursively scans `configs/experiments/{classification,adversarial,generative}/{embedding}/{arch}/` for `.yaml` files under any `hpo/`, `seed_sweep/`, or `grid_sweep/` subdirectory (including variant suffixes like `grid_sweep_hard`, `seed_sweep_soft`).
-2. **Already-run check**: looks for a matching `outputs/{experiment}/*/{embedding}/d{in_dim}D{bond_dim}/{dataset}_*` directory. If found, the config is skipped (unless `--force`).
-3. **Execution**: calls `python -m experiments.{type} --multirun +experiments={experiment_key}` for each remaining config, stopping on the first non-zero exit code.
-
-### Filters
-
-| Flag | Values | Description |
-|------|--------|-------------|
-| `--filter-type` | `cls`, `adv`, `gen` (or full names) | Training regime |
-| `--filter-embedding` | `fourier`, `legendre`, `hermite` | Embedding type |
-| `--filter-arch` | e.g. `d3D10`, `d30D18` | Architecture (exact match) |
-| `--filter-kind` | `hpo`, `grid_sweep`, `seed_sweep`, `grid_sweep_hard`, `seed_sweep_soft`, … | Config kind (exact match) |
-| `--filter-dataset` | any substring | Dataset name substring match |
 
 ## HPO Objective Values
 
-Each entry point returns an objective value for Optuna optimization:
+Each entry point returns an objective value for Optuna:
 
 | Script | Objective | Direction |
 |--------|-----------|-----------|
-| `classification.py` | `trainer.best[stop_crit]` | minimize (negated for acc/rob) |
+| `discriminative.py` | `trainer.best[stop_crit]` | minimize (negated for acc/rob) |
 | `adversarial.py` | `adv_trainer.best[stop_crit]` | minimize (negated for acc/rob) |
-| `ganstyle.py` | `gan_trainer.best[stop_crit]` | minimize (negated for acc/rob) |
 | `generative.py` | `gen_trainer.best[stop_crit]` | minimize (negated for acc/rob) |
 
-**Notes**:
-- **All entry points**: Use the metric specified by `stop_crit` in the respective trainer config. Valid values: `"clsloss"`, `"genloss"`, `"acc"`, `"fid"`, `"rob"`.
-- **Classification training**: Use `stop_crit: "clsloss"` or `"acc"`.
-- **Generative training**: Use `stop_crit: "genloss"` as the NLL loss is more reliable than GAN-style metrics.
-- **Do NOT use `stop_crit: "viz"`** - visualization is not a numeric metric.
-- **Robustness**: If `stop_crit: "rob"`, the objective is the average accuracy across all perturbation strengths.
-- **Keep `direction: minimize`** in Optuna config - the entry points handle negation for acc/rob internally.
+Valid `stop_crit` values: `"dis_loss"`, `"gen_loss"`, `"acc"`, `"rob"`.  
+Keep `direction: minimize` in Optuna config — entry points handle negation for acc/rob internally.

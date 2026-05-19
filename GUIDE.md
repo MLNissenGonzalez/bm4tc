@@ -1,433 +1,159 @@
-# Born Machines Codebase Guide
+# Born Machines for Trustworthy Classification — Codebase Guide
 
-## Motivation
+## What this is
 
-This codebase investigates whether **Born Machines** based on **Matrix Product States (MPS)** trained as **generative classifiers** are more robust than discriminatively-trained models, and whether they can achieve state-of-the-art robust classification accuracy.
+This repo studies whether MPS-based Born Machines trained as **generative classifiers** (learning the joint distribution p(x, c)) offer trustworthy properties — adversarial robustness, membership-inference resistance, calibrated uncertainty — compared to purely discriminative counterparts.
 
-The research hypothesis is that generative models (which learn p(x,c) rather than just p(c|x)) may provide inherent robustness against adversarial attacks due to their understanding of the data distribution.
+See `README.md` for background and setup.
 
-## Core Concepts
+---
 
-### Born Machines & Born Rule
+## Architecture in a nutshell
 
-Born Machines model probability distributions using the Born Rule from quantum mechanics:
-- **Probability = |amplitude|²** — the probability of an outcome is the squared magnitude of an amplitude
-- Inputs are mapped to a higher-dimensional **Hilbert Space** via embeddings (Fourier, Legendre, and Hermite)
-- Each input feature is embedded independently; the complete input is a "product state"
-- The Born Machine is a **tensor network** with structured factorization
+**Born rule**: probability = |amplitude|². Inputs are embedded into a Hilbert space; the amplitude is computed by contracting the embedded input with an MPS tensor chain.
 
-### Matrix Product State (MPS) Structure
+**BornMachine** (`src/models/born.py`) owns two views over the same shared tensors:
+- **BornClassifier** — parallel contraction, yields class-conditional amplitude vector ψ(x, c); squared and normalised → p(c|x)
+- **BornGenerator** — sequential contraction for exact ancestral sampling of p(x|c)
 
-```
-    ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐
-    │ T₀├───┤ T₁├───┤ T₂├───┤...├───┤ Tₙ│
-    └─┬─┘   └─┬─┘   └─┬─┘   └───┘   └─┬─┘
-      │       │       │               │
-     x₀      x₁      x₂              xₙ
-```
+Both share tensors directly. After a training step on one view, call `bm.sync_tensors(after=...)` before evaluating with the other — otherwise they drift.
 
-- Linear chain of tensors connected by "bond" indices
-- Each tensor has a "physical" index connecting to one input feature
-- **Bond dimension** controls model expressivity
-- Contracting the MPS with an embedded input yields a scalar (amplitude)
+**Architecture naming**: `d{d}r{r}` where `d` = physical/embedding dimension (in_dim), `r` = bond dimension.  
+Examples: `d4r3`, `d10r6`, `d30r18`.
 
-### Classification with BornClassifier
+---
 
-The `BornClassifier` adds a special output tensor:
+## Training regimes
 
-```
-    ┌───┐   ┌───┐   ┌───┬───┐   ┌───┐
-    │ T₀├───┤ T₁├───┤ T₂│out├───┤ Tₙ│
-    └─┬─┘   └─┬─┘   └─┬─┴─┬─┘   └─┬─┘
-      │       │       │   │       │
-     x₀      x₁      x₂  cls     xₙ
+| Script | Regime | Description |
+|--------|--------|-------------|
+| `experiments/discriminative.py` | `dis` | Discriminative NLL on p(c\|x) |
+| `experiments/generative.py` | `gen` | Classification pretraining + generative NLL on p(x,c) |
+| `experiments/adversarial.py` | `adv` | Classification pretraining + PGD-AT or TRADES adversarial training |
+
+Each experiment script runs as a Python module from the project root:
+```bash
+python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
+python -m experiments.generative     +experiments=generative/legendre/d10r6/seed_sweep/circles
+python -m experiments.adversarial    +experiments=adversarial/fourier/d4r3/hpo/moons
 ```
 
-- The output tensor has an extra "class" leg that isn't contracted
-- Contracting with input leaves a **vector** of dimension `num_classes`
-- **Square each component and normalize** → p(c|x)
+---
 
-**CRITICAL**: The forward pass outputs **amplitudes**, not logits! You must square them to get probabilities. This is handled internally by `BornClassifier.probabilities()` and `BornClassifier.parallel()`.
+## Configuration system
 
-### Sampling with BornGenerator
+Configurations are managed with [Hydra](https://hydra.cc/). The canonical workflow:
 
-The `BornGenerator` is equally important — it enables **sampling from the learned distribution** p(x|c), which is essential for:
-- GAN-style training (generating synthetic samples)
-- Evaluating generative quality (FID, visualization)
-- The core hypothesis of this research (generative models → robustness)
+1. Write an experiment config in `configs/experiments/` that overrides group defaults
+2. Run with `+experiments=<path>` (without `.yaml`)
 
-**Sequential Sampling Process:**
-```
-For feature i = 0, 1, ..., D-1 (conditioned on class c):
-  1. Compute marginal p(xᵢ | x₀,...,xᵢ₋₁, c) via partial MPS contraction
-  2. Sample xᵢ using differentiable inverse-transform sampling
-  3. Embed sampled xᵢ and add to conditioning set
-  4. Repeat for next feature
-```
-
-The `BornGenerator` uses **sequential contraction** (not parallel like the classifier) because sampling requires computing marginal distributions over unobserved variables. This is computationally more expensive but enables exact sampling from the Born distribution.
-
-**Key implementation**: `src/models/generator/generator.py` and `src/models/generator/differential_sampling.py`
-
-### Training Architecture
-
-**Training Pipeline:**
-1. **Classification Training** — Train MPS as discriminative classifier first
-2. **GAN-style Training** (optional) — Improve generative capabilities using adversarial training with a critic/discriminator
-3. **Adversarial Training** (optional) — Train for robustness against adversarial examples (PGD-AT or TRADES)
-
-**Generative Training (GAN-style):**
-- Uses standard GAN loss or Wasserstein distance with gradient penalty
-- Requires **differentiable sampling** (see `src/models/generator/differential_sampling.py`)
-- Sampling uses product rule: p(x) = ∏ᵢ p(xᵢ | x₁,...,xᵢ₋₁)
-- Uses secant-based inverse transform sampling for gradient flow
-
-## High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        experiments/                              │
-│  classification.py, ganstyle.py (entry points with hydra)       │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                          src/                                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   models/   │  │   trainer/  │  │  tracking/  │              │
-│  │             │  │             │  │             │              │
-│  │ BornMachine │  │ Classific.  │  │ Evaluator   │              │
-│  │ BornClassif.│  │ GANStyle    │  │ Metrics     │              │
-│  │ BornGener.  │  │ Adversarial │  │ W&B utils   │              │
-│  │ Critic      │  │             │  │             │              │
-│  └─────────────┘  └─────────────┘  └─────────────┘              │
-│        │                │                │                       │
-│  ┌─────▼────────────────▼────────────────▼──────┐               │
-│  │                    utils/                     │               │
-│  │  schemas.py, get.py, evasion/, _utils.py     │               │
-│  └──────────────────────────────────────────────┘               │
-│        │                                                         │
-│  ┌─────▼────────────────────────────────────────┐               │
-│  │                    data/                      │               │
-│  │  DataHandler, gen_n_load.py                  │               │
-│  └──────────────────────────────────────────────┘               │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                        configs/                                  │
-│  Hydra configuration files (dataset, born, trainer, tracking)   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Directory Structure
-
-```
-bm4tc/
-├── GUIDE.md                    # This file
-├── README.md                   # Original readme (may be outdated)
-├── environment.yml             # Conda environment specification
-├── configs/                    # Hydra configuration files
-│   ├── config.yaml            # Main config with defaults
-│   ├── born/                  # BornMachine configs (bond_dim, in_dim, embedding)
-│   ├── dataset/               # Dataset configs (organized by type)
-│   │   └── 2Dtoy/            # 2D toy datasets (moons, circles, spirals)
-│   ├── trainer/               # Training configs
-│   │   ├── classification/    # Classifier training configs
-│   │   ├── ganstyle/          # GAN-style training configs
-│   │   ├── generative/        # Generative NLL training configs
-│   │   └── adversarial/       # Adversarial training configs (PGD-AT, TRADES)
-│   ├── tracking/              # W&B tracking configs
-│   ├── experiments/           # Full experiment configs (override defaults)
-│   │   ├── classification/   # Classification experiments (by architecture, then phase)
-│   │   ├── adversarial/      # Adversarial training experiments (by architecture, then phase)
-│   │   ├── generative/       # Generative NLL experiments (by architecture, then phase)
-│   │   ├── ganstyle/         # GAN-style experiments (by architecture)
-│   │   └── tests/            # Quick test experiments
-│   └── hydra/                 # Hydra-specific configs
-│       └── job_logging/      # Logging configs
-├── experiments/               # Entry point scripts
-│   ├── classification.py      # Classification-only training
-│   ├── ganstyle.py           # Classification + GAN-style training
-│   ├── adversarial.py        # Classification + Adversarial training
-│   ├── generative.py         # Classification + Generative NLL training
-│   └── softmax_sanity.py     # Softmax interpretation sanity check (raw amplitudes as logits)
-├── src/                       # Main source code
-│   ├── models/               # Model definitions (see src/models/GUIDE.md)
-│   ├── trainer/              # Training loops (see src/trainer/GUIDE.md)
-│   ├── tracking/             # Evaluation & logging
-│   ├── data/                 # Data loading & preprocessing
-│   └── utils/                # Utilities, schemas, embeddings, criterions, purification
-├── analysis/                 # Post-experiment analysis (see analysis/GUIDE.md)
-│   ├── hpo_analysis.py      # HPO experiment analysis notebook
-│   ├── mia_analysis.py      # MIA privacy analysis notebook
-│   ├── uq_analysis.py       # UQ analysis notebook (detection + purification)
-│   ├── seed_sweep_analysis.py    # Post-hoc sweep analysis notebook
-│   ├── queue_seed_sweep.py    # Batch-run sweep_analysis for unanalyzed seed sweeps
-│   ├── queue_visualize.py   # Batch-regenerate distribution visualizations
-│   ├── cls_reg_analysis.py  # Post-training cls_reg sweep evaluation
-│   ├── dev_comb_analysis.py # Combined cls+gen dual-model sweep evaluation
-│   ├── visualize/           # Visualization helpers (distributions, evolution plots)
-│   └── utils/               # W&B API utilities, MIA utils, UQ utils, resolver
-├── tests/                    # pytest test suite (139 tests)
-│   ├── conftest.py           # Session-scoped BornMachine fixture (fourier, complex64, data_dim=4)
-│   ├── unit/                 # Fast tests (~90): embeddings, criterions, sampling, purification, stats, resolve
-│   └── integration/          # Slow tests (~49, @pytest.mark.slow): born machine, generator, gibbs, UQ
-├── .datasets/                # Generated/downloaded datasets (git-ignored)
-├── outputs/                  # Experiment outputs (git-ignored)
-├── wandb/                    # W&B local files
-├── notebooks/                # Jupyter notebooks
-└── archive/                  # Old/deprecated code
-```
-
-## Key Entry Points
-
-### Designing Experiments
-
-**The primary way to configure experiments is via `configs/experiments/` files**, not command-line overrides. This ensures reproducibility and clear documentation of experiment settings.
-
-**Workflow:**
-1. Create/modify an experiment config in `configs/experiments/`
-2. Run with `+experiments=<path>` to apply it
-
-**Example experiment config** (`configs/experiments/classification/fourier_d30D18/D18.yaml`):
+**Example experiment config** (`configs/experiments/discriminative/fourier/d4r3/hpo/moons.yaml`):
 ```yaml
 # @package _global_
-experiment: default
-
 defaults:
-  - override /born: fourier/d30D18
-  - override /dataset: 2Dtoy/moons_4k
-  - override /trainer/classification: adam500_loss
+  - override /born: fourier/d4r3
+  - override /dataset: 2Dtoy/moons
+  - override /trainer/discriminative: adam500_loss
   - override /tracking: online
-  - override /trainer/ganstyle: null      # Disable GAN training
-  - override /trainer/adversarial: null   # Disable adversarial training
+  - override /trainer/generative: null
+  - override /trainer/adversarial: null
 ```
 
-### Running Experiments
+**Config group layout**:
+```
+configs/
+├── config.yaml              # root defaults
+├── born/{embedding}/        # d{d}r{r}.yaml files — in_dim, bond_dim, boundary
+├── dataset/2Dtoy/           # circles.yaml, moons.yaml, spirals.yaml, *_small.yaml
+├── dataset/mnist/           # mnist.yaml, mnist_1k.yaml
+├── dataset/ucr_ts/          # ECG200.yaml, ItalyPowerDemand.yaml, ...
+├── trainer/discriminative/  # DiscriminativeConfig defaults + variants
+├── trainer/generative/      # GenerativeConfig defaults
+├── trainer/adversarial/     # AdversarialConfig (pgd_at, trades, ...)
+└── tracking/                # online.yaml, offline.yaml, disabled.yaml
+```
+
+**Config dataclass location**: each module owns its config dataclass (e.g., `DiscriminativeConfig` in `src/trainer/discriminative.py`). The top-level `Config`, `TrainerConfig`, `TrackingConfig` and `register()` live in `experiments/config.py`.
+
+---
+
+## Logging
+
+Training always writes `log.json` to the output directory — no W&B required.  
+W&B is opt-in: set `tracking.mode: online` in your experiment config, or `tracking.mode: disabled` to suppress it.
 
 ```bash
-# Run with experiment config (RECOMMENDED)
-python -m experiments.classification +experiments=classification/fourier_d30D18/D18
-
-# Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
-
-# Multirun sweep (define sweep params in experiment config)
-python -m experiments.classification --multirun +experiments=classification/fourier_d30D18/D18_sweep
+# Disable W&B explicitly
+python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
 ```
 
-**Command-line overrides** are useful for quick tests but not for production experiments:
+The epoch logger is constructed via `experiments.tracking.make_logger(output_dir, wandb_run)` and passed as `on_epoch_end` callback to the trainer.
+
+---
+
+## Output directory structure
+
+```
+outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/
+```
+- `kind`: `hpo` | `seed_sweep` | `alpha_curve` | `test`
+- `regime`: `dis` | `gen` | `adv`
+- `arch`: `d4r3` | `d6r4` | `d10r6` | `d30r18`
+- `date`: `DDMM` (multirun) or `DDMM_HHMM` (single run)
+- Single runs: `.hydra/` directly in sweep root
+- Multiruns: numbered subdirs `0/`, `1/`, … each with `.hydra/` inside
+
+---
+
+## Analysis
+
+Post-training analysis lives in `analysis/`. See [`analysis/GUIDE.md`](analysis/GUIDE.md) for full documentation.
+
+Quick start:
 ```bash
-# Quick test with small epoch count
-python -m experiments.classification +experiments=tests/classification trainer.classification.max_epoch=10
+# Analyse a completed seed sweep
+python analysis/seed_sweep_analysis.py outputs/seed_sweep/gen/fourier/d4r3/moons_1802
 
-# Disable W&B for local debugging
-python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
+# Analyse all unanalysed sweeps in batch (no distribution plots)
+python analysis/queue_seed_sweep.py
 ```
 
-## Configuration System
+Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.csv`, `evaluation_summary.txt`, and optionally distribution plots.
 
-The codebase uses **Hydra** for configuration management. Key concepts:
+---
 
-1. **Main config**: `configs/config.yaml` defines defaults
-2. **Config groups**: Each subdirectory (born/, dataset/, etc.) is a group
-3. **Experiment configs**: `configs/experiments/` override defaults for specific experiments (primary workflow)
-4. **Schemas**: Dataclasses in `src/utils/schemas.py` define structure
-
-**IMPORTANT**: If you modify `schemas.py`, you MUST also:
-1. Update corresponding YAML files in `configs/`
-2. Update any code that uses the changed fields
-
-Example schema → config correspondence:
-```python
-# schemas.py
-@dataclass
-class BornMachineConfig:
-    init_kwargs: MPSInitConfig
-    embedding: str
-```
-```yaml
-# configs/born/d10D4.yaml
-init_kwargs:
-  in_dim: 10
-  bond_dim: 4
-  boundary: "obc"
-embedding: "fourier"
-```
-
-## Critical Dependencies
-
-| Library | Purpose |
-|---------|---------|
-| `tensorkrowch` | Tensor network operations, MPS implementation |
-| `hydra-core` | Configuration management |
-| `wandb` | Experiment tracking and visualization |
-| `torch` | Neural network primitives, autograd |
-| `sklearn` | Data generation, preprocessing |
-
-## Navigation Guide
-
-### Where to find specific functionality:
+## Navigation guide
 
 | Task | Location |
 |------|----------|
-| Modify MPS architecture | `src/models/classifier.py`, `src/models/born.py` |
+| Modify MPS architecture / init | `src/models/born.py` |
 | Change embedding | `src/utils/get.py` (`_EMBEDDING_MAP`) |
-| Add new loss function | `src/utils/get.py` (`_CLASSIFICATION_LOSSES`) |
-| Modify training loop | `src/trainer/classification.py`, `src/trainer/ganstyle.py` |
-| Add evaluation metric | `src/tracking/evaluator.py` |
-| Change data preprocessing | `src/data/handler.py` |
-| Add new dataset | `src/data/gen_n_load.py` |
-| Configure experiments | `configs/` directory |
-| Add adversarial attack | `src/utils/evasion/minimal.py` |
-| Purify adversarial examples | `src/utils/purification/minimal.py` |
-| Compute marginal p(x) | `src/models/born.py` (`marginal_log_probability`) |
-| UQ analysis (detection + purification) | `analysis/uq_analysis.py` |
-| Analyze HPO results | `analysis/hpo_analysis.py` |
-| Batch-run sweep analysis | `analysis/queue_seed_sweep.py` |
-| Batch-regenerate distribution plots | `analysis/queue_visualize.py` |
-| Post-training cls_reg sweep evaluation | `analysis/cls_reg_analysis.py` |
-| Combined cls+gen dual-model evaluation | `analysis/dev_comb_analysis.py` |
-| Softmax sanity-check experiment | `experiments/softmax_sanity.py` |
+| Add / change loss function | `src/utils/criterions.py` |
+| Modify training loop | `src/trainer/discriminative.py`, `generative.py`, `adversarial.py` |
+| Validation metrics (eval functions) | `src/trainer/eval.py` |
+| Add adversarial attack | `src/utils/evasion.py` |
+| Purification (likelihood-based) | `src/analysis/purification.py` |
+| Data loading and rescaling | `src/data/handler.py`, `src/data/gen_n_load.py` |
+| Visualisation (matplotlib, no W&B) | `src/analysis/viz.py` |
+| Experiment entry points | `experiments/discriminative.py`, `generative.py`, `adversarial.py` |
+| W&B init + dataset viz logging | `experiments/tracking.py` |
+| Config dataclasses + Hydra register | `experiments/config.py` |
+| Post-hoc sweep evaluation | `analysis/seed_sweep_analysis.py` |
+| HPO result exploration | `analysis/hpo_analysis.py` |
+| MIA deep-dive (single run) | `analysis/mia_analysis.py` |
+| UQ deep-dive (single run) | `analysis/uq_analysis.py` |
 | Fill seed_sweep configs from HPO | `configs/tools/fill_hpo.py` |
-| Fetch W&B run data | `analysis/utils/wandb_fetcher.py` |
-| Run fast tests (no model) | `pytest -m "not slow" -q` |
+| Run unit tests (fast) | `pytest -m "not slow" -q` |
 | Run full test suite | `pytest -q` |
-| Run single test file | `pytest tests/integration/test_born_machine.py -v` |
-
-### Critical code sections to understand:
-
-1. **`BornMachine.__init__`** (`src/models/born.py:19`) — How classifier and generator share tensors
-2. **`BornClassifier.parallel`** (`src/models/classifier.py:80`) — Forward pass with Born rule
-3. **`BornGenerator._single_class`** (`src/models/generator/generator.py:143`) — Sequential sampling
-4. **`os_secant`** (`src/models/generator/differential_sampling.py:46`) — Differentiable sampling
-5. **`Trainer.train`** (`src/trainer/classification.py:235`) — Main training loop
-6. **`BornMachine.marginal_log_probability`** (`src/models/born.py`) — Marginal p(x) for UQ
-
-## Known Issues & Gotchas
-
-1. **FID metric** assumes data dimension < 100 (disabled for larger datasets)
-
-5. **Complex Born Machines require torch ≥ 2.1.0** — Adam optimizer has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates. Always use torch ≥ 2.1.0 when training with `dtype: "complex64"` or `"complex128"` configs.
-
-2. **Docstrings** — Maintained alongside code; see "Documentation Maintenance" section below
-
-3. **The `BornMachine.sync_tensors` method** is critical after training — without it, classifier and generator can get out of sync
-
-4. **`randn_eye` amplitude collapse for non-Fourier embeddings on high-dimensional data** —
-   `randn_eye` places the identity matrix at physical index 0 of every MPS tensor, so the
-   initial amplitude is `φ_0(x)^n_sites`.  For Fourier `φ_0 = 1.0` (safe), but for Legendre
-   `φ_0 = √(1/2) ≈ 0.707`.  On MNIST (`n_sites = 785`) this gives
-   amplitude `≈ 10⁻¹¹⁸`, squared `≈ 10⁻²³⁶` — complete float32 underflow.
-   All Born probabilities become 0, NLL stays at `-log(eps) ≈ 13.8` (constant), gradients are
-   zero throughout, and training silently fails.  **Fixed in `BornMachine.__init__`**: after
-   `randn_eye` initialization the code checks `φ_0`, and if it differs from 1 rescales all
-   tensors by `1/φ_0` so the initial amplitude is restored to `≈ 1`.  This is exact for
-   embeddings with a constant zeroth component (Legendre: `φ_0 = √(1/2)` → scale `√2`);
-   for embeddings where `φ_0` varies with input (Hermite, Chebyshev) `canonical` initialization
-   is required instead — the rescaling only restores amplitude `≈ 1` at `x=0` for these embeddings,
-   while typical data has `φ_0(x) = exp(-x²/2)/π^{1/4} ≪ 1` at most sites, so underflow persists.
-   All Hermite configs have been updated to `init_method: canonical` for this reason.
-
-## Future Directions (from README)
-
-1. ~~**More adversarial attack methods**: Currently only FGM, need PGD and others~~ — **DONE**: PGD implemented in `src/utils/evasion/minimal.py`
-2. ~~**Adversarial training**: Full implementation of robust training~~ — **DONE**: PGD-AT and TRADES implemented in `src/trainer/adversarial.py`
-3. ~~**Uncertainty quantification**: Marginal p(x) for detection and purification~~ — **DONE**: `src/models/born.py` (marginal_log_probability), `src/utils/purification/` (LikelihoodPurification), `analysis/utils/uq.py` (UQEvaluation)
-4. ~~**MNIST support**: Config structure prepared in `configs/dataset/` (subfolder `mnist/` planned)~~ — **DONE**: `d3D10c64` (complex64) and `d3D10` (float32) configs added for MNIST and UCR time-series datasets; legendre embedding with complex MPS is the recommended configuration.
-5. **MPS as discriminator backbone**: Using MPS features as input to critic
-6. ~~**More datasets**: Univariate time series dataset planned~~ — **DONE**: 7 UCR time-series datasets added (`configs/dataset/ucr_ts/`). The 5 new datasets (ChlorineConcentration, SyntheticControl, CricketX/Y/Z) were chosen to match the benchmark in Ding et al. (arXiv:2207.04307) on adversarial robustness of time-series classifiers, enabling direct comparison with their results.
-
-## Quick Reference: Common Commands
-
-```bash
-# Setup environment
-conda env create -f environment.yml
-conda activate bm4tc
-
-# Run classification experiment (using experiment config)
-python -m experiments.classification +experiments=classification/fourier_d30D18/D18
-
-# Run GAN-style experiment
-python -m experiments.ganstyle +experiments=ganstyle/fourier_d30D18/default
-
-# Run generative NLL experiment
-python -m experiments.generative +experiments=generative/fourier_d30D18/hpo/hpo
-
-# Quick test run
-python -m experiments.classification +experiments=tests/classification
-
-# Run with W&B disabled (for debugging)
-python -m experiments.classification +experiments=tests/classification tracking.mode=disabled
-
-# Test run adversarial training
-python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
-
-# PGD-AT training
-python -m experiments.adversarial trainer/adversarial=pgd_at dataset=2Dtoy/moons_2k
-
-# TRADES training
-python -m experiments.adversarial trainer/adversarial=trades dataset=2Dtoy/moons_2k
-
-# Adversarial HPO on moons dataset
-python -m experiments.adversarial --multirun +experiments=adversarial/fourier_d30D18/hpo/moons
-
-# Check W&B dashboard
-# Visit: https://wandb.ai/<entity>/<project>
-```
 
 ---
 
-## Documentation Maintenance
+## Known issues & gotchas
 
-**IMPORTANT**: This section is a reminder for anyone/anything working on this codebase.
+**`randn_eye` amplitude collapse with non-Fourier embeddings on high-dim data** — `randn_eye` sets the identity at physical index 0; initial amplitude ≈ φ₀^n_sites. Fourier: φ₀=1 (safe). Legendre: φ₀=√0.5 → on MNIST (n_sites=785), amplitude ≈ 10⁻¹¹⁸ → float32 underflow → all Born probs zero → silent training failure. **Fixed in `BornMachine.__init__`**: rescales tensors by 1/φ₀ when `randn_eye` is used and φ₀≠1. Exact for Legendre; use `canonical` init for Hermite/Chebyshev.
 
-When making code changes, **always update the corresponding documentation**:
+**Evasion attacks don't clamp to `bm.input_range`** — PGD/FGM in `src/utils/evasion/minimal.py` project delta to the ε-ball but do not clamp `naturals + delta` to the valid embedding domain. Purification correctly clamps.
 
-### Checklist for Code Changes
+**Complex BornMachines require PyTorch ≥ 2.1.0** — Adam has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates.
 
-1. **Docstrings**: Update or add docstrings for any modified/added functions, classes, or methods
-   - Include parameter descriptions with types
-   - Document return values
-   - Note any important side effects or exceptions
-
-2. **GUIDE.md files**: Update the relevant GUIDE.md when:
-   - Adding new features or configuration options
-   - Changing function signatures or behavior
-   - Adding new files or modules
-   - Modifying training loops or evaluation metrics
-
-3. **Schema changes** (`src/utils/schemas.py`):
-   - Update corresponding YAML config files in `configs/`
-   - Update relevant GUIDE.md files documenting the config
-
-4. **This file** (`GUIDE.md`):
-   - Update "Known Issues & Gotchas" if fixing or introducing issues
-   - Update "Future Directions" when implementing planned features
-   - Update "Navigation Guide" when adding new functionality
-
-### Documentation Style
-
-- Keep docstrings concise but complete
-- Use Google-style docstring format
-- Include type hints in function signatures
-- Reference line numbers in GUIDE.md when they help locate code
-
-### Before Finishing Any Task
-
-Ask yourself:
-- Did I update docstrings for changed functions?
-- Does any GUIDE.md need updating?
-- Are there any "Future Directions" items I just completed?
-- Did I introduce any new gotchas or fix existing ones?
-
----
-
-For detailed module documentation, see:
-- `experiments/GUIDE.md` — Running experiments, bash commands, output structure
-- `configs/GUIDE.md` — Configuration system and syntax details
-- `src/models/GUIDE.md` — Model architecture details
-- `src/trainer/GUIDE.md` — Training pipeline details
-- `src/tracking/GUIDE.md` — Tracking and evaluation details
-- `src/data/GUIDE.md` — Data handling details
-- `src/utils/GUIDE.md` — Utilities and configuration details
-- `analysis/GUIDE.md` — Post-experiment analysis and W&B utilities
+**`sync_tensors` is required after each training phase** — classifier and generator share tensor data but track their own parameter views. Without sync, one view can silently diverge from the other.

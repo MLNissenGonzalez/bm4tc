@@ -1,3 +1,10 @@
+"""
+Discriminative training entry point.
+
+Usage:
+    python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
+    python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
+"""
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
