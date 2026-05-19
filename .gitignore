@@ -64,6 +64,7 @@ data/
 
 # claude
 $HOME/
+CLAUDE.md
 
 .pytest_cache/
 pytest.ini
