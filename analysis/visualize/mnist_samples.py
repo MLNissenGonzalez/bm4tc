@@ -1,4 +1,4 @@
-"""Visualize learned MNIST distribution by sampling from a trained BornMachine.
+"""Visualize learned MNIST distribution by sampling from a trained ConditionalBornMachine.
 
 Samples a few images per digit class and displays one randomly-chosen
 sample per class in a 2×5 grid (digits 0–9).
@@ -14,7 +14,7 @@ See DEFERRED.md § 'Canonical-form sampling' for the implementation path.
 """
 
 raise NotImplementedError(
-    "mnist_samples.py requires BornGenerator.sample_all_classes(), which was removed in "
-    "the CBM unification. See DEFERRED.md § 'Canonical-form sampling' for the path "
-    "to re-implementing sampling with ConditionalBornMachine."
+    "mnist_samples.py requires class-conditional sampling for ConditionalBornMachine, "
+    "which is not yet implemented. See DEFERRED.md § 'Canonical-form sampling' for "
+    "the implementation path."
 )

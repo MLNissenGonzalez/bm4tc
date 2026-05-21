@@ -166,8 +166,8 @@ outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
 
   For each run:
     1. load config (.hydra/config.yaml)  →  extract CONFIG_KEYS into config/* columns
-    2. load BornMachine (models/model.pt)
-    3. rebuild DataHandler → split_and_rescale(bm)
+    2. ConditionalBornMachine.load(models/model.pt)
+    3. rebuild DataHandler → split_and_rescale(cbm)
     4. compute: acc, rob, MIA, UQ
     5. return flat dict of metrics
 
@@ -180,7 +180,7 @@ analysis/outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
   └── best_joint.png        (if COMPUTE_DISTRIBUTIONS)
 ```
 
-**Key invariant**: `DataHandler.split_and_rescale(bm)` uses `bm.input_range`, reconstructed from `cfg.embedding` at load time — always correct regardless of which embedding was used.
+**Key invariant**: `DataHandler.split_and_rescale(cbm)` uses `cbm.input_range`, reconstructed from `cfg.embedding` at load time — always correct regardless of which embedding was used.
 
 ---
 
@@ -190,6 +190,6 @@ analysis/outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
 |---------|-------------|-----|
 | `No valid run directories found` | `.hydra/config.yaml` missing in numbered subdirs | Check path; test sweeps have `.hydra/` in root (single run) |
 | `Metric 'rob' failed` | NaN gradients in attack | Check model trained correctly; try smaller epsilon |
-| `Metric 'genloss' failed` | Generator not synced | Set `COMPUTE_GEN_LOSS = False` or add `sync_tensors(after="classification")` |
+| `Metric 'genloss' failed` | gen_loss unavailable for this run | Set `COMPUTE_GEN_LOSS = False` |
 | All `uq_purify_acc` ≈ `uq_adv_acc` | Purification radius too small | Increase `radii` in `UQ_CONFIG` |
 | Hermite robust accuracy suspiciously high | Old analysis before range-size bug fix | Re-run with `--force`; `_RANGE_SIZE = 8.0` is now correct |

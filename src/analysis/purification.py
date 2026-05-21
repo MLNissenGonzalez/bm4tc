@@ -108,7 +108,7 @@ class LikelihoodPurification:
         distribution, staying within a radius of the original input.
 
         Args:
-            born: BornMachine instance (must have marginal_log_probability).
+            born: ConditionalBornMachine instance (must have marginal_log_probability).
             data: Input tensor of shape (batch_size, data_dim).
             radius: Maximum perturbation radius.
             device: Torch device.
