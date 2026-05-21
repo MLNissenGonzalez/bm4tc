@@ -74,7 +74,7 @@ def compute_log_px(
     """Compute marginal log p(x) for all samples in a loader.
 
     Args:
-        born: BornMachine instance.
+        born: ConditionalBornMachine instance.
         loader: DataLoader yielding (data, labels) tuples.
         device: Torch device.
         eps: Clamping floor for log stability.
@@ -110,7 +110,7 @@ def compute_thresholds(
     at percentiles of the clean data's log p(x) distribution.
 
     Args:
-        born: BornMachine instance.
+        born: ConditionalBornMachine instance.
         clean_loader: DataLoader for clean (in-distribution) data.
         percentiles: List of percentile values (e.g., [1, 5, 10, 20]).
         device: Torch device.
@@ -266,7 +266,7 @@ class UQEvaluation:
         5. Package into UQResults
 
         Args:
-            born: BornMachine instance.
+            born: ConditionalBornMachine instance.
             clean_loader: DataLoader for clean test data.
             device: Torch device.
 

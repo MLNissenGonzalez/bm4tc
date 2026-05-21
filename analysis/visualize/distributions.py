@@ -2,7 +2,7 @@
 # # Visualize Learned Probability Distributions
 #
 # This notebook visualizes the learned p(c|x) and p(x,c) distributions
-# of a trained BornMachine over the 2D input space.
+# of a trained ConditionalBornMachine over the 2D input space.
 #
 # **What it shows:**
 # - p(c=1|x): conditional probability heatmap
@@ -52,34 +52,11 @@ def _cls_cmap(class_idx: int):
         f"cls{class_idx}", ["white", palette[class_idx % 2]]
     )
 from analysis.utils import load_run_config, find_model_checkpoint
-from src.models import BornMachine  # must import before src.data to avoid circular import
+from src.models import ConditionalBornMachine
 from src.data.handler import DataHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Filename stem → "discriminative" | "generative" (backward compat for old checkpoints)
-_CHECKPOINT_REGIME = {
-    "cls": "discriminative", "adv": "discriminative",
-    "gen": "generative",     "gan": "generative",
-}
-
-
-def _infer_regime(bm: "BornMachine", checkpoint_path: Path) -> str:
-    """Return 'discriminative' or 'generative', from checkpoint metadata or filename."""
-    if bm._last_regime is not None:
-        return bm._last_regime
-    stem = checkpoint_path.stem
-    regime = _CHECKPOINT_REGIME.get(stem)
-    if regime is None:
-        logger.warning(
-            f"Cannot infer regime from checkpoint name '{stem}'; "
-            f"defaulting to 'discriminative'."
-        )
-        regime = "discriminative"
-    else:
-        logger.info(f"Inferred regime '{regime}' from checkpoint name '{stem}'.")
-    return regime
 
 # %%
 # =============================================================================
@@ -131,11 +108,11 @@ def make_grid(input_range, resolution):
     return grid_x1, grid_x2, grid_points
 
 
-def compute_conditional_probs(bm, grid_points, device, batch_size=10000):
+def compute_conditional_probs(cbm, grid_points, device, batch_size=10000):
     """Compute p(c|x) over grid points using batched inference.
 
     Args:
-        bm: BornMachine instance (already on device).
+        cbm: ConditionalBornMachine instance (already on device).
         grid_points: (N, 2) tensor of input points.
         device: Torch device.
         batch_size: Number of points per batch.
@@ -148,21 +125,16 @@ def compute_conditional_probs(bm, grid_points, device, batch_size=10000):
     for start in range(0, n, batch_size):
         batch = grid_points[start:start + batch_size].to(device)
         with torch.no_grad():
-            probs = bm.class_probabilities(batch)
+            probs = cbm.class_probabilities(batch)
         all_probs.append(probs.cpu())
-        bm.reset()
     return torch.cat(all_probs, dim=0)
 
 
-def compute_joint_probs(bm: BornMachine, grid_points, device, normalize=True, batch_size=10000):
-    """Compute p(x,c) = |psi(x,c)|^2 [/ Z] over grid points.
-
-    For each class c, computes the unnormalized joint probability using the
-    generator's sequential contraction. Optionally normalizes by the partition
-    function.
+def compute_joint_probs(cbm: "ConditionalBornMachine", grid_points, device, normalize=True, batch_size=10000):
+    """Compute p(x,c) = |psi(x,c)|^2 [/ Z] over grid points via parallel contraction.
 
     Args:
-        bm: BornMachine instance (already on device).
+        cbm: ConditionalBornMachine instance (already on device).
         grid_points: (N, 2) tensor of input points.
         device: Torch device.
         normalize: If True, divide by exp(log_partition_function()).
@@ -171,34 +143,24 @@ def compute_joint_probs(bm: BornMachine, grid_points, device, normalize=True, ba
     Returns:
         (N, num_classes) tensor of (normalized) joint probabilities.
     """
-    n = grid_points.shape[0]
-    num_classes = bm.out_dim
-
     # Compute partition function once if normalizing
     if normalize:
-        bm.generator.reset()
+        cbm.reset()
         with torch.no_grad():
-            log_Z = bm.generator.log_partition_function()
+            log_Z = cbm.log_partition_function()
         Z = torch.exp(log_Z).item()
         logger.info(f"Partition function Z = {Z:.6f} (log Z = {log_Z:.4f})")
     else:
         Z = 1.0
 
-    all_probs = []
-    for c in range(num_classes):
-        class_probs = []
-        for start in range(0, n, batch_size):
-            batch = grid_points[start:start + batch_size].to(device)
-            labels = torch.full((batch.shape[0],), c, dtype=torch.long, device=device)
-            bm.generator.reset()
-            with torch.no_grad():
-                prob = bm.generator.unnormalized_prob(batch, labels)
-            class_probs.append(prob.cpu())
-        all_probs.append(torch.cat(class_probs, dim=0))
-        logger.info(f"Computed joint probabilities for class {c}")
+    all_abs_sq = []
+    for start in range(0, grid_points.shape[0], batch_size):
+        batch = grid_points[start:start + batch_size].to(device)
+        with torch.no_grad():
+            abs_sq = cbm.abs_square(cbm.amplitudes(batch))  # (B, num_classes)
+        all_abs_sq.append(abs_sq.cpu())
 
-    # Stack: (N, num_classes)
-    joint = torch.stack(all_probs, dim=1)
+    joint = torch.cat(all_abs_sq, dim=0)  # (N, num_classes)
     if normalize:
         joint = joint / Z
     return joint
@@ -318,38 +280,30 @@ def visualize_from_run_dir(
     # Load config and model
     cfg = load_run_config(run_dir)
     checkpoint_path = find_model_checkpoint(run_dir)
-    bm = BornMachine.load(str(checkpoint_path))
-    bm.to(device)
+    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm.to(device)
     logger.info(f"Loaded model from {checkpoint_path}")
-
-    # Ensure classifier and generator are in sync before computing joint probs.
-    # For discriminatively trained models the classifier is canonical; for
-    # generatively trained models the generator is canonical.
-    regime = _infer_regime(bm, checkpoint_path)
-    sync_after = "classification" if regime == "discriminative" else "generation"
-    bm.sync_tensors(after=sync_after)
-    logger.info(f"Synced tensors (regime='{regime}', after='{sync_after}')")
 
     # Load and prepare data
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(bm)
+    datahandler.split_and_rescale(cbm)
 
     # Get training data for overlay
     train_data = datahandler.data["train"] if show_data else None
     train_labels = datahandler.labels["train"] if show_data else None
-    num_classes = bm.out_dim if show_data else None
+    num_classes = cbm.out_dim if show_data else None
 
     # Build grid
-    input_range = bm.input_range
+    input_range = cbm.input_range
     grid_x1, grid_x2, grid_points = make_grid(input_range, resolution)
 
     # Compute distributions
     logger.info("Computing conditional probabilities p(c|x)...")
-    conditional = compute_conditional_probs(bm, grid_points, device)
+    conditional = compute_conditional_probs(cbm, grid_points, device)
 
     logger.info("Computing joint probabilities p(x,c)...")
-    joint = compute_joint_probs(bm, grid_points, device, normalize=normalize_joint)
+    joint = compute_joint_probs(cbm, grid_points, device, normalize=normalize_joint)
 
     # Determine save paths
     joint_path = (Path(save_dir) / "best_joint.png") if save_dir else None
@@ -375,10 +329,10 @@ def visualize_from_run_dir(
 
 # %%
 def load_model_and_data():
-    """Load trained BornMachine and DataHandler from run directory.
+    """Load trained ConditionalBornMachine and DataHandler from run directory.
 
     Returns:
-        Tuple of (bornmachine, datahandler, device, cfg).
+        Tuple of (cbm, datahandler, device, cfg).
     """
     device = torch.device(DEVICE)
     logger.info(f"Using device: {device}")
@@ -392,21 +346,16 @@ def load_model_and_data():
 
     checkpoint_path = find_model_checkpoint(run_dir)
     logger.info(f"Loading model from: {checkpoint_path}")
-    bm = BornMachine.load(str(checkpoint_path))
-    bm.to(device)
-
-    regime = _infer_regime(bm, checkpoint_path)
-    sync_after = "classification" if regime == "discriminative" else "generation"
-    bm.sync_tensors(after=sync_after)
-    logger.info(f"Synced tensors (regime='{regime}', after='{sync_after}')")
+    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm.to(device)
 
     # Reconstruct DataHandler
     logger.info(f"Loading dataset: {cfg.dataset.name}")
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(bm)
+    datahandler.split_and_rescale(cbm)
 
-    return bm, datahandler, device, cfg
+    return cbm, datahandler, device, cfg
 
 
 # %%
@@ -436,27 +385,27 @@ if __name__ == "__main__":
         print("Loading model and data...")
         print("=" * 60)
 
-        bm, datahandler, device, cfg = load_model_and_data()
+        cbm, datahandler, device, cfg = load_model_and_data()
 
         print(f"\nDataset: {cfg.dataset.name}")
         print(f"Train samples: {len(datahandler.data['train'])}")
         print(f"Number of classes: {datahandler.num_cls}")
-        print(f"Input range: {bm.input_range}")
+        print(f"Input range: {cbm.input_range}")
 
         print("=" * 60)
         print("Computing distributions over input grid...")
         print("=" * 60)
 
-        input_range = bm.input_range
+        input_range = cbm.input_range
         grid_x1, grid_x2, grid_points = make_grid(input_range, RESOLUTION)
         print(f"Grid: {RESOLUTION}x{RESOLUTION} = {grid_points.shape[0]} points")
 
         print("\nComputing p(c|x)...")
-        conditional = compute_conditional_probs(bm, grid_points, device)
+        conditional = compute_conditional_probs(cbm, grid_points, device)
         print(f"  Shape: {conditional.shape}")
 
         print("\nComputing p(x,c)...")
-        joint = compute_joint_probs(bm, grid_points, device, normalize=NORMALIZE_JOINT)
+        joint = compute_joint_probs(cbm, grid_points, device, normalize=NORMALIZE_JOINT)
         print(f"  Shape: {joint.shape}")
 
         train_data = datahandler.data["train"] if SHOW_DATA else None
@@ -466,7 +415,7 @@ if __name__ == "__main__":
         if not save_dir.is_absolute():
             save_dir = project_root / save_dir
 
-        num_classes = bm.out_dim if SHOW_DATA else None
+        num_classes = cbm.out_dim if SHOW_DATA else None
         fig_jnt = plot_joint_marginal(
             joint, grid_x1, grid_x2,
             input_range=input_range,

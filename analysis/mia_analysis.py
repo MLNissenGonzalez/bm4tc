@@ -90,13 +90,13 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # %%
 def load_model_and_data(source: str = DATA_SOURCE):
     """
-    Load trained BornMachine and reconstruct DataHandler from config.
+    Load trained ConditionalBornMachine and reconstruct DataHandler from config.
 
     Args:
         source: "local" or "wandb"
 
     Returns:
-        Tuple of (bornmachine, datahandler, device)
+        Tuple of (cbm, datahandler, device)
     """
     from analysis.utils import (
         load_run_config,
@@ -104,7 +104,7 @@ def load_model_and_data(source: str = DATA_SOURCE):
         find_model_checkpoint,
     )
 
-    from src.models import BornMachine
+    from src.models import ConditionalBornMachine
     from src.data import DataHandler
 
     device = torch.device(DEVICE)
@@ -121,7 +121,7 @@ def load_model_and_data(source: str = DATA_SOURCE):
         # Find and load checkpoint
         checkpoint_path = find_model_checkpoint(run_dir)
         logger.info(f"Loading model from: {checkpoint_path}")
-        bornmachine = BornMachine.load(str(checkpoint_path))
+        cbm = ConditionalBornMachine.load(str(checkpoint_path))
 
     elif source == "wandb":
         logger.info(f"Loading config from wandb: {WANDB_ENTITY}/{WANDB_PROJECT}/{WANDB_RUN_ID}")
@@ -133,7 +133,7 @@ def load_model_and_data(source: str = DATA_SOURCE):
                 "(download checkpoint manually or use download_wandb_checkpoint)"
             )
         logger.info(f"Loading model from: {WANDB_CHECKPOINT_PATH}")
-        bornmachine = BornMachine.load(WANDB_CHECKPOINT_PATH)
+        cbm = ConditionalBornMachine.load(WANDB_CHECKPOINT_PATH)
 
     else:
         raise ValueError(f"Unknown data source: {source}")
@@ -142,12 +142,12 @@ def load_model_and_data(source: str = DATA_SOURCE):
     logger.info(f"Loading dataset: {cfg.dataset.name}")
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(bornmachine)
+    datahandler.split_and_rescale(cbm)
 
     # Move model to device
-    bornmachine.to(device)
+    cbm.to(device)
 
-    return bornmachine, datahandler, device, cfg
+    return cbm, datahandler, device, cfg
 
 
 # %%
@@ -156,7 +156,7 @@ print("=" * 60)
 print("Loading model and data...")
 print("=" * 60)
 
-bornmachine, datahandler, device, cfg = load_model_and_data()
+cbm, datahandler, device, cfg = load_model_and_data()
 
 print(f"\nDataset: {cfg.dataset.name}")
 print(f"Train samples: {len(datahandler.data['train'])}")
@@ -193,7 +193,7 @@ print("Running MIA Evaluation...")
 print("=" * 60)
 
 results = mia_eval.evaluate(
-    model=bornmachine,
+    model=cbm,
     train_loader=train_loader,
     test_loader=test_loader,
     device=device,
