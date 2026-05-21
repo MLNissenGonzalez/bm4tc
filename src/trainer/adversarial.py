@@ -239,8 +239,7 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     import torch
-    from src.models.cbm import ConditionalBornMachine, CBMConfig
-    from src.models.born import MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
     from src.data.handler import DataHandler
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
     from src.utils.evasion import EvasionConfig

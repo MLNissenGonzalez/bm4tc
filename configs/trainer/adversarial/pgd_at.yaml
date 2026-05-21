@@ -21,7 +21,7 @@ evasion:
     name: "negative log-likelihood"
     kwargs:
       eps: 1e-8
-  strengths: [0.1]
+  strengths: [0.1]  # relative fraction; abs_eps = strength × range_size
   num_steps: 10
   step_size: null  # defaults to 2.5 * strength / num_steps
   random_start: true

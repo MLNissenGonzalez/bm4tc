@@ -1,11 +1,8 @@
-# Minimal implementation of evasion attacks against Born Machines
-
 import torch
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from typing import List, Optional
 import src.utils.get as get
-from src.models import *
 from src.utils.get import CriterionConfig
 
 
@@ -21,20 +18,12 @@ class EvasionConfig:
 
 
 def _dis_loss(born, data: torch.Tensor, labels: torch.LongTensor) -> torch.Tensor:
-    """Discriminative NLL loss; works with both CBM (mixed_nll) and BornMachine."""
-    if hasattr(born, "mixed_nll"):
-        return born.mixed_nll(data, labels, alpha=0.0)
-    # BornMachine legacy path (removed in Phase 5)
-    probs = born.class_probabilities(data)
-    return -torch.log(probs[range(len(labels)), labels].clamp(min=1e-8)).mean()
+    """Discriminative NLL loss via CBM mixed_nll with alpha=0."""
+    return born.mixed_nll(data, labels, alpha=0.0)
 
 
 def _zero_grad(born) -> None:
-    """Clear gradients; works with both CBM (nn.Module) and BornMachine wrapper."""
-    if hasattr(born, "zero_grad"):
-        born.zero_grad()
-    else:
-        born.classifier.zero_grad()
+    born.zero_grad()
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):
@@ -364,7 +353,7 @@ class RobustnessEvaluation:
 
     def generate(
             self,
-            born: BornMachine,
+            born,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
             strength: float,
@@ -376,15 +365,18 @@ class RobustnessEvaluation:
 
     def evaluate(
             self,
-            born: BornMachine,
+            born,
             loader: DataLoader,
             device: torch.device | str = "cpu"
     ):
         """
-        Evaluate robustness of a classifier over multiple perturbation strengths.
+        Evaluate robustness at each relative strength; returns list of accuracies.
+
+        strengths values are relative fractions of the embedding range size:
+        abs_eps = strength * (input_range[1] - input_range[0]).
         """
         born.to(device)
-        born.classifier.eval()
+        born.eval()
 
         range_size = born.input_range[1] - born.input_range[0]
         strength_acc = []
@@ -399,7 +391,7 @@ class RobustnessEvaluation:
                 )
 
                 with torch.no_grad():
-                    ad_probs = born.classifier.probabilities(ad_examples)
+                    ad_probs = born.class_probabilities(ad_examples)
                     ad_pred = torch.argmax(ad_probs, dim=1)
                     acc = (ad_pred == labels.to(device)).float().mean().item()
                     batch_acc.append(acc)
@@ -414,26 +406,27 @@ if __name__ == "__main__":
     import sys
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     device = torch.device("cpu")
-    bm = BornMachine(
-        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+    cbm = ConditionalBornMachine(
+        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
         data_dim=2, num_classes=2, device=device,
     )
-    bm.sync_tensors(after="classification")
+    cbm.prepare(device=device)
 
     x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
     y = torch.randint(0, 2, (8,))
-    # Absolute epsilon = 0.05 * range_size(legendre=2.0) = 0.1
-    abs_eps = 0.05 * 2.0
+    # strength=0.05 is a relative fraction; abs_eps = 0.05 * range_size(legendre=2.0) = 0.1
+    strength_frac = 0.05
+    abs_eps = strength_frac * 2.0
 
     for name, ec in [
         ("FGM", EvasionConfig(method="FGM", strengths=[abs_eps])),
         ("PGD", EvasionConfig(method="PGD", num_steps=3, strengths=[abs_eps])),
     ]:
         attack = build_attack(ec)
-        adv = attack.generate(born=bm, naturals=x, labels=y, strength=abs_eps, device=device)
+        adv = attack.generate(born=cbm, naturals=x, labels=y, strength=abs_eps, device=device)
         assert adv.shape == x.shape, f"{name}: shape mismatch"
         delta = (adv - x).abs().max().item()
         print(f"  {name:5s}  max_delta={delta:.4f}  (eps_abs={abs_eps})")

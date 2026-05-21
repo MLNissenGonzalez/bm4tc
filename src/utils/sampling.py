@@ -26,12 +26,14 @@ def pre_select(p: torch.Tensor):
     return cdf_norm, nu, ids
 
 
-def multinomial_sampling(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+def agnostic_sampling(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     """
     Sample from a discretized conditional distribution using torch.multinomial.
 
     Hard (non-differentiable) inverse-CDF sampling. Draws one bin index per batch
     element proportional to p, then returns the corresponding grid value from z.
+    Called "agnostic" because it makes no use of the MPS graph topology — it works
+    with any model that provides marginal probabilities over a discrete grid.
 
     Parameters
     ----------
@@ -53,11 +55,11 @@ def multinomial_sampling(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
 
 
 _SAMPLING_MAP = {
-    "multinomial": multinomial_sampling,
+    "agnostic": agnostic_sampling,
 }
 
 
-def sample(p: torch.Tensor, input_space: torch.Tensor, method: str = "multinomial") -> torch.Tensor:
+def sample(p: torch.Tensor, input_space: torch.Tensor, method: str = "agnostic") -> torch.Tensor:
     """
     Draw samples from a probability distribution tensor using the specified method.
 
@@ -68,7 +70,7 @@ def sample(p: torch.Tensor, input_space: torch.Tensor, method: str = "multinomia
     input_space : torch.Tensor
         1D tensor of candidate values corresponding to bins.
     method : str
-        Sampling method name. Currently supported: "multinomial".
+        Sampling method name. Currently supported: "agnostic".
 
     Returns
     -------

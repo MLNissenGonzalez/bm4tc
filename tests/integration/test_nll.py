@@ -3,8 +3,7 @@ import torch
 from pathlib import Path
 
 from src.trainer.nll import NLLConfig, NLLTrainer, NormControlConfig
-from src.models.cbm import ConditionalBornMachine, CBMConfig
-from src.models.born import MPSInitConfig
+from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.data.handler import DataHandler
 from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
 

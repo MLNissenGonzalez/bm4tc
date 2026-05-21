@@ -4,8 +4,7 @@ from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.trainer.nll import NLLConfig, NLLTrainer, NormControlConfig
-from src.models.cbm import ConditionalBornMachine, CBMConfig
-from src.models.born import MPSInitConfig
+from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────

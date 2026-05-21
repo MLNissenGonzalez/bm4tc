@@ -138,7 +138,7 @@ class LikelihoodPurification:
 
             nll = -born.marginal_log_probability(x_tilde, eps=self.eps).mean()
 
-            born.classifier.zero_grad()
+            born.zero_grad()
             if delta.grad is not None:
                 delta.grad.zero_()
 
@@ -162,28 +162,27 @@ class LikelihoodPurification:
         return purified, log_px
 
 
-"""Gibbs-sampling purification for Born Machines (class-marginalized)."""
+"""Gibbs-sampling purification for ConditionalBornMachine (class-marginalized)."""
 
 import torch
 from typing import Optional, Tuple
 
-from src.models.generator.sampling import multinomial_sampling
+from src.utils.sampling import agnostic_sampling
 
 
 class GibbsPurification:
     """Purify adversarial examples via class-marginalized Gibbs sampling.
 
-    For each feature in turn, resample it from the conditional Born distribution
-    p(x_i | x_{-i}), marginalizing over class label.  Multiple sweeps over all
-    features produce a sample that is more consistent with the Born model's
-    learned distribution.  Classification is performed on the purified sample.
+    For each feature in turn, resample it from the conditional distribution
+    p(x_i | x_{-i}), marginalizing over class label, by evaluating the CBM
+    joint amplitudes over a discrete grid.  Multiple sweeps produce a sample
+    more consistent with the model's learned distribution.
 
     Args:
         num_bins: Resolution of the discrete grid over the input range.
-        gibbs_batch_size: Number of adversarial samples processed per
-            sequential() call.  Controls density-matrix memory:
-            (gibbs_batch_size × num_bins)² × 4 bytes.
-            At bs=8, bins=200: ~10 MB.  At bs=32, bins=200: ~160 MB.
+        gibbs_batch_size: Number of adversarial samples processed per batch.
+            Controls memory: gibbs_batch_size × num_bins inputs per forward pass.
+            At bs=8, bins=200: 1600 forward evals per feature per sweep.
         radius: Perturbation budget as a fraction of the input range size
             (b - a).  Each sweep restricts resampling of feature i to
             [x̄_i ± delta_abs] where delta_abs = radius * (hi - lo).
@@ -211,8 +210,7 @@ class GibbsPurification:
         """Purify adversarial examples using Gibbs sampling.
 
         Args:
-            born: BornMachine instance.  Generator tensors must already be
-                in sync with the classifier (call born.sync_tensors if needed).
+            born: ConditionalBornMachine instance (must be prepared and in eval mode).
             x_adv: Adversarial inputs, shape (n_samples, data_dim).
             n_sweeps: Number of full sweeps over all features.
             device: Torch device.
@@ -223,20 +221,18 @@ class GibbsPurification:
                 - log_px_after: Marginal log p(x) of purified inputs on CPU,
                   shape (n_samples,).
         """
-        generator = born.generator
-        cls_pos = generator.cls_pos
+        born.to(device)
+        born.eval()
+
         n_samples = len(x_adv)
+        data_dim = x_adv.shape[1]
         lo, hi = born.input_range
 
         input_space = torch.linspace(lo, hi, self.num_bins, device=device)
-        # (num_bins, in_dim) — fixed grid embedding, same for every feature and sweep
-        in_emb_grid = generator.embedding(input_space)
 
         # Convert relative radius to absolute.
-        delta: Optional[float] = (
-            self.radius * (hi - lo)
-            if self.radius is not None
-            else None
+        delta_abs: Optional[float] = (
+            self.radius * (hi - lo) if self.radius is not None else None
         )
 
         results = []
@@ -246,55 +242,40 @@ class GibbsPurification:
             x_cur = batch.clone()
 
             for _ in range(n_sweeps):
-                # Snapshot feature values at sweep start; restriction intervals are
-                # centered on these values, not on the within-sweep updated values.
-                x_bar = x_cur.clone() if delta is not None else None
+                # Snapshot at sweep start; restriction intervals are centred on these
+                # values, not on within-sweep updated values.
+                x_bar = x_cur.clone() if delta_abs is not None else None
 
-                for s in range(generator.n_features):
-                    if s == cls_pos:
-                        continue
-                    # Map MPS site → data column
-                    k = s if s < cls_pos else s - 1
-
-                    # Build embs: all data sites except current use their present value;
-                    # current site uses the full candidate grid.  cls_pos is absent →
-                    # tensorkrowch auto-designates it as the sole output site →
-                    # marginalize_output=True traces over the class physical dim.
-                    embs = {}
-                    for s2 in range(generator.n_features):
-                        if s2 == cls_pos or s2 == s:
-                            continue
-                        k2 = s2 if s2 < cls_pos else s2 - 1
-                        embs[s2] = (
-                            generator.embedding(x_cur[:, k2])
-                            .unsqueeze(1)
-                            .expand(bs, self.num_bins, -1)
-                            .reshape(bs * self.num_bins, -1)
-                        )
-                    embs[s] = (
-                        in_emb_grid.unsqueeze(0)
-                        .expand(bs, -1, -1)
+                for k in range(data_dim):
+                    # Build (bs × num_bins) candidate inputs: x_cur with x[:, k] = grid.
+                    x_cand = (
+                        x_cur.unsqueeze(1)
+                        .expand(bs, self.num_bins, -1)
                         .reshape(bs * self.num_bins, -1)
+                        .clone()
                     )
+                    x_cand[:, k] = input_space.repeat(bs)
 
-                    generator.prepare()
-                    p = generator.sequential(embs).view(bs, self.num_bins)
+                    born.reset()
+                    with torch.no_grad():
+                        # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}).
+                        abs_sq = born.abs_square(born.amplitudes(x_cand))  # (bs*bins, C)
+                        p = abs_sq.sum(dim=-1).view(bs, self.num_bins)     # (bs, bins)
 
-                    if delta is not None:
-                        # Restrict each sample's conditional to [x̄_k ± delta] ∩ [lo, hi].
-                        # Vectorised: lo_k/hi_k are (bs, 1), input_space is (num_bins,).
-                        lo_k = (x_bar[:, k] - delta).clamp(lo, hi).unsqueeze(1)
-                        hi_k = (x_bar[:, k] + delta).clamp(lo, hi).unsqueeze(1)
+                    if delta_abs is not None:
+                        lo_k = (x_bar[:, k] - delta_abs).clamp(lo, hi).unsqueeze(1)
+                        hi_k = (x_bar[:, k] + delta_abs).clamp(lo, hi).unsqueeze(1)
                         mask = (input_space[None, :] >= lo_k) & (input_space[None, :] <= hi_k)
                         p = p * mask
 
-                    x_cur[:, k] = multinomial_sampling(p, input_space)
+                    x_cur[:, k] = agnostic_sampling(p, input_space)
 
             results.append(x_cur.cpu())
 
         x_purified = torch.cat(results, dim=0)
-        log_px_after = born.marginal_log_probability(x_purified.to(device))
-        generator.prepare()
+        born.reset()
+        with torch.no_grad():
+            log_px_after = born.marginal_log_probability(x_purified.to(device))
 
         return x_purified, log_px_after.detach().cpu()
 
@@ -303,26 +284,28 @@ if __name__ == "__main__":
     import sys
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     device = torch.device("cpu")
-    bm = BornMachine(
-        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+    cbm = ConditionalBornMachine(
+        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
         data_dim=2, num_classes=2, device=device,
     )
-    bm.sync_tensors(after="classification")
+    cbm.prepare(device=device)
+    cbm.eval()
+    cbm.cache_log_Z()
 
     x_adv = torch.zeros(4, 2)
     radius = 0.1
 
     purifier = LikelihoodPurification(norm="inf", num_steps=5)
-    x_pur, log_px = purifier.purify(bm, x_adv, radius=radius, device=device)
+    x_pur, log_px = purifier.purify(cbm, x_adv, radius=radius, device=device)
     assert x_pur.shape == x_adv.shape, "LikelihoodPurification: shape mismatch"
     assert log_px.isfinite().all(), "LikelihoodPurification: non-finite log_px"
     print(f"  LikelihoodPurification  shape={tuple(x_pur.shape)}  log_px_mean={log_px.mean().item():.4f}")
 
     gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, radius=0.1)
-    x_g, log_px_g = gibbs.purify(bm, x_adv, n_sweeps=1, device=device)
+    x_g, log_px_g = gibbs.purify(cbm, x_adv, n_sweeps=1, device=device)
     assert x_g.shape == x_adv.shape, "GibbsPurification: shape mismatch"
     print(f"  GibbsPurification       shape={tuple(x_g.shape)}  log_px_mean={log_px_g.mean().item():.4f}")
 

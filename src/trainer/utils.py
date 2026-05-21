@@ -107,8 +107,7 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from torch.utils.data import DataLoader, TensorDataset
-    from src.models.cbm import ConditionalBornMachine, CBMConfig
-    from src.models.born import MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     device = torch.device("cpu")
     cfg = CBMConfig(

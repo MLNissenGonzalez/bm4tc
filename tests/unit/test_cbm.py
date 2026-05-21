@@ -1,8 +1,7 @@
 import pytest
 import torch
 from unittest.mock import patch
-from src.models.cbm import CBMConfig, ConditionalBornMachine
-from src.models.born import MPSInitConfig
+from src.models.cbm import CBMConfig, ConditionalBornMachine, MPSInitConfig
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2):
