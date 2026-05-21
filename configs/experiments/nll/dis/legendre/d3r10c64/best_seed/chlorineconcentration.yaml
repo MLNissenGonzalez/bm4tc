@@ -1,0 +1,24 @@
+# @package _global_
+experiment: best_seed
+
+defaults:
+  - override /born: legendre/d3r10c64
+  - override /dataset: ucr_ts/chlorineconcentration
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 1  # FILL: best seed from wandb
+
+trainer:
+  nll:
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 8.11587582031004e-05
+        weight_decay: 1.8889114142673975e-10

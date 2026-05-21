@@ -1,0 +1,33 @@
+# @package _global_
+experiment: seed_sweep
+descriptor: cls
+
+defaults:
+  - override /born: legendre/d15r40c64
+  - override /dataset: ucr_ts/italypowerdemand
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    max_epoch: 300
+    batch_size: 128
+    patience: 100
+    stop_crit: "acc"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???  # FILL FROM HPO
+        weight_decay: 0.0
+
+hydra:
+  sweep:
+    dir: outputs/seed_sweep/cls/legendre/d15r40c64/${dataset.name}_${now:%d%m}
+    subdir: ${hydra.job.num}
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)

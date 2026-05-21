@@ -3,14 +3,10 @@ from omegaconf import OmegaConf
 
 def _training_regime(*, _root_):
     parts = []
-    for key, code in [
-        ("trainer.discriminative", "dis"),
-        ("trainer.generative", "gen"),
-        ("trainer.adversarial", "adv"),
-    ]:
+    for key, code in [("trainer.nll", "nll"), ("trainer.adversarial", "adv")]:
         if OmegaConf.select(_root_, key) is not None:
             parts.append(code)
-    return "".join(parts) or "none"
+    return "_".join(parts) or "none"
 
 
 _DTYPE_SUFFIX = {

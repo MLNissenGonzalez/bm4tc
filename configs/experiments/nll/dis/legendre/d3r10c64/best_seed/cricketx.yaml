@@ -1,0 +1,24 @@
+# @package _global_
+experiment: best_seed
+
+defaults:
+  - override /born: legendre/d3r10c64
+  - override /dataset: ucr_ts/cricketx
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: ???  # FILL: best seed from wandb
+
+trainer:
+  nll:
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 9.935765726949015e-05
+        weight_decay: 7.896552638359285e-10

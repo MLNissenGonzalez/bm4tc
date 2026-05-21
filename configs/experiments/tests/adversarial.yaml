@@ -5,7 +5,6 @@ experiment: test
 defaults:
   - override /born: fourier/test
   - override /dataset: test
-  - override /trainer/discriminative: test
+  - override /trainer/nll: test
   - override /trainer/adversarial: test
-  - override /trainer/ganstyle: null
   - override /tracking: test

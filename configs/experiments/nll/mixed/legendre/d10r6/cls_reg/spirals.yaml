@@ -1,0 +1,39 @@
+# @package _global_
+experiment: cls_reg # python -m experiments.generative +experiments=generative/legendre/d10r6/cls_reg/spirals_4k --multirun
+
+defaults:
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/nll: test
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: outputs/seed_sweep/cls/legendre/d10r6/spirals_4k_1203/10/models/spirals_4k_pre_mps_bd6_legendre10_300adamlr0.04360959649429807wd1.1168052931600827e-09
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 1            # placeholder; swept via hydra sweeper
+    batch_size: 256
+    patience: 100           # >= max max_epoch -> no early stopping during sweep
+    stop_crit: "gen_loss"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.00017820395899344066             # FILL FROM HPO (gen)
+        weight_decay: 6.847604186810345e-09    # FILL FROM HPO (gen)
+
+hydra:
+  sweeper:
+    params:
+      trainer.nll.max_epoch: choice(1,2,4,8,16,32,64,128)
+      tracking.seed: range(1,6)

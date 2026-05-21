@@ -1,0 +1,35 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: legendre/d4r3
+  - override /dataset: 2Dtoy/moons
+  - override /trainer/nll: test
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 300
+    batch_size: 256
+    patience: 300
+    stop_crit: "gen_loss"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0002636875533972306
+        weight_decay: 1.7699302940633323e-08
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)

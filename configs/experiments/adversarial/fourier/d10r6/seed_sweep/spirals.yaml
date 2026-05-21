@@ -4,10 +4,8 @@ experiment: seed_sweep
 defaults:
   - override /born: fourier/d10r6
   - override /dataset: 2Dtoy/spirals
-  - override /trainer/discriminative: null
+  - override /trainer/nll: null
   - override /trainer/adversarial: pgd_at
-  - override /trainer/ganstyle: null
-  - override /trainer/generative: null
   - override /tracking: online
 
 model_path: ???
