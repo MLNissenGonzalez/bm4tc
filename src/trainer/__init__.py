@@ -1,3 +1,2 @@
-from .discriminative import DiscriminativeTrainer
-from .adversarial import AdversarialTrainer
-from .generative import GenerativeTrainer
+from .nll import NLLTrainer, NLLConfig, NormControlConfig
+from .adversarial import AdversarialTrainer, AdversarialConfig

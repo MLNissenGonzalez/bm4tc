@@ -1,4 +1,4 @@
-"""PGD Adversarial Training for Born Machine classifiers."""
+"""PGD Adversarial Training for ConditionalBornMachine classifiers."""
 
 import time
 import torch
@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 import src.utils.get as get
 from src.utils.get import OptimizerConfig
-from src.utils.get import CriterionConfig
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.data.handler import DataHandler
-from src.models import BornMachine
+from src.models.cbm import ConditionalBornMachine
 from src.trainer.utils import eval_metrics, eval_rob
 
 
@@ -19,7 +18,6 @@ class AdversarialConfig:
     max_epoch: int = 100
     batch_size: int = 64
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    criterion: CriterionConfig = field(default_factory=CriterionConfig)
     evasion: EvasionConfig = field(default_factory=EvasionConfig)
     stop_crit: str = "acc"
     patience: int = 250
@@ -29,8 +27,6 @@ class AdversarialConfig:
     curriculum_start: float = 0.0
     curriculum_end_epoch: Optional[int] = None
     save: bool = False
-    auto_stack: bool = True
-    auto_unbind: bool = False
 
 import logging
 logger = logging.getLogger(__name__)
@@ -41,11 +37,11 @@ _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 
 class AdversarialTrainer:
-    """PGD adversarial training for BornMachine classifiers."""
+    """PGD adversarial training for ConditionalBornMachine classifiers."""
 
     def __init__(
             self,
-            bornmachine: BornMachine,
+            cbm: ConditionalBornMachine,
             train_cfg: AdversarialConfig,
             datahandler: DataHandler,
             device: torch.device
@@ -57,11 +53,10 @@ class AdversarialTrainer:
         if self.datahandler.classification is None:
             self.datahandler.get_classification_loaders(batch_size=self.train_cfg.batch_size)
 
-
         self._init_best()
 
-        self.bornmachine = bornmachine
-        self.best_tensors = [t.cpu().clone().detach() for t in self.bornmachine.classifier.tensors]
+        self.cbm = cbm
+        self.best_tensors = [t.cpu().clone().detach() for t in self.cbm.tensors]
         self._init_attack()
 
     def _init_attack(self):
@@ -83,7 +78,7 @@ class AdversarialTrainer:
         else:
             raise ValueError(f"Unknown attack method: {evasion.method}")
 
-        range_size = self.bornmachine.input_range[1] - self.bornmachine.input_range[0]
+        range_size = self.cbm.input_range[1] - self.cbm.input_range[0]
         self.range_size = range_size
         self.base_epsilon = (evasion.strengths[0] if evasion.strengths else 0.1) * range_size
         self._abs_curriculum_start = self.train_cfg.curriculum_start * range_size
@@ -108,7 +103,7 @@ class AdversarialTrainer:
 
     def _generate_adversarial(self, data, labels, epsilon):
         return self.attack.generate(
-            born=self.bornmachine,
+            born=self.cbm,
             naturals=data,
             labels=labels,
             strength=epsilon,
@@ -117,22 +112,20 @@ class AdversarialTrainer:
 
     def _train_epoch(self, epsilon: float):
         losses = []
-        self.bornmachine.classifier.train()
+        self.cbm.train()
 
         for data, labels in self.datahandler.classification["train"]:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
-            self.bornmachine.classifier.eval()
+            self.cbm.eval()
             adv_data = self._generate_adversarial(data, labels, epsilon)
-            self.bornmachine.classifier.train()
+            self.cbm.train()
 
-            adv_probs = self.bornmachine.class_probabilities(adv_data)
-            adv_loss = self.criterion(adv_probs, labels)
+            adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=0.0)
 
             if self.train_cfg.clean_weight > 0:
-                clean_probs = self.bornmachine.class_probabilities(data)
-                clean_loss = self.criterion(clean_probs, labels)
+                clean_loss = self.cbm.mixed_nll(data, labels, alpha=0.0)
                 loss = (1 - self.train_cfg.clean_weight) * adv_loss + \
                        self.train_cfg.clean_weight * clean_loss
             else:
@@ -144,7 +137,6 @@ class AdversarialTrainer:
             losses.append(loss.detach().cpu().item())
 
         self._train_loss = sum(losses) / len(losses) if losses else float("nan")
-
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
@@ -164,7 +156,7 @@ class AdversarialTrainer:
 
         if improved:
             self.best = dict(self.valid_perf)
-            self.best_tensors = [t.clone().detach() for t in self.bornmachine.classifier.tensors]
+            self.best_tensors = [t.clone().detach() for t in self.cbm.tensors]
             self.best_epoch = self.epoch
             self.patience_counter = 0
         else:
@@ -172,18 +164,16 @@ class AdversarialTrainer:
 
     def _summarise_training(self, output_dir: Optional[Path]):
         """Restore best tensors and clean up. No test eval."""
-        self.bornmachine.classifier.prepare(tensors=self.best_tensors, device=self.device,
-                                            train_cfg=self.train_cfg)
-        self.bornmachine.sync_tensors(after="classification", verify=True)
-        self.bornmachine.to(self.device)
+        self.cbm.initialize(tensors=self.best_tensors)
+        self.cbm.reset()
+        self.cbm.to("cpu")
 
-        self.bornmachine.reset()
-        self.bornmachine.to("cpu")
-        del self.valid_perf
+        if hasattr(self, "valid_perf"):
+            del self.valid_perf
 
         if self.train_cfg.save and output_dir is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
-            self.bornmachine.save(path=str(output_dir / "adv"))
+            self.cbm.save(str(output_dir / "model"))
 
         logger.info(f"Adversarial Trainer ({self.train_cfg.evasion.method}) finished.")
 
@@ -198,10 +188,8 @@ class AdversarialTrainer:
         self.best_epoch = 0
         self.epoch_times = []
 
-        self.bornmachine.classifier.prepare(device=self.device, train_cfg=self.train_cfg)
-        self.criterion = get.criterion("classification", self.train_cfg.criterion)
-        self.optimizer = get.optimizer(self.bornmachine.classifier.parameters(),
-                                       self.train_cfg.optimizer)
+        self.cbm.prepare(device=self.device)
+        self.optimizer = get.optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         rob_freq = self.train_cfg.eval_rob_freq
 
@@ -214,15 +202,14 @@ class AdversarialTrainer:
             epsilon = self._get_epsilon(self.epoch)
             self._train_epoch(epsilon)
 
-            self.bornmachine.sync_tensors(after="classification", verify=False)
             dis_loss, acc, _ = eval_metrics(
-                self.bornmachine, self.datahandler.classification["valid"], self.device
+                self.cbm, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc}
 
             if rob_freq and (self.epoch % rob_freq == 0):
                 rob = eval_rob(
-                    self.bornmachine, self.datahandler.classification["valid"],
+                    self.cbm, self.datahandler.classification["valid"],
                     self.attack, self.base_epsilon, self.device
                 )
                 self.valid_perf["rob"] = rob
@@ -252,14 +239,18 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     import torch
-    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig
+    from src.models.born import MPSInitConfig
     from src.data.handler import DataHandler
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
     from src.utils.evasion import EvasionConfig
 
     device = torch.device("cpu")
-    bm = BornMachine(
-        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+    cbm = ConditionalBornMachine(
+        cfg=CBMConfig(
+            embedding="legendre",
+            init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
+        ),
         data_dim=2, num_classes=2, device=device,
     )
     ds_cfg = DatasetConfig(
@@ -269,7 +260,7 @@ if __name__ == "__main__":
     )
     dh = DataHandler(ds_cfg)
     dh.load()
-    dh.split_and_rescale(bm)
+    dh.split_and_rescale(cbm)
 
     # epsilon=0.05 as fraction of legendre range (2.0) → 0.1 absolute
     evasion_cfg = EvasionConfig(method="PGD", num_steps=3, strengths=[0.05])
@@ -277,7 +268,7 @@ if __name__ == "__main__":
         max_epoch=10, batch_size=4, patience=250,
         evasion=evasion_cfg, eval_rob_freq=2,
     )
-    trainer = AdversarialTrainer(bornmachine=bm, train_cfg=train_cfg, datahandler=dh, device=device)
+    trainer = AdversarialTrainer(cbm=cbm, train_cfg=train_cfg, datahandler=dh, device=device)
 
     logged = []
     trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
