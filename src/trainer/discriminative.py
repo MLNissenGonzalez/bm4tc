@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 import src.utils.get as get
 from src.utils.get import OptimizerConfig
-from src.utils.criterions import CriterionConfig
+from src.utils.get import CriterionConfig
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_metrics
+from src.trainer.utils import eval_metrics
 
+# TODO: merge with generative. only use mixed nll. distinguish using alpha. this file corresponds to alpha=0. 
+# softmax get's its own trainer. no need/possibility to report alpha=1 on valid for softmax.
+# three trainers: nlll.py, adversarial.py, softmax.py simplest up to the fact that inference is different. 
+# adversarial could theoretically use mixed loss aswell. most complex.
 
 @dataclass
 class DiscriminativeConfig:

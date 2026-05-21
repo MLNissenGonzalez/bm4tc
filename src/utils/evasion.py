@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import src.utils.get as get
 from src.models import *
-from src.utils.criterions import CriterionConfig
+from src.utils.get import CriterionConfig
 
 
 @dataclass

@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 import src.utils.get as get
 from src.utils.get import OptimizerConfig
-from src.utils.criterions import CriterionConfig
+from src.utils.get import CriterionConfig
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_metrics, eval_rob
+from src.trainer.utils import eval_metrics, eval_rob
 
 
 @dataclass

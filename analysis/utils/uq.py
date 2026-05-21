@@ -274,7 +274,7 @@ class UQEvaluation:
             UQResults with all evaluation metrics.
         """
         from src.utils.evasion import RobustnessEvaluation
-        from src.utils.criterions import CriterionConfig
+        from src.utils.get import CriterionConfig
         from src.analysis.purification import LikelihoodPurification
 
         cfg = self.config

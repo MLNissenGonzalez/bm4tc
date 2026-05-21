@@ -143,7 +143,7 @@ def evaluate_run(
     """
     from src.models import BornMachine
     from src.data.handler import DataHandler
-    from src.trainer.eval import eval_metrics, eval_rob
+    from src.trainer.utils import eval_metrics, eval_rob
 
     run_dir = Path(run_dir)
     device = torch.device(eval_cfg.device)

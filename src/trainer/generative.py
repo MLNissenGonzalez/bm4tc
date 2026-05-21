@@ -1,5 +1,6 @@
 """Generative trainer for BornMachine using NLL minimization."""
 
+# TODO: merge with discriminative.
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,10 +9,11 @@ import torch
 from typing import Callable, Dict, Optional, Union
 from src.utils import get
 from src.utils.get import OptimizerConfig
-from src.utils.criterions import CriterionConfig, NormRegularizer
+from src.utils.get import CriterionConfig
+from src.trainer.utils import NormRegularizer
 from src.data.handler import DataHandler
 from src.models import BornMachine
-from src.trainer.eval import eval_metrics
+from src.trainer.utils import eval_metrics
 
 
 @dataclass
