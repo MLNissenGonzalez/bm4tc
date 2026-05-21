@@ -6,6 +6,12 @@ import torch.optim as optim
 
 
 @dataclass
+class CriterionConfig:
+    name: str = "nll"
+    kwargs: Optional[Dict[str, Any]] = None
+
+
+@dataclass
 class OptimizerConfig:
     name: str = "adam"
     kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
@@ -78,5 +84,4 @@ def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
     return optimizer_cls(params, **config.kwargs)
 
 
-from .criterions import criterion
 from .embeddings import embedding, range_from_embedding
