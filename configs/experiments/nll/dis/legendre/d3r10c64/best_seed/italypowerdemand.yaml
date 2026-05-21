@@ -1,0 +1,24 @@
+# @package _global_
+experiment: best_seed
+
+defaults:
+  - override /born: legendre/d3r10c64
+  - override /dataset: ucr_ts/italypowerdemand
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 4  # FILL: best seed from wandb
+
+trainer:
+  nll:
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0001329291894316216
+        weight_decay: 0.00025619560600751486

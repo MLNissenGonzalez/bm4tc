@@ -1,0 +1,40 @@
+# @package _global_
+experiment: seed_sweep
+descriptor: nll_hard_pretrained
+
+defaults:
+  - override /born: legendre/d5r100c64
+  - override /dataset: ucr_ts/cricketz
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: ???  # FILL: best cls seed sweep checkpoint
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 1000
+    batch_size: 128
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    norm_control:
+      target: null        # captured from pretrained BM at start of train()
+      hard_every: ???     # FILL FROM GRID SWEEP
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???           # FILL FROM GRID SWEEP
+        weight_decay: 0.0
+
+hydra:
+  sweep:
+    dir: outputs/seed_sweep/gen/legendre/d5r100c64/cricketz_${now:%d%m}
+    subdir: ${hydra.job.num}
+  sweeper:
+    params:
+      tracking.seed: range(1, 4)

@@ -5,9 +5,7 @@ defaults:
   - _self_ # has to be here such that overrides work
   - dataset: 2Dtoy/circles
   - born: fourier/d4r3
-  - trainer/discriminative: test
-  - trainer/ganstyle: null
-  - trainer/generative: null
+  - trainer/nll: test
   - trainer/adversarial: null
   - tracking: test
   - override hydra/job_logging: stream_only

@@ -1,0 +1,15 @@
+alpha: 0.0
+max_epoch: 300
+batch_size: 256
+optimizer:
+  name: "adam"
+  kwargs:
+    lr: 1e-4
+    weight_decay: 0.0
+patience: 300
+stop_crit: "dis_loss"
+norm_control:
+  target: 1.0
+  hard_every: 1
+  soft_strength: 0.0
+save: false

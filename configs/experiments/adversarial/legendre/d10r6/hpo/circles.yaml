@@ -4,10 +4,8 @@ experiment: hpo
 defaults:
   - override /born: legendre/d10r6
   - override /dataset: 2Dtoy/circles
-  - override /trainer/discriminative: null
+  - override /trainer/nll: null
   - override /trainer/adversarial: pgd_at
-  - override /trainer/ganstyle: null
-  - override /trainer/generative: null
   - override /tracking: online
   - override /hydra/sweeper: optuna
 

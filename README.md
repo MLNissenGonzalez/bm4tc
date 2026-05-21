@@ -16,7 +16,7 @@ For classification, a special output tensor yields a class-conditioned amplitude
 |--------|--------|-------------|
 | `experiments/discriminative.py` | `dis` | Discriminative classifier (NLL on p(c\|x)) |
 | `experiments/generative.py` | `gen` | Classification pretraining + generative NLL on p(x,c) |
-| `experiments/adversarial.py` | `adv` | Classification pretraining + PGD-AT or TRADES adversarial training |
+| `experiments/adversarial.py` | `adv` | Classification pretraining + PGD adversarial training |
 
 ## Trustworthiness Evaluation
 

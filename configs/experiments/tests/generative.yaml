@@ -1,9 +1,0 @@
-# @package _global_
-experiment: test
-
-defaults:
-  - override /trainer/discriminative: null
-  - override /trainer/generative: test
-  - override /trainer/ganstyle: null
-  - override /trainer/adversarial: null
-  - override /dataset: test

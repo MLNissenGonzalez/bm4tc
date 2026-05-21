@@ -69,3 +69,4 @@ CLAUDE.md
 .pytest_cache/
 pytest.ini
 reference/
+DEFERRED.md

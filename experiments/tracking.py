@@ -46,11 +46,13 @@ def init_wandb(cfg: Config) -> wandb.Run:
     job_num = int(runtime_cfg.job.get("num", 0))
 
     regime_parts = []
-    for key, code in [("trainer.discriminative", "dis"), ("trainer.generative", "gen"),
-                      ("trainer.adversarial", "adv")]:
-        if OmegaConf.select(cfg, key) is not None:
-            regime_parts.append(code)
-    regime = "".join(regime_parts) or "none"
+    nll_cfg = OmegaConf.select(cfg, "trainer.nll")
+    if nll_cfg is not None:
+        alpha = float(OmegaConf.select(cfg, "trainer.nll.alpha") or 0.0)
+        regime_parts.append(f"nll_a{alpha:.2g}" if alpha > 0 else "nll")
+    if OmegaConf.select(cfg, "trainer.adversarial") is not None:
+        regime_parts.append("adv")
+    regime = "_".join(regime_parts) or "none"
 
     _dtype = OmegaConf.select(cfg, "born.init_kwargs.dtype")
     _dtype_suffix = {"complex64": "c64", "complex128": "c128"}.get(_dtype, "")
