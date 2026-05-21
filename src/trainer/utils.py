@@ -41,7 +41,6 @@ class NormRegularizer(nn.Module):
 def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
     """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss)."""
     cbm.eval()
-    cbm.reset()
     with torch.no_grad():
         log_Z = cbm.log_partition_function()
     gen_finite = math.isfinite(log_Z.item())

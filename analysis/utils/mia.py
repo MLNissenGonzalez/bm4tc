@@ -1,5 +1,5 @@
 """
-Membership Inference Attack (MIA) evaluation for BornClassifier models.
+Membership Inference Attack (MIA) evaluation for ConditionalBornMachine models.
 
 This module provides tools to evaluate the privacy leakage of trained models
 by attempting to distinguish training samples from test samples based on
@@ -257,7 +257,7 @@ class MIAEvaluation:
         """Extract MIA features for all samples in a data loader.
 
         Args:
-            model: BornMachine or model with class_probabilities method.
+            model: ConditionalBornMachine or model with class_probabilities method.
             data_loader: DataLoader yielding (data, labels) tuples.
             device: Device to run inference on.
 
@@ -297,7 +297,7 @@ class MIAEvaluation:
         the perturbed inputs.
 
         Args:
-            model: BornMachine or model with class_probabilities method.
+            model: ConditionalBornMachine or model with class_probabilities method.
             data_loader: DataLoader yielding (data, labels) tuples.
             device: Device to run inference on.
             pgd: ProjectedGradientDescent instance for generating adversarial examples.
@@ -538,7 +538,7 @@ class MIAEvaluation:
         """Run the membership inference attack evaluation.
 
         Args:
-            model: BornMachine or model with class_probabilities method.
+            model: ConditionalBornMachine or model with class_probabilities method.
             train_loader: DataLoader for training data (members).
             test_loader: DataLoader for test data (non-members).
             device: Device to run inference on.

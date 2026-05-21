@@ -85,7 +85,7 @@ class EvalConfig:
 # ---------------------------------------------------------------------------
 
 def _get_rob_params(
-    bm,
+    cbm,
     cfg,
     evasion_override: Optional[Dict[str, Any]],
 ) -> Optional[Tuple[Any, List[float]]]:
@@ -111,7 +111,7 @@ def _get_rob_params(
         try:
             raw = OmegaConf.to_container(cfg.trainer.adversarial.evasion, resolve=True)
             ec = EvasionConfig(**raw)
-            range_size = float(bm.input_range[1] - bm.input_range[0])
+            range_size = float(cbm.input_range[1] - cbm.input_range[0])
             strengths_abs = [s * range_size for s in ec.strengths]
         except Exception as e:
             logger.warning(f"No evasion config found; skipping robustness eval. ({e})")
@@ -141,7 +141,7 @@ def evaluate_run(
         Flat dict with keys like ``acc``, ``dis_loss``, ``rob/0.1``,
         ``mia_accuracy``, ``uq_clean_accuracy``, etc.
     """
-    from src.models import BornMachine
+    from src.models import ConditionalBornMachine
     from src.data.handler import DataHandler
     from src.trainer.utils import eval_metrics, eval_rob
 
@@ -154,24 +154,21 @@ def evaluate_run(
 
     # 2. Load model
     checkpoint_path = find_model_checkpoint(run_dir)
-    bm = BornMachine.load(str(checkpoint_path))
-    bm.to(device)
+    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm.to(device)
 
-    # 3. Sync for gen_loss (safe to call for all regimes)
-    bm.sync_tensors(after="classification")
-
-    # 4. Load data
+    # 3. Load data
     OmegaConf.update(cfg, "dataset.overwrite", True, force_add=True)
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(bm)
+    datahandler.split_and_rescale(cbm)
     datahandler.get_classification_loaders()
     loader = datahandler.classification["test"]
 
-    # 5. Core metrics (single forward pass)
+    # 4. Core metrics (single forward pass)
     if eval_cfg.compute_acc or eval_cfg.compute_dis_loss or eval_cfg.compute_gen_loss:
         try:
-            dis_loss, acc, gen_loss = eval_metrics(bm, loader, device)
+            dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device)
             if eval_cfg.compute_acc:
                 results["acc"] = acc
             if eval_cfg.compute_dis_loss:
@@ -187,20 +184,20 @@ def evaluate_run(
             if eval_cfg.compute_gen_loss:
                 results["gen_loss"] = np.nan
 
-    # 6. Robustness
+    # 5. Robustness
     if eval_cfg.compute_rob:
-        rob_params = _get_rob_params(bm, cfg, eval_cfg.evasion_override)
+        rob_params = _get_rob_params(cbm, cfg, eval_cfg.evasion_override)
         if rob_params is not None:
             attack, strengths_abs = rob_params
             for abs_eps in strengths_abs:
                 try:
-                    rob_acc = eval_rob(bm, loader, attack, abs_eps, device)
+                    rob_acc = eval_rob(cbm, loader, attack, abs_eps, device)
                     results[f"rob/{abs_eps}"] = rob_acc
                 except Exception as e:
                     logger.warning(f"eval_rob failed at eps={abs_eps}: {e}")
                     results[f"rob/{abs_eps}"] = np.nan
 
-    # 7. MIA
+    # 6. MIA
     if eval_cfg.compute_mia:
         try:
             from .mia import MIAEvaluation, MIAFeatureConfig
@@ -214,7 +211,7 @@ def evaluate_run(
                 adversarial_norm=eval_cfg.mia_adversarial_norm,
             )
             mia_results = mia_eval.evaluate(
-                bm,
+                cbm,
                 datahandler.classification["train"],
                 datahandler.classification["test"],
                 device,
@@ -244,14 +241,14 @@ def evaluate_run(
             results["mia_accuracy"] = np.nan
             results["mia_auc_roc"] = np.nan
 
-    # 8. UQ
+    # 7. UQ
     uq_results = None
     if eval_cfg.compute_uq:
         try:
             from .uq import UQEvaluation, UQConfig
 
             uq_eval = UQEvaluation(config=UQConfig(**(eval_cfg.uq_config or {})))
-            uq_results = uq_eval.evaluate(bm, datahandler.classification["test"], device)
+            uq_results = uq_eval.evaluate(cbm, datahandler.classification["test"], device)
 
             results["uq_clean_accuracy"] = uq_results.clean_accuracy
             results["uq_clean_log_px_mean"] = float(uq_results.clean_log_px.mean())
@@ -278,14 +275,14 @@ def evaluate_run(
             logger.warning(f"UQ evaluation failed: {e}")
             results["uq_clean_accuracy"] = np.nan
 
-    # 8b. Joint-attack UQ: second pass with JOINT_PGD
+    # 7b. Joint-attack UQ: second pass with JOINT_PGD
     if eval_cfg.compute_uq and eval_cfg.joint_uq_config is not None:
         try:
             from .uq import UQEvaluation, UQConfig
 
             joint_uq_eval = UQEvaluation(config=UQConfig(**eval_cfg.joint_uq_config))
             joint_uq_results = joint_uq_eval.evaluate(
-                bm, datahandler.classification["test"], device
+                cbm, datahandler.classification["test"], device
             )
             for eps, acc in joint_uq_results.adv_accuracies.items():
                 results[f"uq_joint_adv_acc/{eps}"] = acc
@@ -304,8 +301,8 @@ def evaluate_run(
         except Exception as e:
             logger.warning(f"Joint-attack UQ evaluation failed: {e}")
 
-    # 9. Cleanup
-    del bm
+    # 8. Cleanup
+    del cbm
     torch.cuda.empty_cache()
 
     return results

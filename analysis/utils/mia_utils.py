@@ -17,7 +17,7 @@ def load_run_config(run_dir: Union[str, Path]) -> DictConfig:
     """Load full config from .hydra/config.yaml in run output folder.
 
     This loads the complete Hydra configuration used for a training run,
-    which can be used to reconstruct the DataHandler and BornMachine.
+    which can be used to reconstruct the DataHandler and ConditionalBornMachine.
 
     Args:
         run_dir: Path to the run output directory (e.g., outputs/experiment_name_date).
@@ -116,7 +116,7 @@ def find_model_checkpoint(
 
     Example:
         >>> checkpoint = find_model_checkpoint("outputs/classification_2024_01_15")
-        >>> bornmachine = BornMachine.load(str(checkpoint))
+        >>> cbm = ConditionalBornMachine.load(str(checkpoint))
     """
     run_dir = Path(run_dir)
     models_dir = run_dir / "models"

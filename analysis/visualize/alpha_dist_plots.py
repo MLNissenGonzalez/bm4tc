@@ -31,7 +31,7 @@ import pandas as pd
 import torch
 
 from analysis.utils import load_run_config, find_model_checkpoint
-from src.models import BornMachine  # must precede src.data to avoid circular import
+from src.models import ConditionalBornMachine
 from src.data.handler import DataHandler
 from analysis.visualize.distributions import (
     make_grid,
@@ -39,12 +39,11 @@ from analysis.visualize.distributions import (
     compute_joint_probs,
     _overlay_data,
     _save_fig,
-    _infer_regime,
     DECISION_BOUNDARY_CMAP,
 )
 
 OUTPUTS_ROOT = PROJECT_ROOT / "analysis" / "outputs" / "alpha_curve"
-ALPHA_COL    = "config/trainer.generative.criterion.kwargs.alpha"
+ALPHA_COL    = "config/trainer.alpha"
 ACC_COL      = "eval/test/acc"
 DPI          = 150
 PANEL_SIZE   = 3.0  # inches per panel
@@ -84,14 +83,11 @@ def _load_bm(run_path: str, device: torch.device):
     run_dir = Path(run_path)
     if not run_dir.is_absolute():
         run_dir = PROJECT_ROOT / run_dir
-    cfg  = load_run_config(run_dir)
+    cfg = load_run_config(run_dir)
     ckpt = find_model_checkpoint(run_dir)
-    bm   = BornMachine.load(str(ckpt))
-    bm.to(device)
-    regime     = _infer_regime(bm, ckpt)
-    sync_after = "classification" if regime == "discriminative" else "generation"
-    bm.sync_tensors(after=sync_after)
-    return bm, cfg
+    cbm = ConditionalBornMachine.load(str(ckpt))
+    cbm.to(device)
+    return cbm, cfg
 
 
 # ---------------------------------------------------------------------------
@@ -211,34 +207,34 @@ def plot_alpha_dists(csv_path: Path, max_alpha: int, resolution: int,
 
         run_path = best_runs[matched]
         try:
-            bm, cfg = _load_bm(run_path, device)
+            cbm, cfg = _load_bm(run_path, device)
         except Exception as exc:
             print(f"  Warning: could not load model for alpha={alpha:.3g}: {exc}")
             continue
 
         if grid_x1 is None:
-            if bm.num_sites != 3:
-                print(f"  Skipping: dataset has {bm.num_sites-1} input features "
+            if cbm.num_sites != 3:
+                print(f"  Skipping: dataset has {cbm.num_sites-1} input features "
                       f"(distribution plots are only supported for 2D toy data).")
-                del bm
+                del cbm
                 return
-            input_range                 = bm.input_range
+            input_range                 = cbm.input_range
             grid_x1, grid_x2, grid_points = make_grid(input_range, resolution)
-            num_classes                 = bm.out_dim
+            num_classes                 = cbm.out_dim
 
         if show_data and shared_train_data is None:
             dh = DataHandler(cfg.dataset)
             dh.load()
-            dh.split_and_rescale(bm)
+            dh.split_and_rescale(cbm)
             shared_train_data   = dh.data["train"]
             shared_train_labels = dh.labels["train"]
 
         print(f"    α={alpha:.2g}: computing p(c|x) and p(x)…")
-        conditional = compute_conditional_probs(bm, grid_points, device)
-        joint       = compute_joint_probs(bm, grid_points, device, normalize=True)
+        conditional = compute_conditional_probs(cbm, grid_points, device)
+        joint       = compute_joint_probs(cbm, grid_points, device, normalize=True)
         panels.append((matched, conditional, joint,
                         shared_train_data, shared_train_labels, show_data))
-        del bm
+        del cbm
 
     if not panels:
         print("  No panels produced; skipping.")
