@@ -1,8 +1,8 @@
 import pytest
 import torch
-from src.models.generator.sampling import (
+from src.utils.sampling import (
     pre_select,
-    multinomial_sampling,
+    agnostic_sampling,
     sample,
 )
 
@@ -40,23 +40,23 @@ def test_pre_select_ids_valid_range(uniform_p):
     assert (ids >= 0).all() and (ids < BINS).all()
 
 
-# ---- multinomial_sampling ----
+# ---- agnostic_sampling ----
 
 def test_multinomial_output_in_grid(uniform_p, grid):
-    samples = multinomial_sampling(uniform_p, grid)
+    samples = agnostic_sampling(uniform_p, grid)
     grid_set = set(grid.tolist())
     for s in samples.tolist():
         assert any(abs(s - g) < 1e-5 for g in grid_set)
 
 
 def test_multinomial_output_shape(uniform_p, grid):
-    samples = multinomial_sampling(uniform_p, grid)
+    samples = agnostic_sampling(uniform_p, grid)
     assert samples.shape == (BATCH,)
 
 
 def test_multinomial_zero_row_fallback(grid):
     p = torch.zeros(BATCH, BINS)
-    samples = multinomial_sampling(p, grid)
+    samples = agnostic_sampling(p, grid)
     assert samples.shape == (BATCH,)
     assert torch.isfinite(samples).all()
 
@@ -64,21 +64,21 @@ def test_multinomial_zero_row_fallback(grid):
 def test_multinomial_single_nonzero_bin(grid):
     p = torch.zeros(BATCH, BINS)
     p[:, 5] = 1.0
-    samples = multinomial_sampling(p, grid)
+    samples = agnostic_sampling(p, grid)
     expected = grid[5].item()
     assert all(abs(s - expected) < 1e-5 for s in samples.tolist())
 
 
 def test_multinomial_nan_probs_handled(grid):
     p = torch.full((BATCH, BINS), float("nan"))
-    samples = multinomial_sampling(p, grid)
+    samples = agnostic_sampling(p, grid)
     assert samples.shape == (BATCH,)
     assert torch.isfinite(samples).all()
 
 
 def test_multinomial_posinf_handled(grid):
     p = torch.full((BATCH, BINS), float("inf"))
-    samples = multinomial_sampling(p, grid)
+    samples = agnostic_sampling(p, grid)
     assert samples.shape == (BATCH,)
     assert torch.isfinite(samples).all()
 
@@ -86,7 +86,7 @@ def test_multinomial_posinf_handled(grid):
 # ---- sample dispatcher ----
 
 def test_sample_multinomial_dispatch(uniform_p, grid):
-    samples = sample(uniform_p, grid, "multinomial")
+    samples = sample(uniform_p, grid, "agnostic")
     assert samples.shape == (BATCH,)
 
 
@@ -97,5 +97,5 @@ def test_sample_unknown_method_raises(uniform_p, grid):
 
 def test_sample_batch_size_1(grid):
     p = torch.ones(1, BINS)
-    samples = sample(p, grid, "multinomial")
+    samples = sample(p, grid, "agnostic")
     assert samples.shape == (1,)

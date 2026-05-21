@@ -2,13 +2,25 @@ import math
 import torch
 import tensorkrowch as tk
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Text
 from omegaconf import OmegaConf, DictConfig
 import src.utils.get as get
-from src.models.born import MPSInitConfig
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MPSInitConfig:
+    in_dim: int = 4
+    bond_dim: int = 3
+    out_position: Optional[int] = None
+    boundary: Text = "obc"
+    init_method: Text = "randn"
+    std: float = 1e-9
+    n_features: Optional[int] = None
+    out_dim: Optional[int] = None
+    dtype: Optional[str] = None
 
 
 @dataclass

@@ -5,10 +5,10 @@ import torch
 def _make_spirals_handler():
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
     from src.data.handler import DataHandler
-    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
-    bm = BornMachine(
-        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+    bm = ConditionalBornMachine(
+        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
         data_dim=2, num_classes=2, device=torch.device("cpu"),
     )
     ds_cfg = DatasetConfig(

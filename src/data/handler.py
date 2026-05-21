@@ -1,4 +1,4 @@
-from src.models import BornMachine
+from src.models import ConditionalBornMachine
 import torch
 from src.data.gen_n_load import load_dataset, LabelledDataset, DatasetConfig
 from sklearn.preprocessing import MinMaxScaler
@@ -122,14 +122,14 @@ class DataHandler:
 
     def split_and_rescale(
             self,
-            bornmachine: BornMachine,
+            bornmachine: ConditionalBornMachine,
             scaler_name: str = None   # None → read from self.cfg.scaler
     ):
         """
         Split data into train/valid/test and rescale to embedding range.
 
         Args:
-            bornmachine: BornMachine (used to determine input range from embedding).
+            bornmachine: ConditionalBornMachine (used to determine input range from embedding).
             scaler_name: Scaler type ("minmax" or "linear"). If None, reads from self.cfg.scaler.
         """
         # Check that data is already loaded to handler, otherwise, load it:
@@ -283,11 +283,11 @@ if __name__ == "__main__":
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
-    from src.models.born import BornMachine, BornMachineConfig, MPSInitConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     device = torch.device("cpu")
-    bm = BornMachine(
-        cfg=BornMachineConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
+    bm = ConditionalBornMachine(
+        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
         data_dim=2, num_classes=2, device=device,
     )
 

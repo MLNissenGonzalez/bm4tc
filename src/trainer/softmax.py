@@ -171,9 +171,8 @@ if __name__ == "__main__":
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from torch.utils.data import DataLoader, TensorDataset
-    from src.models.cbm import ConditionalBornMachine, CBMConfig
-    from src.models.born import MPSInitConfig
-    from src.trainer.discriminative import DiscriminativeConfig
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.trainer.nll import NLLConfig
 
     criterion = ClassificationSoftmaxNLL()
     logits = torch.randn(8, 2)
@@ -199,7 +198,7 @@ if __name__ == "__main__":
         classification = {"train": loader, "valid": loader}
         def get_classification_loaders(self, **_): pass
 
-    train_cfg = DiscriminativeConfig(max_epoch=3, batch_size=4, patience=250)
+    train_cfg = NLLConfig(max_epoch=3, batch_size=4, patience=250)
     trainer = SoftmaxTrainer(cbm=cbm, train_cfg=train_cfg, datahandler=_FakeDH(), device=device)
 
     logged = []

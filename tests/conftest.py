@@ -25,27 +25,17 @@ NUM_CLASSES = 2
 
 
 @pytest.fixture(scope="session")
-def born_machine():
-    from omegaconf import OmegaConf
-    from src.models.born import BornMachine
-    cfg = OmegaConf.create({
-        "embedding": "fourier",
-        "init_kwargs": {
-            "in_dim": 4,
-            "bond_dim": 2,
-            "out_position": 2,
-            "boundary": "obc",
-            "init_method": "randn",
-            "dtype": "complex64",
-            "n_features": None,
-            "out_dim": None,
-            "std": 1e-3,
-        },
-        "model_path": None,
-    })
-    bm = BornMachine(cfg=cfg, data_dim=DATA_DIM, num_classes=NUM_CLASSES, device="cpu")
-    bm.cache_log_Z()
-    return bm
+def cbm():
+    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    cfg = CBMConfig(
+        embedding="fourier",
+        init_kwargs=MPSInitConfig(in_dim=DATA_DIM, bond_dim=2, std=1e-3),
+    )
+    model = ConditionalBornMachine(cfg=cfg, data_dim=DATA_DIM, num_classes=NUM_CLASSES, device="cpu")
+    model.prepare(device="cpu")
+    model.eval()
+    model.cache_log_Z()
+    return model
 
 
 @pytest.fixture
