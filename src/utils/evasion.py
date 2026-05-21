@@ -299,7 +299,7 @@ def build_attack(
 
 class RobustnessEvaluation:
     """
-    Evaluate adversarial robustness of a BornMachine classifier.
+    Evaluate adversarial robustness of a ConditionalBornMachine.
 
     Generates adversarial examples using FGM or PGD and computes accuracy
     under attack at multiple perturbation strengths.

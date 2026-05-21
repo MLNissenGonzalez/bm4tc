@@ -1,6 +1,6 @@
 
 """
-Embeddings of the input for the BornMachines. This is here because...
+Embeddings of the input for ConditionalBornMachine. This is here because...
 """
 
 import math

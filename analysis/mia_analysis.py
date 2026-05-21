@@ -4,7 +4,7 @@
 # This notebook evaluates privacy leakage via membership inference attacks.
 #
 # **What it does:**
-# - Loads a trained BornMachine model and its original dataset
+# - Loads a trained ConditionalBornMachine model and its original dataset
 # - Extracts features from model outputs (class probabilities) for train and test sets
 # - Trains an attack classifier to distinguish training samples from test samples
 # - Reports attack success metrics (accuracy, AUC-ROC) as privacy indicators

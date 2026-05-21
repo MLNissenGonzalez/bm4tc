@@ -8,21 +8,20 @@ The core hypothesis is that learning the joint distribution p(x, c) rather than 
 
 A **Born Machine** models a probability distribution via the Born rule from quantum mechanics: probability = |amplitude|². The amplitude function is represented as a **Matrix Product State (MPS)**, a structured tensor network that factorises a high-dimensional function into a chain of low-rank tensors. Inputs are mapped into a Hilbert space by a feature embedding before contraction with the MPS.
 
-For classification, a special output tensor yields a class-conditioned amplitude vector; squaring and normalising gives p(c|x). For generation, the same tensors enable exact ancestral sampling of p(x|c) via sequential marginalisation.
+For classification, a special output tensor yields a class-conditioned amplitude vector; squaring and normalising gives p(c|x). The marginal p(x) = Σ_c |ψ(x,c)|² / Z is available analytically via `cbm.log_partition_function()`, enabling likelihood-based detection and purification without sampling.
 
 ## Training Regimes
 
 | Script | Regime | Description |
 |--------|--------|-------------|
-| `experiments/discriminative.py` | `dis` | Discriminative classifier (NLL on p(c\|x)) |
-| `experiments/generative.py` | `gen` | Classification pretraining + generative NLL on p(x,c) |
+| `experiments/nll.py` | `dis`/`gen` | Unified NLL; `alpha=0` → discriminative, `alpha>0` → mixed joint NLL |
 | `experiments/adversarial.py` | `adv` | Classification pretraining + PGD adversarial training |
 
 ## Trustworthiness Evaluation
 
 **Adversarial robustness** — Post-hoc PGD attack (L2, 20 steps) at multiple ε fractions of the embedding range. Robust accuracy reported per seed; sweep statistics include mean ± std and Pareto frontiers (clean accuracy vs. robust accuracy).
 
-**Uncertainty quantification** — `BornMachine.marginal_log_probability(x)` gives log p(x) = log Σ_c |ψ(x,c)|² − log Z. Used for (i) likelihood-based detection of adversarial examples (threshold calibrated on clean test percentiles) and (ii) likelihood purification (projected gradient ascent on log p(x) within an Lp ball).
+**Uncertainty quantification** — `ConditionalBornMachine.marginal_log_probability(x)` gives log p(x) = log Σ_c |ψ(x,c)|² − log Z. Used for (i) likelihood-based detection of adversarial examples (threshold calibrated on clean test percentiles) and (ii) likelihood purification (projected gradient ascent on log p(x) within an Lp ball).
 
 **Membership inference** — Logistic-regression attack and worst-case oracle threshold attack on confidence features derived from p(c|x). Also evaluated on adversarial inputs (adversarial MIA).
 
@@ -58,17 +57,17 @@ Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters). Se
 All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/); the canonical way to design an experiment is to write a config under `configs/experiments/` and reference it with `+experiments=<path>`.
 
 ```bash
-# Single run
-python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
+# Single run (NLL discriminative)
+python -m experiments.nll +experiments=nll/dis/fourier/d4r3/hpo/moons
 
-# Multirun / seed sweep
-python -m experiments.generative --multirun +experiments=generative/legendre/d10r6/seed_sweep/circles
+# Multirun / seed sweep (NLL generative)
+python -m experiments.nll --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
 
 # Batch-run all unrun configs in a filter set
 python -m experiments.queue_experiments --filter-type gen --filter-embedding legendre --dry-run
 
 # Disable W&B for local debugging
-python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
+python -m experiments.nll +experiments=tests/nll tracking.mode=disabled
 ```
 
 ## Post-Hoc Analysis
@@ -87,10 +86,10 @@ Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (discriminative, generative, adversarial)
+├── experiments/        # Entry-point scripts (nll, adversarial)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
-│   ├── models/         # BornMachine, BornClassifier, BornGenerator
+│   ├── models/         # ConditionalBornMachine (cbm.py)
 │   ├── trainer/        # Training loops + eval functions for each regime
 │   ├── analysis/       # viz.py, purification.py (no W&B dependency)
 │   ├── data/           # DataHandler, dataset generation and loading

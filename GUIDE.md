@@ -12,11 +12,9 @@ See `README.md` for background and setup.
 
 **Born rule**: probability = |amplitude|². Inputs are embedded into a Hilbert space; the amplitude is computed by contracting the embedded input with an MPS tensor chain.
 
-**BornMachine** (`src/models/born.py`) owns two views over the same shared tensors:
-- **BornClassifier** — parallel contraction, yields class-conditional amplitude vector ψ(x, c); squared and normalised → p(c|x)
-- **BornGenerator** — sequential contraction for exact ancestral sampling of p(x|c)
-
-Both share tensors directly. After a training step on one view, call `bm.sync_tensors(after=...)` before evaluating with the other — otherwise they drift.
+**ConditionalBornMachine** (`src/models/cbm.py`) is a single MPS that represents the joint amplitude ψ(x, c). Two contraction modes over the same tensors:
+- **Classification** — parallel contraction over x yields amplitude vector ψ(x, c); squared and normalised → p(c|x). No explicit syncing required.
+- **Generation (marginal)** — Σ_c |ψ(x,c)|² / Z gives p(x). Partition function Z is cached once via `cbm.cache_log_Z()`; log p(x) is then available via `cbm.marginal_log_probability(x)`.
 
 **Architecture naming**: `d{d}r{r}` where `d` = physical/embedding dimension (in_dim), `r` = bond dimension.  
 Examples: `d4r3`, `d10r6`, `d30r18`.
@@ -27,15 +25,14 @@ Examples: `d4r3`, `d10r6`, `d30r18`.
 
 | Script | Regime | Description |
 |--------|--------|-------------|
-| `experiments/discriminative.py` | `dis` | Discriminative NLL on p(c\|x) |
-| `experiments/generative.py` | `gen` | Classification pretraining + generative NLL on p(x,c) |
+| `experiments/nll.py` | `dis`/`gen` | Unified NLL; `alpha=0` → pure discriminative, `alpha>0` → mixed joint NLL |
 | `experiments/adversarial.py` | `adv` | Classification pretraining + PGD-AT or TRADES adversarial training |
 
 Each experiment script runs as a Python module from the project root:
 ```bash
-python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
-python -m experiments.generative     +experiments=generative/legendre/d10r6/seed_sweep/circles
-python -m experiments.adversarial    +experiments=adversarial/fourier/d4r3/hpo/moons
+python -m experiments.nll        +experiments=nll/dis/fourier/d4r3/hpo/moons
+python -m experiments.nll        +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+python -m experiments.adversarial +experiments=adversarial/fourier/d4r3/hpo/moons
 ```
 
 ---
@@ -47,16 +44,16 @@ Configurations are managed with [Hydra](https://hydra.cc/). The canonical workfl
 1. Write an experiment config in `configs/experiments/` that overrides group defaults
 2. Run with `+experiments=<path>` (without `.yaml`)
 
-**Example experiment config** (`configs/experiments/discriminative/fourier/d4r3/hpo/moons.yaml`):
+**Example experiment config** (`configs/experiments/nll/dis/fourier/d4r3/hpo/moons.yaml`):
 ```yaml
 # @package _global_
 defaults:
   - override /born: fourier/d4r3
   - override /dataset: 2Dtoy/moons
-  - override /trainer/discriminative: adam500_loss
+  - override /trainer/nll: adam500_loss
   - override /tracking: online
-  - override /trainer/generative: null
-  - override /trainer/adversarial: null
+trainer:
+  alpha: 0.0
 ```
 
 **Config group layout**:
@@ -67,13 +64,12 @@ configs/
 ├── dataset/2Dtoy/           # circles.yaml, moons.yaml, spirals.yaml, *_small.yaml
 ├── dataset/mnist/           # mnist.yaml, mnist_1k.yaml
 ├── dataset/ucr_ts/          # ECG200.yaml, ItalyPowerDemand.yaml, ...
-├── trainer/discriminative/  # DiscriminativeConfig defaults + variants
-├── trainer/generative/      # GenerativeConfig defaults
+├── trainer/nll/             # NLLConfig defaults + variants
 ├── trainer/adversarial/     # AdversarialConfig (pgd_at, trades, ...)
 └── tracking/                # online.yaml, offline.yaml, disabled.yaml
 ```
 
-**Config dataclass location**: each module owns its config dataclass (e.g., `DiscriminativeConfig` in `src/trainer/discriminative.py`). The top-level `Config`, `TrainerConfig`, `TrackingConfig` and `register()` live in `experiments/config.py`.
+**Config dataclass location**: each module owns its config dataclass (e.g., `NLLConfig` in `src/trainer/nll.py`). The top-level `Config`, `TrainerConfig`, `TrackingConfig` and `register()` live in `experiments/config.py`.
 
 ---
 
@@ -84,7 +80,7 @@ W&B is opt-in: set `tracking.mode: online` in your experiment config, or `tracki
 
 ```bash
 # Disable W&B explicitly
-python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
+python -m experiments.nll +experiments=tests/nll tracking.mode=disabled
 ```
 
 The epoch logger is constructed via `experiments.tracking.make_logger(output_dir, wandb_run)` and passed as `on_epoch_end` callback to the trainer.
@@ -126,16 +122,17 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 
 | Task | Location |
 |------|----------|
-| Modify MPS architecture / init | `src/models/born.py` |
+| Modify MPS architecture / init | `src/models/cbm.py` |
 | Change embedding | `src/utils/get.py` (`_EMBEDDING_MAP`) |
-| Add / change loss function | `src/utils/criterions.py` |
-| Modify training loop | `src/trainer/discriminative.py`, `generative.py`, `adversarial.py` |
-| Validation metrics (eval functions) | `src/trainer/eval.py` |
+| Add / change softmax loss | `src/trainer/softmax.py` |
+| Modify NLL training loop | `src/trainer/nll.py` |
+| Modify adversarial training loop | `src/trainer/adversarial.py` |
+| Validation metrics (eval functions) | `src/trainer/utils.py` |
 | Add adversarial attack | `src/utils/evasion.py` |
 | Purification (likelihood-based) | `src/analysis/purification.py` |
 | Data loading and rescaling | `src/data/handler.py`, `src/data/gen_n_load.py` |
 | Visualisation (matplotlib, no W&B) | `src/analysis/viz.py` |
-| Experiment entry points | `experiments/discriminative.py`, `generative.py`, `adversarial.py` |
+| Experiment entry points | `experiments/nll.py`, `experiments/adversarial.py` |
 | W&B init + dataset viz logging | `experiments/tracking.py` |
 | Config dataclasses + Hydra register | `experiments/config.py` |
 | Post-hoc sweep evaluation | `analysis/seed_sweep_analysis.py` |
@@ -150,10 +147,8 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 
 ## Known issues & gotchas
 
-**`randn_eye` amplitude collapse with non-Fourier embeddings on high-dim data** — `randn_eye` sets the identity at physical index 0; initial amplitude ≈ φ₀^n_sites. Fourier: φ₀=1 (safe). Legendre: φ₀=√0.5 → on MNIST (n_sites=785), amplitude ≈ 10⁻¹¹⁸ → float32 underflow → all Born probs zero → silent training failure. **Fixed in `BornMachine.__init__`**: rescales tensors by 1/φ₀ when `randn_eye` is used and φ₀≠1. Exact for Legendre; use `canonical` init for Hermite/Chebyshev.
+**`randn_eye` amplitude collapse with non-Fourier embeddings on high-dim data** — `randn_eye` sets the identity at physical index 0; initial amplitude ≈ φ₀^n_sites. Fourier: φ₀=1 (safe). Legendre: φ₀=√0.5 → on MNIST (n_sites=785), amplitude ≈ 10⁻¹¹⁸ → float32 underflow → all Born probs zero → silent training failure. **Fixed in `ConditionalBornMachine.__init__`** (`src/models/cbm.py`): rescales tensors by 1/φ₀ when `randn_eye` is used and φ₀≠1. Exact for Legendre; use `canonical` init for Hermite/Chebyshev.
 
-**Evasion attacks don't clamp to `bm.input_range`** — PGD/FGM in `src/utils/evasion/minimal.py` project delta to the ε-ball but do not clamp `naturals + delta` to the valid embedding domain. Purification correctly clamps.
+**Evasion attacks don't clamp to `cbm.input_range`** — PGD/FGM in `src/utils/evasion.py` project delta to the ε-ball but do not clamp `naturals + delta` to the valid embedding domain. Purification correctly clamps.
 
-**Complex BornMachines require PyTorch ≥ 2.1.0** — Adam has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates.
-
-**`sync_tensors` is required after each training phase** — classifier and generator share tensor data but track their own parameter views. Without sync, one view can silently diverge from the other.
+**Complex MPS requires PyTorch ≥ 2.1.0** — Adam has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates.

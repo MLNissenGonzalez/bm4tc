@@ -96,7 +96,7 @@ Born Machines learn the joint `p(x, c) ∝ |ψ(x, c)|²`, giving access to the m
 p(x) = Σ_c p(x, c) = Σ_c |ψ(x, c)|² / Z
 ```
 
-This is computed by `BornMachine.marginal_log_probability(x)`. The partition function `Z` is cached once via `bm.cache_log_Z()`.
+This is computed by `ConditionalBornMachine.marginal_log_probability(x)`. The partition function `Z` is cached once via `cbm.cache_log_Z()`.
 
 ### Detection
 
@@ -197,9 +197,9 @@ Random chance = 0.50. Accuracy 0.50 = attacker cannot distinguish members from n
 ```
 1. load_run_config(run_dir)           → Hydra OmegaConf config
 2. apply evasion/sampling overrides   → consistent eval settings across all runs
-3. BornMachine.load(checkpoint)       → model with correct embedding + input_range
-4. OmegaConf.update(cfg, "dataset.overwrite", True)  → force correct data split
-5. DataHandler.split_and_rescale(bm)  → rescale to bm.input_range
+3. ConditionalBornMachine.load(checkpoint) → model with correct embedding + input_range
+4. OmegaConf.update(cfg, "dataset.overwrite", True)   → force correct data split
+5. DataHandler.split_and_rescale(cbm)      → rescale to cbm.input_range
 6. For each split: acc, clsloss, genloss, fid
 7. For non-test splits: rob (via MetricFactory/RobustnessEvaluation)
 8. MIA (train vs test, uses classification["train"] and classification["test"])
