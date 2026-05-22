@@ -56,12 +56,6 @@ from .statistics import (
     plot_correlation_heatmap,
 )
 
-from .evaluate import (
-    EvalConfig,
-    evaluate_run,
-    evaluate_sweep,
-)
-
 from .resolve import (
     resolve_regime_from_path,
     resolve_embedding_from_path,
@@ -154,9 +148,5 @@ __all__ = [
     "plot_accuracy_vs_strength_band",
     "plot_pareto_frontier",
     "plot_correlation_heatmap",
-    # Post-hoc evaluation
-    "EvalConfig",
-    "evaluate_run",
-    "evaluate_sweep",
     "resolve_stop_criterion",
 ]
