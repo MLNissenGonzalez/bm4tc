@@ -38,9 +38,8 @@ class ConditionalBornMachine(tk.models.MPS):
     out_features=[cls_pos] is left open; forward() returns (B, num_classes)
     amplitudes via a single parallel contraction.
 
-    Two auxiliary networks share the same Parameter objects:
-      norm_net      — used for log_partition_function() during training
-      sampling_net  — deferred (canonical-form sampling, see reference/tn4dd_bm.py)
+    One auxiliary network shares the same Parameter objects:
+      norm_net — used for log_partition_function() during training
 
     auto_stack=True and auto_unbind=False are hardcoded on both the main MPS
     and norm_net so they always share the same parameter view.
@@ -160,6 +159,18 @@ class ConditionalBornMachine(tk.models.MPS):
                 with torch.no_grad():
                     for t in self.tensors:
                         t.data.mul_(_scale)
+
+        # ── Sampling nodes (TK integration) ──────────────────────────────
+        # _h_node: batch × bond  — running left boundary (batch of amplitude vectors)
+        # _u_node: left × input × right  — embedded MPS site tensor
+        #   'input' carries num_bins grid bins (replaces discrete phys_dim from reference)
+        # Connected along 'bond'/'left'; tensors updated via _direct_set_tensor() per step.
+        # Pattern mirrors reference/tn4dd_bm.py:113–118.
+        H_init = torch.ones(1, 1, dtype=_dtype)
+        U_init = torch.zeros(1, 1, 1, dtype=_dtype)
+        self._h_node = tk.Node(tensor=H_init, axes_names=('batch', 'bond'))
+        self._u_node = tk.Node(tensor=U_init, axes_names=('left', 'input', 'right'))
+        self._h_node['bond'] ^ self._u_node['left']
 
         # ── Saved attributes ──────────────────────────────────────────────
         OmegaConf.set_struct(cfg, False)
@@ -386,6 +397,103 @@ class ConditionalBornMachine(tk.models.MPS):
             for node in self._mats_env:
                 node.tensor.data.mul_(alpha)
 
+    # ======================================================================
+    # Conditional sampling
+    # ======================================================================
+
+    def condition_on_class(self, class_idx: int) -> List[torch.Tensor]:
+        """Return data_dim raw tensors with the class site contracted and absorbed.
+
+        Contracts the class site with one_hot(class_idx) → (D_l, D_r), then merges
+        that matrix into the right neighbor (or left neighbor if cls_pos is the last
+        site). Does not mutate self._mats_env.
+        """
+        tensors = [node.tensor for node in self._mats_env]
+        T_cls = tensors[self.out_position]          # (D_l, C, D_r)
+        t_vec = T_cls[:, class_idx, :]              # (D_l, D_r)
+
+        cond = list(tensors)
+        cond.pop(self.out_position)                 # data_dim tensors remain
+
+        if self.out_position < self.n_features - 1:
+            T_right = cond[self.out_position]       # (D_r, d, D_rr)
+            cond[self.out_position] = torch.einsum('ij,jkl->ikl', t_vec, T_right)
+        else:
+            T_left = cond[self.out_position - 1]    # (D_ll, d, D_l)
+            cond[self.out_position - 1] = torch.einsum('ijk,kl->ijl', T_left, t_vec)
+
+        return cond
+
+    def _make_conditioned_net(self, class_idx: int) -> List[torch.Tensor]:
+        """Return left-canonical tensors conditioned on class_idx.
+
+        Applies a QR left-canonical sweep on the data_dim conditioned tensors.
+        Does not mutate self._mats_env. Returns a plain list — no TK wrapper,
+        since TK infers pbc from all-3D tensors and would lose the boundary nodes.
+        """
+        tensors = self.condition_on_class(class_idx)
+        for k in range(len(tensors) - 1):
+            T = tensors[k]
+            D_l, d, D_r = T.shape
+            Q, R = torch.linalg.qr(T.reshape(D_l * d, D_r))
+            tensors[k] = Q.reshape(D_l, d, -1)
+            tensors[k + 1] = torch.einsum('ij,jkl->ikl', R, tensors[k + 1])
+        return tensors
+
+    def sample(self, class_idx: int, n: int,
+               num_bins: int = 100, batch_size: int = 64) -> torch.Tensor:
+        """Class-conditional canonical sampling.
+
+        Conditions on class_idx, left-canonicalizes the resulting data_dim-site MPS
+        via QR sweep, then draws n samples via sequential left-to-right product rule.
+
+        Mirrors reference/tn4dd_bm.py _sample_canonical_batch with one adaptation:
+        _u_node is set to the pre-embedded tensor T_k_embs = einsum('ijk,bj->ibk', T_k, Φ)
+        of shape (D_l, num_bins, D_r). Grid bins act as the virtual physical dimension;
+        H @ T_embs contraction is otherwise identical to the reference.
+
+        Returns float tensor (n, data_dim) with values in self.input_range.
+        """
+        tensors = self._make_conditioned_net(class_idx)
+        dev = self._mats_env[0].tensor.device
+        grid = torch.linspace(*self.input_range, num_bins, device=dev)
+        Phi = self.embedding(grid).to(self.dtype)           # (bins, in_dim)
+        left = self._left_node.tensor                       # (D_left,)
+
+        chunks = []
+        for start in range(0, n, batch_size):
+            N = min(batch_size, n - start)
+            H = left.unsqueeze(0).expand(N, -1).clone().to(dev)  # (N, D_left)
+            self._h_node._direct_set_tensor(H)
+            samples = torch.zeros(N, self._data_dim, device=dev)
+            for k, T in enumerate(tensors):
+                T_embs = torch.einsum('ijk,bj->ibk', T, Phi)   # (D_l, bins, D_r)
+                self._u_node._direct_set_tensor(T_embs)
+                C = (self._h_node @ self._u_node).tensor        # (N, bins, D_r)
+                p = (C * C.conj()).real.sum(-1).clamp(min=0)    # (N, bins)
+                idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
+                samples[:, k] = grid[idx]
+                self._h_node._direct_set_tensor(
+                    C[torch.arange(N, device=dev), idx, :])
+            chunks.append(samples.cpu())
+        return torch.cat(chunks, dim=0)
+
+    def sample_all_classes(self, n_per_class: int,
+                           num_bins: int = 100, batch_size: int = 64,
+                           ) -> tuple:
+        """Sample n_per_class examples from each class.
+
+        Returns:
+            samples: float (n_per_class * num_classes, data_dim) in input_range
+            labels:  long  (n_per_class * num_classes,) class indices
+        """
+        all_samples, all_labels = [], []
+        for c in range(self.out_dim):
+            s = self.sample(c, n_per_class, num_bins=num_bins, batch_size=batch_size)
+            all_samples.append(s)
+            all_labels.append(torch.full((n_per_class,), c, dtype=torch.long))
+        return torch.cat(all_samples, dim=0), torch.cat(all_labels, dim=0)
+
     def prepare(self, device: torch.device | None = None, train_cfg=None) -> None:
         """
         Reset state, move to device, and trace for efficient contraction.
@@ -508,6 +616,57 @@ if __name__ == "__main__":
     assert "regime" not in ckpt, "checkpoint should not contain 'regime'"
     os.unlink(path)
     print("  save/load roundtrip OK, no 'regime' field OK")
+
+    # ── Sampling smoke tests ─────────────────────────────────────────────
+    print()
+
+    # condition_on_class: correct length, no mutation
+    mats_before = [n.tensor.clone() for n in cbm._mats_env]
+    cond = cbm.condition_on_class(0)
+    assert len(cond) == cbm._data_dim, f"condition_on_class length {len(cond)}"
+    assert all(t.ndim == 3 for t in cond), "not all conditioned tensors are 3D"
+    for i, (snap, node) in enumerate(zip(mats_before, cbm._mats_env)):
+        assert torch.allclose(snap, node.tensor), f"_mats_env[{i}] mutated by condition_on_class"
+    print(f"  condition_on_class len={len(cond)} no-mutation OK")
+
+    # _make_conditioned_net: returns left-canonical list
+    ct = cbm._make_conditioned_net(0)
+    assert isinstance(ct, list) and len(ct) == cbm._data_dim
+    print(f"  _make_conditioned_net len={len(ct)} OK")
+
+    # sample: shape, range, finite
+    s = cbm.sample(class_idx=0, n=6, num_bins=20)
+    lo, hi = cbm.input_range
+    assert s.shape == (6, cbm._data_dim), f"sample shape {s.shape}"
+    assert s.is_floating_point(), "sample output not float"
+    assert torch.isfinite(s).all(), "sample contains non-finite values"
+    assert (s >= lo).all() and (s <= hi).all(), f"sample out of range [{lo}, {hi}]"
+    for i, (snap, node) in enumerate(zip(mats_before, cbm._mats_env)):
+        assert torch.allclose(snap, node.tensor), f"_mats_env[{i}] mutated by sample"
+    print(f"  sample shape={tuple(s.shape)} in_range=True finite=True no-mutation OK")
+
+    # sample with chunking (n > batch_size)
+    s_chunked = cbm.sample(class_idx=1, n=7, num_bins=20, batch_size=3)
+    assert s_chunked.shape == (7, cbm._data_dim)
+    print(f"  sample (chunked) shape={tuple(s_chunked.shape)} OK")
+
+    # sample_all_classes: shapes and label counts
+    num_classes = cbm.out_dim
+    n_per = 5
+    all_s, all_l = cbm.sample_all_classes(n_per_class=n_per, num_bins=20)
+    assert all_s.shape == (n_per * num_classes, cbm._data_dim), f"sample_all_classes shape {all_s.shape}"
+    assert all_l.shape == (n_per * num_classes,)
+    for c in range(num_classes):
+        assert (all_l == c).sum().item() == n_per, f"class {c} count wrong"
+    print(f"  sample_all_classes shape={tuple(all_s.shape)} label_counts OK")
+
+    # complex dtype: output is always real float
+    cfg_cx = CBMConfig(embedding="fourier",
+                       init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, dtype="complex64", std=1e-3))
+    cbm_cx = ConditionalBornMachine(cfg=cfg_cx, data_dim=2, num_classes=2, device=device)
+    s_cx = cbm_cx.sample(class_idx=0, n=4, num_bins=10)
+    assert s_cx.is_floating_point() and not s_cx.is_complex(), "complex CBM sample not real float"
+    print(f"  complex CBM sample dtype={s_cx.dtype} (real float) OK")
 
     print("\ncbm.py smoke test passed.")
     

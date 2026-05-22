@@ -167,7 +167,7 @@ class LikelihoodPurification:
 import torch
 from typing import Optional, Tuple
 
-from src.utils.sampling import agnostic_sampling
+from src.utils.sampling import draw_from_grid
 
 
 class GibbsPurification:
@@ -268,7 +268,7 @@ class GibbsPurification:
                         mask = (input_space[None, :] >= lo_k) & (input_space[None, :] <= hi_k)
                         p = p * mask
 
-                    x_cur[:, k] = agnostic_sampling(p, input_space)
+                    x_cur[:, k] = draw_from_grid(p, input_space)
 
             results.append(x_cur.cpu())
 
