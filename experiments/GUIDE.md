@@ -6,73 +6,149 @@ Entry point scripts for running experiments. All scripts are run as Python modul
 
 | Script | Purpose |
 |--------|---------|
-| `discriminative.py` | Discriminative NLL training |
-| `generative.py` | Classification pretraining + generative NLL training |
-| `adversarial.py` | Classification pretraining + adversarial training (PGD-AT or TRADES) |
-| `softmax_sanity.py` | Softmax interpretation sanity check (raw amplitudes as softmax logits) |
-| `queue_experiments.py` | Batch-run/list HPO and seed_sweep configs (skip already-run) |
+| `train.py` | Unified Hydra entry point — NLL (dis/gen) and adversarial training |
+| `run_local.py` | Self-contained local runner — no Hydra, no W&B; edit CONFIG BLOCK |
+| `queue.py` | Batch-run/list HPO and seed_sweep configs, skip already-run |
 
-## Running Experiments
+---
+
+## `train.py` — Hydra entry point
+
+Mode is inferred from config: if `trainer.adversarial` is set → adversarial; if `trainer.nll` is set → NLL (dis or gen depending on `alpha`).
 
 ### Basic Usage
 
 ```bash
-# Discriminative experiment
-python -m experiments.discriminative +experiments=discriminative/fourier/d4r3/hpo/moons
+# NLL discriminative run
+python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
 
-# Adversarial training experiment
-python -m experiments.adversarial +experiments=adversarial/fourier/d4r3/hpo/moons
+# NLL generative run
+python -m experiments.train +experiments=nll/gen/legendre/d10r6/hpo/circles
 
-# Generative training experiment
-python -m experiments.generative +experiments=generative/fourier/d4r3/hpo/moons
+# Adversarial training run
+python -m experiments.train +experiments=adversarial/fourier/d4r3/hpo/moons
 
 # Quick test run (tiny config, no W&B)
-python -m experiments.discriminative +experiments=tests/discriminative tracking.mode=disabled
-
-# Softmax sanity check
-python -m experiments.softmax_sanity +experiments=tests/softmax/legendre_mnist
+python -m experiments.train +experiments=tests/nll         tracking.mode=disabled
+python -m experiments.train +experiments=tests/adversarial tracking.mode=disabled
 ```
 
-### Command-Line Overrides (debugging only)
+### Command-Line Overrides
 
 ```bash
 # Fewer epochs
-python -m experiments.discriminative +experiments=tests/discriminative \
-    trainer.discriminative.max_epoch=10
+python -m experiments.train +experiments=tests/nll \
+    trainer.nll.max_epoch=10 tracking.mode=disabled
 
 # Disable W&B
-python -m experiments.discriminative +experiments=tests/discriminative \
+python -m experiments.train +experiments=tests/nll \
     tracking.mode=disabled
 
 # Different learning rate
-python -m experiments.discriminative +experiments=tests/discriminative \
-    trainer.discriminative.optimizer.kwargs.lr=1e-3
+python -m experiments.train +experiments=tests/nll \
+    trainer.nll.optimizer.kwargs.lr=1e-3 tracking.mode=disabled
 ```
 
-### Multirun (Grid Sweep)
+### Multirun (Grid / Seed Sweep)
 
 ```bash
-python -m experiments.discriminative --multirun +experiments=discriminative/fourier/d4r3/sweep
+python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+```
+
+### Debug config (print resolved config without running)
+
+```bash
+python -m experiments.train --cfg job +experiments=tests/nll
 ```
 
 ### Hyperparameter Optimization (Optuna)
 
-**Option 1**: Specify sweeper in experiment config (recommended):
+**Option 1** — Specify sweeper in experiment config (recommended):
 ```yaml
-# configs/experiments/discriminative/fourier/d4r3/hpo/lrwd_hpo.yaml
+# configs/experiments/nll/dis/fourier/d4r3/hpo/moons.yaml
 defaults:
   - override /hydra/sweeper: optuna
 ```
 ```bash
-python -m experiments.discriminative --multirun +experiments=discriminative/fourier/d4r3/hpo/lrwd_hpo
+python -m experiments.train --multirun +experiments=nll/dis/fourier/d4r3/hpo/moons
 ```
 
-**Option 2**: Specify sweeper on command line:
+**Option 2** — Specify sweeper on the command line:
 ```bash
-python -m experiments.discriminative --multirun \
+python -m experiments.train --multirun \
     hydra/sweeper=optuna \
-    +experiments=discriminative/fourier/d4r3/hpo/lrwd_hpo
+    +experiments=nll/dis/fourier/d4r3/hpo/moons
 ```
+
+**HPO objective** — `train.py` returns a scalar: `trainer.best[stop_crit]`, negated for `acc`/`rob` so Optuna can always minimize. Keep `direction: minimize` in your Optuna config.
+
+Valid `stop_crit` values: `"dis_loss"`, `"gen_loss"`, `"acc"`, `"rob"`.
+
+---
+
+## `run_local.py` — self-contained runner
+
+No Hydra, no W&B. Edit the CONFIG BLOCK at the top of the file, then run:
+
+```bash
+python -m experiments.run_local
+```
+
+Key CONFIG BLOCK fields:
+
+| Variable | Values | Notes |
+|----------|--------|-------|
+| `REGIME` | `"nll"` \| `"adversarial"` | Selects trainer |
+| `DATASET_CFG` | `DatasetConfig(name=...)` | See inline comments for dataset names |
+| `CBM_CFG` | `CBMConfig(init_kwargs=MPSInitConfig(...))` | Architecture + embedding |
+| `NLL_CFG` | `NLLConfig(alpha=...)` | `alpha=0` → dis, `alpha=1` → gen |
+| `ADV_CFG` | `AdversarialConfig(...)` | PGD-AT or FGM |
+| `MODEL_PATH` | `Path(...)` \| `None` | Pre-trained checkpoint to fine-tune from |
+
+---
+
+## `queue.py` — batch runner
+
+Discovers all `hpo/`, `seed_sweep/`, and `grid_sweep/` configs under `configs/experiments/` and runs them sequentially, skipping any that already have a matching output directory.
+
+Config layout expected:
+```
+configs/experiments/nll/{dis,gen}/{embedding}/{arch}/{kind}/{dataset}.yaml
+configs/experiments/adversarial/{embedding}/{arch}/{kind}/{dataset}.yaml
+```
+
+### Usage
+
+```bash
+# List all discovered configs with [ran]/[   ] status
+python -m experiments.queue --list
+
+# Dry-run: print commands without executing
+python -m experiments.queue --dry-run
+
+# Run everything that hasn't been run yet
+python -m experiments.queue
+
+# Filter by type (dis | gen | adv or full name)
+python -m experiments.queue --type gen --dry-run
+
+# Filter by embedding
+python -m experiments.queue --embedding legendre --dry-run
+
+# Filter by architecture (exact match)
+python -m experiments.queue --arch d10r6 --dry-run
+
+# Filter by kind (seed_sweep | hpo | grid_sweep)
+python -m experiments.queue --kind hpo --dry-run
+
+# Filter by dataset (substring match)
+python -m experiments.queue --dataset circles --dry-run
+
+# Re-run even if output already exists
+python -m experiments.queue --force --dry-run
+```
+
+---
 
 ## Output Directory Structure
 
@@ -101,65 +177,7 @@ outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
 
 **Naming components:**
 - `{kind}`: `hpo` | `seed_sweep` | `alpha_curve` | `test`
-- `{regime}`: `dis` | `gen` | `adv`
+- `{regime}`: `nll` (dis/gen) | `adv`
 - `{arch}`: `d{in_dim}r{bond_dim}` — e.g. `d4r3`, `d30r18`
 - `{dataset}`: dataset name — e.g. `moons`, `circles`
 - `{date}`: `DDMM` for multiruns, `DDMM_HHMM` for single runs
-
-## Useful Commands
-
-**Debug config** (print resolved config without running):
-```bash
-python -m experiments.discriminative --cfg job +experiments=tests/discriminative
-```
-
-**List available options**:
-```bash
-python -m experiments.discriminative --help
-```
-
-## Batch-Running Experiments (`queue_experiments.py`)
-
-Discovers all `hpo/` and `seed_sweep/` configs under `configs/experiments/` and runs them
-sequentially, skipping any that already have a matching output directory.
-
-### Usage
-
-```bash
-# List all discovered configs with [ran]/[   ] status
-python -m experiments.queue_experiments --list
-
-# Dry-run: print commands without executing
-python -m experiments.queue_experiments --dry-run
-
-# Run everything that hasn't been run yet
-python -m experiments.queue_experiments
-
-# Filter by training type (dis | adv | gen)
-python -m experiments.queue_experiments --filter-type gen --dry-run
-
-# Filter by embedding
-python -m experiments.queue_experiments --filter-embedding legendre --dry-run
-
-# Filter by architecture (exact match)
-python -m experiments.queue_experiments --filter-arch d10r6 --dry-run
-
-# Filter by kind (hpo | seed_sweep)
-python -m experiments.queue_experiments --filter-kind hpo --dry-run
-
-# Filter by dataset (substring match)
-python -m experiments.queue_experiments --filter-dataset circles --dry-run
-```
-
-## HPO Objective Values
-
-Each entry point returns an objective value for Optuna:
-
-| Script | Objective | Direction |
-|--------|-----------|-----------|
-| `discriminative.py` | `trainer.best[stop_crit]` | minimize (negated for acc/rob) |
-| `adversarial.py` | `adv_trainer.best[stop_crit]` | minimize (negated for acc/rob) |
-| `generative.py` | `gen_trainer.best[stop_crit]` | minimize (negated for acc/rob) |
-
-Valid `stop_crit` values: `"dis_loss"`, `"gen_loss"`, `"acc"`, `"rob"`.  
-Keep `direction: minimize` in Optuna config — entry points handle negation for acc/rob internally.

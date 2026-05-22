@@ -58,9 +58,9 @@ CBM_CFG = CBMConfig(
     init_kwargs=MPSInitConfig(
         in_dim=10,
         bond_dim=6,
-        init_method="randn",  # "randn" | "randn_eye" | "canonical"
+        init_method="randn_eye",  # "randn" | "randn_eye" | "canonical"
     ),
-    embedding="fourier",
+    embedding="legendre",
 )
 
 # --- NLL trainer (used when REGIME="nll") -------------------------------------
