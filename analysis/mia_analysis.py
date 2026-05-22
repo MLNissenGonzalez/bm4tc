@@ -168,7 +168,7 @@ print(f"Number of classes: {datahandler.num_cls}")
 # ## Run MIA Evaluation
 
 # %%
-from analysis.utils import MIAEvaluation, MIAFeatureConfig
+from src.analysis.mia import MIAEvaluation, MIAFeatureConfig
 
 # Create feature config from settings
 feature_config = MIAFeatureConfig(**MIA_FEATURES)

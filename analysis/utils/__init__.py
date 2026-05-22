@@ -16,14 +16,14 @@ from .wandb_fetcher import (
     print_classification_config_yaml,
 )
 
-from .mia import (
+from src.analysis.mia import (
     MIAFeatureConfig,
     MIAFeatureExtractor,
     MIAResults,
     MIAEvaluation,
 )
 
-from .uq import (
+from src.analysis.uq import (
     UQConfig,
     UQResults,
     UQEvaluation,
