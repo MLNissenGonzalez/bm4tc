@@ -193,21 +193,3 @@ def eval_rob(cbm, loader, attack, abs_strength: float, device) -> float:
         correct += (probs.argmax(dim=1) == labels).sum().item()
         total += len(labels)
     return correct / total if total > 0 else float("nan")
-
-
-def eval_softmax(cbm, loader, device) -> tuple[float, float]:
-    """(softmax_loss, softmax_acc) using raw CBM amplitudes."""
-    from src.train.softmax import ClassificationSoftmaxNLL
-    cbm.eval()
-    criterion = ClassificationSoftmaxNLL()
-    losses, correct, total = [], 0, 0
-    with torch.no_grad():
-        for data, labels in loader:
-            data, labels = data.to(device), labels.to(device)
-            amps = cbm.amplitudes(data)
-            losses.append(criterion(amps, labels).item())
-            correct += (amps.argmax(dim=1) == labels).sum().item()
-            total += len(labels)
-    softmax_loss = sum(losses) / len(losses) if losses else float("nan")
-    softmax_acc = correct / total if total > 0 else float("nan")
-    return softmax_loss, softmax_acc
