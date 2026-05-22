@@ -1,3 +1,5 @@
+import math
+
 from omegaconf import OmegaConf
 
 
@@ -31,3 +33,11 @@ def register_resolvers():
         OmegaConf.register_new_resolver("complement_200", lambda x: 200 - int(x))
     if not OmegaConf.has_resolver("dtype_suffix"):
         OmegaConf.register_new_resolver("dtype_suffix", _dtype_suffix, use_cache=False)
+    if not OmegaConf.has_resolver("geom_lr"):
+        OmegaConf.register_new_resolver(
+            "geom_lr",
+            lambda alpha, lr_cls, lr_gen: math.exp(
+                (1 - float(alpha)) * math.log(float(lr_cls))
+                + float(alpha) * math.log(float(lr_gen))
+            ),
+        )

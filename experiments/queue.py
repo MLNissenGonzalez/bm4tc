@@ -11,11 +11,11 @@ grid_sweep, grid_sweep_<variant>, cls_reg.
 
 Usage
 -----
-    python -m experiments.queue_experiments --list
-    python -m experiments.queue_experiments --dry-run
-    python -m experiments.queue_experiments --filter-type gen --filter-embedding legendre --dry-run
-    python -m experiments.queue_experiments --filter-type gen --filter-kind seed_sweep
-    python -m experiments.queue_experiments --filter-type dis --filter-dataset moons --force --dry-run
+    python -m experiments.queue --list
+    python -m experiments.queue --dry-run
+    python -m experiments.queue --type gen --embedding legendre --dry-run
+    python -m experiments.queue --type gen --kind seed_sweep
+    python -m experiments.queue --type dis --dataset moons --force --dry-run
 """
 
 import argparse
@@ -31,21 +31,12 @@ CONFIGS_ROOT = ROOT / "configs" / "experiments"
 VALID_TYPES = ["dis", "gen", "mixed", "adversarial"]
 BASE_KINDS = ["seed_sweep", "hpo", "grid_sweep", "cls_reg", "alpha_curve"]
 
-TYPE_TO_MODULE = {
-    "dis":         "experiments.nll",
-    "gen":         "experiments.nll",
-    "mixed":       "experiments.nll",
-    "adversarial": "experiments.adversarial",
-}
-
 TYPE_SHORT = {
     "dis":   "dis",
     "gen":   "gen",
     "mix":   "mixed",
     "adv":   "adversarial",
 }
-
-TYPE_ABBREV = {v: k for k, v in TYPE_SHORT.items()}
 
 KIND_SHORT = {
     "seed": "seed_sweep",
@@ -169,8 +160,7 @@ def discover_configs():
 
 
 def build_cmd(c):
-    module = TYPE_TO_MODULE[c["type"]]
-    return ["python", "-m", module, "--multirun",
+    return ["python", "-m", "experiments.train", "--multirun",
             f"+experiments={c['experiment_key']}"]
 
 
@@ -184,15 +174,15 @@ def main():
                         help="Print commands without executing.")
     parser.add_argument("--force", action="store_true",
                         help="Run even if output already exists.")
-    parser.add_argument("--filter-type", metavar="TYPE",
+    parser.add_argument("--type", metavar="TYPE",
                         help="dis | gen | adv (or full names).")
-    parser.add_argument("--filter-embedding", metavar="EMB",
+    parser.add_argument("--embedding", metavar="EMB",
                         help="fourier | legendre | hermite")
-    parser.add_argument("--filter-arch", metavar="ARCH",
+    parser.add_argument("--arch", metavar="ARCH",
                         help="e.g. d4r3, d30r18")
-    parser.add_argument("--filter-dataset", metavar="DS",
+    parser.add_argument("--dataset", metavar="DS",
                         help="Substring match on dataset name (e.g. moons).")
-    parser.add_argument("--filter-kind", metavar="KIND",
+    parser.add_argument("--kind", metavar="KIND",
                         help="seed_sweep | hpo | grid_sweep | …")
     args = parser.parse_args()
 
@@ -201,17 +191,17 @@ def main():
         print("No experiment configs found under configs/experiments/.")
         return
 
-    if args.filter_type:
-        typ = TYPE_SHORT.get(args.filter_type, args.filter_type)
+    if args.type:
+        typ = TYPE_SHORT.get(args.type, args.type)
         configs = [c for c in configs if c["type"] == typ]
-    if args.filter_embedding:
-        configs = [c for c in configs if c["embedding"] == args.filter_embedding]
-    if args.filter_arch:
-        configs = [c for c in configs if c["arch"] == args.filter_arch]
-    if args.filter_dataset:
-        configs = [c for c in configs if args.filter_dataset in c["dataset_name"]]
-    if args.filter_kind:
-        kind = KIND_SHORT.get(args.filter_kind, args.filter_kind)
+    if args.embedding:
+        configs = [c for c in configs if c["embedding"] == args.embedding]
+    if args.arch:
+        configs = [c for c in configs if c["arch"] == args.arch]
+    if args.dataset:
+        configs = [c for c in configs if args.dataset in c["dataset_name"]]
+    if args.kind:
+        kind = KIND_SHORT.get(args.kind, args.kind)
         configs = [c for c in configs if c["kind"] == kind]
 
     if args.list:
