@@ -1,11 +1,123 @@
 import math
 import logging
-from dataclasses import dataclass
+import random
+import os
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any
+
+import numpy as np
 import torch
+import torch.optim as optim
 from torch import nn
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Seed
+# ---------------------------------------------------------------------------
+
+def set_seed(seed: int):
+    """
+    Set random seeds across Python, NumPy, and PyTorch for reproducible
+    *training* randomness (model init, DataLoader shuffling, PGD, sampling).
+
+    Must be called **after** data loading and **before** model creation.
+    Data pipeline seeds (``gen_dow_kwargs.seed``, ``dataset.split_seed``)
+    are handled independently by their respective functions.
+
+    Parameters
+    ----------
+    seed : int
+        Integer value used to seed all random number generators.
+        Corresponds to ``tracking.seed`` in the Hydra config.
+
+    Notes
+    -----
+    - Seeds Python's `random` module, NumPy, and PyTorch (CPU and GPU).
+    - For PyTorch, also sets `torch.backends.cudnn.deterministic=True` to
+        enforce deterministic algorithms in cuDNN.
+    - Disables `torch.backends.cudnn.benchmark` to avoid non-deterministic
+        optimizations.
+    - Sets the `PYTHONHASHSEED` environment variable for hash-based operations.
+    - May reduce performance due to disabling some GPU optimizations.
+
+    Examples
+    --------
+    >>> set_seed(42)
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # for multi-GPU setups
+
+    # Ensure deterministic behavior in cuDNN (can slow things down!)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Set PYTHONHASHSEED environment variable
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+
+# ---------------------------------------------------------------------------
+# Optimizer config + factory
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CriterionConfig:
+    name: str = "nll"
+    kwargs: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class OptimizerConfig:
+    name: str = "adam"
+    kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
+
+
+_OPTIMIZER_MAP = {
+    "sgd": optim.SGD,
+    "adam": optim.Adam,
+    "adamw": optim.AdamW,
+    "rmsprop": optim.RMSprop,
+    "adagrad": optim.Adagrad,
+    "adamax": optim.Adamax,
+    "nadam": optim.NAdam,
+}
+
+
+def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
+    """
+    Select and instantiate a PyTorch optimizer.
+
+    Parameters
+    ----------
+    params : iterable
+        Parameters to optimize, e.g. model.parameters()
+    config.name : str
+        Name of the optimizer, e.g. "adam"
+    config.kwargs : dict, optional
+        Extra arguments passed to the optimizer, e.g. {"lr": 1e-3}
+
+    Returns
+    -------
+    optim.Optimizer
+        Instantiated optimizer.
+    """
+    key = config.name.replace("-", "").replace("_", "").lower()
+    try:
+        optimizer_cls = _OPTIMIZER_MAP[key]
+    except KeyError:
+        raise ValueError(f"Optimizer {config.name} not recognised. "
+                         f"Available: {list(_OPTIMIZER_MAP.keys())}")
+
+    return optimizer_cls(params, **config.kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Trainer utilities
+# ---------------------------------------------------------------------------
 
 @dataclass
 class TrainResult:
@@ -16,7 +128,6 @@ class TrainResult:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-
     Computes  strength * (Z - target)²  where Z = exp(log_partition_function()).
 
     Parameters
@@ -86,7 +197,7 @@ def eval_rob(cbm, loader, attack, abs_strength: float, device) -> float:
 
 def eval_softmax(cbm, loader, device) -> tuple[float, float]:
     """(softmax_loss, softmax_acc) using raw CBM amplitudes."""
-    from src.trainer.softmax import ClassificationSoftmaxNLL
+    from src.train.softmax import ClassificationSoftmaxNLL
     cbm.eval()
     criterion = ClassificationSoftmaxNLL()
     losses, correct, total = [], 0, 0
@@ -100,40 +211,3 @@ def eval_softmax(cbm, loader, device) -> tuple[float, float]:
     softmax_loss = sum(losses) / len(losses) if losses else float("nan")
     softmax_acc = correct / total if total > 0 else float("nan")
     return softmax_loss, softmax_acc
-
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    from torch.utils.data import DataLoader, TensorDataset
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-
-    device = torch.device("cpu")
-    cfg = CBMConfig(
-        embedding="legendre",
-        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
-    )
-    cbm = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2, device=device)
-    cbm.prepare(device)
-
-    ds = TensorDataset(torch.zeros(8, 2), torch.randint(0, 2, (8,)))
-    loader = DataLoader(ds, batch_size=4)
-
-    dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device)
-    assert math.isfinite(dis_loss), f"dis_loss non-finite: {dis_loss}"
-    assert math.isfinite(acc), f"acc non-finite: {acc}"
-    assert math.isfinite(gen_loss), f"gen_loss non-finite: {gen_loss}"
-    print(f"  eval_metrics  dis_loss={dis_loss:.4f}  acc={acc:.4f}  gen_loss={gen_loss:.4f}")
-
-    softmax_loss, softmax_acc = eval_softmax(cbm, loader, device)
-    assert math.isfinite(softmax_loss), f"softmax_loss non-finite: {softmax_loss}"
-    assert math.isfinite(softmax_acc), f"softmax_acc non-finite: {softmax_acc}"
-    print(f"  eval_softmax  loss={softmax_loss:.4f}  acc={softmax_acc:.4f}")
-
-    reg = NormRegularizer(strength=1.0, target=1.0)
-    cbm.reset()
-    penalty = reg(cbm)
-    assert penalty.isfinite(), f"NormRegularizer penalty non-finite: {penalty}"
-    print(f"  NormRegularizer penalty={penalty.item():.4f}")
-
-    print("\nutils.py smoke test passed.")

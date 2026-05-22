@@ -7,11 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional, Union
 
-import src.utils.get as get
-from src.utils.get import OptimizerConfig
+from src.utils.train import OptimizerConfig, NormRegularizer, eval_metrics, optimizer
 from src.data.handler import DataHandler
 from src.model import ConditionalBornMachine
-from src.trainer.utils import NormRegularizer, eval_metrics
 
 import logging
 logger = logging.getLogger(__name__)
@@ -223,7 +221,7 @@ class NLLTrainer:
             self.norm_regularizer = NormRegularizer(
                 strength=self._nc.soft_strength, target=self._nc_target
             )
-        self.optimizer = get.optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
+        self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         logger.info(f"NLL training begins (alpha={self.train_cfg.alpha:.3g}).")
 

@@ -157,7 +157,7 @@ def analyze_run(
     """
     from src.model import ConditionalBornMachine
     from src.data.handler import DataHandler
-    from src.trainer.utils import eval_metrics, eval_rob
+    from src.utils.train import eval_metrics, eval_rob
 
     run_dir = Path(run_dir)
     device = torch.device(cfg.device)

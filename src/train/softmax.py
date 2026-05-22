@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 import torch
 from torch import nn
-import src.utils.get as get
+from src.utils.train import optimizer
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class SoftmaxTrainer:
     Standalone CBM trainer using raw amplitudes as softmax logits.
 
     Trains via ClassificationSoftmaxNLL (CrossEntropyLoss on raw amplitudes)
-    and validates with eval_softmax from src.trainer.utils. Supports early
+    and validates with eval_softmax from src.utils.train. Supports early
     stopping on 'acc' or 'softmax_loss'.
     """
 
@@ -121,7 +121,7 @@ class SoftmaxTrainer:
         output_dir: Optional[Path] = None,
     ):
         """Run the softmax training loop."""
-        from src.trainer.utils import eval_softmax
+        from src.utils.train import eval_softmax
 
         self.step, self.patience_counter = 0, 0
         self.epoch = 0
@@ -132,7 +132,7 @@ class SoftmaxTrainer:
 
         self.cbm.prepare(device=self.device)
         self.criterion = ClassificationSoftmaxNLL()
-        self.optimizer = get.optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
+        self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         logger.info("Softmax training begins.")
         for epoch in range(self.train_cfg.max_epoch):
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from torch.utils.data import DataLoader, TensorDataset
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    from src.trainer.nll import NLLConfig
+    from src.train.nll import NLLConfig
 
     criterion = ClassificationSoftmaxNLL()
     logits = torch.randn(8, 2)

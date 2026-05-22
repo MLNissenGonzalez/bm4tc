@@ -2,7 +2,7 @@ import pytest
 import torch
 from pathlib import Path
 
-from src.trainer.nll import NLLConfig, NLLTrainer, NormControlConfig
+from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.data.handler import DataHandler
 from src.data.gen_n_load import DatasetConfig, DataGenDowConfig

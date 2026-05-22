@@ -23,7 +23,7 @@ from experiments.config import Config, register
 from src.utils import set_seed
 from src.data import DataHandler
 from src.model import CBMConfig, ConditionalBornMachine
-from src.trainer.softmax import SoftmaxTrainer
+from src.train.softmax import SoftmaxTrainer
 
 logger = logging.getLogger(__name__)
 register()

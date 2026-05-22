@@ -35,7 +35,7 @@ from experiments.config import Config, register
 from src.utils import set_seed
 from src.data import DataHandler
 from src.model import ConditionalBornMachine
-from src.trainer import NLLTrainer
+from src.train import NLLTrainer
 import torch
 
 logger = logging.getLogger(__name__)

@@ -5,12 +5,10 @@ import torch
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
-import src.utils.get as get
-from src.utils.get import OptimizerConfig
+from src.utils.train import OptimizerConfig, eval_metrics, eval_rob, optimizer
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.data.handler import DataHandler
 from src.model import ConditionalBornMachine
-from src.trainer.utils import eval_metrics, eval_rob
 
 
 @dataclass
@@ -189,7 +187,7 @@ class AdversarialTrainer:
         self.epoch_times = []
 
         self.cbm.prepare(device=self.device)
-        self.optimizer = get.optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
+        self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         rob_freq = self.train_cfg.eval_rob_freq
 
