@@ -160,7 +160,7 @@ print(f"Number of classes: {datahandler.num_cls}")
 # ## Run UQ Evaluation
 
 # %%
-from analysis.utils import UQEvaluation, UQConfig
+from src.analysis.uq import UQEvaluation, UQConfig
 
 uq_config = UQConfig(
     norm=PURIFICATION_NORM,

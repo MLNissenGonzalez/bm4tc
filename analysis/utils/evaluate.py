@@ -200,7 +200,7 @@ def evaluate_run(
     # 6. MIA
     if eval_cfg.compute_mia:
         try:
-            from .mia import MIAEvaluation, MIAFeatureConfig
+            from src.analysis.mia import MIAEvaluation, MIAFeatureConfig
 
             feature_config = MIAFeatureConfig(**(eval_cfg.mia_features or {}))
             mia_eval = MIAEvaluation(
@@ -245,7 +245,7 @@ def evaluate_run(
     uq_results = None
     if eval_cfg.compute_uq:
         try:
-            from .uq import UQEvaluation, UQConfig
+            from src.analysis.uq import UQEvaluation, UQConfig
 
             uq_eval = UQEvaluation(config=UQConfig(**(eval_cfg.uq_config or {})))
             uq_results = uq_eval.evaluate(cbm, datahandler.classification["test"], device)
@@ -278,7 +278,7 @@ def evaluate_run(
     # 7b. Joint-attack UQ: second pass with JOINT_PGD
     if eval_cfg.compute_uq and eval_cfg.joint_uq_config is not None:
         try:
-            from .uq import UQEvaluation, UQConfig
+            from src.analysis.uq import UQEvaluation, UQConfig
 
             joint_uq_eval = UQEvaluation(config=UQConfig(**eval_cfg.joint_uq_config))
             joint_uq_results = joint_uq_eval.evaluate(

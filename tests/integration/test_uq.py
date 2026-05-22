@@ -1,7 +1,7 @@
 import pytest
 import torch
 import numpy as np
-from analysis.utils.uq import (
+from src.analysis.uq import (
     UQConfig,
     UQResults,
     UQEvaluation,
