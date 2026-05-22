@@ -22,7 +22,7 @@ from experiments.tracking import init_wandb, log_dataset_viz, make_logger
 from experiments.config import Config, register
 from src.utils import set_seed
 from src.data import DataHandler
-from src.models.cbm import CBMConfig, ConditionalBornMachine
+from src.model import CBMConfig, ConditionalBornMachine
 from src.trainer.softmax import SoftmaxTrainer
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ from typing import Optional
 from hydra.core.config_store import ConfigStore
 
 from src.data.gen_n_load import DatasetConfig
-from src.models.cbm import CBMConfig
+from src.model import CBMConfig
 from src.trainer.nll import NLLConfig
 from src.trainer.adversarial import AdversarialConfig
 from src.utils.evasion import EvasionConfig

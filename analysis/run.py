@@ -155,7 +155,7 @@ def analyze_run(
         Flat dict with keys like ``acc``, ``dis_loss``, ``rob/0.1``,
         ``mia_accuracy``, ``uq_clean_accuracy``, etc.
     """
-    from src.models import ConditionalBornMachine
+    from src.model import ConditionalBornMachine
     from src.data.handler import DataHandler
     from src.trainer.utils import eval_metrics, eval_rob
 

@@ -171,7 +171,7 @@ if __name__ == "__main__":
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from torch.utils.data import DataLoader, TensorDataset
-    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
     from src.trainer.nll import NLLConfig
 
     criterion = ClassificationSoftmaxNLL()

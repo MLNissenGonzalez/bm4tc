@@ -19,7 +19,7 @@ STEPS = 20
 # clamp(min=1e-12) floor → zero gradients in all amplitude-based paths.
 @pytest.fixture(scope="module")
 def cbm_attack():
-    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=DATA_DIM, bond_dim=2, std=1.0),
