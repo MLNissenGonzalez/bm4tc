@@ -4,20 +4,20 @@ Run sweep.py for completed but unanalyzed seed sweeps.
 
 Scans both outputs/seed_sweep/ and outputs/alpha_curve/ for multirun.yaml
 markers.  Distribution plots are intentionally skipped (--no-viz is always
-passed); use queue_visualize.py to regenerate them separately.
+passed); use python -m analysis.visualize.queue to regenerate them separately.
 
 Usage
 -----
-    python analysis/queue_seed_sweep.py                                    # all unanalyzed
-    python analysis/queue_seed_sweep.py --dry-run                          # print commands only
-    python analysis/queue_seed_sweep.py --filter-experiment alpha_curve    # alpha_curve sweeps only
-    python analysis/queue_seed_sweep.py --filter-embedding hermite
-    python analysis/queue_seed_sweep.py --filter-dataset  circles          # substring match
-    python analysis/queue_seed_sweep.py --filter-arch     d4D3
-    python analysis/queue_seed_sweep.py --filter-type     gen              # gen | cls | adv
-    python analysis/queue_seed_sweep.py --filter-embedding fourier --filter-dataset moons_4k
-    python analysis/queue_seed_sweep.py --force                            # re-run already analyzed
-    python analysis/queue_seed_sweep.py --list                             # show status of all sweeps
+    python analysis/queue.py                                    # all unanalyzed
+    python analysis/queue.py --dry-run                          # print commands only
+    python analysis/queue.py --experiment alpha_curve           # alpha_curve sweeps only
+    python analysis/queue.py --embedding hermite
+    python analysis/queue.py --dataset  circles                 # substring match
+    python analysis/queue.py --arch     d4r3
+    python analysis/queue.py --type     gen                     # gen | cls | adv
+    python analysis/queue.py --embedding fourier --dataset moons
+    python analysis/queue.py --force                            # re-run already analyzed
+    python analysis/queue.py --list                             # show status of all sweeps
 """
 
 import argparse
@@ -81,17 +81,17 @@ def main():
                         help="Print commands without executing.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if evaluation_data.csv already exists.")
-    parser.add_argument("--filter-experiment", metavar="EXP",
+    parser.add_argument("--experiment", metavar="EXP",
                         choices=list(SWEEP_ROOTS.keys()),
                         help="Only process sweeps from this experiment family "
                              f"({' | '.join(SWEEP_ROOTS.keys())}).")
-    parser.add_argument("--filter-embedding", metavar="EMB",
+    parser.add_argument("--embedding", metavar="EMB",
                         help="Only process sweeps with this embedding (e.g. hermite).")
-    parser.add_argument("--filter-dataset", metavar="DS",
-                        help="Only process sweeps with this base dataset name (e.g. circles_4k).")
-    parser.add_argument("--filter-arch", metavar="ARCH",
-                        help="Only process sweeps with this architecture (e.g. d4D3).")
-    parser.add_argument("--filter-type", metavar="TYPE",
+    parser.add_argument("--dataset", metavar="DS",
+                        help="Only process sweeps with this base dataset name (e.g. circles).")
+    parser.add_argument("--arch", metavar="ARCH",
+                        help="Only process sweeps with this architecture (e.g. d4r3).")
+    parser.add_argument("--type", metavar="TYPE",
                         help="Only process sweeps with this training type (gen, cls, adv).")
     parser.add_argument("--list", action="store_true",
                         help="Print status of all discovered sweeps and exit.")
@@ -99,8 +99,8 @@ def main():
 
     # Collect (sweep_dir, experiment_name, root) for all roots
     roots_to_scan = (
-        {args.filter_experiment: SWEEP_ROOTS[args.filter_experiment]}
-        if args.filter_experiment
+        {args.experiment: SWEEP_ROOTS[args.experiment]}
+        if args.experiment
         else SWEEP_ROOTS
     )
 
@@ -124,14 +124,14 @@ def main():
 
     # Apply filters
     filtered = all_sweeps
-    if args.filter_type:
-        filtered = [(s, e, r) for s, e, r in filtered if get_training_type(s, r) == args.filter_type]
-    if args.filter_embedding:
-        filtered = [(s, e, r) for s, e, r in filtered if get_embedding(s, r) == args.filter_embedding]
-    if args.filter_arch:
-        filtered = [(s, e, r) for s, e, r in filtered if get_arch(s, r) == args.filter_arch]
-    if args.filter_dataset:
-        filtered = [(s, e, r) for s, e, r in filtered if args.filter_dataset in get_dataset_base(s)]
+    if args.type:
+        filtered = [(s, e, r) for s, e, r in filtered if get_training_type(s, r) == args.type]
+    if args.embedding:
+        filtered = [(s, e, r) for s, e, r in filtered if get_embedding(s, r) == args.embedding]
+    if args.arch:
+        filtered = [(s, e, r) for s, e, r in filtered if get_arch(s, r) == args.arch]
+    if args.dataset:
+        filtered = [(s, e, r) for s, e, r in filtered if args.dataset in get_dataset_base(s)]
 
     todo    = [(s, e, r) for s, e, r in filtered if args.force or not is_analyzed(s)]
     skipped = len(filtered) - len(todo)
@@ -147,7 +147,7 @@ def main():
 
     for sweep_dir, exp_name, root in todo:
         rel = sweep_dir.relative_to(ROOT)
-        # --no-viz: distribution plots are handled separately by queue_visualize.py
+        # --no-viz: distribution plots are handled separately by analysis/visualize/queue.py
         cmd = ["python", "analysis/sweep.py", str(rel), "--no-viz"]
         print(" ".join(cmd))
         if not args.dry_run:
