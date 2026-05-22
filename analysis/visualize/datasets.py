@@ -97,7 +97,7 @@ def load_specs(config_dir: Path) -> list[DatasetSpec]:
 
 def _make_scaler(name: str):
     from sklearn.preprocessing import MinMaxScaler as _MMS
-    from src.data.handler import LinearScaler as _LS
+    from src.datahandler import LinearScaler as _LS
     return {"minmax": _MMS, "linear": _LS}.get(name.lower(), _MMS)(feature_range=(0., 1.))
 
 
@@ -110,7 +110,7 @@ def _make_scaler(name: str):
 def generate_dataset(spec: DatasetSpec) -> tuple[np.ndarray, np.ndarray]:
     """Generate a 2D toy dataset from a DatasetSpec.
 
-    Mirrors the logic in src.data.gen_n_load._two_dim_generator.
+    Mirrors the logic in src.datahandler._two_dim_generator.
     """
     name = spec.name.lower()
     if "moons" in name:

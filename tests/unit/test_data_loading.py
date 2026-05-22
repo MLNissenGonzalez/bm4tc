@@ -3,8 +3,8 @@ import torch
 
 
 def _make_spirals_handler():
-    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
-    from src.data.handler import DataHandler
+    from src.datahandler import DatasetConfig, DataGenDowConfig
+    from src.datahandler import DataHandler
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     bm = ConditionalBornMachine(
@@ -22,7 +22,7 @@ def _make_spirals_handler():
 
 def test_spirals_small():
     import numpy as np
-    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig, load_dataset
+    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="spirals",
@@ -55,7 +55,7 @@ def test_handler_spirals_small():
 @pytest.mark.requires_download
 def test_mnist_loading():
     import numpy as np
-    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig, load_dataset
+    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="mnist",
@@ -72,7 +72,7 @@ def test_mnist_loading():
 @pytest.mark.requires_download
 def test_italy_power_demand_loading():
     import numpy as np
-    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig, load_dataset
+    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="italypowerdemand",

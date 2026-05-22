@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Union
 
 from src.utils.train import OptimizerConfig, NormRegularizer, eval_metrics, optimizer
-from src.data.handler import DataHandler
+from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 
 import logging
@@ -263,8 +263,8 @@ if __name__ == "__main__":
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     import torch
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    from src.data.handler import DataHandler
-    from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
+    from src.datahandler import DataHandler
+    from src.datahandler import DatasetConfig, DataGenDowConfig
 
     device = torch.device("cpu")
 

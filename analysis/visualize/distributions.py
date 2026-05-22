@@ -53,7 +53,7 @@ def _cls_cmap(class_idx: int):
     )
 from analysis.utils import load_run_config, find_model_checkpoint
 from src.model import ConditionalBornMachine
-from src.data.handler import DataHandler
+from src.datahandler import DataHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
