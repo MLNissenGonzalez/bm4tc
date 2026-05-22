@@ -1,35 +1,49 @@
 """
-Post-hoc per-model evaluation for sweep analysis.
+Single-model post-hoc evaluation.
 
-Loads each saved model from a sweep directory and recomputes metrics
-using src/ functions directly. All results are for the test split only.
+Loads a saved model from a Hydra run directory and recomputes metrics on the
+test split. All results are test-set only.
 
-Result dict key conventions (flat, no split prefix):
+Result dict key conventions (flat):
     acc                         clean classification accuracy
     dis_loss                    discriminative NLL loss
     gen_loss                    generative (joint) NLL loss
     rob/<abs_eps>               robust accuracy at absolute epsilon
-    mia_accuracy, mia_auc_roc   membership inference attack results
-    uq_*                        uncertainty quantification results
+    mia_accuracy, mia_auc_roc   membership inference attack
+    uq_*                        uncertainty quantification
 
 Attack strength conventions:
-    evasion_override["strengths"] — absolute epsilon values (caller converts fractions
-        to absolute by multiplying by embedding range size before passing here).
+    AnalysisConfig.evasion_override["strengths"] — absolute epsilon values (callers
+        convert fraction × range_size before passing here).
     Model's own evasion config strengths — fraction-based; converted internally via
-        bm.input_range.
+        cbm.input_range.
+
+CLI usage:
+    python analysis/run.py <run_dir> [--no-acc] [--no-dis-loss] [--no-gen-loss]
+                                      [--no-rob] [--no-mia] [--no-uq]
+                                      [--device DEVICE]
 """
 
+import sys
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import logging
+if "__file__" in dir():
+    project_root = Path(__file__).parent.parent
+else:
+    project_root = Path.cwd().parent
+    if not (project_root / "src").exists():
+        project_root = Path.cwd()
+
+sys.path.insert(0, str(project_root))
+
 import numpy as np
-import pandas as pd
 import torch
 from omegaconf import OmegaConf
 
-from .mia_utils import load_run_config, find_model_checkpoint
+from analysis.utils.mia_utils import load_run_config, find_model_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +53,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class EvalConfig:
-    """Configuration for post-hoc evaluation.
+class AnalysisConfig:
+    """Configuration for post-hoc single-run evaluation.
 
     Attributes:
         compute_acc: Evaluate clean classification accuracy.
         compute_dis_loss: Evaluate discriminative NLL loss.
         compute_gen_loss: Evaluate generative (joint) NLL loss.
-        compute_rob: Evaluate adversarial robustness. Attempted for all models;
-            skipped with a warning if no evasion config is present.
+        compute_rob: Evaluate adversarial robustness. Skipped with a warning if
+            no evasion config is present and no override is given.
         compute_mia: Run membership inference attack evaluation.
         compute_uq: Uncertainty quantification (detection + purification).
         evasion_override: Dict of evasion config fields to override, or None to
-            use each run's own config. Strengths here are ABSOLUTE (pre-multiplied
-            by range size). Example: {"method": "PGD", "num_steps": 40,
+            use each run's own config. Strengths are ABSOLUTE (pre-multiplied by
+            range size). Example: {"method": "PGD", "num_steps": 40,
             "strengths": [0.05, 0.10, 0.15]}.
         mia_features: Feature toggle dict for MIAFeatureConfig.
         mia_adversarial_strength: Absolute epsilon for adversarial MIA.
@@ -93,7 +107,7 @@ def _get_rob_params(
 
     Returns None if no evasion config is available and no override is given.
     Strengths in evasion_override are absolute; strengths from the model config
-    are fractions converted via bm.input_range.
+    are fractions converted via cbm.input_range.
     """
     from src.utils.evasion import EvasionConfig, build_attack
 
@@ -127,15 +141,15 @@ def _get_rob_params(
 # Per-run evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate_run(
+def analyze_run(
     run_dir: Path,
-    eval_cfg: EvalConfig,
+    cfg: AnalysisConfig,
 ) -> Dict[str, Any]:
     """Load a single run's model and compute metrics post-hoc on the test set.
 
     Args:
         run_dir: Path to the Hydra output directory for one run.
-        eval_cfg: Evaluation configuration.
+        cfg: Evaluation configuration.
 
     Returns:
         Flat dict with keys like ``acc``, ``dis_loss``, ``rob/0.1``,
@@ -146,11 +160,11 @@ def evaluate_run(
     from src.trainer.utils import eval_metrics, eval_rob
 
     run_dir = Path(run_dir)
-    device = torch.device(eval_cfg.device)
+    device = torch.device(cfg.device)
     results: Dict[str, Any] = {}
 
     # 1. Load config
-    cfg = load_run_config(run_dir)
+    run_cfg = load_run_config(run_dir)
 
     # 2. Load model
     checkpoint_path = find_model_checkpoint(run_dir)
@@ -158,35 +172,35 @@ def evaluate_run(
     cbm.to(device)
 
     # 3. Load data
-    OmegaConf.update(cfg, "dataset.overwrite", True, force_add=True)
-    datahandler = DataHandler(cfg.dataset)
+    OmegaConf.update(run_cfg, "dataset.overwrite", True, force_add=True)
+    datahandler = DataHandler(run_cfg.dataset)
     datahandler.load()
     datahandler.split_and_rescale(cbm)
     datahandler.get_classification_loaders()
     loader = datahandler.classification["test"]
 
-    # 4. Core metrics (single forward pass)
-    if eval_cfg.compute_acc or eval_cfg.compute_dis_loss or eval_cfg.compute_gen_loss:
+    # 4. Core metrics
+    if cfg.compute_acc or cfg.compute_dis_loss or cfg.compute_gen_loss:
         try:
             dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device)
-            if eval_cfg.compute_acc:
+            if cfg.compute_acc:
                 results["acc"] = acc
-            if eval_cfg.compute_dis_loss:
+            if cfg.compute_dis_loss:
                 results["dis_loss"] = dis_loss
-            if eval_cfg.compute_gen_loss:
+            if cfg.compute_gen_loss:
                 results["gen_loss"] = gen_loss
         except Exception as e:
             logger.warning(f"eval_metrics failed: {e}")
-            if eval_cfg.compute_acc:
+            if cfg.compute_acc:
                 results["acc"] = np.nan
-            if eval_cfg.compute_dis_loss:
+            if cfg.compute_dis_loss:
                 results["dis_loss"] = np.nan
-            if eval_cfg.compute_gen_loss:
+            if cfg.compute_gen_loss:
                 results["gen_loss"] = np.nan
 
     # 5. Robustness
-    if eval_cfg.compute_rob:
-        rob_params = _get_rob_params(cbm, cfg, eval_cfg.evasion_override)
+    if cfg.compute_rob:
+        rob_params = _get_rob_params(cbm, run_cfg, cfg.evasion_override)
         if rob_params is not None:
             attack, strengths_abs = rob_params
             for abs_eps in strengths_abs:
@@ -198,17 +212,17 @@ def evaluate_run(
                     results[f"rob/{abs_eps}"] = np.nan
 
     # 6. MIA
-    if eval_cfg.compute_mia:
+    if cfg.compute_mia:
         try:
             from src.analysis.mia import MIAEvaluation, MIAFeatureConfig
 
-            feature_config = MIAFeatureConfig(**(eval_cfg.mia_features or {}))
+            feature_config = MIAFeatureConfig(**(cfg.mia_features or {}))
             mia_eval = MIAEvaluation(
                 feature_config=feature_config,
-                adversarial_strength=eval_cfg.mia_adversarial_strength,
-                adversarial_num_steps=eval_cfg.mia_adversarial_num_steps,
-                adversarial_step_size=eval_cfg.mia_adversarial_step_size,
-                adversarial_norm=eval_cfg.mia_adversarial_norm,
+                adversarial_strength=cfg.mia_adversarial_strength,
+                adversarial_num_steps=cfg.mia_adversarial_num_steps,
+                adversarial_step_size=cfg.mia_adversarial_step_size,
+                adversarial_norm=cfg.mia_adversarial_norm,
             )
             mia_results = mia_eval.evaluate(
                 cbm,
@@ -242,12 +256,11 @@ def evaluate_run(
             results["mia_auc_roc"] = np.nan
 
     # 7. UQ
-    uq_results = None
-    if eval_cfg.compute_uq:
+    if cfg.compute_uq:
         try:
             from src.analysis.uq import UQEvaluation, UQConfig
 
-            uq_eval = UQEvaluation(config=UQConfig(**(eval_cfg.uq_config or {})))
+            uq_eval = UQEvaluation(config=UQConfig(**(cfg.uq_config or {})))
             uq_results = uq_eval.evaluate(cbm, datahandler.classification["test"], device)
 
             results["uq_clean_accuracy"] = uq_results.clean_accuracy
@@ -275,12 +288,12 @@ def evaluate_run(
             logger.warning(f"UQ evaluation failed: {e}")
             results["uq_clean_accuracy"] = np.nan
 
-    # 7b. Joint-attack UQ: second pass with JOINT_PGD
-    if eval_cfg.compute_uq and eval_cfg.joint_uq_config is not None:
+    # 7b. Joint-attack UQ
+    if cfg.compute_uq and cfg.joint_uq_config is not None:
         try:
             from src.analysis.uq import UQEvaluation, UQConfig
 
-            joint_uq_eval = UQEvaluation(config=UQConfig(**eval_cfg.joint_uq_config))
+            joint_uq_eval = UQEvaluation(config=UQConfig(**cfg.joint_uq_config))
             joint_uq_results = joint_uq_eval.evaluate(
                 cbm, datahandler.classification["test"], device
             )
@@ -309,68 +322,51 @@ def evaluate_run(
 
 
 # ---------------------------------------------------------------------------
-# Sweep-level evaluation
+# CLI
 # ---------------------------------------------------------------------------
 
-def evaluate_sweep(
-    sweep_dir: str,
-    eval_cfg: EvalConfig,
-    config_keys: Optional[List[str]] = None,
-) -> pd.DataFrame:
-    """Evaluate all runs in a sweep directory.
+if __name__ == "__main__":
+    import argparse
 
-    Args:
-        sweep_dir: Path to the sweep directory (contains numbered sub-dirs).
-        eval_cfg: Evaluation configuration.
-        config_keys: Hydra config keys to extract into the DataFrame.
+    logging.basicConfig(level=logging.INFO)
 
-    Returns:
-        DataFrame with one row per run. Columns: ``run_name``, ``run_path``,
-        ``config/<key>`` for each config_key, then flat metric columns.
-    """
-    sweep_path = Path(sweep_dir)
-    run_dirs = sorted(
-        [d for d in sweep_path.iterdir()
-         if d.is_dir() and (d / ".hydra" / "config.yaml").exists()],
-        key=lambda d: d.name,
+    parser = argparse.ArgumentParser(
+        description="Post-hoc single-run evaluation. Loads a saved model and "
+                    "recomputes metrics on the test set.",
+    )
+    parser.add_argument("run_dir", help="Path to Hydra run directory (contains .hydra/config.yaml).")
+    parser.add_argument("--no-acc", action="store_true", help="Skip clean accuracy.")
+    parser.add_argument("--no-dis-loss", action="store_true", help="Skip discriminative NLL loss.")
+    parser.add_argument("--no-gen-loss", action="store_true", help="Skip generative NLL loss.")
+    parser.add_argument("--no-rob", action="store_true", help="Skip robustness evaluation.")
+    parser.add_argument("--no-mia", action="store_true", help="Skip MIA evaluation.")
+    parser.add_argument("--no-uq", action="store_true", help="Skip UQ evaluation.")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
+                        help="Torch device (default: cuda if available, else cpu).")
+    args = parser.parse_args()
+
+    cfg = AnalysisConfig(
+        compute_acc=not args.no_acc,
+        compute_dis_loss=not args.no_dis_loss,
+        compute_gen_loss=not args.no_gen_loss,
+        compute_rob=not args.no_rob,
+        compute_mia=not args.no_mia,
+        compute_uq=not args.no_uq,
+        device=args.device,
     )
 
-    if not run_dirs:
-        print(f"No valid run directories found in {sweep_path}")
-        return pd.DataFrame()
+    print(f"\nEvaluating: {args.run_dir}")
+    print(f"Device: {args.device}\n")
 
-    print(f"Found {len(run_dirs)} runs in {sweep_path}")
+    results = analyze_run(Path(args.run_dir), cfg)
 
-    rows = []
-    for i, run_dir in enumerate(run_dirs):
-        print(f"  [{i + 1}/{len(run_dirs)}] Evaluating {run_dir.name}...")
-
-        row: Dict[str, Any] = {
-            "run_name": run_dir.name,
-            "run_path": str(run_dir),
-        }
-
-        if config_keys:
-            try:
-                cfg = load_run_config(run_dir)
-                for key in config_keys:
-                    try:
-                        val = OmegaConf.select(cfg, key)
-                        row["config/" + key] = val
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Could not load config for {run_dir.name}: {e}")
-
-        try:
-            metrics = evaluate_run(run_dir, eval_cfg)
-            row.update(metrics)
-        except Exception as e:
-            print(f"    FAILED: {e}")
-            logger.warning(f"Run {run_dir.name} failed: {e}")
-
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    print(f"\nEvaluation complete. {len(df)} runs processed.")
-    return df
+    print("=" * 50)
+    print("Results")
+    print("=" * 50)
+    for key, val in sorted(results.items()):
+        if isinstance(val, float):
+            print(f"  {key}: {val:.4f}")
+        elif isinstance(val, list):
+            print(f"  {key}: [list of {len(val)} values]")
+        else:
+            print(f"  {key}: {val}")

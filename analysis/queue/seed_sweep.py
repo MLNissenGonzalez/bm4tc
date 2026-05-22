@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Run seed_sweep_analysis.py for completed but unanalyzed seed sweeps.
+Run sweep.py for completed but unanalyzed seed sweeps.
 
 Scans both outputs/seed_sweep/ and outputs/alpha_curve/ for multirun.yaml
 markers.  Distribution plots are intentionally skipped (--no-viz is always
@@ -43,7 +43,7 @@ def find_sweep_dirs(root: Path):
 
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
-    """Mirror sweep path under analysis/outputs/ (matches seed_sweep_analysis.py logic)."""
+    """Mirror sweep path under analysis/outputs/ (matches sweep.py logic)."""
     rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
@@ -75,7 +75,7 @@ def get_dataset_base(sweep_dir: Path) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run seed_sweep_analysis.py for unanalyzed sweeps (seed_sweep + alpha_curve)."
+        description="Run sweep.py for unanalyzed sweeps (seed_sweep + alpha_curve)."
     )
     parser.add_argument("--dry-run", action="store_true",
                         help="Print commands without executing.")
@@ -148,7 +148,7 @@ def main():
     for sweep_dir, exp_name, root in todo:
         rel = sweep_dir.relative_to(ROOT)
         # --no-viz: distribution plots are handled separately by queue_visualize.py
-        cmd = ["python", "analysis/seed_sweep_analysis.py", str(rel), "--no-viz"]
+        cmd = ["python", "analysis/sweep.py", str(rel), "--no-viz"]
         print(" ".join(cmd))
         if not args.dry_run:
             result = subprocess.run(cmd, cwd=ROOT)

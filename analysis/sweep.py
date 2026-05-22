@@ -219,9 +219,66 @@ if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and _full_uq_config is not None:
     _full_joint_uq_config = {**_full_uq_config, "attack_method": "JOINT_PGD"}
 
 # %%
-from analysis.utils import EvalConfig, evaluate_sweep
+import logging as _logging
+from analysis.run import AnalysisConfig, analyze_run
 
-eval_cfg = EvalConfig(
+_sweep_logger = _logging.getLogger(__name__)
+
+
+def _eval_all_runs(sweep_path, cfg, config_keys=None):
+    """Evaluate all runs in a sweep directory.
+
+    Iterates numbered subdirs that contain .hydra/config.yaml, calls
+    analyze_run for each, and returns a DataFrame with one row per run.
+    """
+    import pandas as pd
+    from omegaconf import OmegaConf
+    from analysis.utils.mia_utils import load_run_config
+
+    sweep_path = Path(sweep_path)
+    run_dirs = sorted(
+        [d for d in sweep_path.iterdir()
+         if d.is_dir() and (d / ".hydra" / "config.yaml").exists()],
+        key=lambda d: d.name,
+    )
+
+    if not run_dirs:
+        print(f"No valid run directories found in {sweep_path}")
+        return pd.DataFrame()
+
+    print(f"Found {len(run_dirs)} runs in {sweep_path}")
+
+    rows = []
+    for i, run_dir in enumerate(run_dirs):
+        print(f"  [{i + 1}/{len(run_dirs)}] Evaluating {run_dir.name}...")
+
+        row = {"run_name": run_dir.name, "run_path": str(run_dir)}
+
+        if config_keys:
+            try:
+                run_cfg = load_run_config(run_dir)
+                for key in config_keys:
+                    try:
+                        row["config/" + key] = OmegaConf.select(run_cfg, key)
+                    except Exception:
+                        pass
+            except Exception as e:
+                _sweep_logger.warning(f"Could not load config for {run_dir.name}: {e}")
+
+        try:
+            row.update(analyze_run(run_dir, cfg))
+        except Exception as e:
+            print(f"    FAILED: {e}")
+            _sweep_logger.warning(f"Run {run_dir.name} failed: {e}")
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    print(f"\nEvaluation complete. {len(df)} runs processed.")
+    return df
+
+
+eval_cfg = AnalysisConfig(
     compute_acc=COMPUTE_ACC,
     compute_rob=COMPUTE_ROB,
     compute_mia=COMPUTE_MIA,
@@ -245,7 +302,7 @@ print(f"Evaluating sweep: {sweep_path}")
 print(f"Device: {DEVICE}")
 print("=" * 60)
 
-df = evaluate_sweep(str(sweep_path), eval_cfg, config_keys=CONFIG_KEYS)
+df = _eval_all_runs(sweep_path, eval_cfg, config_keys=CONFIG_KEYS)
 
 # %%
 # Show DataFrame summary

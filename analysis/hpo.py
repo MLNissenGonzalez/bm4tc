@@ -35,10 +35,18 @@ else:
 
 sys.path.insert(0, str(project_root))
 
-# Check for command line argument to override LOCAL_SWEEP_DIR
-_CLI_SWEEP_DIR = None
-if len(sys.argv) > 1:
-    _CLI_SWEEP_DIR = sys.argv[1]
+import argparse as _argparse
+
+_cli = _argparse.ArgumentParser(add_help=False)
+_cli.add_argument("sweep_dir", nargs="?", default=None)
+_cli.add_argument(
+    "--eval-model", action="store_true",
+    help="Load model checkpoints and compute metrics post-hoc instead of reading from logs.",
+)
+_cli_args, _ = _cli.parse_known_args()
+_CLI_SWEEP_DIR = _cli_args.sweep_dir
+_EVAL_MODEL = _cli_args.eval_model
+if _CLI_SWEEP_DIR:
     print(f"Using sweep dir from command line: {_CLI_SWEEP_DIR}")
 
 import numpy as np
@@ -134,6 +142,13 @@ PARETO_METRICS = None
 FIGSIZE = (10, 6)
 DPI = 100
 
+# --- EVAL-MODEL SETTINGS (only used with --eval-model flag) ---
+# Device for model evaluation.
+EVAL_MODEL_DEVICE = "cpu"
+# Optional evasion override (absolute strengths). None = use each run's own config.
+# Example: {"method": "PGD", "norm": "inf", "num_steps": 40, "strengths": [0.05, 0.10]}
+EVAL_MODEL_EVASION = None
+
 # =============================================================================
 # RESOLVED SETTINGS (auto-populated from resolver)
 # =============================================================================
@@ -228,6 +243,55 @@ def load_data(source: str = DATA_SOURCE, regime: str = REGIME) -> pd.DataFrame:
 
     return df
 
+
+# %%
+# --eval-model: load model checkpoints and evaluate metrics post-hoc, then exit.
+if _EVAL_MODEL:
+    from analysis.run import AnalysisConfig, analyze_run
+    from analysis.utils.mia_utils import load_run_config as _load_run_config
+    from omegaconf import OmegaConf as _OmegaConf
+
+    _sweep_path = project_root / LOCAL_SWEEP_DIR
+    _run_dirs = sorted(
+        [d for d in _sweep_path.iterdir()
+         if d.is_dir() and (d / ".hydra" / "config.yaml").exists()],
+        key=lambda d: d.name,
+    )
+    if not _run_dirs:
+        print(f"No valid run directories found in {_sweep_path}")
+        sys.exit(1)
+
+    print(f"Found {len(_run_dirs)} runs in {_sweep_path}")
+    _eval_cfg = AnalysisConfig(
+        compute_acc=True,
+        compute_rob=True,
+        compute_mia=False,
+        compute_uq=False,
+        evasion_override=EVAL_MODEL_EVASION,
+        device=EVAL_MODEL_DEVICE,
+    )
+
+    _rows = []
+    for _i, _run_dir in enumerate(_run_dirs):
+        print(f"  [{_i + 1}/{len(_run_dirs)}] {_run_dir.name}...")
+        _row = {"run_name": _run_dir.name, "run_path": str(_run_dir)}
+        try:
+            _row.update(analyze_run(_run_dir, _eval_cfg))
+        except Exception as _e:
+            print(f"    FAILED: {_e}")
+        _rows.append(_row)
+
+    _eval_df = pd.DataFrame(_rows)
+    _display_cols = [c for c in _eval_df.columns if c != "run_path"]
+    print(f"\nEval-model complete. {len(_eval_df)} runs.")
+    print(_eval_df[_display_cols].to_string())
+
+    _eval_out = project_root / "analysis" / "outputs" / Path(LOCAL_SWEEP_DIR).name
+    _eval_out.mkdir(parents=True, exist_ok=True)
+    _csv_path = _eval_out / "hpo_model_eval.csv"
+    _eval_df.to_csv(_csv_path, index=False)
+    print(f"\nSaved to: {_csv_path}")
+    sys.exit(0)
 
 # %%
 # Load the data
