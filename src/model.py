@@ -4,7 +4,7 @@ import tensorkrowch as tk
 from dataclasses import dataclass, field
 from typing import List, Optional, Text
 from omegaconf import OmegaConf, DictConfig
-import src.utils.get as get
+from src.utils.embeddings import embedding, range_from_embedding
 import logging
 
 logger = logging.getLogger(__name__)
@@ -113,8 +113,8 @@ class ConditionalBornMachine(tk.models.MPS):
 
         # ── Embedding ─────────────────────────────────────────────────────
         self.embedding_name = cfg.embedding
-        self.embedding = get.embedding(self.embedding_name, _in_dim, dtype=_dtype)
-        self.input_range = get.range_from_embedding(self.embedding_name)
+        self.embedding = embedding(self.embedding_name, _in_dim, dtype=_dtype)
+        self.input_range = range_from_embedding(self.embedding_name)
         self.dtype = _dtype
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import pytest
 import torch
 import torch.nn as nn
-from src.trainer.softmax import ClassificationSoftmaxNLL
+from src.train.softmax import ClassificationSoftmaxNLL
 
 BATCH = 16
 NUM_CLASSES = 3

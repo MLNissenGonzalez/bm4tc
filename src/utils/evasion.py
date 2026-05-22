@@ -2,8 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from typing import List, Optional
-import src.utils.get as get
-from src.utils.get import CriterionConfig
+from src.utils.train import CriterionConfig
 
 
 @dataclass

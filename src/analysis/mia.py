@@ -19,7 +19,7 @@ from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curv
 import logging
 
 from src.utils.evasion import ProjectedGradientDescent
-from src.utils.get import CriterionConfig
+from src.utils.train import CriterionConfig
 
 logger = logging.getLogger(__name__)
 

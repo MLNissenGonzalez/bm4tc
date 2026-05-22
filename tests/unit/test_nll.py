@@ -3,7 +3,7 @@ import torch
 from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.trainer.nll import NLLConfig, NLLTrainer, NormControlConfig
+from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
 
