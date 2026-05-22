@@ -7,7 +7,7 @@ and deletes the matching local directories, W&B runs + artifacts, and mirrored
 analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/ directories.
 
 Usage:
-    python configs/tools/delete_runs.py [filters] [options]
+    python analysis/configs/delete_runs.py [filters] [options]
 
 Filter flags (all accept one or more values; OR-within / AND-across):
     --kind         hpo | seed_sweep | test
@@ -29,14 +29,14 @@ Options:
     --project        W&B project (default: gan_train)
 
 Examples:
-    python configs/tools/delete_runs.py --list
-    python configs/tools/delete_runs.py --kind hpo --regime gen --dry-run
-    python configs/tools/delete_runs.py --dataset circles --date 2102 --dry-run
-    python configs/tools/delete_runs.py --kind test --dry-run
-    python configs/tools/delete_runs.py --kind test
-    python configs/tools/delete_runs.py --kind hpo --wandb-only --dry-run
-    python configs/tools/delete_runs.py --embedding hermite --analysis-only --dry-run
-    python configs/tools/delete_runs.py --analysis-only --list
+    python analysis/configs/delete_runs.py --list
+    python analysis/configs/delete_runs.py --kind hpo --regime gen --dry-run
+    python analysis/configs/delete_runs.py --dataset circles --date 2102 --dry-run
+    python analysis/configs/delete_runs.py --kind test --dry-run
+    python analysis/configs/delete_runs.py --kind test
+    python analysis/configs/delete_runs.py --kind hpo --wandb-only --dry-run
+    python analysis/configs/delete_runs.py --embedding hermite --analysis-only --dry-run
+    python analysis/configs/delete_runs.py --analysis-only --list
 """
 
 import argparse

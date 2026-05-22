@@ -20,8 +20,8 @@ Patches the d10D6 alpha_curve_mixed configs so that:
   - sweeper.params stays as the original alpha × seed cartesian sweep
 
 Usage:
-    python configs/tools/alpha_lr_interp.py            # print table + patch
-    python configs/tools/alpha_lr_interp.py --dry-run  # print table only
+    python analysis/configs/alpha_lr_interp.py            # print table + patch
+    python analysis/configs/alpha_lr_interp.py --dry-run  # print table only
 """
 import math
 import re

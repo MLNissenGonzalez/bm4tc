@@ -44,7 +44,7 @@ pytest tests/integration/ -q     # integration tests (~49, slower)
 src/
   models/         ConditionalBornMachine (cbm.py)
   trainer/        NLLTrainer (nll.py), AdversarialTrainer (adversarial.py), SoftmaxTrainer (softmax.py), utils.py
-  analysis/       viz.py, purification.py  (pure Python/matplotlib, no W&B)
+  analysis/       viz.py, purification.py, mia.py, uq.py  (pure Python/matplotlib, no W&B)
   data/           DataHandler (handler.py), gen_n_load.py
   utils/          embeddings.py, evasion.py, get.py, resolvers.py
 
@@ -63,10 +63,13 @@ configs/
   experiments/                      full experiment override configs
 
 analysis/
-  seed_sweep_analysis.py   evaluate one sweep post-hoc
-  hpo_analysis.py, mia_analysis.py, uq_analysis.py   deep-dive scripts
-  utils/                   evaluate.py, uq.py, mia.py, resolve.py, statistics.py
-  visualize/               distribution plot helpers
+  run.py               single-model analysis entry point
+  sweep.py             seed_sweep / alpha_curve post-hoc analysis
+  hpo.py               HPO result exploration
+  queue.py             batch-queue runner for sweep.py
+  configs/             pipeline tool scripts (fill_hpo.py, delete_runs.py, alpha_lr_interp.py)
+  utils/               statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
+  visualize/           distribution plots + queue.py
 ```
 
 ## Naming conventions
