@@ -7,11 +7,11 @@ and patches the seed_sweep YAML in-place, replacing `???  # FILL FROM HPO`
 placeholders with the actual hyperparameter values.
 
 Usage:
-    python configs/tools/fill_hpo.py --list
-    python configs/tools/fill_hpo.py --dry-run
-    python configs/tools/fill_hpo.py --filter-type adv --dry-run
-    python configs/tools/fill_hpo.py --filter-dataset circles --filter-embedding legendre
-    python configs/tools/fill_hpo.py --force
+    python analysis/configs/fill_hpo.py --list
+    python analysis/configs/fill_hpo.py --dry-run
+    python analysis/configs/fill_hpo.py --type adv --dry-run
+    python analysis/configs/fill_hpo.py --dataset circles --embedding legendre
+    python analysis/configs/fill_hpo.py --force
 """
 
 import argparse
@@ -459,13 +459,13 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--filter-dataset", metavar="DS",
+    parser.add_argument("--dataset", metavar="DS",
                         help="Substring match on dataset name (e.g. circles).")
-    parser.add_argument("--filter-type", metavar="TYPE",
+    parser.add_argument("--type", metavar="TYPE",
                         help="cls | adv | gen (or full name).")
-    parser.add_argument("--filter-embedding", metavar="EMB",
+    parser.add_argument("--embedding", metavar="EMB",
                         help="fourier | legendre | hermite | chebychev1 | chebychev2")
-    parser.add_argument("--filter-arch", metavar="ARCH",
+    parser.add_argument("--arch", metavar="ARCH",
                         help="e.g. d4r3, d10r6")
     parser.add_argument("--source", choices=["wandb", "local", "both"], default="both",
                         help="Where to look for HPO results (default: both, wandb first)")
@@ -503,15 +503,15 @@ def main() -> None:
         return
 
     # Apply filters
-    if args.filter_type:
-        typ = TYPE_SHORT.get(args.filter_type, args.filter_type)
+    if args.type:
+        typ = TYPE_SHORT.get(args.type, args.type)
         combos = [c for c in combos if c["type"] == typ]
-    if args.filter_embedding:
-        combos = [c for c in combos if c["embedding"] == args.filter_embedding]
-    if args.filter_arch:
-        combos = [c for c in combos if c["arch"] == args.filter_arch]
-    if args.filter_dataset:
-        combos = [c for c in combos if args.filter_dataset in c["dataset"]]
+    if args.embedding:
+        combos = [c for c in combos if c["embedding"] == args.embedding]
+    if args.arch:
+        combos = [c for c in combos if c["arch"] == args.arch]
+    if args.dataset:
+        combos = [c for c in combos if args.dataset in c["dataset"]]
 
     todo    = [c for c in combos if args.force or not is_filled(c["seed_path"])]
     skipped = len(combos) - len(todo)
