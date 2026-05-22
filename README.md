@@ -14,8 +14,7 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 | Script | Regime | Description |
 |--------|--------|-------------|
-| `experiments/nll.py` | `dis`/`gen` | Unified NLL; `alpha=0` → discriminative, `alpha>0` → mixed joint NLL |
-| `experiments/adversarial.py` | `adv` | Classification pretraining + PGD adversarial training |
+| `experiments/train.py` | `dis`/`gen`/`adv` | Unified entry point; NLL or adversarial selected by config (`trainer.nll` vs `trainer.adversarial`) |
 
 ## Trustworthiness Evaluation
 
@@ -58,26 +57,26 @@ All experiments are run as Python modules from the project root. Configurations 
 
 ```bash
 # Single run (NLL discriminative)
-python -m experiments.nll +experiments=nll/dis/fourier/d4r3/hpo/moons
+python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
 
 # Multirun / seed sweep (NLL generative)
-python -m experiments.nll --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
 
 # Batch-run all unrun configs in a filter set
-python -m experiments.queue_experiments --filter-type gen --filter-embedding legendre --dry-run
+python -m experiments.queue --type gen --embedding legendre --dry-run
 
 # Disable W&B for local debugging
-python -m experiments.nll +experiments=tests/nll tracking.mode=disabled
+python -m experiments.train +experiments=tests/nll tracking.mode=disabled
 ```
 
 ## Post-Hoc Analysis
 
 ```bash
 # Analyse a specific sweep
-python analysis/seed_sweep_analysis.py outputs/seed_sweep/gen/legendre/d10r6/circles_1802
+python -m analysis.sweep outputs/seed_sweep/gen/legendre/d10r6/circles_1802
 
 # Analyse all completed but unanalysed sweeps in batch
-python analysis/queue_seed_sweep.py
+python -m analysis.queue
 ```
 
 Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
@@ -86,18 +85,22 @@ Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (nll, adversarial)
+├── experiments/        # Entry-point scripts (train.py, run_local.py, queue.py)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
-│   ├── models/         # ConditionalBornMachine (cbm.py)
-│   ├── trainer/        # Training loops + eval functions for each regime
-│   ├── analysis/       # viz.py, purification.py (no W&B dependency)
-│   ├── data/           # DataHandler, dataset generation and loading
-│   └── utils/          # Embeddings, losses, PGD/FGM attacks, resolvers
+│   ├── model.py        # ConditionalBornMachine
+│   ├── datahandler.py  # DataHandler, dataset generation and loading
+│   ├── train/          # NLLTrainer, AdversarialTrainer
+│   ├── analysis/       # viz.py, purification.py, mia.py, uq.py (no W&B dependency)
+│   └── utils/          # Embeddings, PGD/FGM attacks, optimizer config, train utilities
 ├── analysis/
-│   ├── seed_sweep_analysis.py   # Post-hoc metrics for one sweep
-│   ├── utils/              # evaluate.py, uq.py, mia.py, resolve.py, statistics.py
-│   └── outputs/            # Generated analysis artifacts (git-ignored)
+│   ├── sweep.py        # Post-hoc metrics for one seed sweep / alpha curve
+│   ├── queue.py        # Batch-run all unanalysed sweeps
+│   ├── hpo.py          # HPO result exploration
+│   ├── run.py          # Single-model analysis (MIA, UQ)
+│   ├── configs/        # Pipeline tools (fill_hpo.py, delete_runs.py, …)
+│   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
+│   └── outputs/        # Generated analysis artifacts (git-ignored)
 └── environment.yml
 ```
 

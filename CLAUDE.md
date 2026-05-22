@@ -8,7 +8,7 @@ conda activate bm4tc   # or use full path: /home/martin-lanigo/projects/minicond
 
 Always invoke Python as a module from the project root:
 ```bash
-/home/martin-lanigo/projects/miniconda3/envs/bm4tc/bin/python -m experiments.nll ...
+/home/martin-lanigo/projects/miniconda3/envs/bm4tc/bin/python -m experiments.train ...
 ```
 
 Never use `conda run`. Never use relative `python` without the full env path when running experiments.
@@ -42,11 +42,11 @@ pytest tests/integration/ -q     # integration tests (~49, slower)
 
 ```
 src/
-  models/         ConditionalBornMachine (cbm.py)
-  trainer/        NLLTrainer (nll.py), AdversarialTrainer (adversarial.py), SoftmaxTrainer (softmax.py), utils.py
+  model.py        ConditionalBornMachine
+  datahandler.py  DataHandler (load, split_and_rescale, DatasetConfig, DataGenDowConfig)
+  train/          NLLTrainer (nll.py), AdversarialTrainer (adversarial.py)
   analysis/       viz.py, purification.py, mia.py, uq.py  (pure Python/matplotlib, no W&B)
-  data/           DataHandler (handler.py), gen_n_load.py
-  utils/          embeddings.py, evasion.py, get.py, resolvers.py
+  utils/          embeddings.py, evasion.py, train.py (OptimizerConfig, eval functions)
 
 experiments/
   train.py        unified entry point: NLL (alpha=0 dis, alpha>0 gen) + adversarial
@@ -93,11 +93,11 @@ analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
 ## Config dataclasses
 
 Each module owns its config:
-- `NLLConfig`, `NormControlConfig` in `src/trainer/nll.py`
-- `AdversarialConfig` in `src/trainer/adversarial.py`
-- `CBMConfig`, `MPSInitConfig` in `src/models/cbm.py`
-- `DatasetConfig`, `DataGenDowConfig` in `src/data/gen_n_load.py`
-- `OptimizerConfig`, `CriterionConfig` in `src/utils/get.py`
+- `NLLConfig`, `NormControlConfig` in `src/train/nll.py`
+- `AdversarialConfig` in `src/train/adversarial.py`
+- `CBMConfig`, `MPSInitConfig` in `src/model.py`
+- `DatasetConfig`, `DataGenDowConfig` in `src/datahandler.py`
+- `OptimizerConfig` in `src/utils/train.py`
 - `EvasionConfig` in `src/utils/evasion.py`
 - `PurificationConfig` in `src/analysis/purification.py`
 - `Config`, `TrainerConfig`, `TrackingConfig` in `experiments/config.py`
@@ -105,5 +105,5 @@ Each module owns its config:
 ## Key invariants
 
 - `DataHandler.split_and_rescale(cbm)` uses `cbm.input_range` (derived from embedding at load time) — always correct.
-- Eval functions (`eval_metrics`, `eval_rob` in `src/trainer/utils.py`) call `cbm.eval()` themselves.
-- Attack epsilons in `seed_sweep_analysis.py` are fractions of the embedding range size, not absolute values.
+- Eval functions (`eval_metrics`, `eval_rob` in `src/utils/train.py`) call `cbm.eval()` themselves.
+- Attack epsilons in `analysis/sweep.py` are fractions of the embedding range size, not absolute values.
