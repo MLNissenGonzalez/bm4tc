@@ -7,14 +7,14 @@ replacing the old best_run_distributions.png if present.
 
 Usage
 -----
-    python analysis/queue_visualize.py                              # all unvisualized
-    python analysis/queue_visualize.py --dry-run                   # print commands only
-    python analysis/queue_visualize.py --list                      # show status
-    python analysis/queue_visualize.py --force                     # re-run already done
-    python analysis/queue_visualize.py --filter-embedding hermite
-    python analysis/queue_visualize.py --filter-dataset  circles   # substring match
-    python analysis/queue_visualize.py --filter-arch     d4D3
-    python analysis/queue_visualize.py --filter-type     gen       # gen | cls | adv
+    python -m analysis.visualize.queue                        # all unvisualized
+    python -m analysis.visualize.queue --dry-run              # print commands only
+    python -m analysis.visualize.queue --list                 # show status
+    python -m analysis.visualize.queue --force                # re-run already done
+    python -m analysis.visualize.queue --embedding hermite
+    python -m analysis.visualize.queue --dataset  circles     # substring match
+    python -m analysis.visualize.queue --arch     d4r3
+    python -m analysis.visualize.queue --type     gen         # gen | cls | adv
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT          = Path(__file__).parent.parent   # project root
+ROOT          = Path(__file__).parent.parent.parent   # project root
 SWEEP_ROOT    = ROOT / "outputs" / "seed_sweep"
 ANALYSIS_ROOT = ROOT / "analysis" / "outputs"
 
@@ -37,7 +37,7 @@ def find_sweep_dirs(root: Path):
 
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
-    """Mirror sweep path under analysis/outputs/ (matches seed_sweep_analysis.py logic)."""
+    """Mirror sweep path under analysis/outputs/ (matches sweep.py logic)."""
     rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
@@ -73,16 +73,26 @@ def is_visualized(sweep_dir: Path) -> bool:
 
 
 def best_run_from_csv(ana_dir: Path) -> str | None:
-    """Read evaluation_data.csv; return run_path with highest eval/valid/acc."""
+    """Return run_path with highest test (or valid) accuracy; fall back to run 0."""
     csv = ana_dir / "evaluation_data.csv"
     if not csv.exists():
         return None
     df = pd.read_csv(csv)
     if "run_path" not in df.columns:
         return None
-    df["_idx"] = pd.to_numeric(df["run_path"].apply(lambda p: Path(p).name), errors="coerce")
-    row = df.loc[df["_idx"].idxmin()]
-    return row["run_path"]
+    if len(df) == 1:
+        return df["run_path"].iloc[0]
+    acc_col = next(
+        (c for c in ("eval/test/acc", "eval/valid/acc") if c in df.columns),
+        None,
+    )
+    if acc_col is None:
+        print(f"  WARNING: no acc column in {csv.relative_to(ROOT)}, using run 0.")
+        df["_idx"] = pd.to_numeric(
+            df["run_path"].apply(lambda p: Path(p).name), errors="coerce"
+        )
+        return df.loc[df["_idx"].idxmin()]["run_path"]
+    return df.loc[pd.to_numeric(df[acc_col], errors="coerce").idxmax()]["run_path"]
 
 
 def get_training_type(sweep_dir: Path) -> str:
@@ -113,13 +123,13 @@ def main():
                         help="Print commands without executing.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if best_class_dist.png already exists.")
-    parser.add_argument("--filter-embedding", metavar="EMB",
+    parser.add_argument("--embedding", metavar="EMB",
                         help="Only process sweeps with this embedding (e.g. hermite).")
-    parser.add_argument("--filter-dataset", metavar="DS",
-                        help="Only process sweeps with this base dataset name (e.g. circles_4k).")
-    parser.add_argument("--filter-arch", metavar="ARCH",
-                        help="Only process sweeps with this architecture (e.g. d4D3).")
-    parser.add_argument("--filter-type", metavar="TYPE",
+    parser.add_argument("--dataset", metavar="DS",
+                        help="Only process sweeps with this base dataset name (e.g. circles).")
+    parser.add_argument("--arch", metavar="ARCH",
+                        help="Only process sweeps with this architecture (e.g. d4r3).")
+    parser.add_argument("--type", metavar="TYPE",
                         help="Only process sweeps with this training type (gen, cls, adv).")
     parser.add_argument("--list", action="store_true",
                         help="Print status of all discovered sweeps and exit.")
@@ -140,14 +150,14 @@ def main():
         return
 
     # Apply filters
-    if args.filter_type:
-        analyzed = [s for s in analyzed if get_training_type(s) == args.filter_type]
-    if args.filter_embedding:
-        analyzed = [s for s in analyzed if get_embedding(s) == args.filter_embedding]
-    if args.filter_arch:
-        analyzed = [s for s in analyzed if get_arch(s) == args.filter_arch]
-    if args.filter_dataset:
-        analyzed = [s for s in analyzed if args.filter_dataset in get_dataset_base(s)]
+    if args.type:
+        analyzed = [s for s in analyzed if get_training_type(s) == args.type]
+    if args.embedding:
+        analyzed = [s for s in analyzed if get_embedding(s) == args.embedding]
+    if args.arch:
+        analyzed = [s for s in analyzed if get_arch(s) == args.arch]
+    if args.dataset:
+        analyzed = [s for s in analyzed if args.dataset in get_dataset_base(s)]
 
     todo    = [s for s in analyzed if args.force or not is_visualized(s)]
     skipped = len(analyzed) - len(todo)
