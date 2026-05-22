@@ -1,15 +1,15 @@
 """
-NLL training entry point (discriminative, generative, or mixed).
+Unified training entry point (NLL discriminative/generative, adversarial).
 
-alpha=0  → pure discriminative (default)
-alpha>0  → mixed NLL; alpha=1 → pure generative
+Mode is inferred from which trainer config is set:
+  cfg.trainer.adversarial is not None  →  adversarial (AdversarialTrainer only)
+  cfg.trainer.nll is not None          →  nll (NLLTrainer)
 
 Usage:
-    python -m experiments.nll +experiments=tests/nll tracking.mode=disabled
-    python -m experiments.nll +experiments=nll/fourier/d4r3/hpo/moons tracking.mode=disabled
-    python -m experiments.nll --multirun +experiments=nll/legendre/d10r6/seed_sweep/circles
+    python -m experiments.train +experiments=tests/nll tracking.mode=disabled
+    python -m experiments.train +experiments=tests/adversarial tracking.mode=disabled
+    python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
 """
-import math
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -17,25 +17,16 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 import hydra
 import logging
 from pathlib import Path
-from omegaconf import OmegaConf
 
-# geom_lr: geometric LR interpolation for alpha_curve configs.
-# Usage in YAML: lr: ${geom_lr:${trainer.nll.alpha},<lr_cls>,<lr_gen>}
-# Configs that don't sweep alpha just set lr directly — this resolver is never called.
-OmegaConf.register_new_resolver(
-    "geom_lr",
-    lambda alpha, lr_cls, lr_gen: math.exp(
-        (1 - float(alpha)) * math.log(float(lr_cls)) + float(alpha) * math.log(float(lr_gen))
-    ),
-    replace=True,
-)
+from experiments.resolvers import register_resolvers
+register_resolvers()
 
 from experiments.tracking import init_wandb, log_dataset_viz, make_logger
 from experiments.config import Config, register
 from src.utils import set_seed
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
-from src.train import NLLTrainer
+from src.train import NLLTrainer, AdversarialTrainer
 import torch
 
 logger = logging.getLogger(__name__)
@@ -43,14 +34,12 @@ register()
 
 
 @hydra.main(config_path="../configs", config_name="config", version_base=None)
-def main(cfg: Config):
-    """Main entry point for NLL training experiments."""
+def main(cfg: Config) -> float:
     run = init_wandb(cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-
     set_seed(cfg.tracking.seed)
 
     model_path = getattr(cfg, "model_path", None)
@@ -67,12 +56,19 @@ def main(cfg: Config):
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    trainer = NLLTrainer(cbm, cfg.trainer.nll, datahandler, device)
-    trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
+    if cfg.trainer.adversarial is not None:
+        trainer = AdversarialTrainer(cbm, cfg.trainer.adversarial, datahandler, device)
+        trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
+        stop_crit = cfg.trainer.adversarial.stop_crit
+    elif cfg.trainer.nll is not None:
+        trainer = NLLTrainer(cbm, cfg.trainer.nll, datahandler, device)
+        trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
+        stop_crit = cfg.trainer.nll.stop_crit
+    else:
+        raise ValueError("No trainer config: set trainer.nll or trainer.adversarial")
 
     run.finish()
 
-    stop_crit = cfg.trainer.nll.stop_crit
     objective = trainer.best.get(stop_crit, float("inf"))
     if stop_crit in ("acc", "rob"):
         objective = -objective

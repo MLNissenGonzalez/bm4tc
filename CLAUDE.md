@@ -17,17 +17,17 @@ Never use `conda run`. Never use relative `python` without the full env path whe
 
 ```bash
 # Single run (NLL discriminative)
-python -m experiments.nll +experiments=nll/dis/fourier/d4r3/hpo/moons tracking.mode=disabled
+python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons tracking.mode=disabled
 
 # Multirun seed sweep (NLL generative)
-python -m experiments.nll --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
 
 # Test run (tiny config, no W&B)
-python -m experiments.nll         +experiments=tests/nll         tracking.mode=disabled
-python -m experiments.adversarial +experiments=tests/adversarial tracking.mode=disabled
+python -m experiments.train +experiments=tests/nll         tracking.mode=disabled
+python -m experiments.train +experiments=tests/adversarial tracking.mode=disabled
 
 # Debug: print resolved config without running
-python -m experiments.nll --cfg job +experiments=tests/nll
+python -m experiments.train --cfg job +experiments=tests/nll
 ```
 
 ## Running tests
@@ -49,11 +49,11 @@ src/
   utils/          embeddings.py, evasion.py, get.py, resolvers.py
 
 experiments/
-  nll.py          entry point: NLL on p(c|x) with alpha=0, p(x,c) with alpha>0
-  adversarial.py  entry point: classification pretraining + PGD-AT/TRADES
-  softmax_sanity.py   sanity check: raw amplitudes as softmax logits
-  config.py           Config, TrainerConfig, TrackingConfig dataclasses + register()
-  tracking.py         make_logger, init_wandb, log_dataset_viz
+  train.py        unified entry point: NLL (alpha=0 dis, alpha>0 gen) + adversarial
+  queue.py        batch-queue runner for experiment configs (--type, --embedding, …)
+  resolvers.py    OmegaConf custom resolvers (training_regime, geom_lr, dtype_suffix, …)
+  config.py       Config, TrainerConfig, TrackingConfig dataclasses + register()
+  tracking.py     make_logger, init_wandb, log_dataset_viz
 
 configs/
   born/{embedding}/d{d}r{r}.yaml   MPS arch configs (d=physical dim, r=bond dim)
