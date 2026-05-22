@@ -32,7 +32,7 @@ import torch
 
 from analysis.utils import load_run_config, find_model_checkpoint
 from src.model import ConditionalBornMachine
-from src.data.handler import DataHandler
+from src.datahandler import DataHandler
 from analysis.visualize.distributions import (
     make_grid,
     compute_conditional_probs,

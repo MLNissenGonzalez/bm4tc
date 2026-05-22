@@ -8,7 +8,7 @@ from typing import Optional
 
 from hydra.core.config_store import ConfigStore
 
-from src.data.gen_n_load import DatasetConfig
+from src.datahandler import DatasetConfig
 from src.model import CBMConfig
 from src.train.nll import NLLConfig
 from src.train.adversarial import AdversarialConfig

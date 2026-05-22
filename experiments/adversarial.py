@@ -26,7 +26,7 @@ from pathlib import Path
 from experiments.tracking import init_wandb, log_dataset_viz, make_logger
 from experiments.config import Config, register
 from src.utils import set_seed
-from src.data import DataHandler
+from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 from src.train import NLLTrainer, AdversarialTrainer
 import torch
