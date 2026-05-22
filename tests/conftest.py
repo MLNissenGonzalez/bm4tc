@@ -26,7 +26,7 @@ NUM_CLASSES = 2
 
 @pytest.fixture(scope="session")
 def cbm():
-    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=DATA_DIM, bond_dim=2, std=1e-3),

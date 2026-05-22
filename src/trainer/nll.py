@@ -10,7 +10,7 @@ from typing import Callable, Dict, Optional, Union
 import src.utils.get as get
 from src.utils.get import OptimizerConfig
 from src.data.handler import DataHandler
-from src.models.cbm import ConditionalBornMachine
+from src.model import ConditionalBornMachine
 from src.trainer.utils import NormRegularizer, eval_metrics
 
 import logging
@@ -264,7 +264,7 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     import torch
-    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
     from src.data.handler import DataHandler
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
 

@@ -5,7 +5,7 @@ import torch
 def _make_spirals_handler():
     from src.data.gen_n_load import DatasetConfig, DataGenDowConfig
     from src.data.handler import DataHandler
-    from src.models.cbm import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     bm = ConditionalBornMachine(
         cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),

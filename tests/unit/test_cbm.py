@@ -1,7 +1,7 @@
 import pytest
 import torch
 from unittest.mock import patch
-from src.models.cbm import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2):
@@ -96,7 +96,7 @@ def test_condition_on_class_last_position():
                          "dtype": "float32", "n_features": None,
                          "out_dim": None, "std": 1e-3}}
     )
-    from src.models.cbm import CBMConfig
+    from src.model import CBMConfig
     cfg_dc = CBMConfig(embedding="fourier",
                        init_kwargs={"in_dim": 2, "bond_dim": 2, "out_position": 2,
                                     "std": 1e-3, "dtype": "float32"})

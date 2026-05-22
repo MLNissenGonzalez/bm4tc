@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.utils.sampling import draw_from_grid
+from src.model import draw_from_grid
 
 BATCH = 8
 BINS = 20

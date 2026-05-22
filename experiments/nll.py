@@ -34,7 +34,7 @@ from experiments.tracking import init_wandb, log_dataset_viz, make_logger
 from experiments.config import Config, register
 from src.utils import set_seed
 from src.data import DataHandler
-from src.models.cbm import ConditionalBornMachine
+from src.model import ConditionalBornMachine
 from src.trainer import NLLTrainer
 import torch
 

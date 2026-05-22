@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import logging
 
 from analysis.utils import load_run_config, find_model_checkpoint
-from src.models import ConditionalBornMachine
+from src.model import ConditionalBornMachine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

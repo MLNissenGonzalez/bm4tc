@@ -52,7 +52,7 @@ def _cls_cmap(class_idx: int):
         f"cls{class_idx}", ["white", palette[class_idx % 2]]
     )
 from analysis.utils import load_run_config, find_model_checkpoint
-from src.models import ConditionalBornMachine
+from src.model import ConditionalBornMachine
 from src.data.handler import DataHandler
 
 logging.basicConfig(level=logging.INFO)
