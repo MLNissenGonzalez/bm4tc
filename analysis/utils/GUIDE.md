@@ -8,9 +8,9 @@ This guide explains **what is being computed** in the analysis pipeline and **ho
 
 | File | Purpose |
 |------|---------|
-| `evaluate.py` | Top-level `evaluate_run()` / `evaluate_sweep()` — orchestrates all metrics |
-| `uq.py` | Uncertainty quantification: detection + likelihood purification |
-| `mia.py` | Membership inference attack evaluation |
+| `../run.py` | Top-level `analyze_run()` — orchestrates all metrics for a single model |
+| `src/analysis/uq.py` | Uncertainty quantification: detection + likelihood purification |
+| `src/analysis/mia.py` | Membership inference attack evaluation |
 | `mia_utils.py` | Config loading (`load_run_config`) and checkpoint finding |
 | `wandb_fetcher.py` | W&B API + local summary loading |
 | `resolve.py` | Path-to-regime/embedding detection, range-size table, param shorthands |
@@ -40,7 +40,7 @@ self.scaler = MinMaxScaler(feature_range=self.input_range, clip=True)
 
 **Attack epsilons must be expressed in these units.** A perturbation of epsilon=0.1 L∞ means each feature can shift by at most 0.1 in the rescaled space. For Fourier that is 10% of the range; for Hermite the same 0.1 is only 1.25% of the range — 8× weaker in relative terms.
 
-`seed_sweep_analysis.py` therefore uses **range-relative fractions** multiplied by `_RANGE_SIZE` (from `analysis/utils/resolve.py`):
+`sweep.py` therefore uses **range-relative fractions** multiplied by `_RANGE_SIZE` (from `analysis/utils/resolve.py`):
 
 ```python
 _STRENGTH_FRACTIONS = [0.05, 0.10, 0.2, 0.5, 0.8]
@@ -76,7 +76,7 @@ where `α = 2.5ε / T` by default (T = num_steps). The projection Π keeps δ in
 
 **Implementation note**: The current code (`evasion/minimal.py`) does **not clamp** `x + δ` to the embedding's input domain. This means adversarial examples can stray slightly outside the valid range at the boundaries. For Hermite the Gaussian damping `exp(-x²/2)` suppresses out-of-range embedding components naturally; for Fourier the cos/sin functions remain well-defined but are off-distribution.
 
-**In `seed_sweep_analysis.py` the default attack is PGD with L2 norm, 20 steps.**
+**In `sweep.py` the default attack is PGD with L∞ norm, 40 steps.**
 
 ### Robustness metric
 
@@ -190,9 +190,9 @@ Random chance = 0.50. Accuracy 0.50 = attacker cannot distinguish members from n
 
 ---
 
-## `evaluate_run()` pipeline
+## `analyze_run()` pipeline
 
-`analysis/utils/evaluate.py` orchestrates per-run evaluation:
+`analysis/run.py` orchestrates per-run evaluation:
 
 ```
 1. load_run_config(run_dir)           → Hydra OmegaConf config
@@ -207,7 +207,7 @@ Random chance = 0.50. Accuracy 0.50 = attacker cannot distinguish members from n
 10. Test rob: reuse UQ's adv examples where eps overlaps; generate separately for missing eps
 ```
 
-Step 10 avoids generating adversarial examples twice when UQ and rob use the same epsilons — UQ already generates them, so `evaluate_run` reuses the `adv_accuracies` dict from `UQResults`.
+Step 10 avoids generating adversarial examples twice when UQ and rob use the same epsilons — UQ already generates them, so `analyze_run` reuses the `adv_accuracies` dict from `UQResults`.
 
 `dataset.overwrite = True` forces the dataset to be regenerated with the correct seed from the run's config, ensuring the data split matches exactly what was used during training.
 
@@ -215,7 +215,7 @@ Step 10 avoids generating adversarial examples twice when UQ and rob use the sam
 
 ## `resolve.py` — auto-detection from path
 
-`seed_sweep_analysis.py` calls these at startup to configure itself:
+`sweep.py` (and `run.py`) call these at startup to configure evaluation:
 
 ```python
 _EMBEDDING = resolve_embedding_from_path(SWEEP_DIR)
@@ -246,7 +246,7 @@ Both functions tokenize the path on `/` and `_` and match against known strings.
 
 1. **PGD does not clamp to input domain**: adversarial examples can stray outside the embedding's valid range at the boundaries. Purification corrects this (final clamp to `input_range`), but the attack itself does not.
 
-2. **L2 norm by default in seed_sweep_analysis.py**: The training-time evasion config (in `configs/tracking/online.yaml`) also uses L2. They should match for meaningful sanity checks.
+2. **L∞ norm by default in sweep.py**: The training-time evasion config (in `configs/tracking/online.yaml`) should match the norm used here for meaningful sanity checks.
 
 3. **FID disabled for data_dim > 100**: FID is meaningless in high-dimensional spaces where covariance estimation is unreliable.
 
