@@ -4,20 +4,20 @@ Run sweep.py for completed but unanalyzed seed sweeps.
 
 Scans both outputs/seed_sweep/ and outputs/alpha_curve/ for multirun.yaml
 markers.  Distribution plots are intentionally skipped (--no-viz is always
-passed); use python -m analysis.visualize.queue to regenerate them separately.
+passed); use python -m analysis.visualize.batch to regenerate them separately.
 
 Usage
 -----
-    python analysis/queue.py                                    # all unanalyzed
-    python analysis/queue.py --dry-run                          # print commands only
-    python analysis/queue.py --experiment alpha_curve           # alpha_curve sweeps only
-    python analysis/queue.py --embedding hermite
-    python analysis/queue.py --dataset  circles                 # substring match
-    python analysis/queue.py --arch     d4r3
-    python analysis/queue.py --type     gen                     # gen | cls | adv
-    python analysis/queue.py --embedding fourier --dataset moons
-    python analysis/queue.py --force                            # re-run already analyzed
-    python analysis/queue.py --list                             # show status of all sweeps
+    python -m analysis.batch                                    # all unanalyzed
+    python -m analysis.batch --dry-run                          # print commands only
+    python -m analysis.batch --experiment alpha_curve           # alpha_curve sweeps only
+    python -m analysis.batch --embedding hermite
+    python -m analysis.batch --dataset  circles                 # substring match
+    python -m analysis.batch --arch     d4r3
+    python -m analysis.batch --type     gen                     # gen | cls | adv
+    python -m analysis.batch --embedding fourier --dataset moons
+    python -m analysis.batch --force                            # re-run already analyzed
+    python -m analysis.batch --list                             # show status of all sweeps
 """
 
 import argparse
@@ -147,7 +147,7 @@ def main():
 
     for sweep_dir, exp_name, root in todo:
         rel = sweep_dir.relative_to(ROOT)
-        # --no-viz: distribution plots are handled separately by analysis/visualize/queue.py
+        # --no-viz: distribution plots are handled separately by analysis/visualize/batch.py
         cmd = ["python", "analysis/sweep.py", str(rel), "--no-viz"]
         print(" ".join(cmd))
         if not args.dry_run:

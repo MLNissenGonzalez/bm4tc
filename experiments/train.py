@@ -56,11 +56,11 @@ def main(cfg: Config) -> float:
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    if cfg.trainer.adversarial is not None:
+    if cfg.trainer.get("adversarial") is not None:
         trainer = AdversarialTrainer(cbm, cfg.trainer.adversarial, datahandler, device)
         trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
         stop_crit = cfg.trainer.adversarial.stop_crit
-    elif cfg.trainer.nll is not None:
+    elif cfg.trainer.get("nll") is not None:
         trainer = NLLTrainer(cbm, cfg.trainer.nll, datahandler, device)
         trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
         stop_crit = cfg.trainer.nll.stop_crit

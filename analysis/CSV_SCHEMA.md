@@ -31,9 +31,9 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 
 ---
 
-## Type 1: `sweep.py` / `queue.py`
+## Type 1: `sweep.py` / `batch.py`
 
-**Produced by:** `sweep.py` (single sweep) or batch-triggered by `queue.py`.
+**Produced by:** `sweep.py` (single sweep) or batch-triggered by `batch.py`.
 
 **Location:** `analysis/outputs/{seed_sweep|alpha_curve}/{type}/{embedding}/{arch}/{dataset}_{DDMM}/evaluation_data.csv`
 

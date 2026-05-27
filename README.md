@@ -63,7 +63,7 @@ python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
 python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
 
 # Batch-run all unrun configs in a filter set
-python -m experiments.queue --type gen --embedding legendre --dry-run
+python -m experiments.batch --type gen --embedding legendre --dry-run
 
 # Disable W&B for local debugging
 python -m experiments.train +experiments=tests/nll tracking.mode=disabled
@@ -76,7 +76,7 @@ python -m experiments.train +experiments=tests/nll tracking.mode=disabled
 python -m analysis.sweep outputs/seed_sweep/gen/legendre/d10r6/circles_1802
 
 # Analyse all completed but unanalysed sweeps in batch
-python -m analysis.queue
+python -m analysis.batch
 ```
 
 Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
@@ -85,7 +85,7 @@ Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (train.py, run_local.py, queue.py)
+├── experiments/        # Entry-point scripts (train.py, run_local.py, batch.py)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
 │   ├── model.py        # ConditionalBornMachine
@@ -95,7 +95,7 @@ bm4tc/
 │   └── utils/          # Embeddings, PGD/FGM attacks, optimizer config, train utilities
 ├── analysis/
 │   ├── sweep.py        # Post-hoc metrics for one seed sweep / alpha curve
-│   ├── queue.py        # Batch-run all unanalysed sweeps
+│   ├── batch.py        # Batch-run all unanalysed sweeps
 │   ├── hpo.py          # HPO result exploration
 │   ├── run.py          # Single-model analysis (MIA, UQ)
 │   ├── configs/        # Pipeline tools (fill_hpo.py, delete_runs.py, …)

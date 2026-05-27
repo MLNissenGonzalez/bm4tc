@@ -110,7 +110,7 @@ Quick start:
 python -m analysis.sweep outputs/seed_sweep/gen/fourier/d4r3/moons_1802
 
 # Analyse all unanalysed sweeps in batch
-python -m analysis.queue
+python -m analysis.batch
 ```
 
 Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.csv`, `evaluation_summary.txt`, and optionally distribution plots.

@@ -14,7 +14,7 @@ For the full CSV column schema, see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
 | `run.py` | Single-model deep analysis (acc, rob, MIA, UQ) — callable API |
 | `sweep.py` | Post-hoc evaluation of a full seed sweep; primary analysis tool |
 | `hpo.py` | Explore HPO results: parameter-metric correlations, surface plots |
-| `queue.py` | Batch-queue runner: processes all unanalyzed sweeps via `sweep.py` |
+| `batch.py` | Batch-queue runner: processes all unanalyzed sweeps via `sweep.py` |
 
 ---
 
@@ -69,7 +69,7 @@ Loads every model checkpoint in a sweep directory, recomputes metrics post-hoc, 
 # Positional argument overrides the hardcoded SWEEP_DIR at the top of the file
 python analysis/sweep.py outputs/seed_sweep/gen/fourier/d4r3/moons_2102
 
-# Skip distribution plots (faster — queue.py always does this)
+# Skip distribution plots (faster — batch.py always does this)
 python analysis/sweep.py outputs/seed_sweep/gen/fourier/d4r3/moons_2102 --no-viz
 ```
 
