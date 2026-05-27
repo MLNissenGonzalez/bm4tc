@@ -7,14 +7,14 @@ replacing the old best_run_distributions.png if present.
 
 Usage
 -----
-    python -m analysis.visualize.queue                        # all unvisualized
-    python -m analysis.visualize.queue --dry-run              # print commands only
-    python -m analysis.visualize.queue --list                 # show status
-    python -m analysis.visualize.queue --force                # re-run already done
-    python -m analysis.visualize.queue --embedding hermite
-    python -m analysis.visualize.queue --dataset  circles     # substring match
-    python -m analysis.visualize.queue --arch     d4r3
-    python -m analysis.visualize.queue --type     gen         # gen | cls | adv
+    python -m analysis.visualize.batch                        # all unvisualized
+    python -m analysis.visualize.batch --dry-run              # print commands only
+    python -m analysis.visualize.batch --list                 # show status
+    python -m analysis.visualize.batch --force                # re-run already done
+    python -m analysis.visualize.batch --embedding hermite
+    python -m analysis.visualize.batch --dataset  circles     # substring match
+    python -m analysis.visualize.batch --arch     d4r3
+    python -m analysis.visualize.batch --type     gen         # gen | cls | adv
 """
 
 import argparse

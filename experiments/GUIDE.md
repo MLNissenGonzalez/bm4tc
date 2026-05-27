@@ -8,7 +8,7 @@ Entry point scripts for running experiments. All scripts are run as Python modul
 |--------|---------|
 | `train.py` | Unified Hydra entry point — NLL (dis/gen) and adversarial training |
 | `run_local.py` | Self-contained local runner — no Hydra, no W&B; edit CONFIG BLOCK |
-| `queue.py` | Batch-run/list HPO and seed_sweep configs, skip already-run |
+| `batch.py` | Batch-run/list HPO and seed_sweep configs, skip already-run |
 
 ---
 
@@ -107,7 +107,7 @@ Key CONFIG BLOCK fields:
 
 ---
 
-## `queue.py` — batch runner
+## `batch.py` — batch runner
 
 Discovers all `hpo/`, `seed_sweep/`, and `grid_sweep/` configs under `configs/experiments/` and runs them sequentially, skipping any that already have a matching output directory.
 
@@ -121,31 +121,31 @@ configs/experiments/adversarial/{embedding}/{arch}/{kind}/{dataset}.yaml
 
 ```bash
 # List all discovered configs with [ran]/[   ] status
-python -m experiments.queue --list
+python -m experiments.batch --list
 
 # Dry-run: print commands without executing
-python -m experiments.queue --dry-run
+python -m experiments.batch --dry-run
 
 # Run everything that hasn't been run yet
-python -m experiments.queue
+python -m experiments.batch
 
 # Filter by type (dis | gen | adv or full name)
-python -m experiments.queue --type gen --dry-run
+python -m experiments.batch --type gen --dry-run
 
 # Filter by embedding
-python -m experiments.queue --embedding legendre --dry-run
+python -m experiments.batch --embedding legendre --dry-run
 
 # Filter by architecture (exact match)
-python -m experiments.queue --arch d10r6 --dry-run
+python -m experiments.batch --arch d10r6 --dry-run
 
 # Filter by kind (seed_sweep | hpo | grid_sweep)
-python -m experiments.queue --kind hpo --dry-run
+python -m experiments.batch --kind hpo --dry-run
 
 # Filter by dataset (substring match)
-python -m experiments.queue --dataset circles --dry-run
+python -m experiments.batch --dataset circles --dry-run
 
 # Re-run even if output already exists
-python -m experiments.queue --force --dry-run
+python -m experiments.batch --force --dry-run
 ```
 
 ---

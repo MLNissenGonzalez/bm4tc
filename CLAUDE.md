@@ -50,7 +50,7 @@ src/
 
 experiments/
   train.py        unified entry point: NLL (alpha=0 dis, alpha>0 gen) + adversarial
-  queue.py        batch-queue runner for experiment configs (--type, --embedding, …)
+  batch.py        batch-queue runner for experiment configs (--type, --embedding, …)
   resolvers.py    OmegaConf custom resolvers (training_regime, geom_lr, dtype_suffix, …)
   config.py       Config, TrainerConfig, TrackingConfig dataclasses + register()
   tracking.py     make_logger, init_wandb, log_dataset_viz
@@ -66,10 +66,10 @@ analysis/
   run.py               single-model analysis entry point
   sweep.py             seed_sweep / alpha_curve post-hoc analysis
   hpo.py               HPO result exploration
-  queue.py             batch-queue runner for sweep.py
+  batch.py             batch-queue runner for sweep.py
   configs/             pipeline tool scripts (fill_hpo.py, delete_runs.py, alpha_lr_interp.py)
   utils/               statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
-  visualize/           distribution plots + queue.py
+  visualize/           distribution plots + batch.py
 ```
 
 ## Naming conventions

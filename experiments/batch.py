@@ -11,11 +11,11 @@ grid_sweep, grid_sweep_<variant>, cls_reg.
 
 Usage
 -----
-    python -m experiments.queue --list
-    python -m experiments.queue --dry-run
-    python -m experiments.queue --type gen --embedding legendre --dry-run
-    python -m experiments.queue --type gen --kind seed_sweep
-    python -m experiments.queue --type dis --dataset moons --force --dry-run
+    python -m experiments.batch --list
+    python -m experiments.batch --dry-run
+    python -m experiments.batch --type gen --embedding legendre --dry-run
+    python -m experiments.batch --type gen --kind seed_sweep
+    python -m experiments.batch --type dis --dataset moons --force --dry-run
 """
 
 import argparse

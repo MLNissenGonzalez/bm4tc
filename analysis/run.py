@@ -60,8 +60,7 @@ class AnalysisConfig:
         compute_acc: Evaluate clean classification accuracy.
         compute_dis_loss: Evaluate discriminative NLL loss.
         compute_gen_loss: Evaluate generative (joint) NLL loss.
-        compute_rob: Evaluate adversarial robustness. Skipped with a warning if
-            no evasion config is present and no override is given.
+        compute_rob: Evaluate adversarial robustness.
         compute_mia: Run membership inference attack evaluation.
         compute_uq: Uncertainty quantification (detection + purification).
         evasion_override: Dict of evasion config fields to override, or None to
@@ -98,6 +97,9 @@ class AnalysisConfig:
 # Helpers
 # ---------------------------------------------------------------------------
 
+_DEFAULT_ROB_STRENGTHS_REL = [0.05, 0.1]
+
+
 def _get_rob_params(
     cbm,
     cfg,
@@ -105,11 +107,13 @@ def _get_rob_params(
 ) -> Optional[Tuple[Any, List[float]]]:
     """Build (attack_object, abs_strengths) for robustness evaluation.
 
-    Returns None if no evasion config is available and no override is given.
     Strengths in evasion_override are absolute; strengths from the model config
-    are fractions converted via cbm.input_range.
+    are relative fractions converted via cbm.input_range. When no evasion config
+    is available, falls back to PGD at _DEFAULT_ROB_STRENGTHS_REL.
     """
     from src.utils.evasion import EvasionConfig, build_attack
+
+    range_size = float(cbm.input_range[1] - cbm.input_range[0])
 
     if evasion_override is not None:
         strengths_abs = [float(s) for s in evasion_override.get("strengths", [])]
@@ -125,11 +129,10 @@ def _get_rob_params(
         try:
             raw = OmegaConf.to_container(cfg.trainer.adversarial.evasion, resolve=True)
             ec = EvasionConfig(**raw)
-            range_size = float(cbm.input_range[1] - cbm.input_range[0])
             strengths_abs = [s * range_size for s in ec.strengths]
-        except Exception as e:
-            logger.warning(f"No evasion config found; skipping robustness eval. ({e})")
-            return None
+        except Exception:
+            ec = EvasionConfig(method="PGD")
+            strengths_abs = [s * range_size for s in _DEFAULT_ROB_STRENGTHS_REL]
 
     if not strengths_abs:
         return None
