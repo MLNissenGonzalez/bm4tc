@@ -1,10 +1,12 @@
+import math
 import pytest
 import torch
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from src.utils.train import NormRegularizer
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -78,6 +80,36 @@ def test_nll_trainer_sets_up_classification_loaders():
     dh.get_classification_loaders = lambda batch_size: called.append(batch_size)
     NLLTrainer(cbm=cbm, train_cfg=NLLConfig(), datahandler=dh, device=torch.device("cpu"))
     assert called == [NLLConfig().batch_size]
+
+
+# ── Alpha=0 fast path ──────────────────────────────────────────────────────
+
+# ── NormRegularizer ────────────────────────────────────────────────────────
+
+def test_norm_regularizer_zero_at_target():
+    target = 2.5
+    reg = NormRegularizer(strength=1.0, target=target)
+    cbm = MagicMock()
+    cbm.log_partition_function.return_value = torch.tensor(math.log(target))
+    penalty = reg(cbm)
+    assert penalty.item() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_norm_regularizer_nonzero_off_target():
+    target = 1.0
+    strength = 3.0
+    reg = NormRegularizer(strength=strength, target=target)
+    log_Z_val = 2.0  # log(target)=0, so delta = 2.0
+    cbm = MagicMock()
+    cbm.log_partition_function.return_value = torch.tensor(log_Z_val)
+    penalty = reg(cbm)
+    expected = strength * (log_Z_val - math.log(target)) ** 2
+    assert penalty.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_norm_regularizer_invalid_target():
+    with pytest.raises(ValueError, match="target must be > 0"):
+        NormRegularizer(strength=1.0, target=0.0)
 
 
 # ── Alpha=0 fast path ──────────────────────────────────────────────────────
