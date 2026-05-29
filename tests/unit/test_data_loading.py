@@ -70,6 +70,26 @@ def test_mnist_loading():
 
 
 @pytest.mark.requires_download
+def test_mnist_resize():
+    import numpy as np
+    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
+
+    resize = 12
+    ds_cfg = DatasetConfig(
+        name="mnist",
+        gen_dow_kwargs=DataGenDowConfig(name="mnist", resize=resize),
+        overwrite=False,
+    )
+    ds = load_dataset(ds_cfg)
+    assert ds.X.ndim == 2
+    assert ds.X.shape[1] == resize ** 2, f"Expected {resize**2} features, got {ds.X.shape[1]}"
+    assert ds.num_cls == 10, f"Expected 10 classes, got {ds.num_cls}"
+    assert ds.X.dtype in (np.float32, np.float64)
+    assert ds.X.min() >= 0.0 and ds.X.max() <= 1.0, "Pixel values out of [0, 1]"
+    assert ds.name == "mnist_r12", f"Unexpected stem: {ds.name}"
+
+
+@pytest.mark.requires_download
 def test_italy_power_demand_loading():
     import numpy as np
     from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
