@@ -8,7 +8,7 @@ The core hypothesis is that learning the joint distribution p(x, c) rather than 
 
 A **Born Machine** models a probability distribution via the Born rule from quantum mechanics: probability = |amplitude|². The amplitude function is represented as a **Matrix Product State (MPS)**, a structured tensor network that factorises a high-dimensional function into a chain of low-rank tensors. Inputs are mapped into a Hilbert space by a feature embedding before contraction with the MPS.
 
-For classification, a special output tensor yields a class-conditioned amplitude vector; squaring and normalising gives p(c|x). The marginal p(x) = Σ_c |ψ(x,c)|² / Z is available analytically via `cbm.log_partition_function()`, enabling likelihood-based detection and purification without sampling.
+For classification, a special output tensor yields a class-conditioned amplitude vector; squaring and normalising gives p(c|x). The marginal p(x) = Σ_c |ψ(x,c)|² / Z is available analytically via `cbm.marginal_log_probability(x)` (partition function Z cached via `cbm.cache_log_Z()`), enabling likelihood-based detection and purification without sampling.
 
 ## Training Regimes
 

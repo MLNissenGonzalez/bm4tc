@@ -92,7 +92,6 @@ def _parse_dataset_name(name: str):
     raise ValueError(f"Dataset {name} not recognised")
 
 
-# maybe remove random state here
 def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
     """Unprocessed generation of 2D toydata. Comes with labels.
 
@@ -386,8 +385,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     dataset_dir = os.path.join(_DATA_DIR, canonical)
     dataset_file = os.path.join(dataset_dir, f"{variant}.npz")
 
-    # Check overwrite flag (default False for backward compatibility)
-    overwrite = getattr(cfg, 'overwrite', False)
+    overwrite = cfg.overwrite
 
     if overwrite or not os.path.exists(dataset_file):
         _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
@@ -585,7 +583,7 @@ class DataHandler:
             self.data[split] = torch.FloatTensor(data[split])
             self.labels[split] = torch.LongTensor(labels[split])
 
-        # If not to expensive, compute dataset statistics
+        # Always build classified_data; means/covs only for low-dim data
         all_data = torch.cat([d for d in self.data.values()], dim=0)
         all_labels = torch.cat([l for l in self.labels.values()])
         self.classified_data = []
