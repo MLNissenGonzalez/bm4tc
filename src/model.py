@@ -257,12 +257,6 @@ class ConditionalBornMachine(tk.models.MPS):
         Ported verbatim from BornGenerator.log_partition_function() with
         virtual_mps → norm_net. Supports complex tensors.
         """
-        # Reset norm_net to clear any stale computation-graph nodes from prior calls.
-        # With auto_stack=False, _mats_env[i].tensor always returns the original
-        # Parameter; no re-linking needed here.
-
-        # TODO: Check whether reset is needed at all. If not: remove it for efficiency.
-        self.norm_net.reset()
         if self.norm_net._data_nodes:
             self.norm_net.unset_data_nodes()
 
