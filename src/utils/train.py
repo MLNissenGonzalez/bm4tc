@@ -128,25 +128,26 @@ class TrainResult:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-    Computes  strength * (Z - target)²  where Z = exp(log_partition_function()).
+    Computes  strength * (log Z - log target)²  where log Z = log_partition_function().
 
     Parameters
     ----------
     strength : float
         Regularization coefficient.
     target : float
-        Target value for the partition function Z (norm² of the MPS).
+        Target value for the partition function Z (must be > 0).
     """
 
     def __init__(self, strength: float, target: float):
+        if target <= 0:
+            raise ValueError(f"NormRegularizer: target must be > 0, got {target}")
         super().__init__()
         self.strength = strength
-        self.target = target
+        self.log_target: float = math.log(target)
 
     def forward(self, cbm) -> torch.Tensor:
         log_Z: torch.Tensor = cbm.log_partition_function()
-        Z = torch.exp(log_Z)
-        return self.strength * (Z - self.target) ** 2
+        return self.strength * (log_Z - self.log_target) ** 2
 
 
 def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
