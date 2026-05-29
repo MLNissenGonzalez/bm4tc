@@ -25,6 +25,7 @@ class DataGenDowConfig:
     circ_factor: Optional[float] = None
     dow_link: Optional[List[str]] = None
     dow_password: Optional[str] = None
+    resize: Optional[int] = None  # target side length for MNIST resize (None = 28×28, i.e. 784 features)
 
 
 @dataclass
@@ -55,7 +56,7 @@ class LabelledDataset:
 # Dataset directories
 # -----------------------------
 _DATA_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", ".datasets")
+    os.path.join(os.path.dirname(__file__), "..", ".datasets")
 )
 
 # -----------------------------
@@ -189,7 +190,14 @@ def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
     )  # (70000,), int64
 
     # Flatten spatial dims and normalise to float32 in [0, 1]
-    data = data.reshape(-1, 784).astype(np.float32) / 255.0  # (70000, 784)
+    if cfg.resize is not None:
+        import torch.nn.functional as F
+        n = cfg.resize
+        data_t = torch.from_numpy(data).float().unsqueeze(1) / 255.0  # (N, 1, 28, 28)
+        data_t = F.interpolate(data_t, size=(n, n), mode='bilinear', align_corners=False)
+        data = data_t.squeeze(1).numpy().reshape(-1, n * n).astype(np.float32)  # (N, n²)
+    else:
+        data = data.reshape(-1, 784).astype(np.float32) / 255.0  # (N, 784)
     targets = targets.astype(int)
 
     if cfg.size is not None:
@@ -284,6 +292,14 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
     return X, t, ucr_train_size
 
 
+def _npz_stem(cfg: DataGenDowConfig) -> str:
+    """Return the npz filename stem for a dataset config (without .npz extension)."""
+    _, variant = _parse_dataset_name(cfg.name)
+    if cfg.resize is not None:
+        return f"{variant}_r{cfg.resize}"
+    return variant
+
+
 def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
     """
     Generate or download a dataset according to configuration and save it locally.
@@ -331,7 +347,7 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
         np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
     elif canonical in _NIST_DATA:
         X, t = _nist_generator(cfg)
-        np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
+        np.savez(os.path.join(path, f"{_npz_stem(cfg)}.npz"), X=X, y=t)
     elif canonical in _TS_DATA:
         X, t, ucr_train_size = _ucr_ts_loader(cfg)
         np.savez(os.path.join(path, f"{variant}.npz"),
@@ -383,7 +399,8 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     canonical, variant = _parse_dataset_name(cfg.gen_dow_kwargs.name)
     dataset_dir = os.path.join(_DATA_DIR, canonical)
-    dataset_file = os.path.join(dataset_dir, f"{variant}.npz")
+    stem = _npz_stem(cfg.gen_dow_kwargs)
+    dataset_file = os.path.join(dataset_dir, f"{stem}.npz")
 
     overwrite = cfg.overwrite
 
@@ -399,7 +416,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     ucr_train_size = int(data["ucr_train_size"]) if "ucr_train_size" in data else None
     logger.debug(f"{X.shape=}, {t.shape=}")
     return LabelledDataset(
-        name=variant,
+        name=stem,
         X=X,
         t=t,
         size=X.shape[0],
