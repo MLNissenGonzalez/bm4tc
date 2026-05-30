@@ -430,57 +430,83 @@ class ConditionalBornMachine(tk.models.MPS):
         that matrix into the right neighbor (or left neighbor if cls_pos is the last
         site). Does not mutate self._mats_env.
         """
-        tensors = [node.tensor for node in self._mats_env]
-        T_cls = tensors[self.out_position]          # (D_l, C, D_r)
-        t_vec = T_cls[:, class_idx, :]              # (D_l, D_r)
-
-        cond = list(tensors)
-        cond.pop(self.out_position)                 # data_dim tensors remain
-
-        if self.out_position < self.n_features - 1:
-            T_right = cond[self.out_position]       # (D_r, d, D_rr)
-            cond[self.out_position] = torch.einsum('ij,jkl->ikl', t_vec, T_right)
+        
+        if self.out_position == 0:
+            t_vec = self.tensors[0][class_idx, :] # (D_1,)
+            neighbor = self.tensors[1]             # (D_1, in_dim, D_2)
+            with torch.no_grad():
+                cond = torch.einsum('r,rij->ij', t_vec, neighbor)  # (in_dim, D_2)
+            cond_tensors = [cond] + self.tensors[2:]
+        elif self.out_position == self.n_features - 1:
+            t_vec = self.tensors[-1][:, class_idx] # (D_{n-2},)
+            neighbor = self.tensors[-2]             # (D_{n-3}, in_dim, D_{n-2})
+            with torch.no_grad():
+                cond = torch.einsum('ijr,r->ij', neighbor, t_vec)  # (D_{n-3}, in_dim)
+            cond_tensors = self.tensors[:-2] + [cond]
         else:
-            T_left = cond[self.out_position - 1]    # (D_ll, d, D_l)
-            cond[self.out_position - 1] = torch.einsum('ijk,kl->ijl', T_left, t_vec)
+            t_mat = self.tensors[self.out_position][:, class_idx, :]  # (D_l, D_r)
+            left_neighbor = self.tensors[self.out_position - 1]
+            with torch.no_grad():
+                if left_neighbor.ndim == 2:
+                    # Left boundary (out_position==1): (phys_dim, D_l) — no left bond
+                    cond = torch.einsum('il,lr->ir', left_neighbor, t_mat)  # (phys_dim, D_r)
+                    cond_tensors = [cond] + self.tensors[self.out_position + 1:]
+                else:
+                    # Internal neighbor: (D_{l-1}, phys_dim, D_l)
+                    cond = torch.einsum('ijl,lr->ijr', left_neighbor, t_mat)  # (D_{l-1}, phys_dim, D_r)
+                    cond_tensors = self.tensors[:self.out_position - 1] + [cond] + self.tensors[self.out_position + 1:]
+        
+        return cond_tensors
 
-        return cond
+    def _make_conditioned_net(
+        self,
+        class_idx: int,
+        mode: str = 'svd',
+        rank: Optional[int] = None,
+        cutoff: Optional[float] = 1e-6,
+    ) -> tk.models.MPS:
+        """Return a left-canonical MPS conditioned on class_idx.
 
-    def _make_conditioned_net(self, class_idx: int) -> List[torch.Tensor]:
-        """Return left-canonical tensors conditioned on class_idx.
-
-        Applies a QR left-canonical sweep on the data_dim conditioned tensors.
-        Does not mutate self._mats_env. Returns a plain list — no TK wrapper,
-        since TK infers pbc from all-3D tensors and would lose the boundary nodes.
+        Builds a fresh tk.models.MPS from the class-conditioned tensors (no
+        shared tensors with self._mats_env), then calls canonicalize(oc=0) on
+        it. The caller owns the returned object and should delete it when done.
+        Does not mutate self._mats_env.
         """
-        tensors = self.condition_on_class(class_idx)
-        for k in range(len(tensors) - 1):
-            T = tensors[k]
-            D_l, d, D_r = T.shape
-            Q, R = torch.linalg.qr(T.reshape(D_l * d, D_r))
-            tensors[k] = Q.reshape(D_l, d, -1)
-            tensors[k + 1] = torch.einsum('ij,jkl->ikl', R, tensors[k + 1])
-        return tensors
+        cond_tensors = self.condition_on_class(class_idx)
+        cond_mps = tk.models.MPS(tensors=cond_tensors)
+        cond_mps.canonicalize(oc=0, mode=mode, rank=rank, cutoff=cutoff,
+                              renormalize=False)
+        return cond_mps
 
-    def sample(self, class_idx: int, n: int,
-               num_bins: int = 100, batch_size: int = 64) -> torch.Tensor:
+    def sample(
+        self,
+        class_idx: int,
+        n: int,
+        num_bins: int = 100,
+        batch_size: int = 64,
+        mode: str = 'svd',
+        rank: Optional[int] = None,
+        cutoff: Optional[float] = 1e-6,
+    ) -> torch.Tensor:
         """Class-conditional canonical sampling.
 
-        Conditions on class_idx, left-canonicalizes the resulting data_dim-site MPS
-        via QR sweep, then draws n samples via sequential left-to-right product rule.
+        Conditions on class_idx, builds a fresh left-canonical MPS via
+        _make_conditioned_net, then draws n samples via the sequential
+        left-to-right product rule.
 
-        Mirrors reference/tn4dd_bm.py _sample_canonical_batch with one adaptation:
         _u_node is set to the pre-embedded tensor T_k_embs = einsum('ijk,bj->ibk', T_k, Φ)
         of shape (D_l, num_bins, D_r). Grid bins act as the virtual physical dimension;
-        H @ T_embs contraction is otherwise identical to the reference.
+        H @ T_embs contraction is otherwise identical to the tn4dd reference.
 
         Returns float tensor (n, data_dim) with values in self.input_range.
         """
-        tensors = self._make_conditioned_net(class_idx)
+        cond_mps = self._make_conditioned_net(class_idx, mode=mode, rank=rank,
+                                              cutoff=cutoff)
         dev = self._mats_env[0].tensor.device
         grid = torch.linspace(*self.input_range, num_bins, device=dev)
         Phi = self.embedding(grid).to(self.dtype)           # (bins, in_dim)
-        left = self._left_node.tensor                       # (D_left,)
+        left = cond_mps._left_node.tensor                   # (D_left,)
+        tensors = [node.tensor for node in cond_mps._mats_env]
 
         chunks = []
         for start in range(0, n, batch_size):
@@ -498,11 +524,18 @@ class ConditionalBornMachine(tk.models.MPS):
                 self._h_node._direct_set_tensor(
                     C[torch.arange(N, device=dev), idx, :])
             chunks.append(samples.cpu())
+        del cond_mps
         return torch.cat(chunks, dim=0)
 
-    def sample_all_classes(self, n_per_class: int,
-                           num_bins: int = 100, batch_size: int = 64,
-                           ) -> tuple:
+    def sample_all_classes(
+        self,
+        n_per_class: int,
+        num_bins: int = 100,
+        batch_size: int = 64,
+        mode: str = 'svd',
+        rank: Optional[int] = None,
+        cutoff: Optional[float] = 1e-6,
+    ) -> tuple:
         """Sample n_per_class examples from each class.
 
         Returns:
@@ -511,7 +544,8 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         all_samples, all_labels = [], []
         for c in range(self.out_dim):
-            s = self.sample(c, n_per_class, num_bins=num_bins, batch_size=batch_size)
+            s = self.sample(c, n_per_class, num_bins=num_bins, batch_size=batch_size,
+                            mode=mode, rank=rank, cutoff=cutoff)
             all_samples.append(s)
             all_labels.append(torch.full((n_per_class,), c, dtype=torch.long))
         return torch.cat(all_samples, dim=0), torch.cat(all_labels, dim=0)

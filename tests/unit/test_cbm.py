@@ -1,5 +1,6 @@
 import pytest
 import torch
+import tensorkrowch as tk
 from unittest.mock import patch
 from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 
@@ -69,9 +70,12 @@ def test_condition_on_class_length():
     assert len(cbm.condition_on_class(0)) == 4
 
 
-def test_condition_on_class_tensors_3d():
+def test_condition_on_class_tensor_ranks():
     cbm = _tiny_cbm(data_dim=4, num_classes=3)
-    for t in cbm.condition_on_class(0):
+    tensors = cbm.condition_on_class(0)
+    assert tensors[0].ndim == 2   # left boundary
+    assert tensors[-1].ndim == 2  # right boundary
+    for t in tensors[1:-1]:
         assert t.ndim == 3
 
 
@@ -103,17 +107,30 @@ def test_condition_on_class_last_position():
     cbm2 = ConditionalBornMachine(cfg=cfg_dc, data_dim=2, num_classes=2)
     tensors = cbm2.condition_on_class(0)
     assert len(tensors) == 2
+    # both tensors are boundary nodes (2D) when out_position is the last site
     for t in tensors:
-        assert t.ndim == 3
+        assert t.ndim == 2
 
 
 # ── _make_conditioned_net ────────────────────────────────────────────────────
 
-def test_make_conditioned_net_returns_list():
+def test_make_conditioned_net_returns_mps():
     cbm = _tiny_cbm()
     result = cbm._make_conditioned_net(0)
-    assert isinstance(result, list)
-    assert len(result) == cbm._data_dim
+    assert isinstance(result, tk.models.MPS)
+    assert result.n_features == cbm._data_dim
+
+
+def test_make_conditioned_net_is_canonical():
+    cbm = _tiny_cbm()
+    cond_mps = cbm._make_conditioned_net(0)
+    # Sites 1..n-1 must be left-isometric: A†A ≈ I (summed over left and phys dims)
+    for k in range(1, cond_mps.n_features):
+        A = cond_mps._mats_env[k].tensor   # (D_l, d, D_r)
+        D_l, d, D_r = A.shape
+        ATA = torch.einsum('ijk,ijl->kl', A.conj(), A)  # (D_r, D_r)
+        assert torch.allclose(ATA, torch.eye(D_r, dtype=ATA.dtype), atol=1e-5), \
+            f"Site {k} not left-isometric: max err {(ATA - torch.eye(D_r, dtype=ATA.dtype)).abs().max():.2e}"
 
 
 def test_make_conditioned_net_no_mutation():
