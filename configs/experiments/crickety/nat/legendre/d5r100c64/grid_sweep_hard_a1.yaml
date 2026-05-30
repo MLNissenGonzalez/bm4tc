@@ -1,5 +1,5 @@
 # @package _global_
-experiment: grid_sweep
+experiment: grid_sweep_hard_a1
 descriptor: nll_hard_pretrained
 
 defaults:

@@ -36,7 +36,7 @@ def init_wandb(cfg: Config) -> wandb.Run:
     """
     Initialize a W&B run from a Hydra config.
 
-    Group: ``{dataset}/{nat|at}/{embedding}/{arch}/{kind}/{date}``  (slash-separated)
+    Group: ``{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{DDMM_HHMM}``
     Run name: job index (0-indexed).
     """
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
@@ -51,17 +51,15 @@ def init_wandb(cfg: Config) -> wandb.Run:
     _dtype_suffix = {"complex64": "c64", "complex128": "c128"}.get(_dtype, "")
     arch = f"d{cfg.born.init_kwargs.in_dim}r{cfg.born.init_kwargs.bond_dim}{_dtype_suffix}"
 
-    mode = runtime_cfg.mode.value
     now = datetime.now()
-    date_str = now.strftime("%d%m_%H%M") if mode == 1 else now.strftime("%d%m")
+    date_str = now.strftime("%d%m_%H%M")
 
     group_key = "/".join([
         cfg.dataset.name,
         trainer_type,
         cfg.born.embedding,
         arch,
-        cfg.experiment,
-        date_str,
+        f"{cfg.experiment}_{date_str}",
     ])
 
     run = wandb.init(

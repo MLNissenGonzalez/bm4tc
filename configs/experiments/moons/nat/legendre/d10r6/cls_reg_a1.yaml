@@ -1,5 +1,5 @@
 # @package _global_
-experiment: cls_reg # python -m experiments.train --multirun +experiments=moons/nat/legendre/d10r6/cls_reg_a1
+experiment: cls_reg_a1
 
 defaults:
   - override /born: legendre/d10r6

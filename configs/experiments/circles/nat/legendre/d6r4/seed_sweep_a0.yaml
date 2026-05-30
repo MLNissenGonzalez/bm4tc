@@ -1,5 +1,5 @@
 # @package _global_
-experiment: seed_sweep
+experiment: seed_sweep_a0
 
 defaults:
   - override /born: legendre/d6r4

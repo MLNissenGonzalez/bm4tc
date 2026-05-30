@@ -1,6 +1,5 @@
 # @package _global_
 experiment: alpha_curve
-descriptor: mixed_scratch
 
 defaults:
   - override /born: legendre/d10r6

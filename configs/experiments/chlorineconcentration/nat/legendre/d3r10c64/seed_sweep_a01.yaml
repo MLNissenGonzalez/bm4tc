@@ -1,6 +1,5 @@
 # @package _global_
-experiment: seed_sweep
-descriptor: mixed_scratch
+experiment: seed_sweep_a01
 
 defaults:
   - override /born: legendre/d3r10c64

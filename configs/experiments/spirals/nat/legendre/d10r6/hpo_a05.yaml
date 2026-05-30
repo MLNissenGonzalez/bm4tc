@@ -1,5 +1,5 @@
 # @package _global_
-experiment: hpo_mixed
+experiment: hpo_a05
 descriptor: alpha05
 
 defaults:
@@ -37,7 +37,7 @@ trainer:
 
 hydra:
   sweeper:
-    study_name: "hpo_mixed_${dataset.name}_alpha05"
+    study_name: "hpo_a05_${dataset.name}"
     sampler:
       _target_: optuna.samplers.TPESampler
       seed: 42

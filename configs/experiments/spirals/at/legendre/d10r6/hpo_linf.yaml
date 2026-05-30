@@ -1,5 +1,5 @@
 # @package _global_
-experiment: hpo
+experiment: hpo_linf
 
 defaults:
   - override /born: legendre/d10r6
