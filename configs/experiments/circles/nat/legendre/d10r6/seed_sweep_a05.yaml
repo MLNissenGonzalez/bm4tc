@@ -1,5 +1,5 @@
 # @package _global_
-experiment: seed_sweep_mixed_alpha05
+experiment: seed_sweep_a05
 descriptor: alpha05
 
 defaults:

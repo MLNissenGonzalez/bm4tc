@@ -1,5 +1,5 @@
 # @package _global_
-experiment: best_seed
+experiment: best_seed_a0
 
 defaults:
   - override /born: legendre/d3r10c64

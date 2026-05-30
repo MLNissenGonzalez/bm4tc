@@ -1,5 +1,5 @@
 # @package _global_
-experiment: seed_sweep
+experiment: seed_sweep_soft_a1
 descriptor: nll_soft_pretrained
 
 defaults:
