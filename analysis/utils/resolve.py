@@ -25,52 +25,58 @@ from src.utils.embeddings import _EMBEDDING_RANGE_SIZE, embedding_range_size
 # REGIME PATH RESOLVER
 # =============================================================================
 
-# Matches regime tokens in output directory paths.  Old paths use "cls"; new
-# paths use "dis".  Both are mapped to "dis".
-_REGIME_PATH_PATTERN = re.compile(r"^(cls|dis)?(gen)?(adv)?$")
+_REGIME_TOKENS = {
+    # new vocabulary
+    "nat": "nat",
+    "at":  "at",
+    # legacy vocabulary (old output paths)
+    "dis": "dis",
+    "cls": "dis",
+    "gen": "gen",
+    "adv": "adv",
+}
 
 
 def resolve_regime_from_path(sweep_dir: str) -> Optional[str]:
     """Infer the training regime from a sweep directory path.
 
-    The standard sweep output directory has the format::
+    New output paths have the format::
 
-        outputs/{experiment}/{training_regime}/{embedding}/d{in}r{bond}/{dataset}_{ddmm}
+        outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{ddmm}/
 
-    where ``training_regime`` encodes the active trainers:
-
-    * ``dis`` (or legacy ``cls``) — discriminative training
-    * ``gen``  — generative NLL training
-    * ``adv``  — adversarial training
-
-    Priority when multiple codes are present: ``adv`` > ``gen`` > ``dis``.
+    Legacy paths use ``dis`` / ``cls`` / ``gen`` / ``adv`` as the regime token.
 
     Args:
         sweep_dir: Path to the sweep directory (relative or absolute).
 
     Returns:
-        One of ``"dis"``, ``"gen"``, ``"adv"``, or ``None``.
+        One of ``"nat"``, ``"at"``, ``"dis"``, ``"gen"``, ``"adv"``, or ``None``.
 
     Examples:
+        >>> resolve_regime_from_path("outputs/circles/nat/fourier/d4r3/seed_sweep_a0_0102")
+        'nat'
+        >>> resolve_regime_from_path("outputs/circles/at/legendre/d10r6/seed_sweep_2804")
+        'at'
         >>> resolve_regime_from_path("outputs/seed_sweep/adv/fourier/d4r3/circles_0102")
         'adv'
-        >>> resolve_regime_from_path("outputs/seed_sweep/dis/fourier/d4r3/circles_0102")
-        'dis'
         >>> resolve_regime_from_path("outputs/seed_sweep/cls/fourier/d4r3/circles_0102")
         'dis'
     """
     path_str = str(sweep_dir).replace("\\", "/")
-    tokens = re.split(r"[/_]", path_str)
+    # Split on "/" only (not "_") so we match directory-level tokens
+    tokens = path_str.split("/")
 
     for token in tokens:
-        m = _REGIME_PATH_PATTERN.match(token.lower())
-        if m and m.group(0):
-            if m.group(3):   # adv present
-                return "adv"
-            if m.group(2):   # gen present
-                return "gen"
-            if m.group(1):   # dis/cls present
-                return "dis"
+        mapped = _REGIME_TOKENS.get(token.lower())
+        if mapped is not None:
+            return mapped
+
+    # Fallback: split on underscores too (for legacy flat paths like
+    # "outputs/seed_sweep_adv_d30D18fourier_moons_4k_1202")
+    for token in re.split(r"[/_]", path_str):
+        mapped = _REGIME_TOKENS.get(token.lower())
+        if mapped is not None:
+            return mapped
 
     return None
 
@@ -132,39 +138,38 @@ PARAM_ALIASES: Dict[str, str] = {
 # REGIME PARAMETER MAPPINGS
 # =============================================================================
 
+_NLL_PARAMS: Dict[str, str] = {
+    "lr":           "trainer.nll.optimizer.kwargs.lr",
+    "weight-decay": "trainer.nll.optimizer.kwargs.weight_decay",
+    "batch-size":   "trainer.nll.batch_size",
+    "bond-dim":     "born.init_kwargs.bond_dim",
+    "in-dim":       "born.init_kwargs.in_dim",
+    "seed":         "tracking.seed",
+    "data-seed":    "dataset.gen_dow_kwargs.seed",
+    "split-seed":   "dataset.split_seed",
+}
+
+_AT_PARAMS: Dict[str, str] = {
+    "lr":           "trainer.adversarial.optimizer.kwargs.lr",
+    "weight-decay": "trainer.adversarial.optimizer.kwargs.weight_decay",
+    "batch-size":   "trainer.adversarial.batch_size",
+    "epsilon":      "trainer.adversarial.evasion.strengths",
+    "clean-weight": "trainer.adversarial.clean_weight",
+    "bond-dim":     "born.init_kwargs.bond_dim",
+    "in-dim":       "born.init_kwargs.in_dim",
+    "seed":         "tracking.seed",
+    "data-seed":    "dataset.gen_dow_kwargs.seed",
+    "split-seed":   "dataset.split_seed",
+}
+
 REGIME_PARAM_MAP: Dict[str, Dict[str, str]] = {
-    "dis": {
-        "lr":           "trainer.discriminative.optimizer.kwargs.lr",
-        "weight-decay": "trainer.discriminative.optimizer.kwargs.weight_decay",
-        "batch-size":   "trainer.discriminative.batch_size",
-        "bond-dim":     "born.init_kwargs.bond_dim",
-        "in-dim":       "born.init_kwargs.in_dim",
-        "seed":         "tracking.seed",
-        "data-seed":    "dataset.gen_dow_kwargs.seed",
-        "split-seed":   "dataset.split_seed",
-    },
-    "gen": {
-        "lr":           "trainer.generative.optimizer.kwargs.lr",
-        "weight-decay": "trainer.generative.optimizer.kwargs.weight_decay",
-        "batch-size":   "trainer.generative.batch_size",
-        "bond-dim":     "born.init_kwargs.bond_dim",
-        "in-dim":       "born.init_kwargs.in_dim",
-        "seed":         "tracking.seed",
-        "data-seed":    "dataset.gen_dow_kwargs.seed",
-        "split-seed":   "dataset.split_seed",
-    },
-    "adv": {
-        "lr":           "trainer.adversarial.optimizer.kwargs.lr",
-        "weight-decay": "trainer.adversarial.optimizer.kwargs.weight_decay",
-        "batch-size":   "trainer.adversarial.batch_size",
-        "epsilon":      "trainer.adversarial.evasion.strengths",
-        "clean-weight": "trainer.adversarial.clean_weight",
-        "bond-dim":     "born.init_kwargs.bond_dim",
-        "in-dim":       "born.init_kwargs.in_dim",
-        "seed":         "tracking.seed",
-        "data-seed":    "dataset.gen_dow_kwargs.seed",
-        "split-seed":   "dataset.split_seed",
-    },
+    # New vocabulary
+    "nat": _NLL_PARAMS,
+    "at":  _AT_PARAMS,
+    # Legacy aliases (old output paths — kept for backward compat)
+    "dis": _NLL_PARAMS,
+    "gen": _NLL_PARAMS,
+    "adv": _AT_PARAMS,
 }
 
 
@@ -173,18 +178,27 @@ REGIME_PARAM_MAP: Dict[str, Dict[str, str]] = {
 # =============================================================================
 
 REGIME_DESCRIPTIONS: Dict[str, str] = {
-    "dis": "Discriminative training",
-    "gen": "Generative NLL training",
+    "nat": "Natural (clean-data) NLL training",
+    "at":  "Adversarial training (augmented data)",
+    # legacy
+    "dis": "Discriminative NLL training (alpha=0)",
+    "gen": "Generative NLL training (alpha=1)",
     "adv": "Adversarial training",
 }
 
 REGIME_METRIC_PREFIX: Dict[str, str] = {
+    "nat": "dis",   # W&B metric prefix for NLL runs is still "dis"
+    "at":  "adv",
+    # legacy
     "dis": "dis",
     "gen": "gen",
     "adv": "adv",
 }
 
 REGIME_DEFAULT_PARAMS: Dict[str, List[str]] = {
+    "nat": ["lr", "weight-decay", "batch-size"],
+    "at":  ["lr", "weight-decay", "epsilon", "clean-weight"],
+    # legacy
     "dis": ["lr", "weight-decay", "batch-size"],
     "gen": ["lr", "weight-decay", "batch-size"],
     "adv": ["lr", "weight-decay", "epsilon", "clean-weight"],
