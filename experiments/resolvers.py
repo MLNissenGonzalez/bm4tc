@@ -5,9 +5,10 @@ from omegaconf import OmegaConf
 
 def _training_regime(*, _root_):
     parts = []
-    for key, code in [("trainer.nll", "nll"), ("trainer.adversarial", "adv")]:
-        if OmegaConf.select(_root_, key) is not None:
-            parts.append(code)
+    if OmegaConf.select(_root_, "trainer.nll") is not None:
+        parts.append("nat")
+    if OmegaConf.select(_root_, "trainer.adversarial") is not None:
+        parts.append("at")
     return "_".join(parts) or "none"
 
 

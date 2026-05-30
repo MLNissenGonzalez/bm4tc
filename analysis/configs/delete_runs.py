@@ -2,19 +2,19 @@
 """
 Delete sweep outputs: local dirs, W&B runs/artifacts, and analysis dirs.
 
-Discovers sweep roots under outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/
+Discovers sweep roots under outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/
 and deletes the matching local directories, W&B runs + artifacts, and mirrored
-analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/ directories.
+analysis/outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/ directories.
 
 Usage:
     python analysis/configs/delete_runs.py [filters] [options]
 
 Filter flags (all accept one or more values; OR-within / AND-across):
-    --kind         hpo | seed_sweep | test
-    --regime       cls | gen | adv | gan
+    --trainer      nat | at
+    --kind         substring match on kind (e.g. hpo_a0, seed_sweep)
     --embedding    fourier | legendre | hermite | chebychev1 | chebychev2
-    --arch         d4D3 | d6D4 | d10D6 | d30D18
-    --dataset      substring match on dataset name (e.g. "circles", "moons_4k")
+    --arch         d4r3 | d6r4 | d10r6 | d30r18
+    --dataset      substring match on dataset name (e.g. "circles", "moons")
     --date         substring match on date string (e.g. "2202", "23")
     --state        W&B run state filter: finished | failed | crashed | running
 
@@ -25,12 +25,12 @@ Options:
     --wandb-only     Skip local/analysis dirs; only remove W&B runs and artifacts
     --analysis-only  Scan analysis/outputs/ directly; delete only analysis dirs
                      (use after local+W&B runs are already deleted)
-    --entity         W&B entity (default: your-wandb-entity)
-    --project        W&B project (default: gan_train)
+    --entity         W&B entity (default: martin-nissen-gonzalez-heidelberg-university)
+    --project        W&B project (default: bm4tc)
 
 Examples:
     python analysis/configs/delete_runs.py --list
-    python analysis/configs/delete_runs.py --kind hpo --regime gen --dry-run
+    python analysis/configs/delete_runs.py --trainer nat --kind hpo_a0 --dry-run
     python analysis/configs/delete_runs.py --dataset circles --date 2102 --dry-run
     python analysis/configs/delete_runs.py --kind test --dry-run
     python analysis/configs/delete_runs.py --kind test
@@ -64,8 +64,8 @@ from analysis.utils.wandb_fetcher import (
 
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 ANALYSIS_DIR = PROJECT_ROOT / "analysis" / "outputs"
-DEFAULT_ENTITY = "your-wandb-entity"
-DEFAULT_PROJECT = "gan_train"
+DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
+DEFAULT_PROJECT = "bm4tc"
 
 # Matches: <dataset>_<DDMM>  or  <dataset>_<DDMM>_<HHMM>
 DATE_RE = re.compile(r"^(.+?)_(\d{4}(?:_\d{4})?)$")
@@ -80,7 +80,7 @@ WANDB_RUN_DIR_RE = re.compile(r"^run-\d+T\d+-([a-z0-9]+)$")
 
 
 def parse_sweep_path(path: Path) -> Optional[Dict]:
-    """Parse outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}."""
+    """Parse outputs/{dataset}/{trainer}/{embedding}/{arch}/{kind}_{date}."""
     try:
         rel = path.relative_to(OUTPUTS_DIR)
     except ValueError:
@@ -90,22 +90,22 @@ def parse_sweep_path(path: Path) -> Optional[Dict]:
     if len(parts) != 5:
         return None
 
-    kind, regime, embedding, arch, leaf = parts
+    dataset, trainer, embedding, arch, leaf = parts
 
     m = DATE_RE.match(leaf)
     if not m:
         return None
 
-    dataset, date = m.group(1), m.group(2)
+    kind, date = m.group(1), m.group(2)
 
     return {
-        "kind": kind,
-        "regime": regime,
+        "dataset":   dataset,
+        "trainer":   trainer,
         "embedding": embedding,
-        "arch": arch,
-        "dataset": dataset,
-        "date": date,
-        "path": path,
+        "arch":      arch,
+        "kind":      kind,
+        "date":      date,
+        "path":      path,
     }
 
 
@@ -124,18 +124,21 @@ def is_sweep_root(path: Path) -> bool:
 
 
 def find_sweep_roots(outputs_dir: Path) -> List[Dict]:
-    """Walk outputs/ at depth 5; return parsed dicts for each sweep root."""
+    """Walk outputs/ at depth 5; return parsed dicts for each sweep root.
+
+    Structure: outputs/{dataset}/{trainer}/{embedding}/{arch}/{kind}_{date}/
+    """
     results = []
     if not outputs_dir.is_dir():
         return results
 
-    for kind_dir in outputs_dir.iterdir():
-        if not kind_dir.is_dir():
+    for dataset_dir in outputs_dir.iterdir():
+        if not dataset_dir.is_dir():
             continue
-        for regime_dir in kind_dir.iterdir():
-            if not regime_dir.is_dir():
+        for trainer_dir in dataset_dir.iterdir():
+            if not trainer_dir.is_dir():
                 continue
-            for embedding_dir in regime_dir.iterdir():
+            for embedding_dir in trainer_dir.iterdir():
                 if not embedding_dir.is_dir():
                     continue
                 for arch_dir in embedding_dir.iterdir():
@@ -150,17 +153,17 @@ def find_sweep_roots(outputs_dir: Path) -> List[Dict]:
                         if info is not None:
                             results.append(info)
 
-    results.sort(key=lambda x: (x["kind"], x["regime"], x["embedding"], x["arch"], x["dataset"], x["date"]))
+    results.sort(key=lambda x: (x["dataset"], x["trainer"], x["embedding"], x["arch"], x["kind"], x["date"]))
     return results
 
 
 def apply_filters(targets: List[Dict], args) -> List[Dict]:
-    """Filter by kind, regime, embedding, arch, dataset substring, date substring."""
+    """Filter by trainer, kind (substring), embedding, arch, dataset substring, date substring."""
     filtered = []
     for info in targets:
-        if args.kind and info["kind"] not in args.kind:
+        if args.trainer and info["trainer"] not in args.trainer:
             continue
-        if args.regime and info["regime"] not in args.regime:
+        if args.kind and not any(k in info["kind"] for k in args.kind):
             continue
         if args.embedding and info["embedding"] not in args.embedding:
             continue
@@ -218,9 +221,15 @@ def extract_wandb_run_ids(sweep_root: Path) -> List[str]:
 
 
 def reconstruct_group_pattern(info: Dict) -> str:
-    """Build W&B group regex from path components."""
-    archinfo = f"{info['arch']}{info['embedding']}"
-    return f"^{info['kind']}_{info['regime']}_{archinfo}_{info['dataset']}_{info['date']}$"
+    """Build W&B group regex from path components.
+
+    New group format: {dataset}/{trainer}/{embedding}/{arch}/{kind}/{date}
+    """
+    return (
+        f"^{re.escape(info['dataset'])}/{re.escape(info['trainer'])}/"
+        f"{re.escape(info['embedding'])}/{re.escape(info['arch'])}/"
+        f"{re.escape(info['kind'])}/{re.escape(info['date'])}$"
+    )
 
 
 def resolve_wandb_runs(
@@ -270,14 +279,14 @@ def resolve_wandb_runs(
 
 
 def find_analysis_dir(info: Dict, analysis_root: Path) -> Optional[Path]:
-    """Check analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/."""
+    """Check analysis/outputs/{dataset}/{trainer}/{embedding}/{arch}/{kind}_{date}/."""
     candidate = (
         analysis_root
-        / info["kind"]
-        / info["regime"]
+        / info["dataset"]
+        / info["trainer"]
         / info["embedding"]
         / info["arch"]
-        / f"{info['dataset']}_{info['date']}"
+        / f"{info['kind']}_{info['date']}"
     )
     return candidate if candidate.is_dir() else None
 
@@ -288,7 +297,7 @@ def find_analysis_dir(info: Dict, analysis_root: Path) -> Optional[Path]:
 
 
 def parse_analysis_path(path: Path) -> Optional[Dict]:
-    """Parse analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}."""
+    """Parse analysis/outputs/{dataset}/{trainer}/{embedding}/{arch}/{kind}_{date}."""
     try:
         rel = path.relative_to(ANALYSIS_DIR)
     except ValueError:
@@ -298,22 +307,22 @@ def parse_analysis_path(path: Path) -> Optional[Dict]:
     if len(parts) != 5:
         return None
 
-    kind, regime, embedding, arch, leaf = parts
+    dataset, trainer, embedding, arch, leaf = parts
 
     m = DATE_RE.match(leaf)
     if not m:
         return None
 
-    dataset, date = m.group(1), m.group(2)
+    kind, date = m.group(1), m.group(2)
 
     return {
-        "kind": kind,
-        "regime": regime,
+        "dataset":   dataset,
+        "trainer":   trainer,
         "embedding": embedding,
-        "arch": arch,
-        "dataset": dataset,
-        "date": date,
-        "path": path,
+        "arch":      arch,
+        "kind":      kind,
+        "date":      date,
+        "path":      path,
     }
 
 
@@ -323,13 +332,13 @@ def find_analysis_roots(analysis_dir: Path) -> List[Dict]:
     if not analysis_dir.is_dir():
         return results
 
-    for kind_dir in analysis_dir.iterdir():
-        if not kind_dir.is_dir():
+    for dataset_dir in analysis_dir.iterdir():
+        if not dataset_dir.is_dir():
             continue
-        for regime_dir in kind_dir.iterdir():
-            if not regime_dir.is_dir():
+        for trainer_dir in dataset_dir.iterdir():
+            if not trainer_dir.is_dir():
                 continue
-            for embedding_dir in regime_dir.iterdir():
+            for embedding_dir in trainer_dir.iterdir():
                 if not embedding_dir.is_dir():
                     continue
                 for arch_dir in embedding_dir.iterdir():
@@ -342,7 +351,7 @@ def find_analysis_roots(analysis_dir: Path) -> List[Dict]:
                         if info is not None:
                             results.append(info)
 
-    results.sort(key=lambda x: (x["kind"], x["regime"], x["embedding"], x["arch"], x["dataset"], x["date"]))
+    results.sort(key=lambda x: (x["dataset"], x["trainer"], x["embedding"], x["arch"], x["kind"], x["date"]))
     return results
 
 
@@ -516,10 +525,10 @@ def main() -> None:
     )
 
     # Filter flags
+    parser.add_argument("--trainer", nargs="+", metavar="TRAINER",
+                        help="nat | at")
     parser.add_argument("--kind", nargs="+", metavar="KIND",
-                        help="hpo | seed_sweep | test")
-    parser.add_argument("--regime", nargs="+", metavar="REGIME",
-                        help="cls | gen | adv | gan")
+                        help="Substring match on kind (e.g. hpo_a0, seed_sweep)")
     parser.add_argument("--embedding", nargs="+", metavar="EMB",
                         help="fourier | legendre | hermite | chebychev1 | chebychev2")
     parser.add_argument("--arch", nargs="+", metavar="ARCH",
@@ -546,8 +555,15 @@ def main() -> None:
                         help="W&B entity (default: %(default)s)")
     parser.add_argument("--project", default=DEFAULT_PROJECT,
                         help="W&B project (default: %(default)s)")
+    # Keep --regime as a deprecated alias for --trainer (backward compat)
+    parser.add_argument("--regime", nargs="+", metavar="REGIME",
+                        help=argparse.SUPPRESS)
 
     args = parser.parse_args()
+
+    # --regime is a deprecated alias for --trainer
+    if getattr(args, "regime", None) and not args.trainer:
+        args.trainer = args.regime
 
     if args.local_only and args.wandb_only:
         parser.error("--local-only and --wandb-only are mutually exclusive")
