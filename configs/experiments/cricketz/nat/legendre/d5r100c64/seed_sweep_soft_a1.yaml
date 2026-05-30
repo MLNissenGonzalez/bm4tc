@@ -33,7 +33,7 @@ trainer:
 
 hydra:
   sweep:
-    dir: outputs/seed_sweep/gen/legendre/d5r100c64/cricketz_${now:%d%m}
+    dir: outputs/cricketz/nat/legendre/d5r100c64/seed_sweep_soft_a1_${now:%d%m}
     subdir: ${hydra.job.num}
   sweeper:
     params:

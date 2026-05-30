@@ -16,11 +16,14 @@ Never use `conda run`. Never use relative `python` without the full env path whe
 ## Running experiments
 
 ```bash
-# Single run (NLL discriminative)
-python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons tracking.mode=disabled
+# Single run (NLL discriminative, alpha=0)
+python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0 tracking.mode=disabled
 
-# Multirun seed sweep (NLL generative)
-python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+# Multirun seed sweep (NLL generative, alpha=1)
+python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
+
+# Adversarial training seed sweep
+python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
 
 # Test run (tiny config, no W&B)
 python -m experiments.train +experiments=tests/nll         tracking.mode=disabled
@@ -75,20 +78,25 @@ analysis/
 ## Naming conventions
 
 - **Arch**: `d{d}r{r}` — `d4r3`, `d10r6`, `d30r18` (d=in_dim, r=bond_dim)
-- **Regime codes**: `dis` (discriminative), `gen` (generative), `adv` (adversarial)
+- **Trainer tokens**: `nat` (natural NLL training, any alpha) | `at` (adversarial training)
+- **Alpha in kind suffix**: `_a0` (α=0 discriminative), `_a1` (α=1 generative), `_a05` (α=0.5), `_a01`, …
 - **Metrics**: `dis_loss`, `gen_loss`, `acc`, `rob`
 - **Datasets (2D toy)**: `circles`, `moons`, `spirals` (+ `_small` variants); the `_4k` suffix was dropped in Phase 7
 
 ## Output structure
 
 ```
-outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
+outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{DDMM}/
   0/.hydra/config.yaml    resolved config
-  0/models/model.pt       checkpoint
+  0/models/model          checkpoint (tensorkrowch format)
   1/...
-analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
+analysis/outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{DDMM}/
   evaluation_data.csv     one row per run, all metrics
 ```
+
+Examples:
+- `outputs/circles/nat/legendre/d10r6/seed_sweep_a0_2804/`
+- `outputs/moons/at/legendre/d10r6/seed_sweep_2804/`
 
 ## Config dataclasses
 
