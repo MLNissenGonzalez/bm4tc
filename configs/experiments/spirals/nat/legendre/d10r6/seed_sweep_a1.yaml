@@ -26,8 +26,8 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.00017820395899344066    # FILL FROM HPO
-        weight_decay: 6.847604186810345e-09  # FILL FROM HPO
+        lr: 0.0003633766575879599    # FILL FROM HPO
+        weight_decay: 1.1168052931600827e-09  # FILL FROM HPO
 
 hydra:
   sweeper:
