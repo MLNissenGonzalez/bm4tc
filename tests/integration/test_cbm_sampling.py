@@ -41,10 +41,12 @@ def test_condition_on_class_returns_data_dim_tensors(cbm):
     assert len(tensors) == DATA_DIM
 
 
-def test_condition_on_class_tensors_are_3d(cbm):
+def test_condition_on_class_tensor_ranks(cbm):
     tensors = cbm.condition_on_class(0)
-    for i, t in enumerate(tensors):
-        assert t.ndim == 3, f"tensor {i} has {t.ndim} dims, expected 3"
+    assert tensors[0].ndim == 2   # left boundary
+    assert tensors[-1].ndim == 2  # right boundary
+    for i, t in enumerate(tensors[1:-1], start=1):
+        assert t.ndim == 3, f"interior tensor {i} has {t.ndim} dims, expected 3"
 
 
 def test_condition_on_class_does_not_mutate_mats_env(cbm):
