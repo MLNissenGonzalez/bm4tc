@@ -12,9 +12,10 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 ## Training Regimes
 
-| Script | Regime | Description |
-|--------|--------|-------------|
-| `experiments/train.py` | `dis`/`gen`/`adv` | Unified entry point; NLL or adversarial selected by config (`trainer.nll` vs `trainer.adversarial`) |
+| Script | Trainer token | Description |
+|--------|--------------|-------------|
+| `experiments/train.py` | `nat` | NLL training; α=0 discriminative (`hpo_a0`, `seed_sweep_a0`) or α>0 generative (`seed_sweep_a1`, …) |
+| `experiments/train.py` | `at` | Adversarial training; loads a pretrained `nat` checkpoint via `model_path` |
 
 ## Trustworthiness Evaluation
 
@@ -56,14 +57,17 @@ Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters). Se
 All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/); the canonical way to design an experiment is to write a config under `configs/experiments/` and reference it with `+experiments=<path>`.
 
 ```bash
-# Single run (NLL discriminative)
-python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
+# Single run (NLL discriminative, alpha=0)
+python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0
 
-# Multirun / seed sweep (NLL generative)
-python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+# Multirun / seed sweep (NLL generative, alpha=1)
+python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
+
+# Adversarial training seed sweep
+python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
 
 # Batch-run all unrun configs in a filter set
-python -m experiments.batch --type gen --embedding legendre --dry-run
+python -m experiments.batch --trainer nat --embedding legendre --dry-run
 
 # Disable W&B for local debugging
 python -m experiments.train +experiments=tests/nll tracking.mode=disabled
@@ -73,13 +77,13 @@ python -m experiments.train +experiments=tests/nll tracking.mode=disabled
 
 ```bash
 # Analyse a specific sweep
-python -m analysis.sweep outputs/seed_sweep/gen/legendre/d10r6/circles_1802
+python -m analysis.sweep outputs/circles/nat/legendre/d10r6/seed_sweep_a1_1802
 
 # Analyse all completed but unanalysed sweeps in batch
 python -m analysis.batch
 ```
 
-Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
+Results land in `analysis/outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
 
 ## Repository Structure
 
