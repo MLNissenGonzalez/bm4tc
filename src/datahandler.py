@@ -295,8 +295,9 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
 def _npz_stem(cfg: DataGenDowConfig) -> str:
     """Return the npz filename stem for a dataset config (without .npz extension)."""
     _, variant = _parse_dataset_name(cfg.name)
-    if cfg.resize is not None:
-        return f"{variant}_r{cfg.resize}"
+    resize = getattr(cfg, "resize", None)
+    if resize is not None:
+        return f"{variant}_r{resize}"
     return variant
 
 
