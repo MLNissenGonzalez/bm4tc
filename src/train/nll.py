@@ -3,6 +3,7 @@
 import math
 import time
 import torch
+from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional, Union
@@ -225,7 +226,8 @@ class NLLTrainer:
 
         logger.info(f"NLL training begins (alpha={self.train_cfg.alpha:.3g}).")
 
-        for epoch in range(self.train_cfg.max_epoch):
+        pbar = tqdm(range(self.train_cfg.max_epoch), desc="NLL", unit="ep", dynamic_ncols=True)
+        for epoch in pbar:
             epoch_start = time.perf_counter()
             self.epoch = epoch + 1
 
@@ -239,6 +241,12 @@ class NLLTrainer:
                 self.cbm, self.datahandler.classification["valid"], self.device
             )
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc, "gen_loss": gen_loss}
+
+            pbar.set_postfix(
+                loss=f"{self._train_loss:.4f}",
+                dis=f"{dis_loss:.4f}",
+                acc=f"{acc:.4f}",
+            )
 
             if on_epoch_end is not None:
                 on_epoch_end(self.epoch, {

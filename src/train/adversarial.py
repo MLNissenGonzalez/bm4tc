@@ -2,6 +2,7 @@
 
 import time
 import torch
+from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -193,7 +194,8 @@ class AdversarialTrainer:
 
         logger.info(f"Adversarial training ({self.train_cfg.evasion.method}) begins.")
 
-        for epoch in range(self.train_cfg.max_epoch):
+        pbar = tqdm(range(self.train_cfg.max_epoch), desc="ADV", unit="ep", dynamic_ncols=True)
+        for epoch in pbar:
             epoch_start = time.perf_counter()
             self.epoch = epoch + 1
 
@@ -211,6 +213,11 @@ class AdversarialTrainer:
                     self.attack, self.base_epsilon, self.device
                 )
                 self.valid_perf["rob"] = rob
+
+            postfix = dict(loss=f"{self._train_loss:.4f}", acc=f"{acc:.4f}")
+            if "rob" in self.valid_perf:
+                postfix["rob"] = f"{self.valid_perf['rob']:.4f}"
+            pbar.set_postfix(**postfix)
 
             if on_epoch_end is not None:
                 metrics = {
