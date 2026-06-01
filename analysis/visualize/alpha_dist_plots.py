@@ -42,9 +42,9 @@ from analysis.visualize.distributions import (
     DECISION_BOUNDARY_CMAP,
 )
 
-OUTPUTS_ROOT = PROJECT_ROOT / "analysis" / "outputs" / "alpha_curve"
-ALPHA_COL    = "config/trainer.alpha"
-ACC_COL      = "eval/test/acc"
+OUTPUTS_ROOT = PROJECT_ROOT / "analysis" / "outputs"
+ALPHA_COL    = "config/trainer.generative.criterion.kwargs.alpha"
+ACC_COL      = "acc"
 DPI          = 150
 PANEL_SIZE   = 3.0  # inches per panel
 
@@ -259,7 +259,10 @@ def _dataset_base(p: Path) -> str:
 
 
 def find_csvs(root: Path):
-    return sorted(root.rglob("evaluation_data.csv"))
+    return sorted(
+        p for p in root.rglob("evaluation_data.csv")
+        if re.match(r"alpha_curve_\d{4}$", p.parent.name)
+    )
 
 
 # ---------------------------------------------------------------------------
