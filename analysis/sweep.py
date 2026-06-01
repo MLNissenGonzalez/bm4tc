@@ -53,7 +53,7 @@ import torch
 SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30r18fourier_moons_4k_1702"
 _cli = argparse.ArgumentParser(add_help=False)
 _cli.add_argument("sweep_dir", nargs="?", default=None)
-_cli.add_argument("--no-viz", action="store_true", help="Skip best-run distribution plots.")
+_cli.add_argument("--viz", action="store_true", help="Generate best-run distribution plots.")
 _cli.add_argument("--no-mia", action="store_true", help="Skip membership inference attack.")
 _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
@@ -90,7 +90,7 @@ COMPUTE_GEN_LOSS = True
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
 COMPUTE_GIBBS_PURIFICATION = True  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
 COMPUTE_JOINT_ATTACK = True  # Joint generative attack (JOINT_PGD) alongside standard PGD
-COMPUTE_DISTRIBUTIONS = False  # Set False (or pass --no-viz) to skip best-run distribution plots
+COMPUTE_DISTRIBUTIONS = False  # Set True (or pass --viz) to generate best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
@@ -171,8 +171,8 @@ CONFIG_KEYS = [
 ]
 
 # --- CLI overrides (applied after config block so they take effect) ---
-if _cli_args.no_viz:
-    COMPUTE_DISTRIBUTIONS = False
+if _cli_args.viz:
+    COMPUTE_DISTRIBUTIONS = True
 if _cli_args.no_mia:
     COMPUTE_MIA = False
 
