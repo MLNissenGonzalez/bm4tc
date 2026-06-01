@@ -148,7 +148,7 @@ def main():
     for sweep_dir, exp_name, root in todo:
         rel = sweep_dir.relative_to(ROOT)
         # --no-viz: distribution plots are handled separately by analysis/visualize/batch.py
-        cmd = ["python", "analysis/sweep.py", str(rel), "--no-viz"]
+        cmd = ["python", "analysis/sweep.py", str(rel)]
         print(" ".join(cmd))
         if not args.dry_run:
             result = subprocess.run(cmd, cwd=ROOT)

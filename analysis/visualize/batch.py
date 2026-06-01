@@ -66,7 +66,7 @@ def is_analyzed(sweep_dir: Path) -> bool:
 def is_visualized(sweep_dir: Path) -> bool:
     ana_dir = analysis_output_dir(sweep_dir)
     return (
-        (ana_dir / "best_class_dist.png").exists()
+        (ana_dir / "decision_boundary.png").exists()
         or (ana_dir / "mnist_samples.png").exists()
         or (ana_dir / "ts_samples.png").exists()
     )
@@ -82,10 +82,7 @@ def best_run_from_csv(ana_dir: Path) -> str | None:
         return None
     if len(df) == 1:
         return df["run_path"].iloc[0]
-    acc_col = next(
-        (c for c in ("eval/test/acc", "eval/valid/acc") if c in df.columns),
-        None,
-    )
+    acc_col = "acc" if "acc" in df.columns else None
     if acc_col is None:
         print(f"  WARNING: no acc column in {csv.relative_to(ROOT)}, using run 0.")
         df["_idx"] = pd.to_numeric(
