@@ -14,11 +14,11 @@ Matching seed_sweep kinds replace "hpo" with "seed_sweep" in the stem
 (e.g. hpo_a0 → seed_sweep_a0).
 
 Usage:
-    python analysis/configs/fill_hpo.py --list
-    python analysis/configs/fill_hpo.py --dry-run
-    python analysis/configs/fill_hpo.py --trainer at --dry-run
-    python analysis/configs/fill_hpo.py --dataset circles --embedding legendre
-    python analysis/configs/fill_hpo.py --force
+    python tools/fill_hpo.py --list
+    python tools/fill_hpo.py --dry-run
+    python tools/fill_hpo.py --trainer at --dry-run
+    python tools/fill_hpo.py --dataset circles --embedding legendre
+    python tools/fill_hpo.py --force
 """
 
 import argparse
@@ -29,7 +29,7 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from analysis.utils.wandb_fetcher import (
