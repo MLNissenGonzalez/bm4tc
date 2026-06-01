@@ -26,8 +26,8 @@ Also strips per-file hydra.sweep.dir overrides from migrated configs (the global
 template in configs/config.yaml now controls output paths).
 
 Usage:
-    python analysis/configs/migrate_configs.py --dry-run    # print plan
-    python analysis/configs/migrate_configs.py --execute    # git mv + strip overrides
+    python tools/migrate_configs.py --dry-run    # print plan
+    python tools/migrate_configs.py --execute    # git mv + strip overrides
 """
 
 import argparse
@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_ROOT = PROJECT_ROOT / "configs" / "experiments"
 
 # Kind names that live under nll/dis/ or nll/gen/ get a per-sub-dir suffix.

@@ -20,15 +20,15 @@ Patches the d10D6 alpha_curve_mixed configs so that:
   - sweeper.params stays as the original alpha × seed cartesian sweep
 
 Usage:
-    python analysis/configs/alpha_lr_interp.py            # print table + patch
-    python analysis/configs/alpha_lr_interp.py --dry-run  # print table only
+    python tools/alpha_lr_interp.py            # print table + patch
+    python tools/alpha_lr_interp.py --dry-run  # print table only
 """
 import math
 import re
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _MIXED = PROJECT_ROOT / "configs" / "experiments" / "generative" / "legendre" / "d10r6" / "alpha_curve_mixed"
 
 ALPHA_VALUES = [0.0, 1e-5, 1e-4, 1e-3, 1e-2, 5e-2, 1e-1, 5e-1, 8e-1, 1.0]

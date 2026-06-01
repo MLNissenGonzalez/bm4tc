@@ -29,14 +29,14 @@ Options:
     --project        W&B project (default: bm4tc)
 
 Examples:
-    python analysis/configs/delete_runs.py --list
-    python analysis/configs/delete_runs.py --trainer nat --kind hpo_a0 --dry-run
-    python analysis/configs/delete_runs.py --dataset circles --date 2102 --dry-run
-    python analysis/configs/delete_runs.py --kind test --dry-run
-    python analysis/configs/delete_runs.py --kind test
-    python analysis/configs/delete_runs.py --kind hpo --wandb-only --dry-run
-    python analysis/configs/delete_runs.py --embedding hermite --analysis-only --dry-run
-    python analysis/configs/delete_runs.py --analysis-only --list
+    python tools/delete_runs.py --list
+    python tools/delete_runs.py --trainer nat --kind hpo_a0 --dry-run
+    python tools/delete_runs.py --dataset circles --date 2102 --dry-run
+    python tools/delete_runs.py --kind test --dry-run
+    python tools/delete_runs.py --kind test
+    python tools/delete_runs.py --kind hpo --wandb-only --dry-run
+    python tools/delete_runs.py --embedding hermite --analysis-only --dry-run
+    python tools/delete_runs.py --analysis-only --list
 """
 
 import argparse
@@ -49,7 +49,7 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 # Bootstrap: add project root to sys.path
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from analysis.utils.wandb_fetcher import (
