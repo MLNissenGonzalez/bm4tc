@@ -70,9 +70,15 @@ analysis/
   sweep.py             seed_sweep / alpha_curve post-hoc analysis
   hpo.py               HPO result exploration
   batch.py             batch-queue runner for sweep.py
-  configs/             pipeline tool scripts (fill_hpo.py, delete_runs.py, alpha_lr_interp.py)
   utils/               statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
   visualize/           distribution plots + batch.py
+
+tools/
+  fill_hpo.py          patch seed_sweep configs from HPO best run (W&B or local)
+  delete_runs.py       delete local outputs, W&B runs/artifacts, analysis dirs
+  migrate_configs.py   one-off config layout migration (historical)
+  alpha_lr_interp.py   geom-interp LR patcher for alpha_curve configs (historical)
+  fetcher.ipynb        ad-hoc W&B data fetching notebook
 ```
 
 ## Naming conventions
