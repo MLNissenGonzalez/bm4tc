@@ -110,9 +110,7 @@ def get_metric_info(hpo_cfg: Dict, training_type: str) -> Tuple[str, bool]:
     elif stop_crit == "acc":
         return f"{prefix}/valid/acc", False
     elif stop_crit == "rob":
-        strengths = _get_nested_value(hpo_cfg, "tracking.evasion.strengths")
-        strength = strengths[0] if isinstance(strengths, list) else strengths
-        return f"adv/valid/rob/{strength}", False
+        return "rob/valid", False
     else:
         # Fallback: use accuracy metric for the stage
         return f"{prefix}/valid/acc", False
