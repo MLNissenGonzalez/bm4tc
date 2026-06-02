@@ -97,19 +97,15 @@ def get_metric_info(hpo_cfg: Dict, trainer: str) -> Tuple[str, bool]:
     stop_crit = _get_nested_value(hpo_cfg, f"trainer.{trainer_key}.stop_crit")
 
     if stop_crit == "dis_loss":
-        return "dis/valid/dis_loss", True
+        return "dis_loss/valid", True
     elif stop_crit == "gen_loss":
-        return "gen/valid/gen_loss", True
+        return "gen_loss/valid", True
     elif stop_crit == "acc":
-        prefix = "dis" if trainer == "nat" else "adv"
-        return f"{prefix}/valid/acc", False
+        return "acc/valid", False
     elif stop_crit == "rob":
-        strengths = _get_nested_value(hpo_cfg, "tracking.evasion.strengths")
-        strength = strengths[0] if isinstance(strengths, list) else strengths
-        return f"adv/valid/rob/{strength}", False
+        return "rob/valid", False
     else:
-        prefix = "dis" if trainer == "nat" else "adv"
-        return f"{prefix}/valid/acc", False
+        return "acc/valid", False
 
 
 # =============================================================================

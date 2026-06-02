@@ -8,7 +8,7 @@ defaults:
   - override /trainer/adversarial: pgd_at
   - override /tracking: online
 
-model_path: outputs/spirals/nat/legendre/d10r6/seed_sweep_a0_2804/3/models/model
+model_path: ???  # run: python tools/patch_checkpoint.py outputs/spirals/nat/legendre/d10r6/seed_sweep_a0_DDMM
 
 dataset:
   split_seed: 11
@@ -18,7 +18,7 @@ dataset:
 tracking:
   seed: 42
   evasion:
-    norm: 2
+    norm: inf
     criterion:
       name: "negative log-likelihood"
       kwargs:
@@ -36,7 +36,7 @@ trainer:
     patience: 300
 
     evasion:
-      norm: 2
+      norm: inf
       criterion:
         name: "negative log-likelihood"
         kwargs:
@@ -56,9 +56,9 @@ trainer:
 
     optimizer:
       kwargs:
-        lr: 0.006264278041381347                  # FILL FROM HPO
-        weight_decay: 9.895719805415156e-05        # FILL FROM HPO
-    clean_weight: 0.23098015996894655            # FILL FROM HPO
+        lr: ???                                    # FILL FROM HPO
+        weight_decay: ???                          # FILL FROM HPO
+    clean_weight: ???                              # FILL FROM HPO
 
 hydra:
   sweeper:

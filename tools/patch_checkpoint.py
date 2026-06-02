@@ -32,7 +32,10 @@ from analysis.utils.wandb_fetcher import (
     _load_wandb_summary,
 )
 
-DEFAULT_CONFIG = "configs/experiments/spirals/at/legendre/d10r6/seed_sweep.yaml"
+DEFAULT_CONFIGS = [
+    "configs/experiments/spirals/at/legendre/d10r6/hpo.yaml",
+    "configs/experiments/spirals/at/legendre/d10r6/seed_sweep.yaml",
+]
 
 
 def _detect_trainer_and_stop_crit(cfg: Dict) -> Tuple[str, str, List]:
@@ -48,17 +51,14 @@ def _detect_trainer_and_stop_crit(cfg: Dict) -> Tuple[str, str, List]:
 
 def _metric_for_stop_crit(trainer: str, stop_crit: str, strengths: List) -> Tuple[str, bool]:
     if stop_crit == "dis_loss":
-        return "dis/valid/dis_loss", True
+        return "dis_loss/valid", True
     if stop_crit == "gen_loss":
-        return "gen/valid/gen_loss", True
+        return "gen_loss/valid", True
     if stop_crit == "acc":
-        prefix = "dis" if trainer == "nat" else "adv"
-        return f"{prefix}/valid/acc", False
+        return "acc/valid", False
     if stop_crit == "rob":
-        strength = strengths[0] if strengths else 0.1
-        return f"adv/valid/rob/{strength}", False
-    prefix = "dis" if trainer == "nat" else "adv"
-    return f"{prefix}/valid/acc", False
+        return "rob/valid", False
+    return "acc/valid", False
 
 
 def find_best_run(
@@ -135,18 +135,24 @@ def patch_config(config_path: Path, model_path: str, dry_run: bool = False) -> b
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Patch model_path in an AT config with the best checkpoint from a seed_sweep.",
+        description="Patch model_path in AT configs with the best checkpoint from a seed_sweep.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("sweep_dir", help="Seed_sweep output dir (contains numbered subdirs)")
     parser.add_argument(
         "--config",
-        default=DEFAULT_CONFIG,
-        help=f"YAML config to patch (default: {DEFAULT_CONFIG})",
+        dest="configs",
+        action="append",
+        default=None,
+        metavar="CONFIG",
+        help=(
+            "YAML config to patch (repeatable). "
+            f"Defaults to: {', '.join(DEFAULT_CONFIGS)}"
+        ),
     )
     parser.add_argument("--metric", default=None,
-                        help="Override metric key (e.g. 'dis/valid/dis_loss')")
+                        help="Override metric key (e.g. 'dis_loss/valid')")
     parser.add_argument("--minimize", action="store_true",
                         help="Minimize the metric (only used with --metric)")
     parser.add_argument("--dry-run", action="store_true",
@@ -160,12 +166,16 @@ def main() -> None:
         print(f"ERROR: Sweep dir not found: {sweep_dir}")
         sys.exit(1)
 
-    config_path = Path(args.config)
-    if not config_path.is_absolute():
-        config_path = PROJECT_ROOT / config_path
-    if not config_path.exists():
-        print(f"ERROR: Config not found: {config_path}")
-        sys.exit(1)
+    config_paths_raw = args.configs if args.configs is not None else DEFAULT_CONFIGS
+    config_paths = []
+    for raw in config_paths_raw:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        if not p.exists():
+            print(f"ERROR: Config not found: {p}")
+            sys.exit(1)
+        config_paths.append(p)
 
     minimize_override = args.minimize if args.metric else None
     best_idx, model_path_abs = find_best_run(sweep_dir, metric_key=args.metric, minimize=minimize_override)
@@ -176,7 +186,8 @@ def main() -> None:
     except ValueError:
         model_path = str(model_path_abs)
 
-    patch_config(config_path, model_path, dry_run=args.dry_run)
+    for config_path in config_paths:
+        patch_config(config_path, model_path, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
