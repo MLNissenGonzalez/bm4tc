@@ -9,7 +9,7 @@ defaults:
   - override /tracking: online
   - override /hydra/sweeper: optuna
 
-model_path: ???  # run: python tools/patch_checkpoint.py outputs/spirals/nat/legendre/d10r6/seed_sweep_a0_DDMM
+model_path: outputs/spirals/nat/legendre/d10r6/seed_sweep_a0_3005/1/models/model
 
 dataset:
   split_seed: 11
