@@ -31,13 +31,13 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: ${geom_lr:${trainer.nll.alpha},0.04360959649429807,0.00017820395899344066}  # geom interp; resolver in experiments/generative.py
+        lr: ${geom_lr:${trainer.nll.alpha},0.04360959649429807,0.0034928234571149435}  # geom interp; resolver in experiments/generative.py
         weight_decay: 0.0
 
 hydra:
   sweeper:
     params:
-      trainer.nll.alpha: choice(0.0, 1e-5, 1e-4, 1e-3, 1e-2, 5e-2, 1e-1, 5e-1, 8e-1, 1.0)
+      trainer.nll.alpha: choice(0.0, 1e-2, 1e-1, 2e-1, 3e-1, 4e-1, 5e-1, 7e-1, 9e-1, 1.0)
       tracking.seed: range(1, 6)
 
 # kwargs from pure generative:
