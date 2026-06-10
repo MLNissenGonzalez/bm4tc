@@ -1,3 +1,4 @@
+import inspect
 import pytest
 import torch
 import tensorkrowch as tk
@@ -196,3 +197,40 @@ def test_sample_all_classes_label_counts():
     _, labels = cbm.sample_all_classes(n_per_class=4, num_bins=10)
     for c in range(3):
         assert (labels == c).sum().item() == 4
+
+
+# ── _LOG_PROB_EPS / gradient-at-small-amplitude tests ──────────────────────
+
+def test_mixed_nll_no_eps_param():
+    sig = inspect.signature(ConditionalBornMachine.mixed_nll)
+    assert "eps" not in sig.parameters
+
+
+def test_marginal_log_prob_no_eps_param():
+    sig = inspect.signature(ConditionalBornMachine.marginal_log_probability)
+    assert "eps" not in sig.parameters
+
+
+def test_mixed_nll_term1_gradient_at_small_amplitude():
+    """With the old eps=1e-12 floor on abs_sq, amplitudes ~1e-7 (abs_sq~1e-14)
+    hit the clamp and produced zero/wrong gradients.  The 2·log(abs) form with
+    tiny floor should give finite, non-zero gradients at this scale.
+    """
+    # std=1e-5 → typical |ψ(x,c)| ≈ 1e-7, abs_sq ≈ 1e-14  (below old floor)
+    cfg = CBMConfig(
+        embedding="fourier",
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, dtype="float32", std=1e-5),
+    )
+    cbm = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
+
+    x = torch.rand(4, 2, requires_grad=False)
+    y = torch.zeros(4, dtype=torch.long)
+
+    loss = cbm.mixed_nll(x, y, alpha=0.0)
+    assert loss.isfinite(), "loss must be finite for small-amplitude CBM"
+    loss.backward()
+
+    grads = [p.grad for p in cbm.parameters() if p.grad is not None]
+    assert len(grads) > 0, "no gradients computed"
+    assert all(g.isfinite().all() for g in grads), "gradients contain non-finite values"
+    assert any(g.abs().max() > 0 for g in grads), "all gradients are zero (clamp floor too high)"

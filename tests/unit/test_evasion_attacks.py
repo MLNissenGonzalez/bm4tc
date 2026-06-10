@@ -14,9 +14,9 @@ STRENGTH = STRENGTH_FRACTION  # equals abs_eps for fourier (range_size=1.0)
 STEPS = 20
 
 
-# Use std=1.0 so amplitudes are O(1) and gradients don't underflow.
-# The conftest cbm fixture uses std=1e-3 → amplitudes ~1e-12 → at the
-# clamp(min=1e-12) floor → zero gradients in all amplitude-based paths.
+# Use std=1.0 so amplitudes are O(1) for numerically stable gradient checks.
+# (With _LOG_PROB_EPS=float32.tiny, std=1e-3 amplitudes no longer hit the
+# clamp floor, but larger amplitudes still make gradient assertions more robust.)
 @pytest.fixture(scope="module")
 def cbm_attack():
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig

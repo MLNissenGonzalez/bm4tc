@@ -12,6 +12,8 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
+_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
+
 
 # ---------------------------------------------------------------------------
 # Seed
@@ -159,13 +161,13 @@ def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
     if not gen_finite:
         logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
     losses_dis, losses_gen, correct, total = [], [], 0, 0
-    eps = 1e-8
     with torch.no_grad():
         for data, labels in loader:
             data, labels = data.to(device), labels.to(device)
-            abs_sq = cbm.abs_square(cbm.amplitudes(data))
-            log_sq_obs = abs_sq[range(len(labels)), labels].clamp(min=eps).log()
-            log_class_marg = abs_sq.sum(dim=1).clamp(min=eps).log()
+            amp    = cbm.amplitudes(data)
+            abs_sq = cbm.abs_square(amp)
+            log_sq_obs    = 2.0 * amp[range(len(labels)), labels].abs().clamp(min=_LOG_PROB_EPS).log()
+            log_class_marg = abs_sq.sum(dim=1).clamp(min=_LOG_PROB_EPS).log()
             losses_dis.append((log_class_marg - log_sq_obs).mean().item())
             correct += (abs_sq.argmax(dim=1) == labels).sum().item()
             total += len(labels)

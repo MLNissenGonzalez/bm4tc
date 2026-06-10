@@ -7,6 +7,4 @@ evasion:
   norm: 2
   criterion:
     name: "negative log-likelihood"
-    kwargs:
-      eps: 1e-8
   strengths: [0.15]
