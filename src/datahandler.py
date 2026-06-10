@@ -55,9 +55,8 @@ class LabelledDataset:
 # -----------------------------
 # Dataset directories
 # -----------------------------
-_DATA_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", ".datasets")
-)
+from src.utils.paths import data_root as _data_root
+_DATA_DIR = str(_data_root() / ".datasets")
 
 # -----------------------------
 # Supported dataset types

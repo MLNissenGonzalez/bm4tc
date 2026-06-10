@@ -25,9 +25,13 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT          = Path(__file__).parent.parent.parent   # project root
-SWEEP_ROOT    = ROOT / "outputs" / "seed_sweep"
-ANALYSIS_ROOT = ROOT / "analysis" / "outputs"
+ROOT = Path(__file__).parent.parent.parent   # project root
+sys.path.insert(0, str(ROOT))
+
+from src.utils.paths import data_root as _data_root
+
+SWEEP_ROOT    = _data_root() / "outputs" / "seed_sweep"
+ANALYSIS_ROOT = _data_root() / "analysis" / "outputs"
 
 
 def find_sweep_dirs(root: Path):
@@ -38,7 +42,7 @@ def find_sweep_dirs(root: Path):
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
     """Mirror sweep path under analysis/outputs/ (matches sweep.py logic)."""
-    rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
+    rel = sweep_dir.relative_to(_data_root() / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
 
@@ -143,7 +147,7 @@ def main():
     if args.list:
         for s in sweeps:
             status = "OK " if is_visualized(s) else "   "
-            print(f"[{status}] {s.relative_to(ROOT)}")
+            print(f"[{status}] {s.relative_to(_data_root())}")
         return
 
     # Apply filters
@@ -170,7 +174,7 @@ def main():
 
     for sweep_dir in todo:
         ana_dir = analysis_output_dir(sweep_dir)
-        rel = sweep_dir.relative_to(ROOT)
+        rel = sweep_dir.relative_to(_data_root())
 
         # Delete old distributions file if present
         old_dist = ana_dir / "best_run_distributions.png"

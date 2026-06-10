@@ -24,6 +24,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from src.utils.paths import data_root as _data_root
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -42,7 +43,7 @@ from analysis.visualize.distributions import (
     DECISION_BOUNDARY_CMAP,
 )
 
-OUTPUTS_ROOT = PROJECT_ROOT / "analysis" / "outputs"
+OUTPUTS_ROOT = _data_root() / "analysis" / "outputs"
 ALPHA_COL    = "config/trainer.generative.criterion.kwargs.alpha"
 ACC_COL      = "acc"
 DPI          = 150
