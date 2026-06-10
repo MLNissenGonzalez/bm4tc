@@ -134,7 +134,7 @@ def test_mixed_nll_alpha1_finite(cbm, x_batch, y_batch):
 
 def test_renormalize_norm_near_zero(cbm):
     cbm.reset()
-    cbm.renormalize_(target=1.0)
+    cbm.renormalize_(log_target=0.0)
     cbm.reset()
     log_Z = cbm.log_partition_function()
     assert log_Z.abs() < 0.1, f"log_Z after renormalize_ should be ≈ 0, got {log_Z.item():.4f}"

@@ -22,7 +22,7 @@ _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
 
 @dataclass
 class NormControlConfig:
-    target: Optional[Union[float, str]] = 1.0
+    log_target: Optional[Union[float, str]] = 0.0
     hard_every: int = 1
     soft_strength: float = 0.0
 
@@ -65,7 +65,7 @@ class NLLTrainer:
 
         self._nc = train_cfg.norm_control
         self.norm_regularizer: NormRegularizer | None = None
-        self._nc_target: float | None = None
+        self._nc_log_target: float | None = None
 
         self._init_best()
         self.best_tensors = [t.cpu().clone().detach() for t in cbm.tensors]
@@ -81,24 +81,30 @@ class NLLTrainer:
                 f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
             )
 
-    def _resolve_nc_target(self) -> float:
+    def _resolve_nc_log_target(self) -> float:
         import math as _math
-        raw = self._nc.target
+        raw = self._nc.log_target
 
         if raw is None:
             with torch.no_grad():
                 log_Z0 = self.cbm.log_partition_function()
-            target = torch.exp(log_Z0).item()
-            logger.info(f"NormControl: target Z (pretrained) = {target:.6g}")
-            return target
+            log_target = log_Z0.item()
+            logger.info(f"NormControl: log_target (pretrained) = {log_target:.6g}")
+            return log_target
 
         if isinstance(raw, str):
             n_features = self.cbm.n_features
             data_dim = self.datahandler.data_dim
+            in_dim = self.cbm.in_dim
+            out_dim = self.cbm.out_dim
+            bond_dim = self.cbm.bond_dim
             _ns = {
                 "__builtins__": {},
                 "n_features": n_features,
                 "data_dim": data_dim,
+                "in_dim": in_dim,
+                "out_dim": out_dim,
+                "bond_dim": bond_dim,
                 "sqrt": _math.sqrt,
                 "log": _math.log,
                 "exp": _math.exp,
@@ -107,20 +113,22 @@ class NLLTrainer:
                 result = eval(raw, _ns)  # noqa: S307
             except Exception as exc:
                 raise ValueError(
-                    f"NormControl: could not evaluate target expression "
-                    f"{raw!r} (n_features={n_features}, data_dim={data_dim}): {exc}"
+                    f"NormControl: could not evaluate log_target expression "
+                    f"{raw!r} (n_features={n_features}, data_dim={data_dim}, "
+                    f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}): {exc}"
                 ) from exc
-            target = float(result)
-            if target <= 0:
+            log_target = float(result)
+            if not _math.isfinite(log_target):
                 raise ValueError(
-                    f"NormControl: target expression {raw!r} evaluated to "
-                    f"{target}, but Z must be positive."
+                    f"NormControl: log_target expression {raw!r} evaluated to "
+                    f"{log_target}, but log_target must be finite."
                 )
             logger.info(
-                f"NormControl: target Z (expression {raw!r}) = {target:.6g} "
-                f"[n_features={n_features}, data_dim={data_dim}]"
+                f"NormControl: log_target (expression {raw!r}) = {log_target:.6g} "
+                f"[n_features={n_features}, data_dim={data_dim}, "
+                f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}]"
             )
-            return target
+            return log_target
 
         return float(raw)
 
@@ -153,7 +161,7 @@ class NLLTrainer:
             self.optimizer.step()
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
-                self.cbm.renormalize_(target=self._nc_target)
+                self.cbm.renormalize_(log_target=self._nc_log_target)
 
             losses.append(loss.detach().cpu().item())
 
@@ -217,10 +225,10 @@ class NLLTrainer:
         self._collapsed = False
 
         self.cbm.prepare(device=self.device)
-        self._nc_target = self._resolve_nc_target()
+        self._nc_log_target = self._resolve_nc_log_target()
         if self._nc.soft_strength > 0.0:
             self.norm_regularizer = NormRegularizer(
-                strength=self._nc.soft_strength, target=self._nc_target
+                strength=self._nc.soft_strength, log_target=self._nc_log_target
             )
         self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 

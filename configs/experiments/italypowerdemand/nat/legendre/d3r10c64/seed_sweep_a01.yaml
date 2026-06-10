@@ -19,7 +19,7 @@ trainer:
     stop_crit: "gen_loss"
     save: true
     norm_control:
-      target: 1.0
+      log_target: 0.0
       hard_every: 0
       soft_strength: 0.0
     optimizer:

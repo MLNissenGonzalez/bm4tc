@@ -405,9 +405,9 @@ class ConditionalBornMachine(tk.models.MPS):
             term3 = 0.0
         return (term1 + term2 + term3).mean()
 
-    def renormalize_(self, target: float = 1.0) -> None:
+    def renormalize_(self, log_target: float = 0.0) -> None:
         """
-        Rescale all MPS core tensors in-place so Z → target.
+        Rescale all MPS core tensors in-place so log Z → log_target.
 
         Scales _mats_env[i].tensor.data (the actual Parameters) rather than
         self.tensors, which returns boundary-contracted views that do not share
@@ -419,7 +419,7 @@ class ConditionalBornMachine(tk.models.MPS):
             if not torch.isfinite(log_Z):
                 return
             n = len(self._mats_env)
-            alpha = math.exp((math.log(target) - log_Z.item()) / (2 * n))
+            alpha = math.exp((log_target - log_Z.item()) / (2 * n))
             for node in self._mats_env:
                 node.tensor.data.mul_(alpha)
 

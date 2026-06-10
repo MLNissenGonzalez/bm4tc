@@ -22,6 +22,7 @@ else:
 
 sys.path.insert(0, str(project_root))
 
+import math
 import torch
 import matplotlib.pyplot as plt
 import logging
@@ -60,7 +61,7 @@ def sample_and_plot(
     logger.info(f"Sampled {samples.shape[0]} images ({n_per_class} per class)")
 
     num_classes = cbm.out_dim
-    img_dim = int(samples.shape[1] ** 0.5)
+    img_dim = math.isqrt(samples.shape[1])
 
     fig, axes = plt.subplots(2, 5, figsize=(10, 4))
     for c in range(min(num_classes, 10)):

@@ -130,22 +130,22 @@ class TrainResult:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-    Computes  strength * (log Z - log target)²  where log Z = log_partition_function().
+    Computes  strength * (log Z - log_target)²  where log Z = log_partition_function().
 
     Parameters
     ----------
     strength : float
         Regularization coefficient.
-    target : float
-        Target value for the partition function Z (must be > 0).
+    log_target : float
+        Target value for log Z (must be finite).
     """
 
-    def __init__(self, strength: float, target: float):
-        if target <= 0:
-            raise ValueError(f"NormRegularizer: target must be > 0, got {target}")
+    def __init__(self, strength: float, log_target: float):
+        if not math.isfinite(log_target):
+            raise ValueError(f"NormRegularizer: log_target must be finite, got {log_target}")
         super().__init__()
         self.strength = strength
-        self.log_target: float = math.log(target)
+        self.log_target: float = log_target
 
     def forward(self, cbm) -> torch.Tensor:
         log_Z: torch.Tensor = cbm.log_partition_function()
