@@ -103,6 +103,13 @@ Paths under `BM4TC_DATA_ROOT`:
 
 Run `wandb login` once per machine (stores the API key in `~/.netrc`).
 
+On clusters where `/home/` is not mounted on compute nodes, `~/.netrc` is invisible at
+runtime and W&B raises a `CommError`.  Use the environment variable instead:
+
+```bash
+export WANDB_API_KEY=<your_key>   # add to job script or virtualenv activate
+```
+
 The default entity and project are set in `configs/tracking/online.yaml`.  To override
 at runtime:
 
