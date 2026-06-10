@@ -22,7 +22,7 @@ trainer:
     stop_crit: "acc"
     save: false
     norm_control:
-      target: null        # captured from pretrained BM at start of train()
+      log_target: null        # captured from pretrained BM at start of train()
       hard_every: 0       # disabled
       soft_strength: 1e-3 # overridden by grid sweep
     optimizer:
