@@ -24,8 +24,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-ROOT         = Path(__file__).parent.parent.parent
-OUTPUTS_ROOT = ROOT / "analysis" / "outputs"
+ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT))
+from src.utils.paths import data_root as _data_root
+OUTPUTS_ROOT = _data_root() / "analysis" / "outputs"
 
 ALPHA_COL        = "config/trainer.generative.criterion.kwargs.alpha"
 ROB_COL          = "rob/0.2"

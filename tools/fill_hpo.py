@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+from src.utils.paths import data_root as _data_root
 
 from analysis.utils.wandb_fetcher import (
     _get_nested_value,
@@ -470,7 +471,7 @@ def main() -> None:
 
     outputs_dir = Path(args.outputs_dir)
     if not outputs_dir.is_absolute():
-        outputs_dir = PROJECT_ROOT / outputs_dir
+        outputs_dir = _data_root() / outputs_dir
 
     configs_root = PROJECT_ROOT / "configs"
     combos = discover_combos(configs_root)

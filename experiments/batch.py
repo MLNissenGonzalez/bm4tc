@@ -28,6 +28,8 @@ import yaml
 
 ROOT         = Path(__file__).parent.parent
 CONFIGS_ROOT = ROOT / "configs" / "experiments"
+sys.path.insert(0, str(ROOT))
+from src.utils.paths import data_root as _data_root
 
 VALID_TRAINERS = ["nat", "at"]
 
@@ -71,8 +73,8 @@ def get_experiment_field(config_path, kind_stem):
 
 def is_already_run(dataset, trainer, embedding, arch, kind_stem):
     """Return True if an output directory exists for this config."""
-    pattern = f"outputs/{dataset}/{trainer}/{embedding}/{arch}/{kind_stem}_*"
-    return any(ROOT.glob(pattern))
+    pattern = f"{dataset}/{trainer}/{embedding}/{arch}/{kind_stem}_*"
+    return any((_data_root() / "outputs").glob(pattern))
 
 
 def discover_configs():

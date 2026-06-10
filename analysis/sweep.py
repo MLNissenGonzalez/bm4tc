@@ -37,6 +37,8 @@ else:
 
 sys.path.insert(0, str(project_root))
 
+from src.utils.paths import data_root as _data_root
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -296,7 +298,7 @@ eval_cfg = AnalysisConfig(
     device=DEVICE,
 )
 
-sweep_path = project_root / SWEEP_DIR
+sweep_path = _data_root() / SWEEP_DIR
 print("=" * 60)
 print(f"Evaluating sweep: {sweep_path}")
 print(f"Device: {DEVICE}")
@@ -320,14 +322,14 @@ if not df.empty:
 _sp = Path(SWEEP_DIR)
 if _sp.is_absolute():
     try:
-        _sp = _sp.relative_to(project_root)
+        _sp = _sp.relative_to(_data_root())
     except ValueError:
         pass
 try:
     _rel = _sp.relative_to("outputs")
 except ValueError:
     _rel = _sp
-output_dir = project_root / "analysis" / "outputs" / _rel
+output_dir = _data_root() / "analysis" / "outputs" / _rel
 output_dir.mkdir(parents=True, exist_ok=True)
 sweep_name = str(_rel)  # human-readable label used in plot titles and summary
 print(f"Output directory: {output_dir}")

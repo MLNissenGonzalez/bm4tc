@@ -43,14 +43,74 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 **UCR univariate time series**: ECG200, ItalyPowerDemand, ChlorineConcentration, SyntheticControl, CricketX/Y/Z. The last five match the benchmark of [Ding et al. (2022)](https://arxiv.org/abs/2207.04307) for direct comparison with neural-network time-series classifiers.
 
-## Setup
+## Installation
+
+### Option A — conda (local development)
 
 ```bash
 conda env create -f environment.yml   # creates env 'bm4tc'
 conda activate bm4tc
 ```
 
-Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters). See `environment.yml` for the full dependency list.
+### Option B — pip virtualenv (clusters without conda)
+
+```bash
+# Create and activate the virtualenv
+virtualenv -p python3.10 bm4tc_env
+source bm4tc_env/bin/activate
+
+# Core dependencies
+pip install numpy scipy matplotlib jupyter ipykernel tqdm \
+    scikit-learn pandas h5py opt_einsum \
+    hydra-core hydra-optuna-sweeper wandb pytest
+
+# PyTorch with CUDA (adjust --index-url for your driver version)
+pip install torch==2.6.0 torchvision==0.21.0 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Tensor network library
+pip install tensorkrowch
+```
+
+If your cluster requires a proxy, prepend `--proxy http://proxy.example.fr:3128` to each
+`pip install` call.
+
+Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters).
+
+### Data path (`BM4TC_DATA_ROOT`)
+
+By default all outputs and cached datasets are written relative to the repository root.
+On clusters where code and data live on separate filesystems, set:
+
+```bash
+export BM4TC_DATA_ROOT=/path/to/data/root
+# e.g. /ceph/chercheurs/nisseng261/bm4tc
+```
+
+Add this line to your virtualenv's `activate` script (or `.bashrc` / SLURM job header)
+so it is always set when running experiments.  When `BM4TC_DATA_ROOT` is unset the
+repository root is used — the local development layout is unchanged.
+
+Paths under `BM4TC_DATA_ROOT`:
+
+| Subdirectory | Contents |
+|---|---|
+| `outputs/` | Training run checkpoints and Hydra configs |
+| `analysis/outputs/` | Post-hoc evaluation CSVs and figures |
+| `.datasets/` | Cached datasets (MNIST, UCR, 2D toy) |
+
+### Weights & Biases
+
+Run `wandb login` once per machine (stores the API key in `~/.netrc`).
+
+The default entity and project are set in `configs/tracking/online.yaml`.  To override
+at runtime:
+
+```bash
+python -m experiments.train ... tracking.entity=my-entity tracking.project=my-project
+```
+
+To run without W&B logging: `tracking.mode=disabled`.
 
 ## Running Experiments
 

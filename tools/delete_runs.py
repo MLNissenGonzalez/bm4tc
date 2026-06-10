@@ -62,8 +62,9 @@ from analysis.utils.wandb_fetcher import (
 # Constants
 # =============================================================================
 
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
-ANALYSIS_DIR = PROJECT_ROOT / "analysis" / "outputs"
+from src.utils.paths import data_root as _data_root
+OUTPUTS_DIR  = _data_root() / "outputs"
+ANALYSIS_DIR = _data_root() / "analysis" / "outputs"
 DEFAULT_ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 DEFAULT_PROJECT = "bm4tc"
 
