@@ -22,8 +22,6 @@ tracking:
     norm: inf
     criterion:
       name: "negative log-likelihood"
-      kwargs:
-        eps: 1e-8
     strengths: [0.1]
     num_steps: 10
     step_size: null
@@ -40,8 +38,6 @@ trainer:
       norm: inf
       criterion:
         name: "negative log-likelihood"
-        kwargs:
-          eps: 1e-8
       strengths: [0.1]
       num_steps: 10
       step_size: null

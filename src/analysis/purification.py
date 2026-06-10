@@ -12,7 +12,6 @@ class PurificationConfig:
     step_size: Optional[float] = None
     random_start: bool = False
     radii: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
-    eps: float = 1e-12
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):
@@ -52,7 +51,6 @@ class LikelihoodPurification:
             num_steps: int = 20,
             step_size: float | None = None,
             random_start: bool = False,
-            eps: float = 1e-12,
     ):
         """
         Initialize purification.
@@ -64,13 +62,11 @@ class LikelihoodPurification:
                 2.5 * radius / num_steps.
             random_start: Whether to start from random point within
                 the radius ball.
-            eps: Clamping floor for numerical stability in log p(x).
         """
         self.norm = norm
         self.num_steps = num_steps
         self.step_size = step_size
         self.random_start = random_start
-        self.eps = eps
 
     def _project(self, perturbation: torch.Tensor, radius: float) -> torch.Tensor:
         """Project perturbation back into the Lp ball."""
@@ -136,7 +132,7 @@ class LikelihoodPurification:
             delta.requires_grad_(True)
             x_tilde = (data + delta).clamp(input_range[0], input_range[1])
 
-            nll = -born.marginal_log_probability(x_tilde, eps=self.eps).mean()
+            nll = -born.marginal_log_probability(x_tilde).mean()
 
             born.zero_grad()
             if delta.grad is not None:
@@ -157,7 +153,7 @@ class LikelihoodPurification:
 
         # Compute final log p(x) for the purified samples
         with torch.no_grad():
-            log_px = born.marginal_log_probability(purified, eps=self.eps)
+            log_px = born.marginal_log_probability(purified)
 
         return purified, log_px
 

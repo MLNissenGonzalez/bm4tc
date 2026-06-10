@@ -46,7 +46,6 @@ class UQConfig:
     num_steps: int = 20
     step_size: float | None = None
     radii: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
-    eps: float = 1e-12
     random_start: bool = False
 
     # Threshold params
@@ -69,7 +68,6 @@ def compute_log_px(
     born,
     loader: DataLoader,
     device: torch.device,
-    eps: float = 1e-12,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute marginal log p(x) for all samples in a loader.
 
@@ -77,7 +75,6 @@ def compute_log_px(
         born: ConditionalBornMachine instance.
         loader: DataLoader yielding (data, labels) tuples.
         device: Torch device.
-        eps: Clamping floor for log stability.
 
     Returns:
         Tuple of (log_px, labels) tensors concatenated over all batches.
@@ -90,7 +87,7 @@ def compute_log_px(
     with torch.no_grad():
         for batch_data, batch_labels in loader:
             batch_data = batch_data.to(device)
-            log_px = born.marginal_log_probability(batch_data, eps=eps)
+            log_px = born.marginal_log_probability(batch_data)
             all_log_px.append(log_px.cpu())
             all_labels.append(batch_labels)
 
@@ -102,7 +99,6 @@ def compute_thresholds(
     clean_loader: DataLoader,
     percentiles: List[float],
     device: torch.device,
-    eps: float = 1e-12,
 ) -> Tuple[Dict[float, float], torch.Tensor]:
     """Compute percentile-based detection thresholds from clean data.
 
@@ -114,14 +110,13 @@ def compute_thresholds(
         clean_loader: DataLoader for clean (in-distribution) data.
         percentiles: List of percentile values (e.g., [1, 5, 10, 20]).
         device: Torch device.
-        eps: Clamping floor for log stability.
 
     Returns:
         Tuple of:
             - Dict mapping percentile -> threshold value.
             - Tensor of all clean log p(x) values.
     """
-    clean_log_px, _ = compute_log_px(born, clean_loader, device, eps)
+    clean_log_px, _ = compute_log_px(born, clean_loader, device)
 
     thresholds = {}
     for p in percentiles:
@@ -287,7 +282,7 @@ class UQEvaluation:
         # 2. Compute clean log p(x) and thresholds
         logger.info("Computing clean log p(x) and thresholds...")
         thresholds, clean_log_px_tensor = compute_thresholds(
-            born, clean_loader, cfg.percentiles, device, cfg.eps
+            born, clean_loader, cfg.percentiles, device
         )
         clean_log_px = clean_log_px_tensor.numpy()
 
@@ -350,7 +345,7 @@ class UQEvaluation:
                     all_adv_total += len(batch_labels)
 
                     # Compute log p(x_adv)
-                    log_px_adv = born.marginal_log_probability(adv_data, eps=cfg.eps)
+                    log_px_adv = born.marginal_log_probability(adv_data)
                     all_adv_log_px.append(log_px_adv.cpu())
 
                 adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
@@ -384,7 +379,6 @@ class UQEvaluation:
             num_steps=cfg.num_steps,
             step_size=cfg.step_size,
             random_start=cfg.random_start,
-            eps=cfg.eps,
         )
 
         purification_results: Dict[Tuple[float, float], PurificationMetrics] = {}
@@ -410,9 +404,7 @@ class UQEvaluation:
 
                     # Log p(x) before purification
                     with torch.no_grad():
-                        log_px_before = born.marginal_log_probability(
-                            adv_data, eps=cfg.eps
-                        )
+                        log_px_before = born.marginal_log_probability(adv_data)
                         # Classify before purification
                         adv_probs = born.class_probabilities(adv_data)
                         adv_preds = adv_probs.argmax(dim=1)
@@ -478,7 +470,7 @@ class UQEvaluation:
                 batch_labels = batch_labels.to(device)
 
                 with torch.no_grad():
-                    log_px_before = born.marginal_log_probability(batch_data, eps=cfg.eps)
+                    log_px_before = born.marginal_log_probability(batch_data)
 
                 purified, log_px_after = purifier.purify(born, batch_data, radius, device)
 

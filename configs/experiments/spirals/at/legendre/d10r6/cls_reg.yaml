@@ -21,7 +21,7 @@ tracking:
     norm: 2
     criterion:
       name: "negative log-likelihood"
-      kwargs: {eps: 1e-8}
+      kwargs:
     strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre (10% of domain width)
     num_steps: 10
     step_size: null
@@ -38,7 +38,7 @@ trainer:
       norm: 2
       criterion:
         name: "negative log-likelihood"
-        kwargs: {eps: 1e-8}
+        kwargs:
       strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre
       num_steps: 10
       step_size: null

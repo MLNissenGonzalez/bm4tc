@@ -9,6 +9,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Floor for log computations: only clamps actual float32 underflow (exact 0.0).
+# All normal float32 amplitudes pass through with correct gradients.
+_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
+
 
 def draw_from_grid(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     """
@@ -354,7 +358,7 @@ class ConditionalBornMachine(tk.models.MPS):
         logger.info(f"[CBM] Cached log Z = {self._log_Z:.6f}")
         return self._log_Z
 
-    def marginal_log_probability(self, data: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    def marginal_log_probability(self, data: torch.Tensor) -> torch.Tensor:
         """
         log p(x) = log Σ_c |ψ(x,c)|² - log Z  →  (B,).
 
@@ -364,7 +368,7 @@ class ConditionalBornMachine(tk.models.MPS):
         if self._log_Z is None:
             self.cache_log_Z()
         abs_sq = self.abs_square(self.amplitudes(data))
-        return torch.log(abs_sq.sum(dim=-1).clamp(min=eps)) - self._log_Z
+        return torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS)) - self._log_Z
 
     # ======================================================================
     # Training
@@ -375,7 +379,6 @@ class ConditionalBornMachine(tk.models.MPS):
         data: torch.Tensor,
         labels: torch.Tensor,
         alpha: float,
-        eps: float = 1e-12,
     ) -> torch.Tensor:
         """
         Mixed NLL loss interpolating between discriminative (α=0) and generative (α=1).
@@ -386,9 +389,10 @@ class ConditionalBornMachine(tk.models.MPS):
         α=1  →  -log p(x,c)   (pure generative)
         """
         B = data.shape[0]
-        abs_sq = self.abs_square(self.amplitudes(data))              # (B, C)
-        term1 = -torch.log(abs_sq[torch.arange(B), labels].clamp(min=eps))
-        term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=eps))
+        amp    = self.amplitudes(data)                               # (B, C)
+        abs_sq = self.abs_square(amp)                                # (B, C)
+        term1 = -2.0 * torch.log(amp[torch.arange(B), labels].abs().clamp(min=_LOG_PROB_EPS))
+        term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS))
         if alpha > 0.0:
             log_Z = self.log_partition_function()
             if not torch.isfinite(log_Z):

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from src.utils.train import CriterionConfig
 
+_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
+
 
 @dataclass
 class EvasionConfig:
@@ -189,13 +191,11 @@ class JointProjectedGradientDescent:
             num_steps: int = 10,
             step_size: float | None = None,
             random_start: bool = True,
-            eps: float = 1e-12,
     ):
         self.norm = norm
         self.num_steps = num_steps if num_steps is not None else 10
         self.step_size = step_size
         self.random_start = random_start
-        self.eps = eps
 
     def _project(self, perturbation: torch.Tensor, strength: float) -> torch.Tensor:
         if self.norm == "inf":
@@ -245,7 +245,7 @@ class JointProjectedGradientDescent:
             delta.requires_grad_(True)
             _amps = born.amplitudes if hasattr(born, "amplitudes") else born.classifier.amplitudes
             amplitudes  = _amps(naturals + delta)                                # (B, K)
-            log_joint   = 2 * torch.log(amplitudes.abs().clamp(min=self.eps))   # (B, K)
+            log_joint   = 2 * torch.log(amplitudes.abs().clamp(min=_LOG_PROB_EPS))  # (B, K)
             log_joint_w = log_joint.masked_fill(true_class_mask, float('-inf'))
             loss        = log_joint_w.max(dim=-1).values.mean()
 
