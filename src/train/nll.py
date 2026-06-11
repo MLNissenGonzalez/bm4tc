@@ -13,7 +13,15 @@ from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 
 import logging
+from contextlib import contextmanager
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _nullctx():
+    yield
+
 
 _LOSS_METRICS = {"dis_loss", "gen_loss"}
 _ACC_METRICS = {"acc", "rob"}
@@ -247,7 +255,9 @@ class NLLTrainer:
             self.step += 1
 
             try:
-                loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                ctx = torch.autograd.detect_anomaly() if self._nc.debug else _nullctx()
+                with ctx:
+                    loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
             except RuntimeError as e:
                 msg = str(e)
                 if "out of memory" in msg.lower():
@@ -264,14 +274,14 @@ class NLLTrainer:
                     diag = self._diagnostics(data)
                     term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
                     logger.warning(
-                        f"NaN/inf loss at step {self.step} (also after norm_net.reset()) — "
+                        f"NaN/inf loss at step {self.step} (also after cbm.reset()) — "
                         f"{self._format_diagnostics(diag)}\n"
                         f"  term breakdown (no-grad): {term_info}"
                     )
                     self._collapsed = True
                     break
                 logger.warning(
-                    f"NaN/inf loss at step {self.step} recovered after norm_net.reset(); continuing."
+                    f"NaN/inf loss at step {self.step} recovered after cbm.reset(); continuing."
                 )
 
             if self.norm_regularizer is not None:
