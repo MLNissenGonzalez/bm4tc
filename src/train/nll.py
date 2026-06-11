@@ -252,7 +252,7 @@ class NLLTrainer:
             self.step += 1
 
             try:
-                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha, debug=self._nc.debug)
             except RuntimeError as e:
                 msg = str(e)
                 if "out of memory" in msg.lower():
@@ -263,17 +263,14 @@ class NLLTrainer:
                 break
 
             if torch.isnan(nll) or torch.isinf(nll):
-                logger.warning(
-                    f"NaN/inf loss at step {self.step} — retrying with grad diagnostics..."
-                )
+                # Reset clears stale tensorkrowch contraction nodes; retry is for recovery only.
                 self.cbm.reset()
-                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha, debug=True)
+                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
                 if torch.isnan(nll) or torch.isinf(nll):
                     diag = self._diagnostics(data)
-                    term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
                     logger.warning(
-                        f"  still NaN after cbm.reset() — {self._format_diagnostics(diag)}\n"
-                        f"  term breakdown (no-grad): {term_info}"
+                        f"NaN/inf loss at step {self.step} (also after cbm.reset()) — "
+                        f"{self._format_diagnostics(diag)}"
                     )
                     self._collapsed = True
                     break
