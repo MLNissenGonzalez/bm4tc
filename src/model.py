@@ -379,6 +379,7 @@ class ConditionalBornMachine(tk.models.MPS):
         data: torch.Tensor,
         labels: torch.Tensor,
         alpha: float,
+        debug: bool = False,
     ) -> torch.Tensor:
         """
         Mixed NLL loss interpolating between discriminative (α=0) and generative (α=1).
@@ -387,22 +388,55 @@ class ConditionalBornMachine(tk.models.MPS):
 
         α=0  →  -log p(c|x)   (pure discriminative; log_partition_function not called)
         α=1  →  -log p(x,c)   (pure generative)
+
+        debug=True: log per-term NaN/inf stats inside the grad-tracked forward.
+        Non-finite log_Z is logged rather than raised so all terms are visible.
         """
+        def _stats(t: torch.Tensor) -> str:
+            fin = t[torch.isfinite(t)]
+            m = fin.mean().item() if fin.numel() else float("nan")
+            nf = int((~torch.isfinite(t)).sum().item())
+            return f"mean={m:.4g} nonfinite={nf}"
+
         B = data.shape[0]
         amp    = self.amplitudes(data)                               # (B, C)
         abs_sq = self.abs_square(amp)                                # (B, C)
+
+        if debug:
+            nf_amp = int((~torch.isfinite(amp)).sum().item())
+            logger.warning(
+                f"  [mixed_nll/grad] amp: abs_max={amp.abs().max().item():.4g} nonfinite={nf_amp}"
+            )
+
         term1 = -2.0 * torch.log(amp[torch.arange(B), labels].abs().clamp(min=_LOG_PROB_EPS))
+
+        if debug:
+            logger.warning(f"  [mixed_nll/grad] term1(-2·log|ψ(x,c)|): {_stats(term1)}")
+
         term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS))
+
+        if debug:
+            if alpha < 1.0:
+                logger.warning(f"  [mixed_nll/grad] term2((1-α)·log Σ|ψ|²): {_stats(term2)}")
+            else:
+                logger.warning("  [mixed_nll/grad] term2=0 (α=1)")
+
         if alpha > 0.0:
             log_Z = self.log_partition_function()
             if not torch.isfinite(log_Z):
-                raise RuntimeError(
-                    f"log_partition_function returned non-finite value: {log_Z.item():.4g}. "
-                    "MPS has collapsed or exploded."
-                )
+                if debug:
+                    logger.warning(f"  [mixed_nll/grad] log_Z={log_Z.item():.4g} (non-finite)")
+                else:
+                    raise RuntimeError(
+                        f"log_partition_function returned non-finite value: {log_Z.item():.4g}. "
+                        "MPS has collapsed or exploded."
+                    )
+            elif debug:
+                logger.warning(f"  [mixed_nll/grad] term3(α·log_Z): log_Z={log_Z.item():.4g}")
             term3 = alpha * log_Z
         else:
             term3 = 0.0
+
         return (term1 + term2 + term3).mean()
 
     def renormalize_(self, log_target: float = 0.0) -> None:
