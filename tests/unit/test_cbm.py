@@ -211,6 +211,39 @@ def test_marginal_log_prob_no_eps_param():
     assert "eps" not in sig.parameters
 
 
+def test_large_amplitude_numerical_stability():
+    """logsumexp path stays finite when |ψ| > sqrt(float32_max) ≈ 1.84e19 (amp² overflows)."""
+    cbm = _tiny_cbm()
+    x = torch.rand(4, 2)
+    y = torch.randint(0, 2, (4,))
+
+    with torch.no_grad():
+        amp0 = cbm.amplitudes(x)
+        max_abs = float(amp0.abs().max().clamp(min=1e-30))
+        c = (2e19 / max_abs) ** (1.0 / cbm.n_features)
+        for node in cbm._mats_env:
+            node.tensor.data.mul_(c)
+
+    cbm.reset()
+    with torch.no_grad():
+        amp = cbm.amplitudes(x)
+    assert amp.abs().max().item() > 1.84e19, "setup: amplitudes not large enough"
+    assert amp.isfinite().all(), "setup: amplitudes must be finite (not yet overflowed)"
+
+    cbm.reset()
+    probs = cbm.class_probabilities(x)
+    assert probs.isfinite().all() and (probs >= 0).all()
+
+    cbm.cache_log_Z()
+    cbm.reset()
+    log_px = cbm.marginal_log_probability(x)
+    assert log_px.isfinite().all()
+
+    cbm.reset()
+    loss = cbm.mixed_nll(x, y, alpha=0.5)
+    assert loss.isfinite()
+
+
 def test_mixed_nll_term1_gradient_at_small_amplitude():
     """With the old eps=1e-12 floor on abs_sq, amplitudes ~1e-7 (abs_sq~1e-14)
     hit the clamp and produced zero/wrong gradients.  The 2·log(abs) form with

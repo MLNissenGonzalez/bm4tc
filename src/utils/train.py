@@ -164,12 +164,12 @@ def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
     with torch.no_grad():
         for data, labels in loader:
             data, labels = data.to(device), labels.to(device)
-            amp    = cbm.amplitudes(data)
-            abs_sq = cbm.abs_square(amp)
-            log_sq_obs    = 2.0 * amp[range(len(labels)), labels].abs().clamp(min=_LOG_PROB_EPS).log()
-            log_class_marg = abs_sq.sum(dim=1).clamp(min=_LOG_PROB_EPS).log()
+            amp     = cbm.amplitudes(data)
+            log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))
+            log_sq_obs     = 2.0 * log_abs[range(len(labels)), labels]
+            log_class_marg = torch.logsumexp(2.0 * log_abs, dim=1)
             losses_dis.append((log_class_marg - log_sq_obs).mean().item())
-            correct += (abs_sq.argmax(dim=1) == labels).sum().item()
+            correct += (log_abs.argmax(dim=1) == labels).sum().item()
             total += len(labels)
             if gen_finite:
                 gen_batch = (log_Z - log_sq_obs).mean().item()
