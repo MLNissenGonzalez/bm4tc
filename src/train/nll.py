@@ -155,12 +155,12 @@ class NLLTrainer:
                 result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
                 result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
                 result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
-                result["amp_nonfinite_frac"] = (~finite_mask).float().mean().item()
+                result["amp_nonfinite_count"] = int((~finite_mask).sum().item())
             except Exception:
                 result["log_amp_sq_mean"] = float("nan")
                 result["log_amp_sq_min"] = float("nan")
                 result["log_amp_sq_max"] = float("nan")
-                result["amp_nonfinite_frac"] = float("nan")
+                result["amp_nonfinite_count"] = -1
         return result
 
     def _nan_loss_diagnostics(
@@ -182,7 +182,7 @@ class NLLTrainer:
                     f"term1(-2·log|ψ(x,c)|): "
                     f"mean={t1[~nan1].mean().item():.4g} "
                     f"max={t1[~nan1].max().item():.4g} "
-                    f"nonfinite={nan1.float().mean().item():.1%}"
+                    f"nonfinite={int(nan1.sum().item())}"
                 )
 
                 # term2: (1-α) log Σ_c |ψ|²  — zero for alpha=1
@@ -193,7 +193,7 @@ class NLLTrainer:
                     parts.append(
                         f"term2((1-α)·log Σ|ψ|²): "
                         f"mean={t2[~nan2].mean().item():.4g} "
-                        f"nonfinite={nan2.float().mean().item():.1%}"
+                        f"nonfinite={int(nan2.sum().item())}"
                     )
                 else:
                     parts.append("term2=0 (α=1)")
@@ -228,14 +228,14 @@ class NLLTrainer:
         mean_ = d.get("log_amp_sq_mean", float("nan"))
         min_ = d.get("log_amp_sq_min", float("nan"))
         max_ = d.get("log_amp_sq_max", float("nan"))
-        nf = d.get("amp_nonfinite_frac", 0.0)
+        nf_count = d.get("amp_nonfinite_count", 0)
         if not math.isfinite(mean_):
             parts.append("amplitudes non-finite")
         else:
             s = f"log|amp|² mean={mean_:.4g} min={min_:.4g} max={max_:.4g}"
-            if nf > 0:
+            if nf_count > 0:
                 tag = "overflow" if mean_ > 80 else "underflow"
-                s += f" ({nf:.1%} non-finite → {tag})"
+                s += f" ({nf_count} non-finite → {tag})"
             parts.append(s)
         return "; ".join(parts)
 
