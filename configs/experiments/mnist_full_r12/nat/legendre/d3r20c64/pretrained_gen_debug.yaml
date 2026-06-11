@@ -17,15 +17,15 @@ trainer:
   nll:
     alpha: 1.0
     max_epoch: 20
-    batch_size: 64
+    batch_size: 256
     patience: 999
     stop_crit: "gen_loss"
     save: false
     norm_control:
-      hard_every: 1
-      soft_strength: 0.0
+      hard_every: 0
+      soft_strength: 0.6
       log_target: 0.0
-      debug: true
+      debug: false
     optimizer:
       name: "adam"
       kwargs:
