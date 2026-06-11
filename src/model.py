@@ -413,13 +413,16 @@ class ConditionalBornMachine(tk.models.MPS):
         if debug:
             logger.warning(f"  [mixed_nll/grad] term1(-2·log|ψ(x,c)|): {_stats(term1)}")
 
-        term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS))
-
-        if debug:
-            if alpha < 1.0:
+        # Guard: (1-alpha)*log(...) with alpha=1 computes 0.0*inf = NaN when class
+        # amplitudes overflow. Skip the computation entirely when it contributes nothing.
+        if alpha < 1.0:
+            term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS))
+            if debug:
                 logger.warning(f"  [mixed_nll/grad] term2((1-α)·log Σ|ψ|²): {_stats(term2)}")
-            else:
-                logger.warning("  [mixed_nll/grad] term2=0 (α=1)")
+        else:
+            term2 = torch.zeros(B, device=data.device)
+            if debug:
+                logger.warning("  [mixed_nll/grad] term2=0 (α=1, not computed)")
 
         if alpha > 0.0:
             log_Z = self.log_partition_function()
