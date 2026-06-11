@@ -186,9 +186,9 @@ class NLLTrainer:
                 )
 
                 # term2: (1-α) log Σ_c |ψ|²  — zero for alpha=1
+                log_abs_diag = torch.log(amp.abs().clamp(min=_tiny))           # (B, C)
                 if alpha < 1.0:
-                    abs_sq_sum = amp.abs().pow(2).sum(dim=-1).clamp(min=_tiny)
-                    t2 = (1.0 - alpha) * torch.log(abs_sq_sum)
+                    t2 = (1.0 - alpha) * torch.logsumexp(2.0 * log_abs_diag, dim=-1)
                     nan2 = torch.isnan(t2) | torch.isinf(t2)
                     parts.append(
                         f"term2((1-α)·log Σ|ψ|²): "
@@ -207,7 +207,7 @@ class NLLTrainer:
                 t2_full = (
                     torch.zeros(B, device=data.device)
                     if alpha >= 1.0
-                    else (1.0 - alpha) * torch.log(amp.abs().pow(2).sum(dim=-1).clamp(min=_tiny))
+                    else (1.0 - alpha) * torch.logsumexp(2.0 * log_abs_diag, dim=-1)
                 )
                 log_Z_val = self.cbm.log_partition_function() if alpha > 0.0 else torch.tensor(0.0)
                 loss_recomputed = (t1 + t2_full + alpha * log_Z_val).mean()

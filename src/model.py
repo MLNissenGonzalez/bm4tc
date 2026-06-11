@@ -250,9 +250,9 @@ class ConditionalBornMachine(tk.models.MPS):
 
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """Born-rule normalized class probabilities → (B, num_classes)."""
-        abs_sq = self.abs_square(self.amplitudes(data))
-        denom = abs_sq.sum(dim=-1, keepdim=True).clamp(min=torch.finfo(abs_sq.dtype).tiny)
-        return abs_sq / denom
+        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
+        log_probs = 2.0 * log_abs - torch.logsumexp(2.0 * log_abs, dim=-1, keepdim=True)
+        return log_probs.exp()
 
     def log_partition_function(self) -> torch.Tensor:
         """
@@ -367,8 +367,8 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         if self._log_Z is None:
             self.cache_log_Z()
-        abs_sq = self.abs_square(self.amplitudes(data))
-        return torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS)) - self._log_Z
+        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
+        return torch.logsumexp(2.0 * log_abs, dim=-1) - self._log_Z
 
     # ======================================================================
     # Training
@@ -399,8 +399,8 @@ class ConditionalBornMachine(tk.models.MPS):
             return f"mean={m:.4g} nonfinite={nf}"
 
         B = data.shape[0]
-        amp    = self.amplitudes(data)                               # (B, C)
-        abs_sq = self.abs_square(amp)                                # (B, C)
+        amp     = self.amplitudes(data)                                    # (B, C)
+        log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))           # (B, C)
 
         if debug:
             nf_amp = int((~torch.isfinite(amp)).sum().item())
@@ -408,15 +408,14 @@ class ConditionalBornMachine(tk.models.MPS):
                 f"  [mixed_nll/grad] amp: abs_max={amp.abs().max().item():.4g} nonfinite={nf_amp}"
             )
 
-        term1 = -2.0 * torch.log(amp[torch.arange(B), labels].abs().clamp(min=_LOG_PROB_EPS))
+        term1 = -2.0 * log_abs[torch.arange(B), labels]
 
         if debug:
             logger.warning(f"  [mixed_nll/grad] term1(-2·log|ψ(x,c)|): {_stats(term1)}")
 
-        # Guard: (1-alpha)*log(...) with alpha=1 computes 0.0*inf = NaN when class
-        # amplitudes overflow. Skip the computation entirely when it contributes nothing.
+        # Guard: skip when alpha=1 since it contributes nothing.
         if alpha < 1.0:
-            term2 = (1.0 - alpha) * torch.log(abs_sq.sum(dim=-1).clamp(min=_LOG_PROB_EPS))
+            term2 = (1.0 - alpha) * torch.logsumexp(2.0 * log_abs, dim=-1)
             if debug:
                 logger.warning(f"  [mixed_nll/grad] term2((1-α)·log Σ|ψ|²): {_stats(term2)}")
         else:
