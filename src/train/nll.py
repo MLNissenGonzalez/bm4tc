@@ -168,7 +168,6 @@ class NLLTrainer:
         parts = []
         with torch.no_grad():
             try:
-                self.cbm.reset()
                 amp = self.cbm.amplitudes(data)           # (B, C)
                 B = data.shape[0]
 
@@ -259,7 +258,7 @@ class NLLTrainer:
                 break
 
             if torch.isnan(loss) or torch.isinf(loss):
-                self.cbm.norm_net.reset()
+                self.cbm.reset()
                 loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
                 if torch.isnan(loss) or torch.isinf(loss):
                     diag = self._diagnostics(data)
