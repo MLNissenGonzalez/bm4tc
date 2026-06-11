@@ -241,6 +241,8 @@ class NLLTrainer:
 
     def _train_epoch(self):
         losses = []
+        nll_losses = []
+        reg_losses = []
         self._collapsed = False
         self._debug_diags: list = []
         self.cbm.train()
@@ -250,7 +252,7 @@ class NLLTrainer:
             self.step += 1
 
             try:
-                loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
             except RuntimeError as e:
                 msg = str(e)
                 if "out of memory" in msg.lower():
@@ -260,10 +262,10 @@ class NLLTrainer:
                 self._collapsed = True
                 break
 
-            if torch.isnan(loss) or torch.isinf(loss):
+            if torch.isnan(nll) or torch.isinf(nll):
                 self.cbm.reset()
-                loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
-                if torch.isnan(loss) or torch.isinf(loss):
+                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                if torch.isnan(nll) or torch.isinf(nll):
                     diag = self._diagnostics(data)
                     term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
                     logger.warning(
@@ -278,7 +280,11 @@ class NLLTrainer:
                 )
 
             if self.norm_regularizer is not None:
-                loss = loss + self.norm_regularizer(self.cbm)
+                reg = self.norm_regularizer(self.cbm)
+                loss = nll + reg
+            else:
+                reg = None
+                loss = nll
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -292,9 +298,14 @@ class NLLTrainer:
                 logger.debug(f"step={self.step}: {self._format_diagnostics(diag)}")
                 self._debug_diags.append(diag)
 
+            nll_losses.append(nll.detach().cpu().item())
+            reg_losses.append(reg.detach().cpu().item() if reg is not None else 0.0)
             losses.append(loss.detach().cpu().item())
 
-        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
+        n = len(losses)
+        self._train_loss = sum(losses)    / n if losses else float("nan")
+        self._train_nll  = sum(nll_losses) / n if nll_losses else float("nan")
+        self._train_reg  = sum(reg_losses) / n if reg_losses else float("nan")
 
     def _update(self):
         current_value = self.valid_perf.get(self.stopping_criterion_name)
@@ -380,7 +391,8 @@ class NLLTrainer:
             self.valid_perf = {"dis_loss": dis_loss, "acc": acc, "gen_loss": gen_loss}
 
             pbar.set_postfix(
-                loss=f"{self._train_loss:.4f}",
+                nll=f"{self._train_nll:.4f}",
+                reg=f"{self._train_reg:.4f}",
                 dis=f"{dis_loss:.4f}",
                 acc=f"{acc:.4f}",
             )
@@ -388,6 +400,8 @@ class NLLTrainer:
             if on_epoch_end is not None:
                 metrics = {
                     "nll/train":      self._train_loss,
+                    "nll/train_nll":  self._train_nll,
+                    "nll/train_reg":  self._train_reg,
                     "dis_loss/valid": dis_loss,
                     "gen_loss/valid": gen_loss,
                     "acc/valid":      acc,
