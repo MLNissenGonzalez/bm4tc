@@ -25,6 +25,7 @@ class NormControlConfig:
     log_target: Optional[Union[float, str]] = 0.0
     hard_every: int = 1
     soft_strength: float = 0.0
+    debug: bool = False
 
 
 @dataclass
@@ -132,9 +133,56 @@ class NLLTrainer:
 
         return float(raw)
 
+    def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
+        """Compute log_Z and log|amp|² stats. No-grad; safe to call mid-training."""
+        result: Dict[str, float] = {}
+        _tiny = float(torch.finfo(torch.float32).tiny)
+        with torch.no_grad():
+            try:
+                self.cbm.reset()
+                log_Z = self.cbm.log_partition_function()
+                result["log_Z"] = log_Z.item()
+            except Exception:
+                result["log_Z"] = float("nan")
+            try:
+                amp = self.cbm.amplitudes(data)
+                log_abs_sq = 2.0 * torch.log(amp.abs().clamp(min=_tiny))
+                finite_mask = torch.isfinite(log_abs_sq)
+                finite = log_abs_sq[finite_mask]
+                result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
+                result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
+                result["amp_nonfinite_frac"] = (~finite_mask).float().mean().item()
+            except Exception:
+                result["log_amp_sq_mean"] = float("nan")
+                result["log_amp_sq_min"] = float("nan")
+                result["amp_nonfinite_frac"] = float("nan")
+        return result
+
+    def _format_diagnostics(self, d: Dict[str, float]) -> str:
+        parts = []
+        log_Z = d.get("log_Z", float("nan"))
+        if not math.isfinite(log_Z):
+            tag = "overflow" if log_Z > 0 else ("underflow" if log_Z < 0 else "nan")
+            parts.append(f"norm {tag} (log_Z={log_Z:.4g})")
+        else:
+            parts.append(f"log_Z={log_Z:.4g}")
+        mean_ = d.get("log_amp_sq_mean", float("nan"))
+        min_ = d.get("log_amp_sq_min", float("nan"))
+        nf = d.get("amp_nonfinite_frac", 0.0)
+        if not math.isfinite(mean_):
+            parts.append("amplitudes non-finite")
+        else:
+            s = f"log|amp|² mean={mean_:.4g} min={min_:.4g}"
+            if nf > 0:
+                tag = "overflow" if mean_ > 80 else "underflow"
+                s += f" ({nf:.1%} non-finite → {tag})"
+            parts.append(s)
+        return "; ".join(parts)
+
     def _train_epoch(self):
         losses = []
         self._collapsed = False
+        self._debug_diags: list = []
         self.cbm.train()
 
         for data, labels in self.datahandler.classification["train"]:
@@ -144,12 +192,19 @@ class NLLTrainer:
             try:
                 loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
             except RuntimeError as e:
-                logger.warning(f"Norm or amplitude over-/underflow ({e}). Stopping early.")
+                msg = str(e)
+                if "out of memory" in msg.lower():
+                    logger.error(f"CUDA OOM at step {self.step} — re-raising.")
+                    raise
+                logger.warning(f"Training stopped at step {self.step}: {msg}")
                 self._collapsed = True
                 break
 
             if torch.isnan(loss):
-                logger.warning("NaN loss detected — aborting epoch.")
+                diag = self._diagnostics(data)
+                logger.warning(
+                    f"NaN loss at step {self.step} — {self._format_diagnostics(diag)}. Stopping early."
+                )
                 self._collapsed = True
                 break
 
@@ -162,6 +217,11 @@ class NLLTrainer:
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.cbm.renormalize_(log_target=self._nc_log_target)
+
+            if self._nc.debug:
+                diag = self._diagnostics(data)
+                logger.debug(f"step={self.step}: {self._format_diagnostics(diag)}")
+                self._debug_diags.append(diag)
 
             losses.append(loss.detach().cpu().item())
 
@@ -242,7 +302,7 @@ class NLLTrainer:
             self._train_epoch()
 
             if self._collapsed:
-                logger.info("Norm collapsed or NaN loss; ending training.")
+                logger.info("Ending training early (see warning above).")
                 break
 
             dis_loss, acc, gen_loss = eval_metrics(
@@ -257,12 +317,34 @@ class NLLTrainer:
             )
 
             if on_epoch_end is not None:
-                on_epoch_end(self.epoch, {
+                metrics = {
                     "nll/train":      self._train_loss,
                     "dis_loss/valid": dis_loss,
                     "gen_loss/valid": gen_loss,
                     "acc/valid":      acc,
-                })
+                }
+                if self._nc.debug and self._debug_diags:
+                    log_Zs = [d["log_Z"] for d in self._debug_diags if math.isfinite(d.get("log_Z", float("nan")))]
+                    means  = [d["log_amp_sq_mean"] for d in self._debug_diags if math.isfinite(d.get("log_amp_sq_mean", float("nan")))]
+                    mins   = [d["log_amp_sq_min"] for d in self._debug_diags if math.isfinite(d.get("log_amp_sq_min", float("nan")))]
+                    if log_Zs:
+                        metrics["norm/log_Z_mean"] = sum(log_Zs) / len(log_Zs)
+                        metrics["norm/log_Z_min"]  = min(log_Zs)
+                        metrics["norm/log_Z_max"]  = max(log_Zs)
+                    if means:
+                        metrics["norm/log_amp_sq_mean"] = sum(means) / len(means)
+                    if mins:
+                        metrics["norm/log_amp_sq_min"] = min(mins)
+                    logger.info(
+                        f"[debug] epoch {self.epoch}: "
+                        + self._format_diagnostics({
+                            "log_Z":         metrics.get("norm/log_Z_mean", float("nan")),
+                            "log_amp_sq_mean": metrics.get("norm/log_amp_sq_mean", float("nan")),
+                            "log_amp_sq_min":  metrics.get("norm/log_amp_sq_min", float("nan")),
+                            "amp_nonfinite_frac": 0.0,
+                        })
+                    )
+                on_epoch_end(self.epoch, metrics)
 
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
