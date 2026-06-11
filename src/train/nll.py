@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 
-_LOSS_METRICS = {"dis_loss", "gen_loss"}
+_LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss"}
 _ACC_METRICS = {"acc", "rob"}
-_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
+_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "mixed_loss", "acc", "rob"}
 
 
 @dataclass
@@ -387,7 +387,10 @@ class NLLTrainer:
             dis_loss, acc, gen_loss = eval_metrics(
                 self.cbm, self.datahandler.classification["valid"], self.device
             )
-            self.valid_perf = {"dis_loss": dis_loss, "acc": acc, "gen_loss": gen_loss}
+            alpha = self.train_cfg.alpha
+            mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
+            self.valid_perf = {"dis_loss": dis_loss, "acc": acc, "gen_loss": gen_loss,
+                               "mixed_loss": mixed_loss}
 
             pbar.set_postfix(
                 nll=f"{self._train_nll:.4f}",
@@ -401,9 +404,10 @@ class NLLTrainer:
                     "nll/train":      self._train_loss,
                     "nll/train_nll":  self._train_nll,
                     "nll/train_reg":  self._train_reg,
-                    "dis_loss/valid": dis_loss,
-                    "gen_loss/valid": gen_loss,
-                    "acc/valid":      acc,
+                    "dis_loss/valid":   dis_loss,
+                    "gen_loss/valid":   gen_loss,
+                    "mixed_loss/valid": mixed_loss,
+                    "acc/valid":        acc,
                 }
                 if self._nc.debug and self._debug_diags:
                     log_Zs = [d["log_Z"] for d in self._debug_diags if math.isfinite(d.get("log_Z", float("nan")))]
