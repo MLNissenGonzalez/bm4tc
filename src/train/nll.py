@@ -258,15 +258,22 @@ class NLLTrainer:
                 self._collapsed = True
                 break
 
-            if torch.isnan(loss):
-                diag = self._diagnostics(data)
-                term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
+            if torch.isnan(loss) or torch.isinf(loss):
+                self.cbm.norm_net.reset()
+                loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                if torch.isnan(loss) or torch.isinf(loss):
+                    diag = self._diagnostics(data)
+                    term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
+                    logger.warning(
+                        f"NaN/inf loss at step {self.step} (also after norm_net.reset()) — "
+                        f"{self._format_diagnostics(diag)}\n"
+                        f"  term breakdown (no-grad): {term_info}"
+                    )
+                    self._collapsed = True
+                    break
                 logger.warning(
-                    f"NaN loss at step {self.step} — {self._format_diagnostics(diag)}\n"
-                    f"  term breakdown (no-grad): {term_info}"
+                    f"NaN/inf loss at step {self.step} recovered after norm_net.reset(); continuing."
                 )
-                self._collapsed = True
-                break
 
             if self.norm_regularizer is not None:
                 loss = loss + self.norm_regularizer(self.cbm)
