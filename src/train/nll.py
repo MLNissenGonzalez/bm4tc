@@ -151,12 +151,69 @@ class NLLTrainer:
                 finite = log_abs_sq[finite_mask]
                 result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
                 result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
+                result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
                 result["amp_nonfinite_frac"] = (~finite_mask).float().mean().item()
             except Exception:
                 result["log_amp_sq_mean"] = float("nan")
                 result["log_amp_sq_min"] = float("nan")
+                result["log_amp_sq_max"] = float("nan")
                 result["amp_nonfinite_frac"] = float("nan")
         return result
+
+    def _nan_loss_diagnostics(
+        self, data: torch.Tensor, labels: torch.Tensor, alpha: float
+    ) -> str:
+        """Decompose mixed_nll terms under no-grad to locate the NaN source."""
+        _tiny = float(torch.finfo(torch.float32).tiny)
+        parts = []
+        with torch.no_grad():
+            try:
+                self.cbm.reset()
+                amp = self.cbm.amplitudes(data)           # (B, C)
+                B = data.shape[0]
+
+                # term1: -2 log |ψ(x, c_true)|
+                a1 = amp[torch.arange(B), labels].abs().clamp(min=_tiny)
+                t1 = -2.0 * torch.log(a1)
+                nan1 = torch.isnan(t1) | torch.isinf(t1)
+                parts.append(
+                    f"term1(-2·log|ψ(x,c)|): "
+                    f"mean={t1[~nan1].mean().item():.4g} "
+                    f"max={t1[~nan1].max().item():.4g} "
+                    f"nonfinite={nan1.float().mean().item():.1%}"
+                )
+
+                # term2: (1-α) log Σ_c |ψ|²  — zero for alpha=1
+                if alpha < 1.0:
+                    abs_sq_sum = amp.abs().pow(2).sum(dim=-1).clamp(min=_tiny)
+                    t2 = (1.0 - alpha) * torch.log(abs_sq_sum)
+                    nan2 = torch.isnan(t2) | torch.isinf(t2)
+                    parts.append(
+                        f"term2((1-α)·log Σ|ψ|²): "
+                        f"mean={t2[~nan2].mean().item():.4g} "
+                        f"nonfinite={nan2.float().mean().item():.1%}"
+                    )
+                else:
+                    parts.append("term2=0 (α=1)")
+
+                # term3: α·log_Z
+                if alpha > 0.0:
+                    log_Z = self.cbm.log_partition_function()
+                    parts.append(f"term3(α·log_Z): {alpha * log_Z.item():.4g}")
+
+                # combined
+                t2_full = (
+                    torch.zeros(B, device=data.device)
+                    if alpha >= 1.0
+                    else (1.0 - alpha) * torch.log(amp.abs().pow(2).sum(dim=-1).clamp(min=_tiny))
+                )
+                log_Z_val = self.cbm.log_partition_function() if alpha > 0.0 else torch.tensor(0.0)
+                loss_recomputed = (t1 + t2_full + alpha * log_Z_val).mean()
+                parts.append(f"recomputed_loss={loss_recomputed.item():.4g}")
+
+            except Exception as exc:
+                parts.append(f"(diagnostic failed: {exc})")
+        return " | ".join(parts)
 
     def _format_diagnostics(self, d: Dict[str, float]) -> str:
         parts = []
@@ -168,11 +225,12 @@ class NLLTrainer:
             parts.append(f"log_Z={log_Z:.4g}")
         mean_ = d.get("log_amp_sq_mean", float("nan"))
         min_ = d.get("log_amp_sq_min", float("nan"))
+        max_ = d.get("log_amp_sq_max", float("nan"))
         nf = d.get("amp_nonfinite_frac", 0.0)
         if not math.isfinite(mean_):
             parts.append("amplitudes non-finite")
         else:
-            s = f"log|amp|² mean={mean_:.4g} min={min_:.4g}"
+            s = f"log|amp|² mean={mean_:.4g} min={min_:.4g} max={max_:.4g}"
             if nf > 0:
                 tag = "overflow" if mean_ > 80 else "underflow"
                 s += f" ({nf:.1%} non-finite → {tag})"
@@ -202,8 +260,10 @@ class NLLTrainer:
 
             if torch.isnan(loss):
                 diag = self._diagnostics(data)
+                term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
                 logger.warning(
-                    f"NaN loss at step {self.step} — {self._format_diagnostics(diag)}. Stopping early."
+                    f"NaN loss at step {self.step} — {self._format_diagnostics(diag)}\n"
+                    f"  term breakdown (no-grad): {term_info}"
                 )
                 self._collapsed = True
                 break
