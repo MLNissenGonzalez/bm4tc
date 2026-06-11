@@ -13,14 +13,9 @@ from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 
 import logging
-from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-
-@contextmanager
-def _nullctx():
-    yield
 
 
 _LOSS_METRICS = {"dis_loss", "gen_loss"}
@@ -255,9 +250,7 @@ class NLLTrainer:
             self.step += 1
 
             try:
-                ctx = torch.autograd.detect_anomaly() if self._nc.debug else _nullctx()
-                with ctx:
-                    loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                loss = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
             except RuntimeError as e:
                 msg = str(e)
                 if "out of memory" in msg.lower():
