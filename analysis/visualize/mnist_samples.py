@@ -53,6 +53,7 @@ def sample_and_plot(
     cbm = ConditionalBornMachine.load(str(checkpoint_path))
     cbm.to(device)
     cbm.eval()
+    cbm.renormalize_(log_target=0.0)
     logger.info(f"Loaded model from {checkpoint_path}")
 
     samples, labels = cbm.sample_all_classes(
