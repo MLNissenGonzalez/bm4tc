@@ -24,7 +24,7 @@ trainer:
     norm_control:
       hard_every: 0
       soft_strength: 0.6
-      log_target: 0.0
+      log_target: null
       debug: false
     optimizer:
       name: "adam"
