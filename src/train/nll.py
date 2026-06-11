@@ -263,14 +263,16 @@ class NLLTrainer:
                 break
 
             if torch.isnan(nll) or torch.isinf(nll):
+                logger.warning(
+                    f"NaN/inf loss at step {self.step} — retrying with grad diagnostics..."
+                )
                 self.cbm.reset()
-                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha)
+                nll = self.cbm.mixed_nll(data, labels, self.train_cfg.alpha, debug=True)
                 if torch.isnan(nll) or torch.isinf(nll):
                     diag = self._diagnostics(data)
                     term_info = self._nan_loss_diagnostics(data, labels, self.train_cfg.alpha)
                     logger.warning(
-                        f"NaN/inf loss at step {self.step} (also after cbm.reset()) — "
-                        f"{self._format_diagnostics(diag)}\n"
+                        f"  still NaN after cbm.reset() — {self._format_diagnostics(diag)}\n"
                         f"  term breakdown (no-grad): {term_info}"
                     )
                     self._collapsed = True
