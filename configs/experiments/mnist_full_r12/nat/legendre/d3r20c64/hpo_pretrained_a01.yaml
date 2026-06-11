@@ -27,7 +27,7 @@ trainer:
       hard_every: 0
       soft_strength: 1.0
       log_target: null
-      debug: true
+      debug: false
     optimizer:
       name: "adam"
       kwargs:
