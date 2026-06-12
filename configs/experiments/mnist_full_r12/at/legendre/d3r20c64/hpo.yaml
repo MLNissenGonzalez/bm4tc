@@ -15,34 +15,36 @@ model_path: /home/ubuntu/bm4tc/outputs/mnist_full_r12/nat/legendre/d3r20c64/seed
 tracking:
   seed: 42
   evasion:
-    norm: 2
+    norm: "inf"
     method: "PGD"
     criterion:
       name: "negative log-likelihood"
-    strengths: [0.1]
+    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
     num_steps: 10
     step_size: null
     random_start: true
 
 trainer:
   adversarial:
-    max_epoch: 300
+    max_epoch: 100
     batch_size: 512
     stop_crit: "rob"
-    patience: 60
+    patience: 10
+    eval_rob_freq: 5
+    acc_floor: 0.90   # only select epochs whose clean valid-acc stays >= 90%
 
     evasion:
-      norm: 2
+      norm: "inf"
       criterion:
         name: "negative log-likelihood"
-      strengths: [0.1]
+      strengths: [0.3]   # standard MNIST L-inf budget (Madry et al.)
       num_steps: 10
       step_size: null
       random_start: true
 
     curriculum: true
     curriculum_start: 0.01
-    curriculum_end_epoch: 200
+    curriculum_end_epoch: 70
 
     save: false
     auto_stack: true

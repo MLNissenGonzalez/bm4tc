@@ -28,6 +28,7 @@ patience: 30
 eval_rob_freq: 5
 
 clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)
+acc_floor: null  # min clean valid-acc for model selection (null = no floor)
 curriculum: false
 curriculum_start: 0.0
 curriculum_end_epoch: null
