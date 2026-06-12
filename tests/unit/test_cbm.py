@@ -6,10 +6,11 @@ from unittest.mock import patch
 from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 
 
-def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2):
+def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
+              bond_dim=2, std=1e-3):
     cfg = CBMConfig(
         embedding=embedding,
-        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, dtype=dtype, std=1e-3),
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype, std=std),
     )
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
 
@@ -181,6 +182,68 @@ def test_sample_complex_dtype():
     cbm = _tiny_cbm(dtype="complex64")
     s = cbm.sample(0, n=4, num_bins=10)
     assert s.is_floating_point()  # output always real
+
+
+# ── sampling numerical stability (per-site H renormalization) ─────────────────
+
+def _old_sample_loop(cbm, class_idx, n, num_bins):
+    """Pre-fix sampling loop: byte-for-byte ConditionalBornMachine.sample()
+    EXCEPT the two H-renormalization lines are removed. Uses the same node
+    contraction path so the only difference under test is the renormalization."""
+    cond = cbm._make_conditioned_net(class_idx)
+    dev = cbm._mats_env[0].tensor.device
+    grid = torch.linspace(*cbm.input_range, num_bins, device=dev)
+    Phi = cbm.embedding(grid).to(cbm.dtype)
+    left = cond._left_node.tensor
+    tensors = [node.tensor for node in cond._mats_env]
+    H = left.unsqueeze(0).expand(n, -1).clone().to(dev)
+    cbm._h_node._direct_set_tensor(H)
+    samples = torch.zeros(n, cbm._data_dim, device=dev)
+    for k, T in enumerate(tensors):
+        T_embs = torch.einsum('ijk,bj->ibk', T, Phi)
+        cbm._u_node._direct_set_tensor(T_embs)
+        C = (cbm._h_node @ cbm._u_node).tensor
+        p = (C * C.conj()).real.sum(-1).clamp(min=0)
+        idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
+        samples[:, k] = grid[idx]
+        cbm._h_node._direct_set_tensor(C[torch.arange(n, device=dev), idx, :])
+    return samples.cpu()
+
+
+def _argmax_multinomial(weights, num_samples, *args, **kwargs):
+    """Deterministic stand-in for torch.multinomial(·, 1): argmax is exactly
+    scale-invariant, so it exposes any change in sampling decisions."""
+    return weights.argmax(dim=-1, keepdim=True)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_sample_renorm_matches_old_method(dtype):
+    # On a short chain (no overflow) the renormalized sampler must reproduce the
+    # old method bit-for-bit: per-row positive rescaling of H leaves the draw
+    # unchanged. Patch multinomial -> argmax to remove RNG.
+    cbm = _tiny_cbm(dtype=dtype, data_dim=4, bond_dim=3, std=0.5)
+    with patch("torch.multinomial", _argmax_multinomial):
+        s_new = cbm.sample(0, n=16, num_bins=12)
+        s_old = _old_sample_loop(cbm, 0, 16, 12)
+    assert torch.equal(s_new, s_old)
+
+
+def test_sample_keeps_boundary_normalized_long_chain():
+    # MNIST-scale regime: a long chain. The fix keeps the running boundary H at
+    # unit norm every site, so output stays finite and non-degenerate.
+    cbm = _tiny_cbm(dtype="complex64", data_dim=250)
+    cbm.eval()
+    cbm.renormalize_(log_target=0.0)
+    with patch.object(cbm._h_node, "_direct_set_tensor",
+                      wraps=cbm._h_node._direct_set_tensor) as spy:
+        s = cbm.sample(0, n=8, num_bins=8)
+    assert torch.isfinite(s).all()
+    assert s.unique().numel() > 1  # not collapsed to a single value
+    # Every boundary set into the contraction node is per-sample unit-normalized.
+    assert spy.call_args_list, "H was never set"
+    for call in spy.call_args_list:
+        norms = call.args[0].norm(dim=-1)
+        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-4)
 
 
 # ── sample_all_classes ──────────────────────────────────────────────────────
