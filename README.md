@@ -169,9 +169,9 @@ bm4tc/
 │   ├── batch.py        # Batch-run all unanalysed sweeps
 │   ├── hpo.py          # HPO result exploration
 │   ├── run.py          # Single-model analysis (MIA, UQ)
-│   ├── configs/        # Pipeline tools (fill_hpo.py, delete_runs.py, …)
 │   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)
+├── tools/              # Pipeline tools (fill_hpo.py, delete_runs.py, …)
 └── environment.yml
 ```
 

@@ -163,59 +163,6 @@ class NLLTrainer:
                 result["amp_nonfinite_count"] = -1
         return result
 
-    def _nan_loss_diagnostics(
-        self, data: torch.Tensor, labels: torch.Tensor, alpha: float
-    ) -> str:
-        """Decompose mixed_nll terms under no-grad to locate the NaN source."""
-        _tiny = float(torch.finfo(torch.float32).tiny)
-        parts = []
-        with torch.no_grad():
-            try:
-                amp = self.cbm.amplitudes(data)           # (B, C)
-                B = data.shape[0]
-
-                # term1: -2 log |ψ(x, c_true)|
-                a1 = amp[torch.arange(B), labels].abs().clamp(min=_tiny)
-                t1 = -2.0 * torch.log(a1)
-                nan1 = torch.isnan(t1) | torch.isinf(t1)
-                parts.append(
-                    f"term1(-2·log|ψ(x,c)|): "
-                    f"mean={t1[~nan1].mean().item():.4g} "
-                    f"max={t1[~nan1].max().item():.4g} "
-                    f"nonfinite={int(nan1.sum().item())}"
-                )
-
-                # term2: (1-α) log Σ_c |ψ|²  — zero for alpha=1
-                log_abs_diag = torch.log(amp.abs().clamp(min=_tiny))           # (B, C)
-                if alpha < 1.0:
-                    t2 = (1.0 - alpha) * torch.logsumexp(2.0 * log_abs_diag, dim=-1)
-                    nan2 = torch.isnan(t2) | torch.isinf(t2)
-                    parts.append(
-                        f"term2((1-α)·log Σ|ψ|²): "
-                        f"mean={t2[~nan2].mean().item():.4g} "
-                        f"nonfinite={int(nan2.sum().item())}"
-                    )
-                else:
-                    parts.append("term2=0 (α=1)")
-
-                # term3: α·log_Z
-                if alpha > 0.0:
-                    log_Z = self.cbm.log_partition_function()
-                    parts.append(f"term3(α·log_Z): {alpha * log_Z.item():.4g}")
-
-                # combined
-                t2_full = (
-                    torch.zeros(B, device=data.device)
-                    if alpha >= 1.0
-                    else (1.0 - alpha) * torch.logsumexp(2.0 * log_abs_diag, dim=-1)
-                )
-                log_Z_val = self.cbm.log_partition_function() if alpha > 0.0 else torch.tensor(0.0)
-                loss_recomputed = (t1 + t2_full + alpha * log_Z_val).mean()
-                parts.append(f"recomputed_loss={loss_recomputed.item():.4g}")
-
-            except Exception as exc:
-                parts.append(f"(diagnostic failed: {exc})")
-        return " | ".join(parts)
 
     def _format_diagnostics(self, d: Dict[str, float]) -> str:
         parts = []

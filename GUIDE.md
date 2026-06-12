@@ -23,15 +23,16 @@ Examples: `d4r3`, `d10r6`, `d30r18`.
 
 ## Training regimes
 
-| Script | Regime | Description |
-|--------|--------|-------------|
-| `experiments/train.py` | `dis`/`gen`/`adv` | Unified entry point; NLL (`trainer.nll`) or adversarial (`trainer.adversarial`) selected by config |
+| Script | Trainer token | Description |
+|--------|--------------|-------------|
+| `experiments/train.py` | `nat` | NLL training, any α (α=0 discriminative, α>0 generative) |
+| `experiments/train.py` | `at` | Adversarial training; loads pretrained `nat` checkpoint via `model_path` |
 
 Run as a Python module from the project root:
 ```bash
-python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
-python -m experiments.train +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
-python -m experiments.train +experiments=adversarial/fourier/d4r3/hpo/moons
+python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0
+python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
+python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
 ```
 
 ---
@@ -43,16 +44,17 @@ Configurations are managed with [Hydra](https://hydra.cc/). The canonical workfl
 1. Write an experiment config in `configs/experiments/` that overrides group defaults
 2. Run with `+experiments=<path>` (without `.yaml`)
 
-**Example experiment config** (`configs/experiments/nll/dis/fourier/d4r3/hpo/moons.yaml`):
+**Config tree** (`configs/experiments/{dataset}/{nat|at}/{embedding}/{arch}/{kind}.yaml`):
 ```yaml
 # @package _global_
 defaults:
-  - override /born: fourier/d4r3
-  - override /dataset: 2Dtoy/moons
-  - override /trainer/nll: adam500_loss
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/circles
+  - override /trainer/nll: default
   - override /tracking: online
 trainer:
   alpha: 0.0
+  stop_crit: dis_loss   # dis_loss | gen_loss | mixed_loss | acc | rob
 ```
 
 **Config group layout**:
@@ -61,14 +63,16 @@ configs/
 ├── config.yaml              # root defaults
 ├── born/{embedding}/        # d{d}r{r}.yaml files — in_dim, bond_dim, boundary
 ├── dataset/2Dtoy/           # circles.yaml, moons.yaml, spirals.yaml, *_small.yaml
-├── dataset/mnist/           # mnist.yaml, mnist_1k.yaml
+├── dataset/mnist/           # mnist.yaml, mnist_1k.yaml, mnist_full_r12.yaml
 ├── dataset/ucr_ts/          # ECG200.yaml, ItalyPowerDemand.yaml, ...
-├── trainer/nll/             # NLLConfig defaults + variants
+├── trainer/nll/             # NLLConfig defaults + variants (debug: false required)
 ├── trainer/adversarial/     # AdversarialConfig (pgd_at, trades, ...)
 └── tracking/                # online.yaml, offline.yaml, disabled.yaml
 ```
 
 **Config dataclass location**: each module owns its config dataclass (e.g., `NLLConfig` in `src/train/nll.py`). The top-level `Config`, `TrainerConfig`, `TrackingConfig` and `register()` live in `experiments/config.py`.
+
+**Hydra gotcha**: any field added to a config dataclass must also appear with a value in the corresponding base YAML under `configs/trainer/`. Dataclass defaults alone are not enough — Hydra raises "key not in config" otherwise.
 
 ---
 
@@ -89,14 +93,16 @@ The epoch logger is constructed via `experiments.tracking.make_logger(output_dir
 ## Output directory structure
 
 ```
-outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/
+outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/
 ```
-- `kind`: `hpo` | `seed_sweep` | `alpha_curve` | `test`
-- `regime`: `dis` | `gen` | `adv`
-- `arch`: `d4r3` | `d6r4` | `d10r6` | `d30r18`
+- `dataset`: `circles`, `moons`, `spirals`, `mnist`, `mnist_full_r12`, UCR names, …
+- `nat|at`: trainer token
+- `arch`: `d4r3` | `d6r4` | `d10r6` | `d30r18` | `d3r20c64` (complex, 3-class)
+- `kind`: `hpo_a0` | `seed_sweep_a1` | `seed_sweep` (at) | `alpha_curve` | `test`
 - `date`: `DDMM` (multirun) or `DDMM_HHMM` (single run)
-- Single runs: `.hydra/` directly in sweep root
 - Multiruns: numbered subdirs `0/`, `1/`, … each with `.hydra/` inside
+
+Analysis mirrors the structure under `analysis/outputs/`.
 
 ---
 
@@ -107,7 +113,7 @@ Post-training analysis lives in `analysis/`. See [`analysis/GUIDE.md`](analysis/
 Quick start:
 ```bash
 # Analyse a completed seed sweep
-python -m analysis.sweep outputs/seed_sweep/gen/fourier/d4r3/moons_1802
+python -m analysis.sweep outputs/circles/nat/legendre/d10r6/seed_sweep_a1_1802
 
 # Analyse all unanalysed sweeps in batch
 python -m analysis.batch
@@ -137,7 +143,7 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 | Post-hoc sweep evaluation | `analysis/sweep.py` |
 | HPO result exploration | `analysis/hpo.py` |
 | Single-model analysis (MIA / UQ) | `analysis/run.py` |
-| Fill seed_sweep configs from HPO | `analysis/configs/fill_hpo.py` |
+| Fill seed_sweep configs from HPO | `tools/fill_hpo.py` |
 | Run unit tests (fast) | `pytest -m "not slow" -q` |
 | Run full test suite | `pytest -q` |
 
@@ -150,3 +156,5 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 **Evasion attacks don't clamp to `cbm.input_range`** — PGD/FGM in `src/utils/evasion.py` project delta to the ε-ball but do not clamp `naturals + delta` to the valid embedding domain. Purification correctly clamps.
 
 **Complex MPS requires PyTorch ≥ 2.1.0** — Adam has a `foreach` bug with complex-typed parameters in older versions, causing NaN updates.
+
+**Purification broken when amplitudes overflow** — `purification.py:258` uses `abs_square` to compute Gibbs sampling weights; `draw_from_grid` maps `posinf → 0.0`, so overflow candidates are silently zeroed and sampling is wrong. Not yet fixed.
