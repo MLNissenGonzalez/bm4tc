@@ -12,4 +12,5 @@ norm_control:
   log_target: 0.0
   hard_every: 1
   soft_strength: 0.0
+  debug: false
 save: false
