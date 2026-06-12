@@ -1,0 +1,59 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Fill in path to trained seed_sweep_a0 run before launching
+model_path: outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_DDMM/0/models/model
+
+tracking:
+  seed: 42
+  evasion:
+    norm: 2
+    method: "PGD"
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.1]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 300
+    batch_size: 512
+    stop_crit: "rob"
+    patience: 60
+    save: true
+
+    evasion:
+      norm: 2
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.1]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 200
+
+    auto_stack: true
+    auto_unbind: false
+
+    optimizer:
+      kwargs:
+        lr: ???           # FILL FROM HPO
+        weight_decay: ???  # FILL FROM HPO
+    clean_weight: ???      # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
