@@ -270,10 +270,16 @@ class GibbsPurification:
 
         x_purified = torch.cat(results, dim=0)
         born.reset()
+        # Chunk the final log p(x) forward by gibbs_batch_size so it stays within the
+        # same memory budget as the sweep (a single forward over all samples would OOM
+        # on large inputs, e.g. MNIST's full test split).
+        log_px_chunks = []
         with torch.no_grad():
-            log_px_after = born.marginal_log_probability(x_purified.to(device))
+            for i in range(0, len(x_purified), self.gibbs_batch_size):
+                chunk = x_purified[i:i + self.gibbs_batch_size].to(device)
+                log_px_chunks.append(born.marginal_log_probability(chunk).cpu())
 
-        return x_purified, log_px_after.detach().cpu()
+        return x_purified, torch.cat(log_px_chunks)
 
 
 if __name__ == "__main__":

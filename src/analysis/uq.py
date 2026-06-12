@@ -63,6 +63,38 @@ class UQConfig:
     gibbs_batch_size: int = 8
     gibbs_radius: Optional[float] = 0.1  # relative to input range; None = unrestricted
 
+    # Memory control
+    eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch
+
+
+def _recover_after_failure(born) -> None:
+    """Restore a clean state after a failed/aborted block so later blocks are unaffected.
+
+    A mid-contraction OOM leaves the tk network's data nodes dirty; reset() clears them,
+    and empty_cache() releases the freed memory back to the allocator for the next block.
+    """
+    try:
+        born.reset()
+    except Exception:
+        pass
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _batched_forward(fn, x: torch.Tensor, batch_size: Optional[int], device) -> torch.Tensor:
+    """Apply a no-grad model forward `fn` over `x` in chunks, returning a CPU tensor.
+
+    Keeps peak GPU memory bounded for full-test-set forwards (e.g. on MNIST, where a
+    single forward over the whole test split would OOM). `batch_size=None` falls back
+    to a single pass over all of `x`.
+    """
+    bs = batch_size if batch_size is not None else len(x)
+    outs = []
+    with torch.no_grad():
+        for i in range(0, len(x), bs):
+            outs.append(fn(x[i:i + bs].to(device)).cpu())
+    return torch.cat(outs)
+
 
 def compute_log_px(
     born,
@@ -275,6 +307,13 @@ class UQEvaluation:
         cfg = self.config
         born.to(device)
 
+        # Re-batch to a memory-safe chunk size so the gradient path (attack /
+        # purification) and the per-batch forwards stay bounded on large inputs.
+        if cfg.eval_batch_size is not None:
+            clean_loader = DataLoader(
+                clean_loader.dataset, batch_size=cfg.eval_batch_size, shuffle=False
+            )
+
         # 1. Cache log Z
         logger.info("Computing partition function...")
         born.cache_log_Z()
@@ -320,58 +359,62 @@ class UQEvaluation:
 
         for eps in cfg.attack_strengths:
             logger.info(f"Generating adversarial examples (eps={eps})...")
-            all_adv_log_px = []
-            all_adv_correct_list = []
-            all_adv_correct = 0
-            all_adv_total = 0
-            adv_batches = []
+            try:
+                all_adv_log_px = []
+                all_adv_correct_list = []
+                all_adv_correct = 0
+                all_adv_total = 0
+                adv_batches = []
 
-            for batch_data, batch_labels in clean_loader:
-                batch_data = batch_data.to(device)
-                batch_labels = batch_labels.to(device)
+                for batch_data, batch_labels in clean_loader:
+                    batch_data = batch_data.to(device)
+                    batch_labels = batch_labels.to(device)
 
-                # Generate adversarial examples
-                adv_data = attack.generate(
-                    born, batch_data, batch_labels, eps, device
+                    # Generate adversarial examples
+                    adv_data = attack.generate(
+                        born, batch_data, batch_labels, eps, device
+                    )
+
+                    # Classify adversarial examples
+                    with torch.no_grad():
+                        adv_probs = born.class_probabilities(adv_data)
+                        adv_preds = adv_probs.argmax(dim=1)
+                        correct_batch = adv_preds == batch_labels
+                        all_adv_correct += correct_batch.sum().item()
+                        all_adv_correct_list.append(correct_batch.cpu())
+                        all_adv_total += len(batch_labels)
+
+                        # Compute log p(x_adv)
+                        log_px_adv = born.marginal_log_probability(adv_data)
+                        all_adv_log_px.append(log_px_adv.cpu())
+
+                    adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
+
+                adv_log_px_arr = torch.cat(all_adv_log_px).numpy()
+                adv_log_px[eps] = adv_log_px_arr
+                adv_accuracies[eps] = all_adv_correct / all_adv_total
+                adv_examples_cache[eps] = adv_batches
+                misclf_arr = ~torch.cat(all_adv_correct_list).numpy()
+
+                logger.info(
+                    f"  eps={eps}: adv_acc={adv_accuracies[eps]:.4f}, "
+                    f"mean log p(x_adv)={adv_log_px_arr.mean():.2f}"
                 )
 
-                # Classify adversarial examples
-                with torch.no_grad():
-                    adv_probs = born.class_probabilities(adv_data)
-                    adv_preds = adv_probs.argmax(dim=1)
-                    correct_batch = adv_preds == batch_labels
-                    all_adv_correct += correct_batch.sum().item()
-                    all_adv_correct_list.append(correct_batch.cpu())
-                    all_adv_total += len(batch_labels)
-
-                    # Compute log p(x_adv)
-                    log_px_adv = born.marginal_log_probability(adv_data)
-                    all_adv_log_px.append(log_px_adv.cpu())
-
-                adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
-
-            adv_log_px_arr = torch.cat(all_adv_log_px).numpy()
-            adv_log_px[eps] = adv_log_px_arr
-            adv_accuracies[eps] = all_adv_correct / all_adv_total
-            adv_examples_cache[eps] = adv_batches
-            misclf_arr = ~torch.cat(all_adv_correct_list).numpy()
-
-            logger.info(
-                f"  eps={eps}: adv_acc={adv_accuracies[eps]:.4f}, "
-                f"mean log p(x_adv)={adv_log_px_arr.mean():.2f}"
-            )
-
-            # Detection rates and conditional error rates at each threshold
-            for pct, tau in thresholds.items():
-                det_mask = adv_log_px_arr < tau
-                pas_mask = ~det_mask
-                detection_rates[(pct, eps)] = float(det_mask.mean())
-                err_rate_detected[(pct, eps)] = (
-                    float(misclf_arr[det_mask].mean()) if det_mask.any() else float("nan")
-                )
-                err_rate_passed[(pct, eps)] = (
-                    float(misclf_arr[pas_mask].mean()) if pas_mask.any() else float("nan")
-                )
+                # Detection rates and conditional error rates at each threshold
+                for pct, tau in thresholds.items():
+                    det_mask = adv_log_px_arr < tau
+                    pas_mask = ~det_mask
+                    detection_rates[(pct, eps)] = float(det_mask.mean())
+                    err_rate_detected[(pct, eps)] = (
+                        float(misclf_arr[det_mask].mean()) if det_mask.any() else float("nan")
+                    )
+                    err_rate_passed[(pct, eps)] = (
+                        float(misclf_arr[pas_mask].mean()) if pas_mask.any() else float("nan")
+                    )
+            except Exception as e:
+                logger.warning(f"Detection/attack failed (eps={eps}): {e}; skipping")
+                _recover_after_failure(born)
 
         # 4. Purification
         purifier = LikelihoodPurification(
@@ -386,111 +429,122 @@ class UQEvaluation:
         for eps in cfg.attack_strengths:
             for radius in cfg.radii:
                 logger.info(f"Purifying (eps={eps}, radius={radius})...")
-                all_purified_correct = 0
-                all_recovered = 0
-                all_misclassified_before = 0
-                all_log_px_before = []
-                all_log_px_after = []
-                all_total = 0
-                all_below_threshold = 0
+                try:
+                    all_purified_correct = 0
+                    all_recovered = 0
+                    all_misclassified_before = 0
+                    all_log_px_before = []
+                    all_log_px_after = []
+                    all_total = 0
+                    all_below_threshold = 0
 
-                # Use median threshold for rejection rate
-                median_pct = cfg.percentiles[len(cfg.percentiles) // 2]
-                tau = thresholds[median_pct]
+                    # Use median threshold for rejection rate
+                    median_pct = cfg.percentiles[len(cfg.percentiles) // 2]
+                    tau = thresholds[median_pct]
 
-                for adv_data_cpu, labels_cpu in adv_examples_cache[eps]:
-                    adv_data = adv_data_cpu.to(device)
-                    labels = labels_cpu.to(device)
+                    for adv_data_cpu, labels_cpu in adv_examples_cache[eps]:
+                        adv_data = adv_data_cpu.to(device)
+                        labels = labels_cpu.to(device)
 
-                    # Log p(x) before purification
-                    with torch.no_grad():
-                        log_px_before = born.marginal_log_probability(adv_data)
-                        # Classify before purification
-                        adv_probs = born.class_probabilities(adv_data)
-                        adv_preds = adv_probs.argmax(dim=1)
-                        misclassified = (adv_preds != labels)
+                        # Log p(x) before purification
+                        with torch.no_grad():
+                            log_px_before = born.marginal_log_probability(adv_data)
+                            # Classify before purification
+                            adv_probs = born.class_probabilities(adv_data)
+                            adv_preds = adv_probs.argmax(dim=1)
+                            misclassified = (adv_preds != labels)
 
-                    # Purify
-                    purified, log_px_after = purifier.purify(
-                        born, adv_data, radius, device
+                        # Purify
+                        purified, log_px_after = purifier.purify(
+                            born, adv_data, radius, device
+                        )
+
+                        # Classify after purification
+                        with torch.no_grad():
+                            pur_probs = born.class_probabilities(purified)
+                            pur_preds = pur_probs.argmax(dim=1)
+                            correct_after = (pur_preds == labels)
+
+                        # Recovery: correctly classified after purification
+                        # among those misclassified before
+                        recovered = (misclassified & correct_after).sum().item()
+
+                        all_purified_correct += correct_after.sum().item()
+                        all_recovered += recovered
+                        all_misclassified_before += misclassified.sum().item()
+                        all_log_px_before.append(log_px_before.cpu())
+                        all_log_px_after.append(log_px_after.cpu())
+                        all_total += len(labels)
+                        all_below_threshold += (log_px_after.cpu() < tau).sum().item()
+
+                    acc_after = all_purified_correct / all_total
+                    recovery = (
+                        all_recovered / all_misclassified_before
+                        if all_misclassified_before > 0
+                        else 1.0
+                    )
+                    mean_before = torch.cat(all_log_px_before).mean().item()
+                    mean_after = torch.cat(all_log_px_after).mean().item()
+                    rejection_rate = all_below_threshold / all_total
+
+                    purification_results[(eps, radius)] = PurificationMetrics(
+                        accuracy_after_purify=acc_after,
+                        recovery_rate=recovery,
+                        mean_log_px_before=mean_before,
+                        mean_log_px_after=mean_after,
+                        rejection_rate=rejection_rate,
                     )
 
-                    # Classify after purification
-                    with torch.no_grad():
-                        pur_probs = born.class_probabilities(purified)
-                        pur_preds = pur_probs.argmax(dim=1)
-                        correct_after = (pur_preds == labels)
-
-                    # Recovery: correctly classified after purification
-                    # among those misclassified before
-                    recovered = (misclassified & correct_after).sum().item()
-
-                    all_purified_correct += correct_after.sum().item()
-                    all_recovered += recovered
-                    all_misclassified_before += misclassified.sum().item()
-                    all_log_px_before.append(log_px_before.cpu())
-                    all_log_px_after.append(log_px_after.cpu())
-                    all_total += len(labels)
-                    all_below_threshold += (log_px_after.cpu() < tau).sum().item()
-
-                acc_after = all_purified_correct / all_total
-                recovery = (
-                    all_recovered / all_misclassified_before
-                    if all_misclassified_before > 0
-                    else 1.0
-                )
-                mean_before = torch.cat(all_log_px_before).mean().item()
-                mean_after = torch.cat(all_log_px_after).mean().item()
-                rejection_rate = all_below_threshold / all_total
-
-                purification_results[(eps, radius)] = PurificationMetrics(
-                    accuracy_after_purify=acc_after,
-                    recovery_rate=recovery,
-                    mean_log_px_before=mean_before,
-                    mean_log_px_after=mean_after,
-                    rejection_rate=rejection_rate,
-                )
-
-                logger.info(
-                    f"  eps={eps}, r={radius}: "
-                    f"acc={acc_after:.4f}, recovery={recovery:.2%}"
-                )
+                    logger.info(
+                        f"  eps={eps}, r={radius}: "
+                        f"acc={acc_after:.4f}, recovery={recovery:.2%}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Gradient purification failed (eps={eps}, radius={radius}): "
+                        f"{e}; skipping"
+                    )
+                    _recover_after_failure(born)
 
         # 5. Clean purification (natural examples, no attack)
         clean_purification_results: Dict[float, PurificationMetrics] = {}
         for radius in cfg.radii:
             logger.info(f"Clean purification (radius={radius})...")
-            all_correct = 0
-            all_total = 0
-            all_log_px_before = []
-            all_log_px_after = []
+            try:
+                all_correct = 0
+                all_total = 0
+                all_log_px_before = []
+                all_log_px_after = []
 
-            for batch_data, batch_labels in clean_loader:
-                batch_data = batch_data.to(device)
-                batch_labels = batch_labels.to(device)
+                for batch_data, batch_labels in clean_loader:
+                    batch_data = batch_data.to(device)
+                    batch_labels = batch_labels.to(device)
 
-                with torch.no_grad():
-                    log_px_before = born.marginal_log_probability(batch_data)
+                    with torch.no_grad():
+                        log_px_before = born.marginal_log_probability(batch_data)
 
-                purified, log_px_after = purifier.purify(born, batch_data, radius, device)
+                    purified, log_px_after = purifier.purify(born, batch_data, radius, device)
 
-                with torch.no_grad():
-                    preds = born.class_probabilities(purified).argmax(dim=1)
-                    all_correct += (preds == batch_labels).sum().item()
-                    all_total += len(batch_labels)
+                    with torch.no_grad():
+                        preds = born.class_probabilities(purified).argmax(dim=1)
+                        all_correct += (preds == batch_labels).sum().item()
+                        all_total += len(batch_labels)
 
-                all_log_px_before.append(log_px_before.cpu())
-                all_log_px_after.append(log_px_after.cpu())
+                    all_log_px_before.append(log_px_before.cpu())
+                    all_log_px_after.append(log_px_after.cpu())
 
-            acc = all_correct / all_total
-            clean_purification_results[radius] = PurificationMetrics(
-                accuracy_after_purify=acc,
-                recovery_rate=float("nan"),
-                mean_log_px_before=torch.cat(all_log_px_before).mean().item(),
-                mean_log_px_after=torch.cat(all_log_px_after).mean().item(),
-                rejection_rate=0.0,
-            )
-            logger.info(f"  radius={radius}: clean_purify_acc={acc:.4f}")
+                acc = all_correct / all_total
+                clean_purification_results[radius] = PurificationMetrics(
+                    accuracy_after_purify=acc,
+                    recovery_rate=float("nan"),
+                    mean_log_px_before=torch.cat(all_log_px_before).mean().item(),
+                    mean_log_px_after=torch.cat(all_log_px_after).mean().item(),
+                    rejection_rate=0.0,
+                )
+                logger.info(f"  radius={radius}: clean_purify_acc={acc:.4f}")
+            except Exception as e:
+                logger.warning(f"Clean purification failed (radius={radius}): {e}; skipping")
+                _recover_after_failure(born)
 
         # 6. Gibbs purification
         gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
@@ -505,64 +559,82 @@ class UQEvaluation:
                 radius=cfg.gibbs_radius,
             )
             for eps in cfg.attack_strengths:
-                all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
-                all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
+                try:
+                    all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
+                    all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
 
-                with torch.no_grad():
-                    adv_probs = born.class_probabilities(all_adv.to(device))
-                    adv_preds = adv_probs.argmax(dim=1).cpu()
+                    adv_preds = _batched_forward(
+                        born.class_probabilities, all_adv, cfg.eval_batch_size, device
+                    ).argmax(dim=1)
                     misclassified = adv_preds != all_labels
+                except Exception as e:
+                    logger.warning(f"Gibbs setup failed (eps={eps}): {e}; skipping")
+                    _recover_after_failure(born)
+                    continue
 
                 for n_sw in cfg.gibbs_n_sweeps:
                     logger.info(f"Gibbs purification (eps={eps}, n_sweeps={n_sw})...")
-                    x_purified, log_px_after = gibbs_purifier.purify(
-                        born, all_adv, n_sw, device
-                    )
+                    try:
+                        x_purified, log_px_after = gibbs_purifier.purify(
+                            born, all_adv, n_sw, device
+                        )
 
-                    with torch.no_grad():
-                        pur_probs = born.class_probabilities(x_purified.to(device))
-                        pur_preds = pur_probs.argmax(dim=1).cpu()
-                    correct_after = pur_preds == all_labels
-                    acc_after = correct_after.float().mean().item()
-                    misclassified_before = misclassified.sum().item()
-                    recovered = (misclassified & correct_after).sum().item()
-                    recovery = (
-                        recovered / misclassified_before
-                        if misclassified_before > 0
-                        else 1.0
-                    )
-                    gibbs_purification_results[(eps, n_sw)] = PurificationMetrics(
-                        accuracy_after_purify=acc_after,
-                        recovery_rate=recovery,
-                        mean_log_px_before=float(adv_log_px[eps].mean()),
-                        mean_log_px_after=float(log_px_after.mean()),
-                        rejection_rate=0.0,
-                    )
-                    logger.info(
-                        f"  eps={eps}, sweeps={n_sw}: "
-                        f"acc={acc_after:.4f}, recovery={recovery:.2%}"
-                    )
+                        pur_preds = _batched_forward(
+                            born.class_probabilities, x_purified, cfg.eval_batch_size, device
+                        ).argmax(dim=1)
+                        correct_after = pur_preds == all_labels
+                        acc_after = correct_after.float().mean().item()
+                        misclassified_before = misclassified.sum().item()
+                        recovered = (misclassified & correct_after).sum().item()
+                        recovery = (
+                            recovered / misclassified_before
+                            if misclassified_before > 0
+                            else 1.0
+                        )
+                        gibbs_purification_results[(eps, n_sw)] = PurificationMetrics(
+                            accuracy_after_purify=acc_after,
+                            recovery_rate=recovery,
+                            mean_log_px_before=float(adv_log_px[eps].mean()),
+                            mean_log_px_after=float(log_px_after.mean()),
+                            rejection_rate=0.0,
+                        )
+                        logger.info(
+                            f"  eps={eps}, sweeps={n_sw}: "
+                            f"acc={acc_after:.4f}, recovery={recovery:.2%}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Gibbs purification failed (eps={eps}, n_sweeps={n_sw}): "
+                            f"{e}; skipping"
+                        )
+                        _recover_after_failure(born)
 
             # Clean Gibbs purification
             all_clean = torch.cat([b for b, _ in clean_loader])
             all_clean_labels = torch.cat([lb for _, lb in clean_loader])
             for n_sw in cfg.gibbs_n_sweeps:
                 logger.info(f"Clean Gibbs purification (n_sweeps={n_sw})...")
-                x_purified, log_px_after = gibbs_purifier.purify(
-                    born, all_clean, n_sw, device
-                )
-                with torch.no_grad():
-                    pur_probs = born.class_probabilities(x_purified.to(device))
-                    pur_preds = pur_probs.argmax(dim=1).cpu()
-                acc = (pur_preds == all_clean_labels).float().mean().item()
-                clean_gibbs_purification_results[n_sw] = PurificationMetrics(
-                    accuracy_after_purify=acc,
-                    recovery_rate=float("nan"),
-                    mean_log_px_before=float(clean_log_px.mean()),
-                    mean_log_px_after=float(log_px_after.mean()),
-                    rejection_rate=0.0,
-                )
-                logger.info(f"  sweeps={n_sw}: clean_gibbs_acc={acc:.4f}")
+                try:
+                    x_purified, log_px_after = gibbs_purifier.purify(
+                        born, all_clean, n_sw, device
+                    )
+                    pur_preds = _batched_forward(
+                        born.class_probabilities, x_purified, cfg.eval_batch_size, device
+                    ).argmax(dim=1)
+                    acc = (pur_preds == all_clean_labels).float().mean().item()
+                    clean_gibbs_purification_results[n_sw] = PurificationMetrics(
+                        accuracy_after_purify=acc,
+                        recovery_rate=float("nan"),
+                        mean_log_px_before=float(clean_log_px.mean()),
+                        mean_log_px_after=float(log_px_after.mean()),
+                        rejection_rate=0.0,
+                    )
+                    logger.info(f"  sweeps={n_sw}: clean_gibbs_acc={acc:.4f}")
+                except Exception as e:
+                    logger.warning(
+                        f"Clean Gibbs purification failed (n_sweeps={n_sw}): {e}; skipping"
+                    )
+                    _recover_after_failure(born)
 
         return UQResults(
             clean_log_px=clean_log_px,
