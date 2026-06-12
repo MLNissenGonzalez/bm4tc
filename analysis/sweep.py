@@ -130,12 +130,18 @@ MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range
 UQ_CONFIG = {
     "radii": [0.10 * _RANGE_SIZE],
     "percentiles": [1, 5, 10, 20],
+    # Chunk size for all UQ forwards (attack/purify + full-test class-prob/log-px).
+    # Bounds peak GPU memory on large inputs (e.g. MNIST). None = use loader batch.
+    "eval_batch_size": 256,
 }
 
 # --- GIBBS PURIFICATION SETTINGS (only used when COMPUTE_GIBBS_PURIFICATION=True) ---
 GIBBS_CONFIG = {
     "n_sweeps": [1, 3, 5],
     "num_bins": 200,
+    # Candidate-expansion peak ∝ gibbs_batch_size × num_bins. On a 24 GB GPU,
+    # 8 is safe for resized MNIST (r12, ~3 GB); drop to 4 for full-res mnist_full
+    # (784 sites, ~16 GB at 8).
     "gibbs_batch_size": 8,
     "radius": 0.1,
 }

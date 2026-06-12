@@ -8,6 +8,7 @@ from src.analysis.uq import (
     PurificationMetrics,
     compute_log_px,
     compute_thresholds,
+    _batched_forward,
 )
 
 pytestmark = pytest.mark.slow
@@ -219,3 +220,71 @@ def test_uq_err_rate_passed_range(cbm, clean_loader):
     assert len(results.err_rate_passed) > 0
     for v in results.err_rate_passed.values():
         assert math.isnan(v) or 0.0 <= v <= 1.0
+
+
+# ---- Memory-control: chunked forwards + fault isolation ----
+
+def test_uq_config_eval_batch_size_default():
+    assert UQConfig().eval_batch_size is None
+
+
+@pytest.mark.parametrize("bs", [1, 7, 20, 100, None])
+def test_batched_forward_matches_single_pass(cbm, bs):
+    # Chunked forward must equal a single full-batch forward, for batch sizes that
+    # divide N (20), don't divide it (7), equal it (20), exceed it (100), or None.
+    x = torch.rand(20, cbm._data_dim)
+    ref = cbm.class_probabilities(x).detach().cpu()
+    out = _batched_forward(cbm.class_probabilities, x, bs, "cpu")
+    assert out.shape == ref.shape
+    assert torch.allclose(out, ref, atol=1e-5)
+
+
+def test_uq_eval_batch_size_completes(cbm, clean_loader):
+    # Re-batching to a small eval_batch_size must not change that evaluation runs.
+    cfg = UQConfig(
+        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        attack_num_steps=2, num_steps=2, eval_batch_size=4,
+    )
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    assert isinstance(results, UQResults)
+    assert len(results.detection_rates) > 0
+    assert len(results.purification_results) > 0
+
+
+def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
+    # A failure (e.g. OOM) inside Gibbs purification must not discard the
+    # detection and gradient-purification results computed earlier.
+    from src.analysis import purification as purif_mod
+
+    def boom(self, *args, **kwargs):
+        raise RuntimeError("simulated OOM")
+
+    monkeypatch.setattr(purif_mod.GibbsPurification, "purify", boom)
+    cfg = UQConfig(
+        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        attack_num_steps=2, num_steps=2, run_gibbs=True, gibbs_n_sweeps=[1],
+    )
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    assert len(results.detection_rates) > 0          # detection survived
+    assert len(results.purification_results) > 0     # gradient purify survived
+    assert results.gibbs_purification_results == {}  # gibbs skipped, not fatal
+
+
+def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
+    # If the attack raises for one eps, the other eps must still produce results.
+    from src.utils import evasion as evasion_mod
+    real_generate = evasion_mod.RobustnessEvaluation.generate
+
+    def selective(self, born, data, labels, eps, device, *a, **k):
+        if eps == 0.2:
+            raise RuntimeError("simulated OOM")
+        return real_generate(self, born, data, labels, eps, device, *a, **k)
+
+    monkeypatch.setattr(evasion_mod.RobustnessEvaluation, "generate", selective)
+    cfg = UQConfig(
+        attack_strengths=[0.1, 0.2], radii=[0.1], percentiles=[10],
+        attack_num_steps=2, num_steps=2,
+    )
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    assert 0.1 in results.adv_accuracies        # good eps survived
+    assert 0.2 not in results.adv_accuracies     # failed eps skipped
