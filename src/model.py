@@ -552,6 +552,11 @@ class ConditionalBornMachine(tk.models.MPS):
         for start in range(0, n, batch_size):
             N = min(batch_size, n - start)
             H = left.unsqueeze(0).expand(N, -1).clone().to(dev)  # (N, D_left)
+            # Per-sample renormalization: sampling is invariant under per-row
+            # positive rescaling of H (multinomial normalizes each row), so we
+            # keep H at O(1) every site to avoid amplitude overflow/underflow on
+            # long chains (mirrors the per-node renorm in log_partition_function).
+            H = H / H.norm(dim=-1, keepdim=True).clamp_min(1e-30)
             self._h_node._direct_set_tensor(H)
             samples = torch.zeros(N, self._data_dim, device=dev)
             for k, T in enumerate(tensors):
@@ -561,8 +566,9 @@ class ConditionalBornMachine(tk.models.MPS):
                 p = (C * C.conj()).real.sum(-1).clamp(min=0)    # (N, bins)
                 idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
                 samples[:, k] = grid[idx]
-                self._h_node._direct_set_tensor(
-                    C[torch.arange(N, device=dev), idx, :])
+                H_next = C[torch.arange(N, device=dev), idx, :]  # (N, D_r)
+                H_next = H_next / H_next.norm(dim=-1, keepdim=True).clamp_min(1e-30)
+                self._h_node._direct_set_tensor(H_next)
             chunks.append(samples.cpu())
         del cond_mps
         return torch.cat(chunks, dim=0)
