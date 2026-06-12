@@ -22,6 +22,7 @@ class AdversarialConfig:
     patience: int = 250
     eval_rob_freq: int = 5
     clean_weight: float = 0.0
+    acc_floor: Optional[float] = None  # min clean valid-acc for a model to be selectable
     curriculum: bool = False
     curriculum_start: float = 0.0
     curriculum_end_epoch: Optional[int] = None
@@ -141,6 +142,16 @@ class AdversarialTrainer:
         """Check if valid_perf improved; update best tensors and patience counter."""
         current_value = self.valid_perf.get(self.stopping_criterion_name)
         if current_value is None:
+            return
+
+        # Clean-accuracy floor: never select a model whose clean acc has collapsed.
+        # Sub-floor epochs count as non-improvements. If no epoch ever meets the
+        # floor, `best` keeps its init (e.g. rob=0.0) and `best_tensors` stays the
+        # starting (pretrained) model — HPO then sees the worst objective, and a
+        # saved seed_sweep run falls back to the clean pretrained model.
+        floor = self.train_cfg.acc_floor
+        if floor is not None and self.valid_perf.get("acc", 1.0) < floor:
+            self.patience_counter += 1
             return
 
         former_best = self.best.get(
