@@ -24,13 +24,13 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: ???  # FILL FROM HPO
+      soft_strength: 0.15535  # lowest mixed nll loss
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???  # FILL FROM HPO
+        lr: 0.0000077105  # lowest mixed nll loss
         weight_decay: 0.0
 
 hydra:
