@@ -9,7 +9,7 @@ defaults:
   - override /tracking: online
 
 # Fill in path to trained seed_sweep_a0 run before launching
-model_path: outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_DDMM/0/models/model
+model_path: outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_DDMM/run/models/model
 
 tracking:
   seed: 42
@@ -24,13 +24,13 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: ???  # FILL FROM HPO
+      soft_strength: 1.55691  # Lowest mixed nll loss
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???  # FILL FROM HPO
+        lr: 0.000011579  # lowest mixed nll loss
         weight_decay: 0.0
 
 hydra:
