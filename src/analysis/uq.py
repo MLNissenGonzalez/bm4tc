@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 import logging
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ def compute_log_px(
     born,
     loader: DataLoader,
     device: torch.device,
+    desc: str = "log p(x)",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute marginal log p(x) for all samples in a loader.
 
@@ -107,6 +109,7 @@ def compute_log_px(
         born: ConditionalBornMachine instance.
         loader: DataLoader yielding (data, labels) tuples.
         device: Torch device.
+        desc: Label for the progress bar.
 
     Returns:
         Tuple of (log_px, labels) tensors concatenated over all batches.
@@ -117,7 +120,9 @@ def compute_log_px(
     born.to(device)
 
     with torch.no_grad():
-        for batch_data, batch_labels in loader:
+        for batch_data, batch_labels in tqdm(
+            loader, desc=desc, unit="batch", leave=False, dynamic_ncols=True
+        ):
             batch_data = batch_data.to(device)
             log_px = born.marginal_log_probability(batch_data)
             all_log_px.append(log_px.cpu())
@@ -329,7 +334,9 @@ class UQEvaluation:
         clean_correct = 0
         clean_total = 0
         with torch.no_grad():
-            for batch_data, batch_labels in clean_loader:
+            for batch_data, batch_labels in tqdm(
+                clean_loader, desc="clean acc", unit="batch", leave=False, dynamic_ncols=True
+            ):
                 batch_data = batch_data.to(device)
                 batch_labels = batch_labels.to(device)
                 probs = born.class_probabilities(batch_data)
@@ -357,7 +364,9 @@ class UQEvaluation:
         # Store adversarial examples for purification
         adv_examples_cache: Dict[float, List[Tuple[torch.Tensor, torch.Tensor]]] = {}
 
-        for eps in cfg.attack_strengths:
+        for eps in tqdm(
+            cfg.attack_strengths, desc="UQ attack", unit="eps", dynamic_ncols=True
+        ):
             logger.info(f"Generating adversarial examples (eps={eps})...")
             try:
                 all_adv_log_px = []
@@ -366,7 +375,10 @@ class UQEvaluation:
                 all_adv_total = 0
                 adv_batches = []
 
-                for batch_data, batch_labels in clean_loader:
+                for batch_data, batch_labels in tqdm(
+                    clean_loader, desc=f"attack eps={eps}", unit="batch",
+                    leave=False, dynamic_ncols=True,
+                ):
                     batch_data = batch_data.to(device)
                     batch_labels = batch_labels.to(device)
 
@@ -426,7 +438,9 @@ class UQEvaluation:
 
         purification_results: Dict[Tuple[float, float], PurificationMetrics] = {}
 
-        for eps in cfg.attack_strengths:
+        for eps in tqdm(
+            cfg.attack_strengths, desc="UQ purify", unit="eps", dynamic_ncols=True
+        ):
             for radius in cfg.radii:
                 logger.info(f"Purifying (eps={eps}, radius={radius})...")
                 try:
@@ -442,7 +456,11 @@ class UQEvaluation:
                     median_pct = cfg.percentiles[len(cfg.percentiles) // 2]
                     tau = thresholds[median_pct]
 
-                    for adv_data_cpu, labels_cpu in adv_examples_cache[eps]:
+                    for adv_data_cpu, labels_cpu in tqdm(
+                        adv_examples_cache[eps],
+                        desc=f"purify eps={eps} r={radius}", unit="batch",
+                        leave=False, dynamic_ncols=True,
+                    ):
                         adv_data = adv_data_cpu.to(device)
                         labels = labels_cpu.to(device)
 
@@ -508,7 +526,9 @@ class UQEvaluation:
 
         # 5. Clean purification (natural examples, no attack)
         clean_purification_results: Dict[float, PurificationMetrics] = {}
-        for radius in cfg.radii:
+        for radius in tqdm(
+            cfg.radii, desc="UQ clean purify", unit="radius", dynamic_ncols=True
+        ):
             logger.info(f"Clean purification (radius={radius})...")
             try:
                 all_correct = 0
@@ -516,7 +536,10 @@ class UQEvaluation:
                 all_log_px_before = []
                 all_log_px_after = []
 
-                for batch_data, batch_labels in clean_loader:
+                for batch_data, batch_labels in tqdm(
+                    clean_loader, desc=f"clean purify r={radius}", unit="batch",
+                    leave=False, dynamic_ncols=True,
+                ):
                     batch_data = batch_data.to(device)
                     batch_labels = batch_labels.to(device)
 
@@ -558,7 +581,9 @@ class UQEvaluation:
                 gibbs_batch_size=cfg.gibbs_batch_size,
                 radius=cfg.gibbs_radius,
             )
-            for eps in cfg.attack_strengths:
+            for eps in tqdm(
+                cfg.attack_strengths, desc="Gibbs purify", unit="eps", dynamic_ncols=True
+            ):
                 try:
                     all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
                     all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
@@ -612,7 +637,9 @@ class UQEvaluation:
             # Clean Gibbs purification
             all_clean = torch.cat([b for b, _ in clean_loader])
             all_clean_labels = torch.cat([lb for _, lb in clean_loader])
-            for n_sw in cfg.gibbs_n_sweeps:
+            for n_sw in tqdm(
+                cfg.gibbs_n_sweeps, desc="Gibbs clean purify", unit="sweeps", dynamic_ncols=True
+            ):
                 logger.info(f"Clean Gibbs purification (n_sweeps={n_sw})...")
                 try:
                     x_purified, log_px_after = gibbs_purifier.purify(
