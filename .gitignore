@@ -68,4 +68,5 @@ $HOME/
 .pytest_cache/
 pytest.ini
 reference/
-DEFERRED.mdCLAUDE.md
+DEFERRED.md
+CLAUDE.md
