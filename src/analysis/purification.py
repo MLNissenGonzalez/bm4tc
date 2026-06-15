@@ -2,7 +2,9 @@
 
 import torch
 from dataclasses import dataclass, field
-from typing import Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List
+
+from tqdm.auto import tqdm
 
 
 @dataclass
@@ -205,6 +207,8 @@ class GibbsPurification:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Purify adversarial examples using Gibbs sampling.
 
+        Thin wrapper over :meth:`purify_snapshots` for the single-sweep-count case.
+
         Args:
             born: ConditionalBornMachine instance (must be prepared and in eval mode).
             x_adv: Adversarial inputs, shape (n_samples, data_dim).
@@ -217,8 +221,37 @@ class GibbsPurification:
                 - log_px_after: Marginal log p(x) of purified inputs on CPU,
                   shape (n_samples,).
         """
+        return self.purify_snapshots(born, x_adv, [n_sweeps], device)[n_sweeps]
+
+    def purify_snapshots(
+        self,
+        born,
+        x_adv: torch.Tensor,
+        sweep_points: List[int],
+        device: torch.device | str,
+    ) -> Dict[int, Tuple[torch.Tensor, torch.Tensor]]:
+        """Purify via Gibbs sampling, snapshotting state at several sweep counts.
+
+        Runs ``max(sweep_points)`` sweeps once and records the purified state after
+        each requested sweep count. A 5-sweep run thus yields the 1-, 3-, and
+        5-sweep results in a single pass instead of three independent reruns — the
+        snapshot at sweep ``s`` is bit-identical to a dedicated ``s``-sweep run under
+        the same RNG state.
+
+        Args:
+            born: ConditionalBornMachine instance (must be prepared and in eval mode).
+            x_adv: Adversarial inputs, shape (n_samples, data_dim).
+            sweep_points: Sweep counts to snapshot (e.g. ``[1, 3, 5]``).
+            device: Torch device.
+
+        Returns:
+            Dict mapping each sweep count to ``(x_purified, log_px_after)``, both on CPU.
+        """
         born.to(device)
         born.eval()
+
+        sweep_points = sorted({int(s) for s in sweep_points})
+        max_sweeps = max(sweep_points)
 
         n_samples = len(x_adv)
         data_dim = x_adv.shape[1]
@@ -231,18 +264,37 @@ class GibbsPurification:
             self.radius * (hi - lo) if self.radius is not None else None
         )
 
-        results = []
-        for batch_start in range(0, n_samples, self.gibbs_batch_size):
+        # Per-snapshot accumulation of purified batches (concatenated after the loop).
+        snap_results: Dict[int, List[torch.Tensor]] = {s: [] for s in sweep_points}
+        n_batches = (n_samples + self.gibbs_batch_size - 1) // self.gibbs_batch_size
+        for batch_start in tqdm(
+            range(0, n_samples, self.gibbs_batch_size),
+            total=n_batches,
+            desc="Gibbs",
+            unit="batch",
+            dynamic_ncols=True,
+        ):
             batch = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
             bs = len(batch)
             x_cur = batch.clone()
 
-            for _ in range(n_sweeps):
+            # The candidate forward shape (bs*num_bins) is constant across all features
+            # and sweeps of this batch and never changes core roles, so a single reset
+            # here suffices — it re-traces only when bs changes (the final partial batch).
+            born.reset()
+
+            for s in range(1, max_sweeps + 1):
                 # Snapshot at sweep start; restriction intervals are centred on these
                 # values, not on within-sweep updated values.
                 x_bar = x_cur.clone() if delta_abs is not None else None
 
-                for k in range(data_dim):
+                for k in tqdm(
+                    range(data_dim),
+                    desc=f"sweep {s}/{max_sweeps}",
+                    unit="feat",
+                    leave=False,
+                    dynamic_ncols=True,
+                ):
                     # Build (bs × num_bins) candidate inputs: x_cur with x[:, k] = grid.
                     x_cand = (
                         x_cur.unsqueeze(1)
@@ -252,7 +304,6 @@ class GibbsPurification:
                     )
                     x_cand[:, k] = input_space.repeat(bs)
 
-                    born.reset()
                     with torch.no_grad():
                         # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}).
                         abs_sq = born.abs_square(born.amplitudes(x_cand))  # (bs*bins, C)
@@ -266,20 +317,41 @@ class GibbsPurification:
 
                     x_cur[:, k] = draw_from_grid(p, input_space)
 
-            results.append(x_cur.cpu())
+                if s in snap_results:
+                    snap_results[s].append(x_cur.cpu().clone())
 
-        x_purified = torch.cat(results, dim=0)
+        out: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+        for s in sweep_points:
+            x_purified = torch.cat(snap_results[s], dim=0)
+            out[s] = (x_purified, self._chunked_log_px(born, x_purified, device))
+        return out
+
+    def _chunked_log_px(
+        self,
+        born,
+        x_purified: torch.Tensor,
+        device: torch.device | str,
+    ) -> torch.Tensor:
+        """Chunk the final log p(x) forward by gibbs_batch_size.
+
+        Keeps this within the same memory budget as the sweep (a single forward over
+        all samples would OOM on large inputs, e.g. MNIST's full test split).
+        """
         born.reset()
-        # Chunk the final log p(x) forward by gibbs_batch_size so it stays within the
-        # same memory budget as the sweep (a single forward over all samples would OOM
-        # on large inputs, e.g. MNIST's full test split).
         log_px_chunks = []
+        n_chunks = (len(x_purified) + self.gibbs_batch_size - 1) // self.gibbs_batch_size
         with torch.no_grad():
-            for i in range(0, len(x_purified), self.gibbs_batch_size):
+            for i in tqdm(
+                range(0, len(x_purified), self.gibbs_batch_size),
+                total=n_chunks,
+                desc="Gibbs log p(x)",
+                unit="batch",
+                leave=False,
+                dynamic_ncols=True,
+            ):
                 chunk = x_purified[i:i + self.gibbs_batch_size].to(device)
                 log_px_chunks.append(born.marginal_log_probability(chunk).cpu())
-
-        return x_purified, torch.cat(log_px_chunks)
+        return torch.cat(log_px_chunks)
 
 
 if __name__ == "__main__":

@@ -104,3 +104,79 @@ def test_restricted_purify_log_px_finite(cbm, x_adv):
     purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, radius=0.3)
     _, log_px = purifier.purify(cbm, x_adv, n_sweeps=3, device="cpu")
     assert torch.isfinite(log_px).all()
+
+
+# --- Snapshot purification (one max-sweep run yields several sweep counts) ---
+
+def test_purify_snapshots_keys_and_shapes(cbm):
+    n = 6
+    x = torch.rand(n, DATA_DIM)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE)
+    snaps = purifier.purify_snapshots(cbm, x, [1, 3], device="cpu")
+    assert sorted(snaps.keys()) == [1, 3]
+    for k in (1, 3):
+        xp, lp = snaps[k]
+        assert xp.shape == (n, DATA_DIM)
+        assert lp.shape == (n,)
+        assert torch.isfinite(lp).all()
+
+
+def test_purify_snapshots_single_batch_matches_purify(cbm):
+    # With one batch (gibbs_batch_size >= n), the RNG stream is identical to dedicated
+    # per-sweep runs, so each snapshot is bit-for-bit equal to purify(n_sweeps=k).
+    n = 6
+    x = torch.rand(n, DATA_DIM)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=64)
+    torch.manual_seed(777)
+    snaps = purifier.purify_snapshots(cbm, x, [1, 3], device="cpu")
+    for k in (1, 3):
+        torch.manual_seed(777)
+        xp, lp = purifier.purify(cbm, x, n_sweeps=k, device="cpu")
+        assert torch.equal(snaps[k][0], xp)
+        assert torch.equal(snaps[k][1], lp)
+
+
+def test_purify_snapshots_partial_batch_valid(cbm):
+    # Across multiple batches the per-sample RNG drifts, but every snapshot must still be
+    # a valid k-sweep purification: right shape, finite log p(x), inside the input range.
+    n = 5
+    x = torch.rand(n, DATA_DIM)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=3)  # partial final batch
+    snaps = purifier.purify_snapshots(cbm, x, [1, 2], device="cpu")
+    lo, hi = cbm.input_range
+    for k in (1, 2):
+        xp, lp = snaps[k]
+        assert xp.shape == (n, DATA_DIM)
+        assert torch.isfinite(lp).all()
+        assert (xp >= lo - 1e-5).all() and (xp <= hi + 1e-5).all()
+
+
+def test_gibbs_numeric_regression():
+    """Pin Gibbs output so future changes (e.g. the reset hoist) can't silently alter it.
+
+    Golden values captured from the per-feature-reset implementation; reproduced exactly
+    by the current per-batch-reset code for both a batch size that divides n_samples and
+    one that leaves a partial final batch.
+    """
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+
+    def make_cbm():
+        torch.manual_seed(0)
+        m = ConditionalBornMachine(
+            cfg=CBMConfig(embedding="legendre",
+                          init_kwargs=MPSInitConfig(in_dim=2, bond_dim=3, std=1e-1)),
+            data_dim=4, num_classes=3, device=torch.device("cpu"),
+        )
+        m.prepare(device=torch.device("cpu")); m.eval(); m.cache_log_Z()
+        return m
+
+    golden = {3: (-4.5714287758, -10.9865303040), 4: (-2.0000000000, -9.3423662186)}
+    for bs, (xp_sum, lp_sum) in golden.items():
+        cbm = make_cbm()
+        torch.manual_seed(123)
+        x_adv = -1 + 2 * torch.rand(6, 4)
+        purifier = GibbsPurification(num_bins=8, gibbs_batch_size=bs, radius=0.2)
+        torch.manual_seed(777)
+        xp, lp = purifier.purify(cbm, x_adv, n_sweeps=2, device="cpu")
+        assert xp.sum().item() == pytest.approx(xp_sum, abs=1e-5)
+        assert lp.sum().item() == pytest.approx(lp_sum, abs=1e-4)

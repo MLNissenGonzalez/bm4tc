@@ -16,6 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
+from tqdm.auto import tqdm
 import logging
 
 from src.utils.evasion import ProjectedGradientDescent
@@ -269,7 +270,10 @@ class MIAEvaluation:
         model.to(device)
 
         with torch.no_grad():
-            for batch_data, batch_labels in data_loader:
+            for batch_data, batch_labels in tqdm(
+                data_loader, desc="MIA features", unit="batch",
+                leave=False, dynamic_ncols=True,
+            ):
                 batch_data = batch_data.to(device)
                 batch_labels = batch_labels.to(device)
 
@@ -310,7 +314,10 @@ class MIAEvaluation:
 
         model.to(device)
 
-        for batch_data, batch_labels in data_loader:
+        for batch_data, batch_labels in tqdm(
+            data_loader, desc="MIA adv features", unit="batch",
+            leave=False, dynamic_ncols=True,
+        ):
             batch_data = batch_data.to(device)
             batch_labels = batch_labels.to(device)
 
