@@ -259,7 +259,7 @@ def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
     def boom(self, *args, **kwargs):
         raise RuntimeError("simulated OOM")
 
-    monkeypatch.setattr(purif_mod.GibbsPurification, "purify", boom)
+    monkeypatch.setattr(purif_mod.GibbsPurification, "purify_snapshots", boom)
     cfg = UQConfig(
         attack_strengths=[0.1], radii=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2, run_gibbs=True, gibbs_n_sweeps=[1],
@@ -268,6 +268,25 @@ def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
     assert len(results.detection_rates) > 0          # detection survived
     assert len(results.purification_results) > 0     # gradient purify survived
     assert results.gibbs_purification_results == {}  # gibbs skipped, not fatal
+
+
+def test_uq_gibbs_subsample_runs(cbm, clean_loader):
+    # Gibbs runs on a fixed subsample (< n_adv) while cheap metrics keep the full set;
+    # snapshot sweeps [1,2] both produce valid metrics in a single max-sweep pass.
+    import math
+    cfg = UQConfig(
+        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        attack_num_steps=2, num_steps=2,
+        run_gibbs=True, gibbs_n_sweeps=[1, 2], gibbs_num_bins=8,
+        gibbs_batch_size=3,          # forces multiple Gibbs batches on the subsample
+        gibbs_subsample=8, gibbs_subsample_seed=0,
+    )
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    assert {(0.1, 1), (0.1, 2)} <= set(results.gibbs_purification_results.keys())
+    for m in results.gibbs_purification_results.values():
+        assert 0.0 <= m.accuracy_after_purify <= 1.0
+        assert math.isfinite(m.mean_log_px_after)
+    assert set(results.clean_gibbs_purification_results.keys()) == {1, 2}
 
 
 def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
