@@ -63,6 +63,10 @@ class UQConfig:
     gibbs_num_bins: int = 200
     gibbs_batch_size: int = 8
     gibbs_radius: Optional[float] = 0.1  # relative to input range; None = unrestricted
+    # Gibbs is ~99% of UQ cost and reduces to a mean over the test set, so it runs on a
+    # fixed random subsample (cheap metrics keep the full set). None = full set.
+    gibbs_subsample: Optional[int] = None
+    gibbs_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/alphas (paired)
 
     # Memory control
     eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch
@@ -581,29 +585,51 @@ class UQEvaluation:
                 gibbs_batch_size=cfg.gibbs_batch_size,
                 radius=cfg.gibbs_radius,
             )
+            sweep_points = sorted(set(cfg.gibbs_n_sweeps))
+
+            def _gibbs_subsample(*tensors):
+                """Take a fixed random subsample (shared across model-seeds) of inputs.
+
+                Gibbs is ~99% of cost and only feeds a mean over the test set; estimating
+                that mean on a fixed ~1k subsample keeps the statistic within ~±1.5%.
+                """
+                n = len(tensors[0])
+                if cfg.gibbs_subsample is None or cfg.gibbs_subsample >= n:
+                    return tensors
+                rng = np.random.default_rng(cfg.gibbs_subsample_seed)
+                idx = torch.from_numpy(rng.permutation(n)[: cfg.gibbs_subsample])
+                return tuple(t[idx] for t in tensors)
+
             for eps in tqdm(
                 cfg.attack_strengths, desc="Gibbs purify", unit="eps", dynamic_ncols=True
             ):
                 try:
                     all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
                     all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
+                    all_adv, all_labels = _gibbs_subsample(all_adv, all_labels)
 
+                    # Recompute misclassification + mean log p(x) on the SAME subsample so
+                    # accuracy/recovery/log-px are internally consistent.
                     adv_preds = _batched_forward(
                         born.class_probabilities, all_adv, cfg.eval_batch_size, device
                     ).argmax(dim=1)
                     misclassified = adv_preds != all_labels
+                    mean_log_px_before = float(
+                        _batched_forward(
+                            born.marginal_log_probability, all_adv, cfg.eval_batch_size, device
+                        ).mean()
+                    )
+
+                    snapshots = gibbs_purifier.purify_snapshots(
+                        born, all_adv, sweep_points, device
+                    )
                 except Exception as e:
-                    logger.warning(f"Gibbs setup failed (eps={eps}): {e}; skipping")
+                    logger.warning(f"Gibbs failed (eps={eps}): {e}; skipping")
                     _recover_after_failure(born)
                     continue
 
-                for n_sw in cfg.gibbs_n_sweeps:
-                    logger.info(f"Gibbs purification (eps={eps}, n_sweeps={n_sw})...")
+                for n_sw, (x_purified, log_px_after) in snapshots.items():
                     try:
-                        x_purified, log_px_after = gibbs_purifier.purify(
-                            born, all_adv, n_sw, device
-                        )
-
                         pur_preds = _batched_forward(
                             born.class_probabilities, x_purified, cfg.eval_batch_size, device
                         ).argmax(dim=1)
@@ -619,7 +645,7 @@ class UQEvaluation:
                         gibbs_purification_results[(eps, n_sw)] = PurificationMetrics(
                             accuracy_after_purify=acc_after,
                             recovery_rate=recovery,
-                            mean_log_px_before=float(adv_log_px[eps].mean()),
+                            mean_log_px_before=mean_log_px_before,
                             mean_log_px_after=float(log_px_after.mean()),
                             rejection_rate=0.0,
                         )
@@ -629,7 +655,7 @@ class UQEvaluation:
                         )
                     except Exception as e:
                         logger.warning(
-                            f"Gibbs purification failed (eps={eps}, n_sweeps={n_sw}): "
+                            f"Gibbs scoring failed (eps={eps}, n_sweeps={n_sw}): "
                             f"{e}; skipping"
                         )
                         _recover_after_failure(born)
@@ -637,14 +663,24 @@ class UQEvaluation:
             # Clean Gibbs purification
             all_clean = torch.cat([b for b, _ in clean_loader])
             all_clean_labels = torch.cat([lb for _, lb in clean_loader])
-            for n_sw in tqdm(
-                cfg.gibbs_n_sweeps, desc="Gibbs clean purify", unit="sweeps", dynamic_ncols=True
-            ):
-                logger.info(f"Clean Gibbs purification (n_sweeps={n_sw})...")
+            all_clean, all_clean_labels = _gibbs_subsample(all_clean, all_clean_labels)
+            try:
+                clean_mean_log_px_before = float(
+                    _batched_forward(
+                        born.marginal_log_probability, all_clean, cfg.eval_batch_size, device
+                    ).mean()
+                )
+                clean_snapshots = gibbs_purifier.purify_snapshots(
+                    born, all_clean, sweep_points, device
+                )
+            except Exception as e:
+                logger.warning(f"Clean Gibbs failed: {e}; skipping")
+                _recover_after_failure(born)
+                clean_snapshots = {}
+                clean_mean_log_px_before = float("nan")
+
+            for n_sw, (x_purified, log_px_after) in clean_snapshots.items():
                 try:
-                    x_purified, log_px_after = gibbs_purifier.purify(
-                        born, all_clean, n_sw, device
-                    )
                     pur_preds = _batched_forward(
                         born.class_probabilities, x_purified, cfg.eval_batch_size, device
                     ).argmax(dim=1)
@@ -652,14 +688,14 @@ class UQEvaluation:
                     clean_gibbs_purification_results[n_sw] = PurificationMetrics(
                         accuracy_after_purify=acc,
                         recovery_rate=float("nan"),
-                        mean_log_px_before=float(clean_log_px.mean()),
+                        mean_log_px_before=clean_mean_log_px_before,
                         mean_log_px_after=float(log_px_after.mean()),
                         rejection_rate=0.0,
                     )
                     logger.info(f"  sweeps={n_sw}: clean_gibbs_acc={acc:.4f}")
                 except Exception as e:
                     logger.warning(
-                        f"Clean Gibbs purification failed (n_sweeps={n_sw}): {e}; skipping"
+                        f"Clean Gibbs scoring failed (n_sweeps={n_sw}): {e}; skipping"
                     )
                     _recover_after_failure(born)
 

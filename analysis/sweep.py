@@ -90,7 +90,7 @@ COMPUTE_MIA = False
 COMPUTE_DIS_LOSS = True
 COMPUTE_GEN_LOSS = True
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
-COMPUTE_GIBBS_PURIFICATION = True  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
+COMPUTE_GIBBS_PURIFICATION = False  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
 COMPUTE_JOINT_ATTACK = True  # Joint generative attack (JOINT_PGD) alongside standard PGD
 COMPUTE_DISTRIBUTIONS = False  # Set True (or pass --viz) to generate best-run distribution plots
 
@@ -138,12 +138,16 @@ UQ_CONFIG = {
 # --- GIBBS PURIFICATION SETTINGS (only used when COMPUTE_GIBBS_PURIFICATION=True) ---
 GIBBS_CONFIG = {
     "n_sweeps": [1, 3, 5],
-    "num_bins": 200,
+    "num_bins": 96,
     # Candidate-expansion peak ∝ gibbs_batch_size × num_bins. On a 24 GB GPU,
-    # 8 is safe for resized MNIST (r12, ~3 GB); drop to 4 for full-res mnist_full
-    # (784 sites, ~16 GB at 8).
-    "gibbs_batch_size": 8,
+    # 24 is safe for resized MNIST (r12) at num_bins=96 (~1.5× the old 8×200 peak);
+    # drop to ~8 for full-res mnist_full (784 sites).
+    "gibbs_batch_size": 24,
     "radius": 0.1,
+    # Gibbs is ~99% of analysis cost and only estimates a mean over the test set, so
+    # run it on a fixed random subsample (cheap metrics keep the full set). ~±1.5%
+    # stderr at 1000. None = full test set.
+    "subsample": 1000,
 }
 
 # --- EVALUATION SETTINGS ---
@@ -219,12 +223,17 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
         _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
         _full_uq_config["gibbs_radius"] = GIBBS_CONFIG.get("radius")
+        _full_uq_config["gibbs_subsample"] = GIBBS_CONFIG.get("subsample")
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
 
 _full_joint_uq_config = None
 if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and _full_uq_config is not None:
-    _full_joint_uq_config = {**_full_uq_config, "attack_method": "JOINT_PGD"}
+    # Skip Gibbs in the joint pass: it doubles the dominant cost and the standard-PGD
+    # Gibbs table is the headline defense result. Joint detection + gradient purify stay.
+    _full_joint_uq_config = {
+        **_full_uq_config, "attack_method": "JOINT_PGD", "run_gibbs": False,
+    }
 
 # %%
 import logging as _logging
