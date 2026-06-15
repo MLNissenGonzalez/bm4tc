@@ -185,7 +185,7 @@ def analyze_run(
     # 4. Core metrics
     if cfg.compute_acc or cfg.compute_dis_loss or cfg.compute_gen_loss:
         try:
-            dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device)
+            dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device, progress=True)
             if cfg.compute_acc:
                 results["acc"] = acc
             if cfg.compute_dis_loss:
@@ -208,7 +208,7 @@ def analyze_run(
             attack, strengths_abs = rob_params
             for abs_eps in strengths_abs:
                 try:
-                    rob_acc = eval_rob(cbm, loader, attack, abs_eps, device)
+                    rob_acc = eval_rob(cbm, loader, attack, abs_eps, device, progress=True)
                     results[f"rob/{abs_eps}"] = rob_acc
                 except Exception as e:
                     logger.warning(f"eval_rob failed at eps={abs_eps}: {e}")

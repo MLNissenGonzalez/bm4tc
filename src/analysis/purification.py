@@ -4,6 +4,8 @@ import torch
 from dataclasses import dataclass, field
 from typing import Tuple, Optional, List
 
+from tqdm.auto import tqdm
+
 
 @dataclass
 class PurificationConfig:
@@ -232,17 +234,30 @@ class GibbsPurification:
         )
 
         results = []
-        for batch_start in range(0, n_samples, self.gibbs_batch_size):
+        n_batches = (n_samples + self.gibbs_batch_size - 1) // self.gibbs_batch_size
+        for batch_start in tqdm(
+            range(0, n_samples, self.gibbs_batch_size),
+            total=n_batches,
+            desc="Gibbs",
+            unit="batch",
+            dynamic_ncols=True,
+        ):
             batch = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
             bs = len(batch)
             x_cur = batch.clone()
 
-            for _ in range(n_sweeps):
+            for s in range(n_sweeps):
                 # Snapshot at sweep start; restriction intervals are centred on these
                 # values, not on within-sweep updated values.
                 x_bar = x_cur.clone() if delta_abs is not None else None
 
-                for k in range(data_dim):
+                for k in tqdm(
+                    range(data_dim),
+                    desc=f"sweep {s + 1}/{n_sweeps}",
+                    unit="feat",
+                    leave=False,
+                    dynamic_ncols=True,
+                ):
                     # Build (bs × num_bins) candidate inputs: x_cur with x[:, k] = grid.
                     x_cand = (
                         x_cur.unsqueeze(1)
@@ -274,8 +289,16 @@ class GibbsPurification:
         # same memory budget as the sweep (a single forward over all samples would OOM
         # on large inputs, e.g. MNIST's full test split).
         log_px_chunks = []
+        n_chunks = (len(x_purified) + self.gibbs_batch_size - 1) // self.gibbs_batch_size
         with torch.no_grad():
-            for i in range(0, len(x_purified), self.gibbs_batch_size):
+            for i in tqdm(
+                range(0, len(x_purified), self.gibbs_batch_size),
+                total=n_chunks,
+                desc="Gibbs log p(x)",
+                unit="batch",
+                leave=False,
+                dynamic_ncols=True,
+            ):
                 chunk = x_purified[i:i + self.gibbs_batch_size].to(device)
                 log_px_chunks.append(born.marginal_log_probability(chunk).cpu())
 
