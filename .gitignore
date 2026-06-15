@@ -7,8 +7,8 @@ spec_file.txt
 # Save images only locally. 
 images/
 
-# Notebooks are right now only for personal experimentation
-notebooks/
+# Track notebooks/ but keep the personal-experimentation archive out of git
+notebooks/archive/
 
 # This folder contains the results of experiment runs, the logging, images, and model parameters.
 outputs/
