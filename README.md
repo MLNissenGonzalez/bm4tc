@@ -152,6 +152,19 @@ python -m analysis.batch
 
 Results land in `analysis/outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
 
+## Reproduction Notebooks
+
+Self-contained notebooks under `notebooks/` walk from running sweeps → analysis → paper
+figures. Activate the `bm4tc` env, launch Jupyter, and run top-to-bottom (a bootstrap cell
+resolves the repo root, so the working directory does not matter):
+
+| Notebook | Benchmark | Figures |
+|----------|-----------|---------|
+| `notebooks/2dtoy.ipynb` | spirals (Legendre, d10r6) | distribution panel · alpha curve · regime barplot |
+| `notebooks/mnist.ipynb` | MNIST (Legendre, d3r20c64) | sampling (mean digit) · alpha curve · robustness curves (purification + detection) |
+
+Generated figures are written under `figures/`.
+
 ## Repository Structure
 
 ```
@@ -172,6 +185,7 @@ bm4tc/
 │   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)
 ├── tools/              # Pipeline tools (fill_hpo.py, delete_runs.py, …)
+├── notebooks/          # Reproduction notebooks (2dtoy.ipynb, mnist.ipynb; archive/ git-ignored)
 └── environment.yml
 ```
 
