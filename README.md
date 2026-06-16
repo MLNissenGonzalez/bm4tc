@@ -163,7 +163,7 @@ resolves the repo root, so the working directory does not matter):
 | `notebooks/2dtoy.ipynb` | spirals (Legendre, d10r6) | distribution panel · alpha curve · regime barplot |
 | `notebooks/mnist.ipynb` | MNIST (Legendre, d3r20c64) | sampling (mean digit) · alpha curve · robustness curves (purification + detection) |
 
-Generated figures are written under `figures/`.
+Generated figures are written under `figures/` (git-ignored; regenerate by running the notebook).
 
 ## Repository Structure
 
