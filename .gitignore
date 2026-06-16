@@ -4,8 +4,11 @@ environment_old.*
 # I don't know I want to keep it
 spec_file.txt
 
-# Save images only locally. 
+# Save images only locally.
 images/
+
+# Generated figures (reproduced by the notebooks under notebooks/)
+figures/
 
 # Track notebooks/ but keep the personal-experimentation archive out of git
 notebooks/archive/
