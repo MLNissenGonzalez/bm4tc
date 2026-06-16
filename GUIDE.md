@@ -123,6 +123,22 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 
 ---
 
+## Reproduction notebooks
+
+`notebooks/` holds end-to-end notebooks (run sweeps → analyse → figures), one per benchmark:
+
+| Notebook | Benchmark | Figures |
+|----------|-----------|---------|
+| `notebooks/2dtoy.ipynb` | spirals · Legendre · d10r6 | distribution panel · alpha curve · regime barplot |
+| `notebooks/mnist.ipynb` | MNIST (`mnist_full_r12`) · Legendre · d3r20c64 | sampling (mean digit, α=0.01) · alpha curve · robustness curves with purification + detection overlays |
+
+Each notebook's first cell walks up to the repo root and adds it to `sys.path`, so it runs
+correctly from `notebooks/` regardless of the Jupyter working directory; all `outputs/`,
+`analysis/`, and `figures/` paths are anchored on that `PROJECT_ROOT`. Figures are written
+under `figures/`. `notebooks/archive/` (personal experimentation) is git-ignored.
+
+---
+
 ## Navigation guide
 
 | Task | Location |
@@ -144,6 +160,7 @@ Analysis outputs land in `analysis/outputs/<sweep_path>/` as `evaluation_data.cs
 | HPO result exploration | `analysis/hpo.py` |
 | Single-model analysis (MIA / UQ) | `analysis/run.py` |
 | Fill seed_sweep configs from HPO | `tools/fill_hpo.py` |
+| Reproduce paper figures (notebooks) | `notebooks/2dtoy.ipynb`, `notebooks/mnist.ipynb` |
 | Run unit tests (fast) | `pytest -m "not slow" -q` |
 | Run full test suite | `pytest -q` |
 
