@@ -49,7 +49,13 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 
 ### Metric columns
 
-All metric columns are prefixed `eval/`. Optional groups depend on which metrics were enabled in the `COMPUTE_*` flags at the top of `sweep.py`.
+Optional groups depend on which metrics were enabled in the `COMPUTE_*` flags at the top of `sweep.py`.
+
+> **Prefix note (post-Phase-7).** The column names in the tables below are shown with the
+> historical `eval/` / `eval/test/` prefix. **Current `sweep.py` writes them WITHOUT that
+> prefix** — e.g. `acc`, `rob/0.2`, `uq_adv_acc/0.2`, `uq_purify_acc/0.2/0.2`. Strip the
+> `eval/test/` / `eval/` prefix when reading recent CSVs (the old prefixed names only appear
+> in pre-refactor outputs).
 
 #### Accuracy & loss
 
@@ -83,14 +89,30 @@ All metric columns are prefixed `eval/`. Optional groups depend on which metrics
 
 | Column | Description |
 |--------|-------------|
-| `eval/uq_clean_accuracy` | Clean accuracy (cross-check via UQ pipeline) |
-| `eval/uq_clean_log_px_mean` | Mean log p(x) on clean test data |
-| `eval/uq_adv_acc/{eps}` | Adversarial accuracy before purification at `eps` |
-| `eval/uq_detection/{pct}pct/{eps}` | Detection rate at threshold calibrated to `{pct}`th percentile of clean log p(x), at attack eps `eps` |
-| `eval/uq_purify_acc/{eps}/{radius}` | Accuracy after likelihood purification (attack `eps`, purification ball `radius`) |
-| `eval/uq_purify_recovery/{eps}/{radius}` | Recovery rate: fraction of previously-wrong examples corrected by purification |
-| `eval/gibbs_purify_acc/{eps}/{n_sweeps}` | Accuracy after Gibbs-sampling purification (attack `eps`, `n_sweeps` full feature sweeps). Only present when `COMPUTE_GIBBS_PURIFICATION=True`. |
-| `eval/gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification: fraction of pre-purification misclassified samples that become correct. |
+Column names below omit the dropped `eval/` prefix (see prefix note above). `{q}` is a clean
+false-positive rate in percent (the threshold `τ` is the `{q}`-th percentile of clean
+`log p(x)`); `{eps}` is the absolute attack budget; `{radius}` the purification ball radius.
+
+| Column | Description |
+|--------|-------------|
+| `uq_clean_accuracy` | Clean accuracy (cross-check via UQ pipeline) |
+| `uq_clean_log_px_mean` | Mean log p(x) on clean test data |
+| `uq_adv_acc/{eps}` | Adversarial accuracy, **no defense**, at `eps`. Equals `rob/{eps}` when both are computed. |
+| `uq_detection/{q}pct/{eps}` | **Detection rate**: fraction of adversarial inputs flagged (`log p(x) < τ`) at threshold `τ` = `{q}`-th percentile of clean `log p(x)`. |
+| `uq_det_err_detected/{q}pct/{eps}` | Misclassification rate **among detected (flagged)** adversarial inputs. |
+| `uq_det_err_passed/{q}pct/{eps}` | Misclassification rate **among passed (non-flagged)** adversarial inputs. ⇒ **accuracy on accepted inputs = `1 − uq_det_err_passed/{q}pct/{eps}`** (conditional on acceptance; pair with `1 − uq_detection/{q}pct/{eps}` for coverage). |
+| `uq_purify_acc/{eps}/{radius}` | Accuracy after **likelihood purification** (projected gradient ascent on `log p(x)` within an `radius` ball) of `eps`-attacked inputs. |
+| `uq_purify_recovery/{eps}/{radius}` | Recovery rate: fraction of previously-wrong examples corrected by purification. |
+| `uq_clean_purify_acc/{radius}` | Accuracy after purifying **clean** inputs (sanity: purification should not hurt clean accuracy). |
+| `gibbs_purify_acc/{eps}/{n_sweeps}` | Accuracy after Gibbs-sampling purification. Only when `COMPUTE_GIBBS_PURIFICATION=True`. |
+| `gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification. |
+
+**`uq_joint_*` family** (`uq_joint_adv_acc/{eps}`, `uq_joint_detection/…`,
+`uq_joint_det_err_{detected,passed}/…`, `uq_joint_purify_{acc,recovery}/…`) — the **same
+metrics measured under the joint / adaptive attack** (`COMPUTE_JOINT_ATTACK=True`): a PGD
+attack that degrades classification **while keeping `log p(x)` high to evade the likelihood
+detector**. These are *harder-attack* counterparts of the columns above, **not** a separate
+"detect + purify" defense. Do not plot `uq_joint_adv_acc` as a defense line.
 
 ### Companion file: `evaluation_summary.txt`
 
