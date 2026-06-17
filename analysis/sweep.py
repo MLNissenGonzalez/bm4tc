@@ -128,7 +128,7 @@ MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
-    "radii": [0.10 * _RANGE_SIZE],
+    "radii": [0.10 * _RANGE_SIZE, 0.15 * _RANGE_SIZE],
     "percentiles": [1, 5, 10, 20],
     # Chunk size for all UQ forwards (attack/purify + full-test class-prob/log-px).
     # Bounds peak GPU memory on large inputs (e.g. MNIST). None = use loader batch.
