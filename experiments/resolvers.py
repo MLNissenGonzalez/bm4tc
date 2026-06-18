@@ -1,13 +1,15 @@
 import math
+import os
 
 from omegaconf import OmegaConf
 
 
 def _training_regime(*, _root_):
     parts = []
-    for key, code in [("trainer.nll", "nll"), ("trainer.adversarial", "adv")]:
-        if OmegaConf.select(_root_, key) is not None:
-            parts.append(code)
+    if OmegaConf.select(_root_, "trainer.nll") is not None:
+        parts.append("nat")
+    if OmegaConf.select(_root_, "trainer.adversarial") is not None:
+        parts.append("at")
     return "_".join(parts) or "none"
 
 
@@ -22,7 +24,14 @@ def _dtype_suffix(*, _root_):
     return _DTYPE_SUFFIX.get(dtype, f"_{dtype}")
 
 
+def _outputs_root() -> str:
+    root = os.environ.get("BM4TC_DATA_ROOT")
+    return f"{root}/outputs" if root else "outputs"
+
+
 def register_resolvers():
+    if not OmegaConf.has_resolver("outputs_root"):
+        OmegaConf.register_new_resolver("outputs_root", _outputs_root)
     if not OmegaConf.has_resolver("training_regime"):
         OmegaConf.register_new_resolver(
             "training_regime", _training_regime, use_cache=False

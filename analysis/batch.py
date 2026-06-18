@@ -27,12 +27,16 @@ import sys
 from pathlib import Path
 
 ROOT          = Path(__file__).parent.parent   # project root (analysis/../)
-ANALYSIS_ROOT = ROOT / "analysis" / "outputs"
+sys.path.insert(0, str(ROOT))
+
+from src.utils.paths import data_root as _data_root
+
+ANALYSIS_ROOT = _data_root() / "analysis" / "outputs"
 
 # All experiment families to scan.  Each maps a short name to its outputs/ sub-dir.
 SWEEP_ROOTS = {
-    "seed_sweep":  ROOT / "outputs" / "seed_sweep",
-    "alpha_curve": ROOT / "outputs" / "alpha_curve",
+    "seed_sweep":  _data_root() / "outputs" / "seed_sweep",
+    "alpha_curve": _data_root() / "outputs" / "alpha_curve",
 }
 
 
@@ -44,7 +48,7 @@ def find_sweep_dirs(root: Path):
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
     """Mirror sweep path under analysis/outputs/ (matches sweep.py logic)."""
-    rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
+    rel = sweep_dir.relative_to(_data_root() / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
 
@@ -119,7 +123,7 @@ def main():
     if args.list:
         for sweep_dir, exp_name, root in all_sweeps:
             status = "OK " if is_analyzed(sweep_dir) else "   "
-            print(f"[{status}] [{exp_name}] {sweep_dir.relative_to(ROOT)}")
+            print(f"[{status}] [{exp_name}] {sweep_dir.relative_to(_data_root())}")
         return
 
     # Apply filters
@@ -146,9 +150,9 @@ def main():
     print(f"{label}Processing {len(todo)} sweep(s):\n")
 
     for sweep_dir, exp_name, root in todo:
-        rel = sweep_dir.relative_to(ROOT)
+        rel = sweep_dir.relative_to(_data_root())
         # --no-viz: distribution plots are handled separately by analysis/visualize/batch.py
-        cmd = ["python", "analysis/sweep.py", str(rel), "--no-viz"]
+        cmd = ["python", "analysis/sweep.py", str(rel)]
         print(" ".join(cmd))
         if not args.dry_run:
             result = subprocess.run(cmd, cwd=ROOT)

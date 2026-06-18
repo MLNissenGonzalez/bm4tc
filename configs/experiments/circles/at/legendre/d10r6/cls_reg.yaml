@@ -1,0 +1,64 @@
+# @package _global_
+experiment: cls_reg
+
+defaults:
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/circles
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+model_path: outputs/circles/nat/legendre/d10r6/seed_sweep_a0_1203/0/models/model
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+  evasion:
+    norm: 2
+    criterion:
+      name: "negative log-likelihood"
+      kwargs:
+    strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre (10% of domain width)
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 1            # placeholder; swept via hydra sweeper
+    batch_size: 256
+    stop_crit: "rob"
+    patience: 100           # >= max max_epoch -> no early stopping during sweep
+
+    evasion:
+      norm: 2
+      criterion:
+        name: "negative log-likelihood"
+        kwargs:
+      strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: false
+    curriculum_start: 0.0
+    curriculum_end_epoch: null
+    save: true
+    auto_stack: true
+    auto_unbind: false
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0001329291894316216                  # FILL FROM HPO
+        weight_decay: 0.04033800832600378        # FILL FROM HPO
+    clean_weight: 0.7855951534491241  
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.max_epoch: choice(1,2,4,8,16,32,64,128)
+      tracking.seed: range(1,6)

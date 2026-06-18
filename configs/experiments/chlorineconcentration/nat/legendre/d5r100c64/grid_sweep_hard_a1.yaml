@@ -1,0 +1,38 @@
+# @package _global_
+experiment: grid_sweep_hard_a1
+descriptor: nll_hard_pretrained
+
+defaults:
+  - override /born: legendre/d5r100c64
+  - override /dataset: ucr_ts/chlorineconcentration
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+model_path: ???  # FILL: best cls seed sweep checkpoint
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 1000
+    batch_size: 128
+    patience: 300
+    stop_crit: "acc"
+    save: false
+    norm_control:
+      log_target: null        # captured from pretrained BM at start of train()
+      hard_every: 1       # overridden by grid sweep
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4          # overridden by grid sweep
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.nll.optimizer.kwargs.lr: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2)
+      trainer.nll.norm_control.hard_every: choice(1, 2, 5, 10, 20, 50, 100, 200)

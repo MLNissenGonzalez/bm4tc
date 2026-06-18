@@ -11,16 +11,12 @@ optimizer:
 
 criterion:
   name: "negative log-likelihood"
-  kwargs:
-    eps: 1e-8
 
 evasion:
   method: "PGD"
   norm: 2
   criterion:
     name: "negative log-likelihood"
-    kwargs:
-      eps: 1e-8
   strengths: [0.1]  # relative fraction; abs_eps = strength × range_size
   num_steps: 10
   step_size: null  # defaults to 2.5 * strength / num_steps
@@ -32,6 +28,7 @@ patience: 30
 eval_rob_freq: 5
 
 clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)
+acc_floor: null  # min clean valid-acc for model selection (null = no floor)
 curriculum: false
 curriculum_start: 0.0
 curriculum_end_epoch: null

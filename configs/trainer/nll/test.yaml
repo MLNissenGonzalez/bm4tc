@@ -9,7 +9,8 @@ optimizer:
 patience: 50
 stop_crit: "dis_loss"
 norm_control:
-  target: 1.0
+  log_target: 0.0
   hard_every: 1
   soft_strength: 0.0
+  debug: false
 save: false

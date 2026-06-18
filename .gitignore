@@ -4,11 +4,14 @@ environment_old.*
 # I don't know I want to keep it
 spec_file.txt
 
-# Save images only locally. 
+# Save images only locally.
 images/
 
-# Notebooks are right now only for personal experimentation
-notebooks/
+# Generated figures (reproduced by the notebooks under notebooks/)
+figures/
+
+# Track notebooks/ but keep the personal-experimentation archive out of git
+notebooks/archive/
 
 # This folder contains the results of experiment runs, the logging, images, and model parameters.
 outputs/
@@ -55,7 +58,6 @@ analysis/scratchbook.ipynb
 # github
 .github/
 .github
-/mathqi/mnissen/adversarial_training_mps/.github
 .claude/
 .vscode/
 
@@ -69,3 +71,4 @@ $HOME/
 pytest.ini
 reference/
 DEFERRED.md
+CLAUDE.md

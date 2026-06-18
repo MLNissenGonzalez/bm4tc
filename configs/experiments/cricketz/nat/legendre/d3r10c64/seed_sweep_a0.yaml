@@ -1,0 +1,29 @@
+# @package _global_
+experiment: seed_sweep_a0
+
+defaults:
+  - override /born: legendre/d3r10c64
+  - override /dataset: ucr_ts/cricketz
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0006358358856676254    # FILL FROM HPO
+        weight_decay: 3.139575515829448e-07  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,11)

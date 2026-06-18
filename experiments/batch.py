@@ -1,21 +1,22 @@
 #!/usr/bin/env python
 """
-Discover and run seed_sweep / hpo / grid_sweep experiment configs from configs/experiments/.
+Discover and run experiment configs from configs/experiments/.
 
 Directory layout:
-  configs/experiments/nll/{dis,gen}/{embedding}/{arch}/{kind}/{dataset}.yaml
-  configs/experiments/adversarial/{embedding}/{arch}/{kind}/{dataset}.yaml
+  configs/experiments/{dataset}/{nat|at}/{embedding}/{arch}/{kind}.yaml
 
-where {kind} is one of: hpo, hpo_<variant>, seed_sweep, seed_sweep_<variant>,
-grid_sweep, grid_sweep_<variant>, cls_reg.
+where {kind} encodes the experiment type and alpha (if applicable):
+  hpo_a0, hpo_a1, hpo_a05, hpo        (HPO variants)
+  seed_sweep_a0, seed_sweep_a1, …      (seed sweep variants)
+  alpha_curve, grid_sweep, cls_reg_a1  (special sweep types)
 
 Usage
 -----
     python -m experiments.batch --list
     python -m experiments.batch --dry-run
-    python -m experiments.batch --type gen --embedding legendre --dry-run
-    python -m experiments.batch --type gen --kind seed_sweep
-    python -m experiments.batch --type dis --dataset moons --force --dry-run
+    python -m experiments.batch --trainer nat --embedding legendre --dry-run
+    python -m experiments.batch --trainer nat --kind seed_sweep_a1
+    python -m experiments.batch --dataset moons --force --dry-run
 """
 
 import argparse
@@ -27,24 +28,16 @@ import yaml
 
 ROOT         = Path(__file__).parent.parent
 CONFIGS_ROOT = ROOT / "configs" / "experiments"
+sys.path.insert(0, str(ROOT))
+from src.utils.paths import data_root as _data_root
 
-VALID_TYPES = ["dis", "gen", "mixed", "adversarial"]
+VALID_TRAINERS = ["nat", "at"]
+
 BASE_KINDS = ["seed_sweep", "hpo", "grid_sweep", "cls_reg", "alpha_curve"]
 
-TYPE_SHORT = {
-    "dis":   "dis",
-    "gen":   "gen",
-    "mix":   "mixed",
-    "adv":   "adversarial",
-}
 
-KIND_SHORT = {
-    "seed": "seed_sweep",
-}
-
-
-def parse_dataset_name(config_path, fallback):
-    """Extract dataset name from yaml defaults list; fall back to config stem."""
+def parse_dataset_name(config_path):
+    """Extract dataset name from yaml defaults list; fall back to dataset folder."""
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f)
@@ -55,11 +48,12 @@ def parse_dataset_name(config_path, fallback):
                     return val.split("/")[-1]
     except Exception:
         pass
-    return fallback
+    # Fallback: dataset folder name (grandparent^3 of the yaml)
+    return config_path.parts[-5] if len(config_path.parts) >= 5 else config_path.stem
 
 
-def get_experiment_field(config_path, kind):
-    """Read 'experiment:' from yaml; derive from kind if absent."""
+def get_experiment_field(config_path, kind_stem):
+    """Read 'experiment:' from yaml; derive from kind stem if absent."""
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f)
@@ -68,105 +62,79 @@ def get_experiment_field(config_path, kind):
             return exp
     except Exception:
         pass
-    return "seed_sweep" if kind.startswith("seed_sweep") else kind
+    # Derive from kind stem: strip alpha suffixes to get canonical kind name
+    base = kind_stem
+    for suffix in ("_a0", "_a1", "_a05", "_a01", "_linf"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return base
 
 
-def is_already_run(experiment, typ, embedding, arch, dataset_name):
+def is_already_run(dataset, trainer, embedding, arch, kind_stem):
     """Return True if an output directory exists for this config."""
-    regime = "nll" if typ in ("dis", "gen", "mixed") else "adv"
-    pattern = f"outputs/{experiment}/{regime}/{embedding}/{arch}/{dataset_name}_*"
-    return any(ROOT.glob(pattern))
+    pattern = f"{dataset}/{trainer}/{embedding}/{arch}/{kind_stem}_*"
+    return any((_data_root() / "outputs").glob(pattern))
 
 
 def discover_configs():
-    """Yield config dicts for every seed_sweep / hpo / grid_sweep yaml under CONFIGS_ROOT.
+    """Yield config dicts for every yaml under CONFIGS_ROOT/{dataset}/{nat|at}/...
 
-    NLL layout:     nll/{dis,gen}/{embedding}/{arch}/{kind}/{dataset}.yaml
-    Adversarial:    adversarial/{embedding}/{arch}/{kind}/{dataset}.yaml
+    Layout: {dataset}/{trainer}/{embedding}/{arch}/{kind}.yaml
     """
     configs = []
 
-    # ── NLL (dis + gen + mixed) ────────────────────────────────────────────
-    for sub in ("dis", "gen", "mixed"):
-        type_dir = CONFIGS_ROOT / "nll" / sub
-        if not type_dir.is_dir():
+    for trainer_dir in CONFIGS_ROOT.iterdir():
+        if not trainer_dir.is_dir() or trainer_dir.name == "tests":
             continue
-        for config_path in sorted(type_dir.rglob("*.yaml")):
-            rel   = config_path.relative_to(type_dir)
-            parts = rel.parts  # (embedding, arch, kind, name)
+        dataset = trainer_dir.name
 
-            kind_idx = next(
-                (i for i, p in enumerate(parts[:-1])
-                 if any(p == k or p.startswith(k + "_") for k in BASE_KINDS)), None
-            )
-            if kind_idx is None:
+        for trainer_type_dir in trainer_dir.iterdir():
+            if not trainer_type_dir.is_dir():
                 continue
-            kind   = parts[kind_idx]
-            prefix = parts[:kind_idx]
-            if len(prefix) != 2:
+            trainer = trainer_type_dir.name
+            if trainer not in VALID_TRAINERS:
                 continue
-            embedding, arch = prefix
-            name          = config_path.stem
-            dataset_name  = parse_dataset_name(config_path, name)
-            experiment    = get_experiment_field(config_path, kind)
-            experiment_key = str(Path("nll") / sub / rel.with_suffix(""))
-            configs.append({
-                "type":           sub,
-                "embedding":      embedding,
-                "arch":           arch,
-                "kind":           kind,
-                "name":           name,
-                "dataset_name":   dataset_name,
-                "experiment":     experiment,
-                "config_path":    config_path,
-                "experiment_key": experiment_key,
-            })
 
-    # ── Adversarial ─────────────────────────────────────────────────────────
-    type_dir = CONFIGS_ROOT / "adversarial"
-    if type_dir.is_dir():
-        for config_path in sorted(type_dir.rglob("*.yaml")):
-            rel   = config_path.relative_to(type_dir)
-            parts = rel.parts
+            for config_path in sorted(trainer_type_dir.rglob("*.yaml")):
+                rel = config_path.relative_to(trainer_type_dir)
+                parts = rel.parts  # (embedding, arch, kind.yaml)
+                if len(parts) != 3:
+                    continue
+                embedding, arch, kind_yaml = parts
+                kind_stem = Path(kind_yaml).stem
 
-            kind_idx = next(
-                (i for i, p in enumerate(parts[:-1])
-                 if any(p == k or p.startswith(k + "_") for k in BASE_KINDS)), None
-            )
-            if kind_idx is None:
-                continue
-            kind   = parts[kind_idx]
-            prefix = parts[:kind_idx]
-            if len(prefix) != 2:
-                continue
-            embedding, arch = prefix
-            name          = config_path.stem
-            dataset_name  = parse_dataset_name(config_path, name)
-            experiment    = get_experiment_field(config_path, kind)
-            experiment_key = str(Path("adversarial") / rel.with_suffix(""))
-            configs.append({
-                "type":           "adversarial",
-                "embedding":      embedding,
-                "arch":           arch,
-                "kind":           kind,
-                "name":           name,
-                "dataset_name":   dataset_name,
-                "experiment":     experiment,
-                "config_path":    config_path,
-                "experiment_key": experiment_key,
-            })
+                dataset_name  = parse_dataset_name(config_path)
+                experiment    = get_experiment_field(config_path, kind_stem)
+                experiment_key = str(
+                    Path(dataset) / trainer / embedding / arch / kind_stem
+                )
+
+                configs.append({
+                    "dataset":        dataset,
+                    "trainer":        trainer,
+                    "embedding":      embedding,
+                    "arch":           arch,
+                    "kind":           kind_stem,
+                    "dataset_name":   dataset_name,
+                    "experiment":     experiment,
+                    "config_path":    config_path,
+                    "experiment_key": experiment_key,
+                })
 
     return configs
 
 
 def build_cmd(c):
-    return ["python", "-m", "experiments.train", "--multirun",
-            f"+experiments={c['experiment_key']}"]
+    return [
+        "python", "-m", "experiments.train", "--multirun",
+        f"+experiments={c['experiment_key']}",
+    ]
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Discover and run seed_sweep / hpo / grid_sweep experiment configs."
+        description="Discover and run experiment configs.",
     )
     parser.add_argument("--list", action="store_true",
                         help="Print all discovered configs with [ran]/[   ] status.")
@@ -174,8 +142,8 @@ def main():
                         help="Print commands without executing.")
     parser.add_argument("--force", action="store_true",
                         help="Run even if output already exists.")
-    parser.add_argument("--type", metavar="TYPE",
-                        help="dis | gen | adv (or full names).")
+    parser.add_argument("--trainer", metavar="TRAINER",
+                        help="nat | at")
     parser.add_argument("--embedding", metavar="EMB",
                         help="fourier | legendre | hermite")
     parser.add_argument("--arch", metavar="ARCH",
@@ -183,7 +151,7 @@ def main():
     parser.add_argument("--dataset", metavar="DS",
                         help="Substring match on dataset name (e.g. moons).")
     parser.add_argument("--kind", metavar="KIND",
-                        help="seed_sweep | hpo | grid_sweep | …")
+                        help="Substring match on kind (e.g. seed_sweep, hpo_a1).")
     args = parser.parse_args()
 
     configs = discover_configs()
@@ -191,9 +159,8 @@ def main():
         print("No experiment configs found under configs/experiments/.")
         return
 
-    if args.type:
-        typ = TYPE_SHORT.get(args.type, args.type)
-        configs = [c for c in configs if c["type"] == typ]
+    if args.trainer:
+        configs = [c for c in configs if c["trainer"] == args.trainer]
     if args.embedding:
         configs = [c for c in configs if c["embedding"] == args.embedding]
     if args.arch:
@@ -201,21 +168,22 @@ def main():
     if args.dataset:
         configs = [c for c in configs if args.dataset in c["dataset_name"]]
     if args.kind:
-        kind = KIND_SHORT.get(args.kind, args.kind)
-        configs = [c for c in configs if c["kind"] == kind]
+        configs = [c for c in configs if args.kind in c["kind"]]
 
     if args.list:
         for c in configs:
-            ran = is_already_run(c["experiment"], c["type"], c["embedding"],
-                                 c["arch"], c["dataset_name"])
+            ran = is_already_run(
+                c["dataset"], c["trainer"], c["embedding"],
+                c["arch"], c["kind"],
+            )
             status = "ran" if ran else "   "
             print(f"[{status}] {c['experiment_key']}")
         return
 
     todo    = [c for c in configs
                if args.force or not is_already_run(
-                   c["experiment"], c["type"], c["embedding"],
-                   c["arch"], c["dataset_name"])]
+                   c["dataset"], c["trainer"], c["embedding"],
+                   c["arch"], c["kind"])]
     skipped = len(configs) - len(todo)
 
     if skipped:

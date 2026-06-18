@@ -1,0 +1,40 @@
+# @package _global_
+experiment: seed_sweep_a05
+descriptor: alpha05
+
+defaults:
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/circles
+  - override /trainer/nll: test
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 0.5
+    max_epoch: 300
+    batch_size: 256
+    patience: 300
+    stop_crit: "gen_loss"
+    save: true
+    norm_control:
+      log_target: 0.0
+      hard_every: 0
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0009227734409479708           # FILL FROM HPO
+        weight_decay: 2.05e-9  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 21)

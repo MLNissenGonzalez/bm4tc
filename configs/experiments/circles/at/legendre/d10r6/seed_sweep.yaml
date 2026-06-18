@@ -1,0 +1,62 @@
+# @package _global_
+experiment: seed_sweep
+
+defaults:
+  - override /born: legendre/d10r6
+  - override /dataset: 2Dtoy/circles
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+model_path: outputs/circles/nat/legendre/d10r6/seed_sweep_a0_2804/3/models/model
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+tracking:
+  seed: 42
+  evasion:
+    norm: 2
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.1]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    max_epoch: 300
+    batch_size: 256
+    stop_crit: "rob"
+    patience: 300
+
+    evasion:
+      norm: 2
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.1]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 200
+
+    save: true
+    auto_stack: true
+    auto_unbind: false
+
+    optimizer:
+      kwargs:
+        lr: 0.0001329291894316216                  # FILL FROM HPO
+        weight_decay: 0.04033800832600378        # FILL FROM HPO
+    clean_weight: 0.7855951534491241            # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,9)

@@ -1,0 +1,33 @@
+# @package _global_
+experiment: pretrained_gen_debug
+
+descriptor: nll
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: test
+
+# set on CLI: model_path=<absolute_path>/models/model
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 20
+    batch_size: 256
+    patience: 999
+    stop_crit: "gen_loss"
+    save: false
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.6
+      log_target: null
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4
+        weight_decay: 0.0

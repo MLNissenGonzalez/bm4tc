@@ -37,6 +37,8 @@ else:
 
 sys.path.insert(0, str(project_root))
 
+from src.utils.paths import data_root as _data_root
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -53,7 +55,7 @@ import torch
 SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30r18fourier_moons_4k_1702"
 _cli = argparse.ArgumentParser(add_help=False)
 _cli.add_argument("sweep_dir", nargs="?", default=None)
-_cli.add_argument("--no-viz", action="store_true", help="Skip best-run distribution plots.")
+_cli.add_argument("--viz", action="store_true", help="Generate best-run distribution plots.")
 _cli.add_argument("--no-mia", action="store_true", help="Skip membership inference attack.")
 _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
@@ -88,9 +90,9 @@ COMPUTE_MIA = False
 COMPUTE_DIS_LOSS = True
 COMPUTE_GEN_LOSS = True
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
-COMPUTE_GIBBS_PURIFICATION = True  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
+COMPUTE_GIBBS_PURIFICATION = False  # Gibbs-sampling purification (requires COMPUTE_UQ=True)
 COMPUTE_JOINT_ATTACK = True  # Joint generative attack (JOINT_PGD) alongside standard PGD
-COMPUTE_DISTRIBUTIONS = False  # Set False (or pass --no-viz) to skip best-run distribution plots
+COMPUTE_DISTRIBUTIONS = False  # Set True (or pass --viz) to generate best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
@@ -126,16 +128,26 @@ MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
-    "radii": [0.10 * _RANGE_SIZE],
+    "radii": [0.10 * _RANGE_SIZE, 0.15 * _RANGE_SIZE],
     "percentiles": [1, 5, 10, 20],
+    # Chunk size for all UQ forwards (attack/purify + full-test class-prob/log-px).
+    # Bounds peak GPU memory on large inputs (e.g. MNIST). None = use loader batch.
+    "eval_batch_size": 256,
 }
 
 # --- GIBBS PURIFICATION SETTINGS (only used when COMPUTE_GIBBS_PURIFICATION=True) ---
 GIBBS_CONFIG = {
     "n_sweeps": [1, 3, 5],
-    "num_bins": 200,
-    "gibbs_batch_size": 8,
+    "num_bins": 96,
+    # Candidate-expansion peak ∝ gibbs_batch_size × num_bins. On a 24 GB GPU,
+    # 24 is safe for resized MNIST (r12) at num_bins=96 (~1.5× the old 8×200 peak);
+    # drop to ~8 for full-res mnist_full (784 sites).
+    "gibbs_batch_size": 24,
     "radius": 0.1,
+    # Gibbs is ~99% of analysis cost and only estimates a mean over the test set, so
+    # run it on a fixed random subsample (cheap metrics keep the full set). ~±1.5%
+    # stderr at 1000. None = full test set.
+    "subsample": 1000,
 }
 
 # --- EVALUATION SETTINGS ---
@@ -171,8 +183,8 @@ CONFIG_KEYS = [
 ]
 
 # --- CLI overrides (applied after config block so they take effect) ---
-if _cli_args.no_viz:
-    COMPUTE_DISTRIBUTIONS = False
+if _cli_args.viz:
+    COMPUTE_DISTRIBUTIONS = True
 if _cli_args.no_mia:
     COMPUTE_MIA = False
 
@@ -211,12 +223,17 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
         _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
         _full_uq_config["gibbs_radius"] = GIBBS_CONFIG.get("radius")
+        _full_uq_config["gibbs_subsample"] = GIBBS_CONFIG.get("subsample")
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
 
 _full_joint_uq_config = None
 if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and _full_uq_config is not None:
-    _full_joint_uq_config = {**_full_uq_config, "attack_method": "JOINT_PGD"}
+    # Skip Gibbs in the joint pass: it doubles the dominant cost and the standard-PGD
+    # Gibbs table is the headline defense result. Joint detection + gradient purify stay.
+    _full_joint_uq_config = {
+        **_full_uq_config, "attack_method": "JOINT_PGD", "run_gibbs": False,
+    }
 
 # %%
 import logging as _logging
@@ -296,7 +313,7 @@ eval_cfg = AnalysisConfig(
     device=DEVICE,
 )
 
-sweep_path = project_root / SWEEP_DIR
+sweep_path = _data_root() / SWEEP_DIR
 print("=" * 60)
 print(f"Evaluating sweep: {sweep_path}")
 print(f"Device: {DEVICE}")
@@ -320,14 +337,14 @@ if not df.empty:
 _sp = Path(SWEEP_DIR)
 if _sp.is_absolute():
     try:
-        _sp = _sp.relative_to(project_root)
+        _sp = _sp.relative_to(_data_root())
     except ValueError:
         pass
 try:
     _rel = _sp.relative_to("outputs")
 except ValueError:
     _rel = _sp
-output_dir = project_root / "analysis" / "outputs" / _rel
+output_dir = _data_root() / "analysis" / "outputs" / _rel
 output_dir.mkdir(parents=True, exist_ok=True)
 sweep_name = str(_rel)  # human-readable label used in plot titles and summary
 print(f"Output directory: {output_dir}")

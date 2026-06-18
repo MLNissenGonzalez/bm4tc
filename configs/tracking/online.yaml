@@ -1,5 +1,5 @@
-project: gan_train
-entity: ""  # set your W&B entity here
+project: ""
+entity: ""
 mode: online
 seed: 42
 evasion:
@@ -7,6 +7,4 @@ evasion:
   norm: 2
   criterion:
     name: "negative log-likelihood"
-    kwargs:
-      eps: 1e-8
   strengths: [0.1]

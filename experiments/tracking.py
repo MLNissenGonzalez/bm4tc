@@ -36,7 +36,7 @@ def init_wandb(cfg: Config) -> wandb.Run:
     """
     Initialize a W&B run from a Hydra config.
 
-    Group name: ``{experiment}_{regime}_{archinfo}_{dataset}_{date}``
+    Group: ``{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{DDMM_HHMM}``
     Run name: job index (0-indexed).
     """
     wandb_cfg = OmegaConf.to_container(cfg, resolve=True)
@@ -45,24 +45,22 @@ def init_wandb(cfg: Config) -> wandb.Run:
     run_dir = Path(runtime_cfg.runtime.output_dir)
     job_num = int(runtime_cfg.job.get("num", 0))
 
-    regime_parts = []
-    nll_cfg = OmegaConf.select(cfg, "trainer.nll")
-    if nll_cfg is not None:
-        alpha = float(OmegaConf.select(cfg, "trainer.nll.alpha") or 0.0)
-        regime_parts.append(f"nll_a{alpha:.2g}" if alpha > 0 else "nll")
-    if OmegaConf.select(cfg, "trainer.adversarial") is not None:
-        regime_parts.append("adv")
-    regime = "_".join(regime_parts) or "none"
+    trainer_type = "at" if OmegaConf.select(cfg, "trainer.adversarial") is not None else "nat"
 
     _dtype = OmegaConf.select(cfg, "born.init_kwargs.dtype")
     _dtype_suffix = {"complex64": "c64", "complex128": "c128"}.get(_dtype, "")
-    archinfo = f"d{cfg.born.init_kwargs.in_dim}D{cfg.born.init_kwargs.bond_dim}{_dtype_suffix}{cfg.born.embedding}"
+    arch = f"d{cfg.born.init_kwargs.in_dim}r{cfg.born.init_kwargs.bond_dim}{_dtype_suffix}"
 
-    mode = runtime_cfg.mode.value
     now = datetime.now()
-    date_str = now.strftime("%d%m_%H%M") if mode == 1 else now.strftime("%d%m")
+    date_str = now.strftime("%d%m_%H%M")
 
-    group_key = f"{cfg.experiment}_{regime}_{archinfo}_{cfg.dataset.name}_{date_str}"
+    group_key = "/".join([
+        cfg.dataset.name,
+        trainer_type,
+        cfg.born.embedding,
+        arch,
+        f"{cfg.experiment}_{date_str}",
+    ])
 
     run = wandb.init(
         project=cfg.tracking.project,

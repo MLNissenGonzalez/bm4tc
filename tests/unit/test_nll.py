@@ -46,7 +46,7 @@ def test_nll_config_defaults():
 
 def test_norm_control_config_defaults():
     nc = NormControlConfig()
-    assert nc.target == 1.0
+    assert nc.log_target == 0.0
     assert nc.hard_every == 1
     assert nc.soft_strength == 0.0
 
@@ -67,7 +67,7 @@ def test_nll_trainer_constructs():
     cfg = NLLConfig()
     trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
     assert trainer.norm_regularizer is None
-    assert trainer._nc_target is None
+    assert trainer._nc_log_target is None
     assert len(trainer.best_tensors) == len(cbm.tensors)
 
 
@@ -87,29 +87,29 @@ def test_nll_trainer_sets_up_classification_loaders():
 # ── NormRegularizer ────────────────────────────────────────────────────────
 
 def test_norm_regularizer_zero_at_target():
-    target = 2.5
-    reg = NormRegularizer(strength=1.0, target=target)
+    log_target = math.log(2.5)
+    reg = NormRegularizer(strength=1.0, log_target=log_target)
     cbm = MagicMock()
-    cbm.log_partition_function.return_value = torch.tensor(math.log(target))
+    cbm.log_partition_function.return_value = torch.tensor(log_target)
     penalty = reg(cbm)
     assert penalty.item() == pytest.approx(0.0, abs=1e-6)
 
 
 def test_norm_regularizer_nonzero_off_target():
-    target = 1.0
+    log_target = 0.0  # Z=1
     strength = 3.0
-    reg = NormRegularizer(strength=strength, target=target)
-    log_Z_val = 2.0  # log(target)=0, so delta = 2.0
+    reg = NormRegularizer(strength=strength, log_target=log_target)
+    log_Z_val = 2.0  # delta = 2.0
     cbm = MagicMock()
     cbm.log_partition_function.return_value = torch.tensor(log_Z_val)
     penalty = reg(cbm)
-    expected = strength * (log_Z_val - math.log(target)) ** 2
+    expected = strength * (log_Z_val - log_target) ** 2
     assert penalty.item() == pytest.approx(expected, rel=1e-5)
 
 
 def test_norm_regularizer_invalid_target():
-    with pytest.raises(ValueError, match="target must be > 0"):
-        NormRegularizer(strength=1.0, target=0.0)
+    with pytest.raises(ValueError, match="log_target must be finite"):
+        NormRegularizer(strength=1.0, log_target=float("inf"))
 
 
 # ── Alpha=0 fast path ──────────────────────────────────────────────────────

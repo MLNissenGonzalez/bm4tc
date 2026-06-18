@@ -9,8 +9,11 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch import nn
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
+
+_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 
 
 # ---------------------------------------------------------------------------
@@ -128,30 +131,34 @@ class TrainResult:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-    Computes  strength * (log Z - log target)²  where log Z = log_partition_function().
+    Computes  strength * (log Z - log_target)²  where log Z = log_partition_function().
 
     Parameters
     ----------
     strength : float
         Regularization coefficient.
-    target : float
-        Target value for the partition function Z (must be > 0).
+    log_target : float
+        Target value for log Z (must be finite).
     """
 
-    def __init__(self, strength: float, target: float):
-        if target <= 0:
-            raise ValueError(f"NormRegularizer: target must be > 0, got {target}")
+    def __init__(self, strength: float, log_target: float):
+        if not math.isfinite(log_target):
+            raise ValueError(f"NormRegularizer: log_target must be finite, got {log_target}")
         super().__init__()
         self.strength = strength
-        self.log_target: float = math.log(target)
+        self.log_target: float = log_target
 
     def forward(self, cbm) -> torch.Tensor:
         log_Z: torch.Tensor = cbm.log_partition_function()
         return self.strength * (log_Z - self.log_target) ** 2
 
 
-def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
-    """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss)."""
+def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, float, float]:
+    """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss).
+
+    Set ``progress=True`` to show a transient per-batch tqdm bar (used by post-hoc
+    analysis); the default keeps training-time validation output clean.
+    """
     cbm.eval()
     with torch.no_grad():
         log_Z = cbm.log_partition_function()
@@ -159,15 +166,18 @@ def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
     if not gen_finite:
         logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
     losses_dis, losses_gen, correct, total = [], [], 0, 0
-    eps = 1e-8
     with torch.no_grad():
-        for data, labels in loader:
+        for data, labels in tqdm(
+            loader, desc="eval", unit="batch", leave=False,
+            dynamic_ncols=True, disable=not progress,
+        ):
             data, labels = data.to(device), labels.to(device)
-            abs_sq = cbm.abs_square(cbm.amplitudes(data))
-            log_sq_obs = abs_sq[range(len(labels)), labels].clamp(min=eps).log()
-            log_class_marg = abs_sq.sum(dim=1).clamp(min=eps).log()
+            amp     = cbm.amplitudes(data)
+            log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))
+            log_sq_obs     = 2.0 * log_abs[range(len(labels)), labels]
+            log_class_marg = torch.logsumexp(2.0 * log_abs, dim=1)
             losses_dis.append((log_class_marg - log_sq_obs).mean().item())
-            correct += (abs_sq.argmax(dim=1) == labels).sum().item()
+            correct += (log_abs.argmax(dim=1) == labels).sum().item()
             total += len(labels)
             if gen_finite:
                 gen_batch = (log_Z - log_sq_obs).mean().item()
@@ -181,11 +191,18 @@ def eval_metrics(cbm, loader, device) -> tuple[float, float, float]:
     return dis_loss, acc, gen_loss
 
 
-def eval_rob(cbm, loader, attack, abs_strength: float, device) -> float:
-    """Evaluates robustness at a single perturbation strength; returns mean robust acc."""
+def eval_rob(cbm, loader, attack, abs_strength: float, device, progress: bool = False) -> float:
+    """Evaluates robustness at a single perturbation strength; returns mean robust acc.
+
+    Set ``progress=True`` to show a transient per-batch tqdm bar (used by post-hoc
+    analysis); the default keeps training-time validation output clean.
+    """
     cbm.eval()
     correct, total = 0, 0
-    for data, labels in loader:
+    for data, labels in tqdm(
+        loader, desc=f"rob eps={abs_strength:.3g}", unit="batch", leave=False,
+        dynamic_ncols=True, disable=not progress,
+    ):
         data, labels = data.to(device), labels.to(device)
         adv = attack.generate(born=cbm, naturals=data, labels=labels,
                               strength=abs_strength, device=device)

@@ -1,0 +1,33 @@
+# @package _global_
+experiment: seed_sweep_a0
+
+defaults:
+  - override /born: fourier/d30r18
+  - override /dataset: 2Dtoy/circles_small
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    max_epoch: 1000
+    batch_size: 256
+    patience: 1000
+    stop_crit: "dis_loss"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0010253509690168502    # FILL FROM HPO
+        weight_decay: 0.04033800832600378  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)

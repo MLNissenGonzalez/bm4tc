@@ -12,9 +12,10 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 ## Training Regimes
 
-| Script | Regime | Description |
-|--------|--------|-------------|
-| `experiments/train.py` | `dis`/`gen`/`adv` | Unified entry point; NLL or adversarial selected by config (`trainer.nll` vs `trainer.adversarial`) |
+| Script | Trainer token | Description |
+|--------|--------------|-------------|
+| `experiments/train.py` | `nat` | NLL training; α=0 discriminative (`hpo_a0`, `seed_sweep_a0`) or α>0 generative (`seed_sweep_a1`, …) |
+| `experiments/train.py` | `at` | Adversarial training; loads a pretrained `nat` checkpoint via `model_path` |
 
 ## Trustworthiness Evaluation
 
@@ -42,28 +43,98 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 **UCR univariate time series**: ECG200, ItalyPowerDemand, ChlorineConcentration, SyntheticControl, CricketX/Y/Z. The last five match the benchmark of [Ding et al. (2022)](https://arxiv.org/abs/2207.04307) for direct comparison with neural-network time-series classifiers.
 
-## Setup
+## Installation
+
+### Option A — conda (local development)
 
 ```bash
 conda env create -f environment.yml   # creates env 'bm4tc'
 conda activate bm4tc
 ```
 
-Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters). See `environment.yml` for the full dependency list.
+### Option B — pip virtualenv (clusters without conda)
+
+```bash
+# Create and activate the virtualenv
+virtualenv -p python3.10 bm4tc_env
+source bm4tc_env/bin/activate
+
+# Core dependencies
+pip install numpy scipy matplotlib jupyter ipykernel tqdm \
+    scikit-learn pandas h5py opt_einsum \
+    hydra-core hydra-optuna-sweeper wandb pytest
+
+# PyTorch with CUDA (adjust --index-url for your driver version)
+pip install torch==2.6.0 torchvision==0.21.0 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Tensor network library
+pip install tensorkrowch
+```
+
+If your cluster requires a proxy, prepend `--proxy http://proxy.example.fr:3128` to each
+`pip install` call.
+
+Requires PyTorch ≥ 2.1.0 (Adam optimizer fix for complex-typed parameters).
+
+### Data path (`BM4TC_DATA_ROOT`)
+
+By default all outputs and cached datasets are written relative to the repository root.
+On clusters where code and data live on separate filesystems, set:
+
+```bash
+export BM4TC_DATA_ROOT=/path/to/data/root
+# e.g. /ceph/chercheurs/nisseng261/bm4tc
+```
+
+Add this line to your virtualenv's `activate` script (or `.bashrc` / SLURM job header)
+so it is always set when running experiments.  When `BM4TC_DATA_ROOT` is unset the
+repository root is used — the local development layout is unchanged.
+
+Paths under `BM4TC_DATA_ROOT`:
+
+| Subdirectory | Contents |
+|---|---|
+| `outputs/` | Training run checkpoints and Hydra configs |
+| `analysis/outputs/` | Post-hoc evaluation CSVs and figures |
+| `.datasets/` | Cached datasets (MNIST, UCR, 2D toy) |
+
+### Weights & Biases
+
+Run `wandb login` once per machine (stores the API key in `~/.netrc`).
+
+On clusters where `/home/` is not mounted on compute nodes, `~/.netrc` is invisible at
+runtime and W&B raises a `CommError`.  Use the environment variable instead:
+
+```bash
+export WANDB_API_KEY=<your_key>   # add to job script or virtualenv activate
+```
+
+The default entity and project are set in `configs/tracking/online.yaml`.  To override
+at runtime:
+
+```bash
+python -m experiments.train ... tracking.entity=my-entity tracking.project=my-project
+```
+
+To run without W&B logging: `tracking.mode=disabled`.
 
 ## Running Experiments
 
 All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/); the canonical way to design an experiment is to write a config under `configs/experiments/` and reference it with `+experiments=<path>`.
 
 ```bash
-# Single run (NLL discriminative)
-python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
+# Single run (NLL discriminative, alpha=0)
+python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0
 
-# Multirun / seed sweep (NLL generative)
-python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+# Multirun / seed sweep (NLL generative, alpha=1)
+python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
+
+# Adversarial training seed sweep
+python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
 
 # Batch-run all unrun configs in a filter set
-python -m experiments.batch --type gen --embedding legendre --dry-run
+python -m experiments.batch --trainer nat --embedding legendre --dry-run
 
 # Disable W&B for local debugging
 python -m experiments.train +experiments=tests/nll tracking.mode=disabled
@@ -73,13 +144,26 @@ python -m experiments.train +experiments=tests/nll tracking.mode=disabled
 
 ```bash
 # Analyse a specific sweep
-python -m analysis.sweep outputs/seed_sweep/gen/legendre/d10r6/circles_1802
+python -m analysis.sweep outputs/circles/nat/legendre/d10r6/seed_sweep_a1_1802
 
 # Analyse all completed but unanalysed sweeps in batch
 python -m analysis.batch
 ```
 
-Results land in `analysis/outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
+Results land in `analysis/outputs/{dataset}/{nat|at}/{embedding}/{arch}/{kind}_{date}/` as `evaluation_data.csv` (one row per seed), a human-readable summary, and PNG figures.
+
+## Reproduction Notebooks
+
+Self-contained notebooks under `notebooks/` walk from running sweeps → analysis → paper
+figures. Activate the `bm4tc` env, launch Jupyter, and run top-to-bottom (a bootstrap cell
+resolves the repo root, so the working directory does not matter):
+
+| Notebook | Benchmark | Figures |
+|----------|-----------|---------|
+| `notebooks/2dtoy.ipynb` | spirals (Legendre, d10r6) | distribution panel · alpha curve · regime barplot |
+| `notebooks/mnist.ipynb` | MNIST (Legendre, d3r20c64) | sampling (mean digit) · alpha curve · robustness curves (purification + detection) |
+
+Generated figures are written under `figures/` (git-ignored; regenerate by running the notebook).
 
 ## Repository Structure
 
@@ -98,9 +182,10 @@ bm4tc/
 │   ├── batch.py        # Batch-run all unanalysed sweeps
 │   ├── hpo.py          # HPO result exploration
 │   ├── run.py          # Single-model analysis (MIA, UQ)
-│   ├── configs/        # Pipeline tools (fill_hpo.py, delete_runs.py, …)
 │   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)
+├── tools/              # Pipeline tools (fill_hpo.py, delete_runs.py, …)
+├── notebooks/          # Reproduction notebooks (2dtoy.ipynb, mnist.ipynb; archive/ git-ignored)
 └── environment.yml
 ```
 

@@ -1,0 +1,34 @@
+# @package _global_
+experiment: seed_sweep_a01
+
+defaults:
+  - override /born: legendre/d5r100c64
+  - override /dataset: ucr_ts/cricketx
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 0.1
+    max_epoch: 1000
+    batch_size: 128
+    patience: 300
+    stop_crit: "acc"
+    save: true
+    norm_control:
+      log_target: 0.0
+      hard_every: 0
+      soft_strength: 0.0
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???           # FILL FROM GRID SWEEP
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 4)

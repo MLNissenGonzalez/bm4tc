@@ -10,16 +10,12 @@ optimizer:
 
 criterion:
   name: "negative log-likelihood"
-  kwargs:
-    eps: 1e-8
 
 evasion:
   method: "PGD"
   norm: "inf"
   criterion:
     name: "negative log-likelihood"
-    kwargs:
-      eps: 1e-8
   strengths: [0.15]
   num_steps: 5
   step_size: null
@@ -31,6 +27,7 @@ patience: 5
 eval_rob_freq: 1
 
 clean_weight: 0.0
+acc_floor: null
 curriculum: false
 curriculum_start: 0.0
 curriculum_end_epoch: null

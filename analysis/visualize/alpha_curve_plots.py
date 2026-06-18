@@ -24,16 +24,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-ROOT         = Path(__file__).parent.parent.parent
-OUTPUTS_ROOT = ROOT / "analysis" / "outputs" / "alpha_curve"
+ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT))
+from src.utils.paths import data_root as _data_root
+OUTPUTS_ROOT = _data_root() / "analysis" / "outputs"
 
 ALPHA_COL        = "config/trainer.generative.criterion.kwargs.alpha"
-ROB_COL          = "eval/test/rob/0.2"
-PURIF_COL        = "eval/uq_purify_acc/0.2/0.2"
-GIBBS_PURIF_COL  = "eval/gibbs_purify_acc/0.2/1"
-ACC_COL          = "eval/test/acc"
-CLSLOSS_COL      = "eval/test/clsloss"
-GENLOSS_COL      = "eval/test/genloss"
+ROB_COL          = "rob/0.2"
+PURIF_COL        = "uq_purify_acc/0.2/0.2"
+GIBBS_PURIF_COL  = "gibbs_purify_acc/0.2/1"
+ACC_COL          = "acc"
+CLSLOSS_COL      = "dis_loss"
+GENLOSS_COL      = "gen_loss"
 
 DPI     = 150
 FIGSIZE = (11, 4.5)
@@ -178,7 +180,10 @@ def plot_alpha_curve(csv_path: Path):
 # ---------------------------------------------------------------------------
 
 def find_csvs(root: Path):
-    return sorted(root.rglob("evaluation_data.csv"))
+    return sorted(
+        p for p in root.rglob("evaluation_data.csv")
+        if re.match(r"alpha_curve_\d{4}$", p.parent.name)
+    )
 
 
 def get_dataset_base(p: Path) -> str:

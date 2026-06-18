@@ -25,9 +25,13 @@ from pathlib import Path
 
 import pandas as pd
 
-ROOT          = Path(__file__).parent.parent.parent   # project root
-SWEEP_ROOT    = ROOT / "outputs" / "seed_sweep"
-ANALYSIS_ROOT = ROOT / "analysis" / "outputs"
+ROOT = Path(__file__).parent.parent.parent   # project root
+sys.path.insert(0, str(ROOT))
+
+from src.utils.paths import data_root as _data_root
+
+SWEEP_ROOT    = _data_root() / "outputs" / "seed_sweep"
+ANALYSIS_ROOT = _data_root() / "analysis" / "outputs"
 
 
 def find_sweep_dirs(root: Path):
@@ -38,7 +42,7 @@ def find_sweep_dirs(root: Path):
 
 def analysis_output_dir(sweep_dir: Path) -> Path:
     """Mirror sweep path under analysis/outputs/ (matches sweep.py logic)."""
-    rel = sweep_dir.relative_to(ROOT / "outputs")   # strip leading 'outputs/'
+    rel = sweep_dir.relative_to(_data_root() / "outputs")   # strip leading 'outputs/'
     return ANALYSIS_ROOT / rel
 
 
@@ -66,7 +70,7 @@ def is_analyzed(sweep_dir: Path) -> bool:
 def is_visualized(sweep_dir: Path) -> bool:
     ana_dir = analysis_output_dir(sweep_dir)
     return (
-        (ana_dir / "best_class_dist.png").exists()
+        (ana_dir / "decision_boundary.png").exists()
         or (ana_dir / "mnist_samples.png").exists()
         or (ana_dir / "ts_samples.png").exists()
     )
@@ -82,10 +86,7 @@ def best_run_from_csv(ana_dir: Path) -> str | None:
         return None
     if len(df) == 1:
         return df["run_path"].iloc[0]
-    acc_col = next(
-        (c for c in ("eval/test/acc", "eval/valid/acc") if c in df.columns),
-        None,
-    )
+    acc_col = "acc" if "acc" in df.columns else None
     if acc_col is None:
         print(f"  WARNING: no acc column in {csv.relative_to(ROOT)}, using run 0.")
         df["_idx"] = pd.to_numeric(
@@ -146,7 +147,7 @@ def main():
     if args.list:
         for s in sweeps:
             status = "OK " if is_visualized(s) else "   "
-            print(f"[{status}] {s.relative_to(ROOT)}")
+            print(f"[{status}] {s.relative_to(_data_root())}")
         return
 
     # Apply filters
@@ -173,7 +174,7 @@ def main():
 
     for sweep_dir in todo:
         ana_dir = analysis_output_dir(sweep_dir)
-        rel = sweep_dir.relative_to(ROOT)
+        rel = sweep_dir.relative_to(_data_root())
 
         # Delete old distributions file if present
         old_dist = ana_dir / "best_run_distributions.png"
