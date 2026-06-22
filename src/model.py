@@ -216,7 +216,15 @@ class ConditionalBornMachine(tk.models.MPS):
         # self.bond_dim — inherited property from tk.models.MPS
         # self.n_features — inherited property from tk.models.MPS
         self.device = device
+        # Detached log Z snapshot for purification (constant w.r.t. params); set
+        # by cache_log_Z(), read by marginal_log_probability.
         self._log_Z: float | None = None
+        # Per-forward with-gradient log Z + detached log|amp|² stats, populated
+        # by mixed_nll each training forward. The norm regularizer and failure
+        # diagnostics read these instead of contracting the norm a second time.
+        # DISTINCT from _log_Z above (that one is detached/param-constant).
+        self._log_Z_cache: torch.Tensor | None = None
+        self._amp_diag_cache: dict | None = None
 
     # ======================================================================
     # Auxiliary network sync
@@ -237,6 +245,7 @@ class ConditionalBornMachine(tk.models.MPS):
         super().initialize(tensors=tensors, **kwargs)
         if hasattr(self, "norm_net"):
             self._sync_norm_net()
+        self._invalidate_log_Z_cache()
 
     # ======================================================================
     # Inference
@@ -356,6 +365,47 @@ class ConditionalBornMachine(tk.models.MPS):
 
         return log_Z
 
+    def log_Z(self, recompute: bool = False) -> torch.Tensor:
+        """With-gradient log Z with a per-forward cache.
+
+        recompute=True contracts the norm via log_partition_function() and
+        refreshes the cache (called by mixed_nll each forward). recompute=False
+        returns the cached grad tensor from the most recent forward — the norm
+        regularizer reads it this way, sharing mixed_nll's contraction graph
+        instead of contracting a second time. If nothing is cached yet it
+        computes (and caches) once.
+
+        The cache reflects the LAST forward only; recompute=False assumes the
+        tensors are unchanged since (i.e. you are within the same step). It is
+        invalidated by the in-place value mutators renormalize_() / initialize().
+        Distinct from the detached _log_Z used by marginal_log_probability.
+        """
+        if recompute or self._log_Z_cache is None:
+            self._log_Z_cache = self.log_partition_function()
+        return self._log_Z_cache
+
+    def _invalidate_log_Z_cache(self) -> None:
+        """Drop the per-forward norm/amplitude caches after a tensor mutation."""
+        self._log_Z_cache = None
+        self._amp_diag_cache = None
+
+    @torch.no_grad()
+    def _cache_amp_diag(self, log_abs_sq: torch.Tensor) -> None:
+        """Cache detached log|amp|² summary stats from the current forward.
+
+        log_abs_sq = 2·log|ψ(x,c)| (B, C) is already computed in mixed_nll; this
+        stores its finite-masked mean/min/max plus a non-finite count, matching
+        the keys _format_diagnostics() expects.
+        """
+        finite_mask = torch.isfinite(log_abs_sq)
+        finite = log_abs_sq[finite_mask]
+        self._amp_diag_cache = {
+            "log_amp_sq_mean": finite.mean().item() if finite.numel() else float("nan"),
+            "log_amp_sq_min": finite.min().item() if finite.numel() else float("nan"),
+            "log_amp_sq_max": finite.max().item() if finite.numel() else float("nan"),
+            "amp_nonfinite_count": int((~finite_mask).sum().item()),
+        }
+
     def cache_log_Z(self) -> float:
         """Compute and cache log Z as a detached float."""
         self.reset()
@@ -408,6 +458,7 @@ class ConditionalBornMachine(tk.models.MPS):
         B = data.shape[0]
         amp     = self.amplitudes(data)                                    # (B, C)
         log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))           # (B, C)
+        self._cache_amp_diag(2.0 * log_abs)                               # detached, for diagnostics
 
         if debug:
             nf_amp = int((~torch.isfinite(amp)).sum().item())
@@ -431,7 +482,7 @@ class ConditionalBornMachine(tk.models.MPS):
                 logger.warning("  [mixed_nll/grad] term2=0 (α=1, not computed)")
 
         if alpha > 0.0:
-            log_Z = self.log_partition_function()
+            log_Z = self.log_Z(recompute=True)
             if not torch.isfinite(log_Z):
                 if debug:
                     logger.warning(f"  [mixed_nll/grad] log_Z={log_Z.item():.4g} (non-finite)")
@@ -465,6 +516,7 @@ class ConditionalBornMachine(tk.models.MPS):
             alpha = math.exp((log_target - log_Z.item()) / (2 * n))
             for node in self._mats_env:
                 node.tensor.data.mul_(alpha)
+        self._invalidate_log_Z_cache()
 
     # ======================================================================
     # Conditional sampling

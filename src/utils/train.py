@@ -131,7 +131,7 @@ class TrainResult:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-    Computes  strength * (log Z - log_target)²  where log Z = log_partition_function().
+    Computes  strength * (log Z - log_target)²  where log Z = cbm.log_Z().
 
     Parameters
     ----------
@@ -149,7 +149,10 @@ class NormRegularizer(nn.Module):
         self.log_target: float = log_target
 
     def forward(self, cbm) -> torch.Tensor:
-        log_Z: torch.Tensor = cbm.log_partition_function()
+        # recompute=False reuses the with-gradient log Z from the same step's
+        # mixed_nll forward (one norm contraction/step instead of two). Falls
+        # back to a fresh contraction if nothing is cached (e.g. alpha=0).
+        log_Z: torch.Tensor = cbm.log_Z(recompute=False)
         return self.strength * (log_Z - self.log_target) ** 2
 
 

@@ -1,4 +1,5 @@
 import inspect
+import math
 import pytest
 import torch
 import tensorkrowch as tk
@@ -55,6 +56,92 @@ def test_mixed_nll_scalar_output():
     loss = cbm.mixed_nll(x, y, alpha=0.0)
     assert loss.ndim == 0
     assert loss.isfinite()
+
+
+# ── log_Z cache (with-gradient, per-forward) ───────────────────────────────
+
+def test_log_Z_cache_reuses_within_forward():
+    """recompute=True contracts once; recompute=False reuses the cached tensor."""
+    cbm = _tiny_cbm()
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        a = cbm.log_Z(recompute=True)
+        b = cbm.log_Z(recompute=False)
+        c = cbm.log_Z(recompute=False)
+    assert mock_logZ.call_count == 1
+    assert b is a and c is a
+
+
+def test_log_Z_recompute_contracts_again():
+    cbm = _tiny_cbm()
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        cbm.log_Z(recompute=True)
+        cbm.log_Z(recompute=True)
+    assert mock_logZ.call_count == 2
+
+
+def test_log_Z_recompute_false_computes_when_empty():
+    """recompute=False with an empty cache still computes (and caches) once."""
+    cbm = _tiny_cbm()
+    assert cbm._log_Z_cache is None
+    val = cbm.log_Z(recompute=False)
+    assert torch.isfinite(val.real) and cbm._log_Z_cache is val
+
+
+def test_renormalize_invalidates_log_Z_cache():
+    cbm = _tiny_cbm()
+    cbm.log_Z(recompute=True)
+    assert cbm._log_Z_cache is not None
+    cbm.renormalize_(log_target=0.0)
+    assert cbm._log_Z_cache is None and cbm._amp_diag_cache is None
+
+
+def test_initialize_invalidates_log_Z_cache():
+    cbm = _tiny_cbm()
+    cbm.log_Z(recompute=True)
+    cbm.initialize()
+    assert cbm._log_Z_cache is None and cbm._amp_diag_cache is None
+
+
+# ── amp-diag cache populated by mixed_nll ──────────────────────────────────
+
+_AMP_KEYS = {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max", "amp_nonfinite_count"}
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
+def test_mixed_nll_populates_amp_diag_cache(alpha):
+    cbm = _tiny_cbm()
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    cbm.mixed_nll(x, y, alpha=alpha)
+    assert cbm._amp_diag_cache is not None
+    assert set(cbm._amp_diag_cache) == _AMP_KEYS
+    assert math.isfinite(cbm._amp_diag_cache["log_amp_sq_mean"])
+
+
+def test_mixed_nll_logZ_cache_only_when_alpha_positive():
+    cbm = _tiny_cbm()
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    cbm.mixed_nll(x, y, alpha=0.0)
+    assert cbm._log_Z_cache is None          # alpha=0 never contracts the norm
+    cbm.mixed_nll(x, y, alpha=1.0)
+    assert cbm._log_Z_cache is not None
+
+
+def test_regularizer_reuses_mixed_nll_contraction():
+    """alpha>0: mixed_nll + NormRegularizer contract the norm once, total."""
+    from src.utils.train import NormRegularizer
+    cbm = _tiny_cbm()
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    reg = NormRegularizer(strength=1.0, log_target=0.0)
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        loss = cbm.mixed_nll(x, y, alpha=1.0) + reg(cbm)
+    assert mock_logZ.call_count == 1
+    # Shared log_Z node receives gradient from both terms.
+    loss.backward()
+    assert any(p.grad is not None and torch.isfinite(p.grad).all()
+               for p in cbm.parameters())
 
 
 def test_norm_net_auto_stack_matches():
@@ -220,7 +307,10 @@ def _argmax_multinomial(weights, num_samples, *args, **kwargs):
 def test_sample_renorm_matches_old_method(dtype):
     # On a short chain (no overflow) the renormalized sampler must reproduce the
     # old method bit-for-bit: per-row positive rescaling of H leaves the draw
-    # unchanged. Patch multinomial -> argmax to remove RNG.
+    # unchanged. Patch multinomial -> argmax to remove RNG. Seed the random init
+    # too: an unseeded init can land on a near-tie between bins where the renorm's
+    # float noise flips argmax, making the comparison order-dependently flaky.
+    torch.manual_seed(0)
     cbm = _tiny_cbm(dtype=dtype, data_dim=4, bond_dim=3, std=0.5)
     with patch("torch.multinomial", _argmax_multinomial):
         s_new = cbm.sample(0, n=16, num_bins=12)

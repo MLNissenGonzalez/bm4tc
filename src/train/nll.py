@@ -137,30 +137,45 @@ class NLLTrainer:
         return float(raw)
 
     def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
-        """Compute log_Z and log|amp|² stats. No-grad; safe to call mid-training."""
+        """log_Z and log|amp|² stats. Prefers the caches populated by the failing
+        mixed_nll forward (no extra contraction); falls back to a fresh no-grad
+        recompute when a cache is absent (e.g. alpha=0 leaves log_Z uncached)."""
         result: Dict[str, float] = {}
         _tiny = float(torch.finfo(torch.float32).tiny)
-        with torch.no_grad():
-            try:
-                self.cbm.reset()
-                log_Z = self.cbm.log_partition_function()
-                result["log_Z"] = log_Z.item()
-            except Exception:
-                result["log_Z"] = float("nan")
-            try:
-                amp = self.cbm.amplitudes(data)
-                log_abs_sq = 2.0 * torch.log(amp.abs().clamp(min=_tiny))
-                finite_mask = torch.isfinite(log_abs_sq)
-                finite = log_abs_sq[finite_mask]
-                result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
-                result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
-                result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
-                result["amp_nonfinite_count"] = int((~finite_mask).sum().item())
-            except Exception:
-                result["log_amp_sq_mean"] = float("nan")
-                result["log_amp_sq_min"] = float("nan")
-                result["log_amp_sq_max"] = float("nan")
-                result["amp_nonfinite_count"] = -1
+
+        # log_Z: reuse the with-gradient cache from the failing forward (detached
+        # for reporting); recompute fresh only if nothing was cached.
+        cached_log_Z = self.cbm._log_Z_cache
+        if cached_log_Z is not None:
+            result["log_Z"] = cached_log_Z.detach().item()
+        else:
+            with torch.no_grad():
+                try:
+                    self.cbm.reset()
+                    result["log_Z"] = self.cbm.log_partition_function().item()
+                except Exception:
+                    result["log_Z"] = float("nan")
+
+        # log|amp|² stats: reuse the detached amp-diag cache; recompute otherwise.
+        cached_amp = self.cbm._amp_diag_cache
+        if cached_amp is not None:
+            result.update(cached_amp)
+        else:
+            with torch.no_grad():
+                try:
+                    amp = self.cbm.amplitudes(data)
+                    log_abs_sq = 2.0 * torch.log(amp.abs().clamp(min=_tiny))
+                    finite_mask = torch.isfinite(log_abs_sq)
+                    finite = log_abs_sq[finite_mask]
+                    result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
+                    result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
+                    result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
+                    result["amp_nonfinite_count"] = int((~finite_mask).sum().item())
+                except Exception:
+                    result["log_amp_sq_mean"] = float("nan")
+                    result["log_amp_sq_min"] = float("nan")
+                    result["log_amp_sq_max"] = float("nan")
+                    result["amp_nonfinite_count"] = -1
         return result
 
 
