@@ -39,6 +39,7 @@ class Config:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     experiment: str = "default"
     descriptor: str = ""
+    stage: str = ""
     model_path: Optional[str] = None
 
 

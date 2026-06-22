@@ -29,6 +29,16 @@ def _outputs_root() -> str:
     return f"{root}/outputs" if root else "outputs"
 
 
+def _stage_path(*, _root_) -> str:
+    """Path segment for the experiment stage (hpo/ | seed_sweep/).
+
+    Returns ``"{stage}/"`` when a non-empty ``stage`` field is set, else ``""``.
+    Keeps legacy (flat) configs without a stage at their original location.
+    """
+    stage = OmegaConf.select(_root_, "stage")
+    return f"{stage}/" if stage else ""
+
+
 def register_resolvers():
     if not OmegaConf.has_resolver("outputs_root"):
         OmegaConf.register_new_resolver("outputs_root", _outputs_root)
@@ -42,6 +52,8 @@ def register_resolvers():
         OmegaConf.register_new_resolver("complement_200", lambda x: 200 - int(x))
     if not OmegaConf.has_resolver("dtype_suffix"):
         OmegaConf.register_new_resolver("dtype_suffix", _dtype_suffix, use_cache=False)
+    if not OmegaConf.has_resolver("stage_path"):
+        OmegaConf.register_new_resolver("stage_path", _stage_path, use_cache=False)
     if not OmegaConf.has_resolver("geom_lr"):
         OmegaConf.register_new_resolver(
             "geom_lr",
