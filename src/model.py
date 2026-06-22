@@ -161,14 +161,16 @@ class ConditionalBornMachine(tk.models.MPS):
         self.norm_net = self.copy(share_tensors=True)
         self.norm_net.auto_stack = False
         self.norm_net._auto_unbind = False
-        # copy() creates boundary nodes with float32 even for complex models
-        if _dtype.is_complex:
-            if self.norm_net._left_node is not None:
-                self.norm_net._left_node.set_tensor(
-                    self.norm_net._left_node.tensor.to(_dtype))
-            if self.norm_net._right_node is not None:
-                self.norm_net._right_node.set_tensor(
-                    self.norm_net._right_node.tensor.to(_dtype))
+        # copy() creates boundary nodes as float32 on cpu regardless of the
+        # model dtype/device. Re-cast them to match the cores so norm_net is
+        # self-consistent right after construction. Needed for float64 (to()
+        # moves device but never changes dtype, so the float32 boundary would
+        # stay mismatched and break log_partition_function's boundary
+        # contraction); complex was already handled, real float32 is a no-op.
+        _core_device = self.tensors[0].device
+        for _bn in (self.norm_net._left_node, self.norm_net._right_node):
+            if _bn is not None:
+                _bn.set_tensor(_bn.tensor.to(dtype=_dtype, device=_core_device))
 
         # ── randn_eye phi_0 rescaling ─────────────────────────────────────
         # randn_eye sets T[:,0,:] ≈ I; initial amplitude ≈ phi_0^n_sites.
