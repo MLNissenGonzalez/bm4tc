@@ -114,6 +114,27 @@ def test_log_partition_product_state_analytic():
     assert torch.allclose(log_Z, expected, atol=1e-5)
 
 
+@pytest.mark.parametrize("dtype", ["float32", "float64", "complex64", "complex128"])
+@pytest.mark.parametrize("boundary", ["obc", "pbc"])
+def test_log_partition_function_dtype_boundary(dtype, boundary):
+    """log Z must be finite for every dtype/boundary. Regression: copy() made
+    norm_net boundary nodes float32, so float64 models mismatched in the
+    boundary contraction."""
+    from omegaconf import OmegaConf
+    cfg = OmegaConf.create({
+        "embedding": "fourier", "model_path": None,
+        "init_kwargs": {
+            "in_dim": 2, "bond_dim": 2, "out_position": 1, "boundary": boundary,
+            "init_method": "randn", "dtype": dtype, "n_features": None,
+            "out_dim": None, "std": 0.5,
+        },
+    })
+    m = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2, device="cpu")
+    m.reset()
+    log_Z = m.log_partition_function()
+    assert torch.isfinite(log_Z.real)
+
+
 def test_log_partition_reentrant_stable_complex(cbm):
     """Calling log_partition_function repeatedly without reset() (the training
     path) must be stable for complex models. Regression for the reuse-path
