@@ -20,7 +20,7 @@ trainer:
   nll:
     alpha: 1.0
     max_epoch: 100
-    batch_size: 512
+    batch_size: 128
     patience: 50
     stop_crit: "mixed_loss"
     save: false

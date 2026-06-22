@@ -16,7 +16,7 @@ trainer:
   nll:
     alpha: 0.0
     max_epoch: 300
-    batch_size: 512
+    batch_size: 128
     patience: 60
     stop_crit: "acc"
     save: true
