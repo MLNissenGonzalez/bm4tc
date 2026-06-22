@@ -71,16 +71,22 @@ def get_experiment_field(config_path, kind_stem):
     return base
 
 
-def is_already_run(dataset, trainer, embedding, arch, kind_stem):
-    """Return True if an output directory exists for this config."""
-    pattern = f"{dataset}/{trainer}/{embedding}/{arch}/{kind_stem}_*"
+def is_already_run(dataset, trainer, embedding, arch, kind_stem, stage=""):
+    """Return True if an output directory exists for this config.
+
+    Mirrors the staged output layout: an optional {stage}/ segment sits
+    between {arch} and the {kind}_{date} leaf.
+    """
+    stage_seg = f"{stage}/" if stage else ""
+    pattern = f"{dataset}/{trainer}/{embedding}/{arch}/{stage_seg}{kind_stem}_*"
     return any((_data_root() / "outputs").glob(pattern))
 
 
 def discover_configs():
     """Yield config dicts for every yaml under CONFIGS_ROOT/{dataset}/{nat|at}/...
 
-    Layout: {dataset}/{trainer}/{embedding}/{arch}/{kind}.yaml
+    Layout (legacy flat):  {dataset}/{trainer}/{embedding}/{arch}/{kind}.yaml
+    Layout (staged):       {dataset}/{trainer}/{embedding}/{arch}/{stage}/{kind}.yaml
     """
     configs = []
 
@@ -98,23 +104,32 @@ def discover_configs():
 
             for config_path in sorted(trainer_type_dir.rglob("*.yaml")):
                 rel = config_path.relative_to(trainer_type_dir)
-                parts = rel.parts  # (embedding, arch, kind.yaml)
-                if len(parts) != 3:
+                parts = rel.parts
+                # flat: (embedding, arch, kind.yaml)
+                # staged: (embedding, arch, stage, kind.yaml)
+                if len(parts) == 3:
+                    embedding, arch, kind_yaml = parts
+                    stage = ""
+                elif len(parts) == 4:
+                    embedding, arch, stage, kind_yaml = parts
+                else:
                     continue
-                embedding, arch, kind_yaml = parts
                 kind_stem = Path(kind_yaml).stem
 
                 dataset_name  = parse_dataset_name(config_path)
                 experiment    = get_experiment_field(config_path, kind_stem)
-                experiment_key = str(
-                    Path(dataset) / trainer / embedding / arch / kind_stem
-                )
+                key_parts = [dataset, trainer, embedding, arch]
+                if stage:
+                    key_parts.append(stage)
+                key_parts.append(kind_stem)
+                experiment_key = str(Path(*key_parts))
 
                 configs.append({
                     "dataset":        dataset,
                     "trainer":        trainer,
                     "embedding":      embedding,
                     "arch":           arch,
+                    "stage":          stage,
                     "kind":           kind_stem,
                     "dataset_name":   dataset_name,
                     "experiment":     experiment,
@@ -174,7 +189,7 @@ def main():
         for c in configs:
             ran = is_already_run(
                 c["dataset"], c["trainer"], c["embedding"],
-                c["arch"], c["kind"],
+                c["arch"], c["kind"], c.get("stage", ""),
             )
             status = "ran" if ran else "   "
             print(f"[{status}] {c['experiment_key']}")
@@ -183,7 +198,7 @@ def main():
     todo    = [c for c in configs
                if args.force or not is_already_run(
                    c["dataset"], c["trainer"], c["embedding"],
-                   c["arch"], c["kind"])]
+                   c["arch"], c["kind"], c.get("stage", ""))]
     skipped = len(configs) - len(todo)
 
     if skipped:

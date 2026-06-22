@@ -90,8 +90,9 @@ def test_norm_regularizer_zero_at_target():
     log_target = math.log(2.5)
     reg = NormRegularizer(strength=1.0, log_target=log_target)
     cbm = MagicMock()
-    cbm.log_partition_function.return_value = torch.tensor(log_target)
+    cbm.log_Z.return_value = torch.tensor(log_target)
     penalty = reg(cbm)
+    cbm.log_Z.assert_called_once_with(recompute=False)
     assert penalty.item() == pytest.approx(0.0, abs=1e-6)
 
 
@@ -101,7 +102,7 @@ def test_norm_regularizer_nonzero_off_target():
     reg = NormRegularizer(strength=strength, log_target=log_target)
     log_Z_val = 2.0  # delta = 2.0
     cbm = MagicMock()
-    cbm.log_partition_function.return_value = torch.tensor(log_Z_val)
+    cbm.log_Z.return_value = torch.tensor(log_Z_val)
     penalty = reg(cbm)
     expected = strength * (log_Z_val - log_target) ** 2
     assert penalty.item() == pytest.approx(expected, rel=1e-5)
@@ -110,6 +111,40 @@ def test_norm_regularizer_nonzero_off_target():
 def test_norm_regularizer_invalid_target():
     with pytest.raises(ValueError, match="log_target must be finite"):
         NormRegularizer(strength=1.0, log_target=float("inf"))
+
+
+# ── _diagnostics cache routing ─────────────────────────────────────────────
+
+def _diag_trainer():
+    cbm = _tiny_cbm()
+    trainer = NLLTrainer(cbm=cbm, train_cfg=NLLConfig(alpha=1.0),
+                         datahandler=_FakeDataHandler(), device=torch.device("cpu"))
+    return trainer, cbm
+
+
+def test_diagnostics_uses_caches_without_recontracting():
+    """When mixed_nll has populated the caches, _diagnostics reads them and does
+    not contract the norm again."""
+    trainer, cbm = _diag_trainer()
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    cbm.mixed_nll(x, y, alpha=1.0)            # populates both caches
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        diag = trainer._diagnostics(x)
+    mock_logZ.assert_not_called()
+    assert math.isfinite(diag["log_Z"])
+    assert diag["log_Z"] == pytest.approx(cbm._log_Z_cache.detach().item())
+    assert {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
+            "amp_nonfinite_count"} <= set(diag)
+
+
+def test_diagnostics_falls_back_when_cache_empty():
+    """No cached forward (fresh model) → _diagnostics recomputes and still works."""
+    trainer, cbm = _diag_trainer()
+    assert cbm._log_Z_cache is None and cbm._amp_diag_cache is None
+    diag = trainer._diagnostics(torch.rand(4, 2))
+    assert math.isfinite(diag["log_Z"])
+    assert math.isfinite(diag["log_amp_sq_mean"])
 
 
 # ── Alpha=0 fast path ──────────────────────────────────────────────────────

@@ -161,14 +161,16 @@ class ConditionalBornMachine(tk.models.MPS):
         self.norm_net = self.copy(share_tensors=True)
         self.norm_net.auto_stack = False
         self.norm_net._auto_unbind = False
-        # copy() creates boundary nodes with float32 even for complex models
-        if _dtype.is_complex:
-            if self.norm_net._left_node is not None:
-                self.norm_net._left_node.set_tensor(
-                    self.norm_net._left_node.tensor.to(_dtype))
-            if self.norm_net._right_node is not None:
-                self.norm_net._right_node.set_tensor(
-                    self.norm_net._right_node.tensor.to(_dtype))
+        # copy() creates boundary nodes as float32 on cpu regardless of the
+        # model dtype/device. Re-cast them to match the cores so norm_net is
+        # self-consistent right after construction. Needed for float64 (to()
+        # moves device but never changes dtype, so the float32 boundary would
+        # stay mismatched and break log_partition_function's boundary
+        # contraction); complex was already handled, real float32 is a no-op.
+        _core_device = self.tensors[0].device
+        for _bn in (self.norm_net._left_node, self.norm_net._right_node):
+            if _bn is not None:
+                _bn.set_tensor(_bn.tensor.to(dtype=_dtype, device=_core_device))
 
         # ── randn_eye phi_0 rescaling ─────────────────────────────────────
         # randn_eye sets T[:,0,:] ≈ I; initial amplitude ≈ phi_0^n_sites.
@@ -214,7 +216,15 @@ class ConditionalBornMachine(tk.models.MPS):
         # self.bond_dim — inherited property from tk.models.MPS
         # self.n_features — inherited property from tk.models.MPS
         self.device = device
+        # Detached log Z snapshot for purification (constant w.r.t. params); set
+        # by cache_log_Z(), read by marginal_log_probability.
         self._log_Z: float | None = None
+        # Per-forward with-gradient log Z + detached log|amp|² stats, populated
+        # by mixed_nll each training forward. The norm regularizer and failure
+        # diagnostics read these instead of contracting the norm a second time.
+        # DISTINCT from _log_Z above (that one is detached/param-constant).
+        self._log_Z_cache: torch.Tensor | None = None
+        self._amp_diag_cache: dict | None = None
 
     # ======================================================================
     # Auxiliary network sync
@@ -235,6 +245,7 @@ class ConditionalBornMachine(tk.models.MPS):
         super().initialize(tensors=tensors, **kwargs)
         if hasattr(self, "norm_net"):
             self._sync_norm_net()
+        self._invalidate_log_Z_cache()
 
     # ======================================================================
     # Inference
@@ -319,35 +330,81 @@ class ConditionalBornMachine(tk.models.MPS):
             for node, copied_node in zip(all_nodes, copied_nodes):
                 node.reattach_edges(axes=["input"])
                 copied_node["input"] ^ node["input"]
-
-            if _is_complex:
-                for i, node in enumerate(copied_nodes):
-                    copied_nodes[i] = node.conj()
         else:
             copied_nodes = [node.neighbours("input") for node in all_nodes]
 
-        mats_out_env = self.norm_net._input_contraction(
-            nodes_env=all_nodes,
-            input_nodes=copied_nodes,
-            inline_input=True,
-        )
+        # Conjugate the bra on EVERY call (both create and reuse paths). conj()
+        # is a fresh per-call op; doing it only in the create branch left the
+        # reuse path computing Σψ² instead of Σ|ψ|² for complex models — wrong
+        # log Z on every training step after the first. No-op for real dtypes.
+        if _is_complex:
+            copied_nodes = [node.conj() for node in copied_nodes]
 
+        # Zip-up (ladder) contraction: carry one running environment, absorbing
+        # one ket node then its bra copy per site, instead of materialising all
+        # L rank-4 (D,D,D,D) transfer matrices at once. Largest transient is the
+        # (D,d,D) of `result @ node`, so peak memory is O(D²·d) instead of
+        # O(L·D⁴) — the difference between fitting and OOM at large bond dim.
+        # Mathematically identical to the old inline-transfer-matrix order; only
+        # the contraction order differs. Mirrors tn4dd TTTN.norm zip-up.
         log_Z = 0
-        result_node = mats_out_env[0]
-        log_Z += result_node.norm().log()
-        result_node = result_node.renormalize()
-
-        for node in mats_out_env[1:]:
-            result_node @= node
+        result_node = None
+        for i, (node, copied_node) in enumerate(zip(all_nodes, copied_nodes)):
+            if i == 0:
+                result_node = node @ copied_node
+            else:
+                result_node = result_node @ node          # transient (D,d,D)
+                result_node = result_node @ copied_node    # back to (D,D)
             log_Z += result_node.norm().log()
             result_node = result_node.renormalize()
 
-        if result_node.is_connected_to(result_node):
+        if result_node.is_connected_to(result_node):       # PBC self-loop
             result_node @= result_node
             log_Z += result_node.norm().log()
             result_node = result_node.renormalize()
 
         return log_Z
+
+    def log_Z(self, recompute: bool = False) -> torch.Tensor:
+        """With-gradient log Z with a per-forward cache.
+
+        recompute=True contracts the norm via log_partition_function() and
+        refreshes the cache (called by mixed_nll each forward). recompute=False
+        returns the cached grad tensor from the most recent forward — the norm
+        regularizer reads it this way, sharing mixed_nll's contraction graph
+        instead of contracting a second time. If nothing is cached yet it
+        computes (and caches) once.
+
+        The cache reflects the LAST forward only; recompute=False assumes the
+        tensors are unchanged since (i.e. you are within the same step). It is
+        invalidated by the in-place value mutators renormalize_() / initialize().
+        Distinct from the detached _log_Z used by marginal_log_probability.
+        """
+        if recompute or self._log_Z_cache is None:
+            self._log_Z_cache = self.log_partition_function()
+        return self._log_Z_cache
+
+    def _invalidate_log_Z_cache(self) -> None:
+        """Drop the per-forward norm/amplitude caches after a tensor mutation."""
+        self._log_Z_cache = None
+        self._amp_diag_cache = None
+
+    @torch.no_grad()
+    def _cache_amp_diag(self, log_abs_sq: torch.Tensor) -> None:
+        """Cache detached log|amp|² summary stats from the current forward.
+
+        log_abs_sq = 2·log|ψ(x,c)| (B, C) is already computed in mixed_nll; this
+        stores its finite-masked mean/min/max plus a non-finite count, matching
+        the keys _format_diagnostics() expects.
+        """
+        finite_mask = torch.isfinite(log_abs_sq)
+        finite = log_abs_sq[finite_mask]
+        self._amp_diag_cache = {
+            "log_amp_sq_mean": finite.mean().item() if finite.numel() else float("nan"),
+            "log_amp_sq_min": finite.min().item() if finite.numel() else float("nan"),
+            "log_amp_sq_max": finite.max().item() if finite.numel() else float("nan"),
+            "amp_nonfinite_count": int((~finite_mask).sum().item()),
+        }
 
     def cache_log_Z(self) -> float:
         """Compute and cache log Z as a detached float."""
@@ -401,6 +458,7 @@ class ConditionalBornMachine(tk.models.MPS):
         B = data.shape[0]
         amp     = self.amplitudes(data)                                    # (B, C)
         log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))           # (B, C)
+        self._cache_amp_diag(2.0 * log_abs)                               # detached, for diagnostics
 
         if debug:
             nf_amp = int((~torch.isfinite(amp)).sum().item())
@@ -424,7 +482,7 @@ class ConditionalBornMachine(tk.models.MPS):
                 logger.warning("  [mixed_nll/grad] term2=0 (α=1, not computed)")
 
         if alpha > 0.0:
-            log_Z = self.log_partition_function()
+            log_Z = self.log_Z(recompute=True)
             if not torch.isfinite(log_Z):
                 if debug:
                     logger.warning(f"  [mixed_nll/grad] log_Z={log_Z.item():.4g} (non-finite)")
@@ -458,6 +516,7 @@ class ConditionalBornMachine(tk.models.MPS):
             alpha = math.exp((log_target - log_Z.item()) / (2 * n))
             for node in self._mats_env:
                 node.tensor.data.mul_(alpha)
+        self._invalidate_log_Z_cache()
 
     # ======================================================================
     # Conditional sampling

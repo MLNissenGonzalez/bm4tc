@@ -54,13 +54,17 @@ def init_wandb(cfg: Config) -> wandb.Run:
     now = datetime.now()
     date_str = now.strftime("%d%m_%H%M")
 
-    group_key = "/".join([
+    stage = OmegaConf.select(cfg, "stage")
+    group_parts = [
         cfg.dataset.name,
         trainer_type,
         cfg.born.embedding,
         arch,
-        f"{cfg.experiment}_{date_str}",
-    ])
+    ]
+    if stage:
+        group_parts.append(stage)
+    group_parts.append(f"{cfg.experiment}_{date_str}")
+    group_key = "/".join(group_parts)
 
     run = wandb.init(
         project=cfg.tracking.project,
