@@ -51,13 +51,13 @@ DEFAULT_PROJECT = "bm4tc"
 
 # Regex to match `key: ???  # optional comment` lines
 FILL_PATTERN = re.compile(
-    r'^(\s*)(lr|weight_decay|clean_weight):\s*\?\?\?(\s*(?:#[^\n]*)?)$',
+    r'^(\s*)(lr|weight_decay|clean_weight|soft_strength):\s*\?\?\?(\s*(?:#[^\n]*)?)$',
     re.MULTILINE,
 )
 
 # Regex for overwrite mode — also matches already-filled numeric values
 OVERWRITE_PATTERN = re.compile(
-    r'^(\s*)(lr|weight_decay|clean_weight):\s*\S+(\s*(?:#[^\n]*)?)$',
+    r'^(\s*)(lr|weight_decay|clean_weight|soft_strength):\s*\S+(\s*(?:#[^\n]*)?)$',
     re.MULTILINE,
 )
 
@@ -86,6 +86,19 @@ def _seed_kind_for_hpo(hpo_kind: str) -> str:
         suffix = hpo_kind[len("hpo"):]  # e.g. "", "_a0", "_a1", "_linf"
         return "seed_sweep" + suffix
     return hpo_kind  # fallback
+
+
+def _seed_kind_for_hpo_staged(hpo_kind: str) -> str:
+    """Map a staged (bare) HPO kind to its matching seed_sweep kind.
+
+    In the staged layout the stage lives in the folder, so kinds are bare:
+        a0            → a0
+        pretrained_a1 → a1   (warm-start HPO informs the alpha=1 seed sweep)
+        pretrained_a05 → a05
+    """
+    if hpo_kind.startswith("pretrained_"):
+        return hpo_kind[len("pretrained_"):]
+    return hpo_kind
 
 
 # =============================================================================
@@ -118,12 +131,15 @@ def _extract_params(config: Dict, trainer: str) -> Dict[str, Any]:
     trainer_key = TRAINER_CONFIG_KEY[trainer]
     lr = _get_nested_value(config, f"trainer.{trainer_key}.optimizer.kwargs.lr")
     wd = _get_nested_value(config, f"trainer.{trainer_key}.optimizer.kwargs.weight_decay")
+    soft = _get_nested_value(config, f"trainer.{trainer_key}.norm_control.soft_strength")
 
     params: Dict[str, Any] = {}
     if lr is not None:
         params["lr"] = lr
     if wd is not None:
         params["weight_decay"] = wd
+    if soft is not None:
+        params["soft_strength"] = soft
 
     if trainer == "at":
         cw = _get_nested_value(config, "trainer.adversarial.clean_weight")
@@ -147,18 +163,20 @@ def query_wandb(
     minimize: bool,
     entity: str,
     project: str,
+    hpo_stage: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Query W&B for the best finished HPO run matching the combo.
 
-    W&B group format: {dataset}/{trainer}/{embedding}/{arch}/{hpo_kind}/{date}
-    We match by prefix: ^{dataset}/{trainer}/{embedding}/{arch}/{hpo_kind}/
+    W&B group format: {dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}/{date}
+    We match by prefix: ^{dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}/
     """
     if not WANDB_AVAILABLE:
         return None
 
     import wandb
 
-    group_prefix = f"{dataset}/{trainer}/{embedding}/{arch}/{hpo_kind}/"
+    stage_seg = f"{hpo_stage}/" if hpo_stage else ""
+    group_prefix = f"{dataset}/{trainer}/{embedding}/{arch}/{stage_seg}{hpo_kind}/"
     group_pattern = f"^{re.escape(group_prefix)}"
 
     try:
@@ -212,6 +230,7 @@ def query_local(
     metric_key: str,
     minimize: bool,
     outputs_dir: Path,
+    hpo_stage: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Walk outputs dir to find matching HPO trials; return params from best."""
     trainer_key = TRAINER_CONFIG_KEY[trainer]
@@ -219,8 +238,10 @@ def query_local(
     best_metric: Optional[float] = None
     best_params: Optional[Dict[str, Any]] = None
 
-    # Search under outputs/{dataset}/{trainer}/{embedding}/{arch}/{hpo_kind}_*/
+    # Search under outputs/{dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}_*/
     search_root = outputs_dir / dataset / trainer / embedding / arch
+    if hpo_stage:
+        search_root = search_root / hpo_stage
     if not search_root.exists():
         print(f"  [local] No output dir found: {search_root}")
         return None
@@ -323,7 +344,30 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                         continue
                     arch = arch_dir.name
 
-                    # Find all hpo_*.yaml files and their matching seed_sweep_*.yaml
+                    hpo_stage_dir = arch_dir / "hpo"
+                    if hpo_stage_dir.is_dir():
+                        # Staged layout: hpo/{kind}.yaml ↔ seed_sweep/{kind}.yaml
+                        seed_stage_dir = arch_dir / "seed_sweep"
+                        for hpo_path in sorted(hpo_stage_dir.glob("*.yaml")):
+                            hpo_kind = hpo_path.stem
+                            seed_kind = _seed_kind_for_hpo_staged(hpo_kind)
+                            seed_path = seed_stage_dir / f"{seed_kind}.yaml"
+                            if not seed_path.exists():
+                                continue
+                            combos.append({
+                                "dataset":    dataset,
+                                "trainer":    trainer,
+                                "embedding":  embedding,
+                                "arch":       arch,
+                                "hpo_stage":  "hpo",
+                                "hpo_kind":   hpo_kind,
+                                "seed_kind":  seed_kind,
+                                "hpo_path":   hpo_path,
+                                "seed_path":  seed_path,
+                            })
+                        continue
+
+                    # Legacy flat layout: hpo_*.yaml ↔ seed_sweep_*.yaml
                     for hpo_path in sorted(arch_dir.glob("hpo*.yaml")):
                         hpo_kind = hpo_path.stem
                         seed_kind = _seed_kind_for_hpo(hpo_kind)
@@ -337,6 +381,7 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                             "trainer":   trainer,
                             "embedding": embedding,
                             "arch":      arch,
+                            "hpo_stage": "",
                             "hpo_kind":  hpo_kind,
                             "seed_kind": seed_kind,
                             "hpo_path":  hpo_path,
@@ -369,6 +414,7 @@ def process_combo(
     embedding = combo["embedding"]
     arch      = combo["arch"]
     hpo_kind  = combo["hpo_kind"]
+    hpo_stage = combo.get("hpo_stage", "")
     seed_path = combo["seed_path"]
 
     label = f"{dataset}/{trainer}/{embedding}/{arch}: {hpo_kind} → {combo['seed_kind']}"
@@ -385,13 +431,13 @@ def process_combo(
     if source in ("wandb", "both"):
         params = query_wandb(
             dataset, trainer, embedding, arch, hpo_kind,
-            metric_key, minimize, entity, project,
+            metric_key, minimize, entity, project, hpo_stage,
         )
 
     if params is None and source in ("local", "both"):
         params = query_local(
             dataset, trainer, embedding, arch, hpo_kind,
-            metric_key, minimize, outputs_dir,
+            metric_key, minimize, outputs_dir, hpo_stage,
         )
 
     if not params:
