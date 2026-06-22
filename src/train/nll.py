@@ -250,6 +250,12 @@ class NLLTrainer:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            # optimizer.step() mutated the tensors in place, so the per-forward
+            # with-grad log_Z cache now reflects stale params (and a freed graph).
+            # Drop it so the next step recomputes a fresh graph. Essential for
+            # alpha=0 + soft norm control, where mixed_nll never refreshes the
+            # cache itself (it skips log_Z) and the regularizer reads recompute=False.
+            self.cbm._invalidate_log_Z_cache()
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.cbm.renormalize_(log_target=self._nc_log_target)

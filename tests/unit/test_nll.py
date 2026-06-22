@@ -167,3 +167,33 @@ def test_alpha0_skips_log_partition_function_in_mixed_nll():
         trainer._train_epoch()
 
     mock_logZ.assert_not_called()
+
+
+def test_alpha0_soft_norm_control_multistep_backward():
+    """Regression: alpha=0 + soft norm control must train across multiple steps.
+
+    The with-grad log_Z cache is only refreshed by mixed_nll when alpha>0; for
+    alpha=0 the NormRegularizer reads it via recompute=False. Without per-step
+    cache invalidation, the second optimizer step backwards through the freed
+    graph of the first step ("Trying to backward through the graph a second
+    time"). Guards the _invalidate_log_Z_cache() call in _train_epoch.
+    """
+    cbm = _tiny_cbm()
+    dh = _FakeDataHandler(n=16, batch_size=4)  # 4 batches → 4 steps (>=2 needed)
+    cfg = NLLConfig(
+        alpha=0.0, max_epoch=1,
+        norm_control=NormControlConfig(hard_every=0, soft_strength=1.0, log_target=0.0),
+    )
+    trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
+    trainer.cbm.prepare(device=torch.device("cpu"))
+    trainer.step = 0
+    trainer._nc_log_target = 0.0
+    trainer.norm_regularizer = NormRegularizer(strength=1.0, log_target=0.0)
+    trainer.optimizer = torch.optim.Adam(cbm.parameters(), lr=1e-3)
+
+    # Must complete without "Trying to backward through the graph a second time".
+    trainer._train_epoch()
+
+    assert not trainer._collapsed
+    assert trainer.step >= 2
+    assert cbm._log_Z_cache is None  # invalidated after the final step
