@@ -319,30 +319,35 @@ class ConditionalBornMachine(tk.models.MPS):
             for node, copied_node in zip(all_nodes, copied_nodes):
                 node.reattach_edges(axes=["input"])
                 copied_node["input"] ^ node["input"]
-
-            if _is_complex:
-                for i, node in enumerate(copied_nodes):
-                    copied_nodes[i] = node.conj()
         else:
             copied_nodes = [node.neighbours("input") for node in all_nodes]
 
-        mats_out_env = self.norm_net._input_contraction(
-            nodes_env=all_nodes,
-            input_nodes=copied_nodes,
-            inline_input=True,
-        )
+        # Conjugate the bra on EVERY call (both create and reuse paths). conj()
+        # is a fresh per-call op; doing it only in the create branch left the
+        # reuse path computing Σψ² instead of Σ|ψ|² for complex models — wrong
+        # log Z on every training step after the first. No-op for real dtypes.
+        if _is_complex:
+            copied_nodes = [node.conj() for node in copied_nodes]
 
+        # Zip-up (ladder) contraction: carry one running environment, absorbing
+        # one ket node then its bra copy per site, instead of materialising all
+        # L rank-4 (D,D,D,D) transfer matrices at once. Largest transient is the
+        # (D,d,D) of `result @ node`, so peak memory is O(D²·d) instead of
+        # O(L·D⁴) — the difference between fitting and OOM at large bond dim.
+        # Mathematically identical to the old inline-transfer-matrix order; only
+        # the contraction order differs. Mirrors tn4dd TTTN.norm zip-up.
         log_Z = 0
-        result_node = mats_out_env[0]
-        log_Z += result_node.norm().log()
-        result_node = result_node.renormalize()
-
-        for node in mats_out_env[1:]:
-            result_node @= node
+        result_node = None
+        for i, (node, copied_node) in enumerate(zip(all_nodes, copied_nodes)):
+            if i == 0:
+                result_node = node @ copied_node
+            else:
+                result_node = result_node @ node          # transient (D,d,D)
+                result_node = result_node @ copied_node    # back to (D,D)
             log_Z += result_node.norm().log()
             result_node = result_node.renormalize()
 
-        if result_node.is_connected_to(result_node):
+        if result_node.is_connected_to(result_node):       # PBC self-loop
             result_node @= result_node
             log_Z += result_node.norm().log()
             result_node = result_node.renormalize()

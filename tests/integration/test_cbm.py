@@ -93,6 +93,39 @@ def test_log_partition_function_finite(cbm):
     assert log_Z.isfinite()
 
 
+def test_log_partition_product_state_analytic():
+    """bond_dim=1 product state: Z = Π_i ‖t_i‖²  →  log Z = Σ_i log‖t_i‖².
+
+    Independent analytic value for the zip-up contraction (bonds are trivial,
+    so the chain factorises over sites)."""
+    from omegaconf import OmegaConf
+    cfg = OmegaConf.create({
+        "embedding": "fourier", "model_path": None,
+        "init_kwargs": {
+            "in_dim": 2, "bond_dim": 1, "out_position": 1, "boundary": "obc",
+            "init_method": "randn", "dtype": "float32", "n_features": None,
+            "out_dim": None, "std": 1.0,
+        },
+    })
+    m = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2, device="cpu")
+    m.reset()
+    log_Z = m.log_partition_function()
+    expected = sum(t.abs().square().sum().log() for t in m.tensors)
+    assert torch.allclose(log_Z, expected, atol=1e-5)
+
+
+def test_log_partition_reentrant_stable_complex(cbm):
+    """Calling log_partition_function repeatedly without reset() (the training
+    path) must be stable for complex models. Regression for the reuse-path
+    conj bug that computed Σψ² instead of Σ|ψ|² after the first call."""
+    cbm.reset()
+    ref = cbm.log_partition_function()        # reset → create-copies path
+    again = cbm.log_partition_function()       # no reset → reuse path
+    third = cbm.log_partition_function()
+    assert torch.allclose(again, ref, atol=1e-5)
+    assert torch.allclose(third, ref, atol=1e-5)
+
+
 def test_cache_log_Z_attribute_finite(cbm):
     assert cbm._log_Z is not None
     assert torch.isfinite(torch.tensor(cbm._log_Z))
