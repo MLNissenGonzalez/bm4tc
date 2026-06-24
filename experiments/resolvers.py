@@ -33,10 +33,13 @@ def _alpha_suffix(*, _root_) -> str:
     """Kind-suffix token encoding the NLL alpha (e.g. 0.0->a0, 0.5->a05, 1.0->a1).
 
     Matches the manual naming convention (a0, a001, a01, a02, a05, a1) so that
-    pretrained HPO sweeps over a CLI-supplied ``trainer.nll.alpha`` land in
-    distinct ``{experiment}`` output folders (and analysis mirrors) per alpha.
+    HPO sweeps over a CLI-supplied alpha land in distinct ``{experiment}`` output
+    folders (and analysis mirrors) per alpha. Reads ``trainer.nll.alpha`` for NLL
+    runs, falling back to ``trainer.adversarial.alpha`` for adversarial training.
     """
     alpha = OmegaConf.select(_root_, "trainer.nll.alpha")
+    if alpha is None:
+        alpha = OmegaConf.select(_root_, "trainer.adversarial.alpha")
     digits = str(float(alpha)).replace(".", "").rstrip("0")
     return "a" + (digits if digits else "0")
 

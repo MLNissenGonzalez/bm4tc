@@ -1,0 +1,73 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# General adversarial-training (AT) HPO for cricketx, with alpha>=0 support.
+#
+# One config covers every bond dimension AND every alpha. Like hpo_pretrained,
+# AT fine-tunes from the best clean (alpha=0) checkpoint supplied via
+# `model_path`. The alpha sets the *training* objective on adversarial (and
+# clean) examples: alpha*gen + (1-alpha)*dis. It is passed on the CLI and folded
+# into the `experiment` token via `alpha_suffix`, so each alpha lands in its own
+# output/analysis folder (e.g. alpha=0.5 -> at_a05). Bond dim via `born`.
+#
+# Note: the PGD attack keeps its discriminative NLL criterion (inherited from
+# pgd_at); only the training objective is mixed. The AT trainer has no norm
+# control, so rely on a small lr + the pretrained (normalized) start to keep
+# log_Z stable for alpha>0.
+#
+# Usage (alpha and matching model_path required):
+#   python -m experiments.train --multirun \
+#       +experiments=cricketx/at/legendre/hpo \
+#       born=legendre/d3r60c64 \
+#       trainer.adversarial.alpha=0.5 \
+#       model_path=outputs/cricketx/nat/legendre/d3r60c64/hpo_a0_{DDMM}/0/models/model
+#
+#   # large r: add a smaller batch size
+#   ... born=legendre/d3r100c64 trainer.adversarial.batch_size=64 ...
+#
+# Output:  outputs/cricketx/at/legendre/d3r{R}c64/at_a{X}_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+experiment: "at_${alpha_suffix:}"
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r60c64
+  - override /dataset: ucr_ts/cricketx
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+# Required on the CLI: best clean (alpha=0) checkpoint for the chosen bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+
+trainer:
+  adversarial:
+    alpha: 0.0
+    max_epoch: 800
+    batch_size: 100
+    patience: 200
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    save: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-5
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    study_name: "${experiment}_${dataset.name}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 6
+    direction: minimize
+    n_trials: 20
+    n_jobs: 1
+    params:
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-6, 5e-4))
+      trainer.adversarial.clean_weight: interval(0.0, 1.0)
