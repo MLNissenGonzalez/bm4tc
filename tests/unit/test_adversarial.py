@@ -6,8 +6,12 @@ tests don't construct a DataHandler or PGD attack — they target the selection 
 """
 
 import torch
+from unittest.mock import patch
+from torch.utils.data import DataLoader, TensorDataset
 
 from src.train.adversarial import AdversarialTrainer, AdversarialConfig
+from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from src.utils.train import NormControlConfig, NormRegularizer
 
 
 def _make_trainer(cbm, *, stop_crit="rob", acc_floor=None):
@@ -130,8 +134,119 @@ def test_alpha_threads_into_training_objective():
     t.optimizer = torch.optim.SGD([param], lr=0.0)
     t.datahandler = type("DH", (), {"classification": {"train": [batch]}})()
     t._generate_adversarial = lambda data, labels, eps: data
+    t._nc = t.train_cfg.norm_control  # off by default → no-op
+    t.norm_regularizer = None
 
     t._train_epoch(epsilon=0.1)
 
     # adv term + clean term (clean_weight > 0), both at the configured alpha
     assert captured == [0.5, 0.5]
+
+
+# ── Norm control ────────────────────────────────────────────────────────────
+
+def _tiny_cbm():
+    cfg = CBMConfig(
+        embedding="fourier",
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
+    )
+    return ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
+
+
+class _FakeDataHandler:
+    """Minimal DataHandler substitute that skips file I/O."""
+    data_dim = 2
+
+    def __init__(self, n=16, batch_size=4):
+        ds = TensorDataset(torch.rand(n, 2), torch.randint(0, 2, (n,)))
+        loader = DataLoader(ds, batch_size=batch_size)
+        self.classification = {"train": loader, "valid": loader}
+
+    def get_classification_loaders(self, batch_size=4):
+        pass
+
+
+def _bare_epoch_trainer(cbm, dh, train_cfg, *, norm_regularizer=None, log_target=0.0):
+    """Trainer wired with just the attributes `_train_epoch` touches.
+
+    Bypasses `_init_attack` (no PGD) by stubbing `_generate_adversarial` to the
+    identity, so these tests exercise the norm-control plumbing in isolation.
+    """
+    t = AdversarialTrainer.__new__(AdversarialTrainer)
+    t.train_cfg = train_cfg
+    t.cbm = cbm
+    t.datahandler = dh
+    t.device = torch.device("cpu")
+    t.step = 0
+    t._nc = train_cfg.norm_control
+    t.norm_regularizer = norm_regularizer
+    t._nc_log_target = log_target
+    t.optimizer = torch.optim.Adam(cbm.parameters(), lr=1e-3)
+    t._generate_adversarial = lambda data, labels, eps: data
+    return t
+
+
+def test_adversarial_config_norm_control_default_off():
+    """AT norm control is opt-in: the default config is a complete no-op."""
+    nc = AdversarialConfig().norm_control
+    assert nc.hard_every == 0
+    assert nc.soft_strength == 0.0
+
+
+def test_norm_control_off_skips_renormalize():
+    cbm = _tiny_cbm()
+    cbm.prepare(device=torch.device("cpu"))
+    dh = _FakeDataHandler()
+    cfg = AdversarialConfig(
+        norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
+    )
+    t = _bare_epoch_trainer(cbm, dh, cfg)
+
+    with patch.object(cbm, "renormalize_", wraps=cbm.renormalize_) as m_renorm:
+        t._train_epoch(epsilon=0.1)
+
+    m_renorm.assert_not_called()
+    assert t._train_reg == 0.0
+
+
+def test_hard_renorm_called_every_step():
+    cbm = _tiny_cbm()
+    cbm.prepare(device=torch.device("cpu"))
+    dh = _FakeDataHandler(n=16, batch_size=4)  # 4 batches → 4 steps
+    cfg = AdversarialConfig(
+        norm_control=NormControlConfig(hard_every=1, soft_strength=0.0, log_target=0.0),
+    )
+    t = _bare_epoch_trainer(cbm, dh, cfg, log_target=0.0)
+
+    with patch.object(cbm, "renormalize_", wraps=cbm.renormalize_) as m_renorm:
+        t._train_epoch(epsilon=0.1)
+
+    assert m_renorm.call_count == 4
+
+
+def test_soft_norm_control_multistep_backward():
+    """alpha=0 + soft norm control must train across multiple steps.
+
+    The NormRegularizer reads the with-grad log_Z via recompute=False; without
+    per-step cache invalidation the second step backwards through the first
+    step's freed graph. Mirrors the NLLTrainer regression guard.
+    """
+    cbm = _tiny_cbm()
+    cbm.prepare(device=torch.device("cpu"))
+    dh = _FakeDataHandler(n=16, batch_size=4)
+    cfg = AdversarialConfig(
+        alpha=0.0,
+        norm_control=NormControlConfig(hard_every=0, soft_strength=1.0, log_target=0.0),
+    )
+    t = _bare_epoch_trainer(
+        cbm, dh, cfg,
+        norm_regularizer=NormRegularizer(strength=1.0, log_target=0.0),
+        log_target=0.0,
+    )
+
+    # Must complete without "Trying to backward through the graph a second time".
+    t._train_epoch(epsilon=0.1)
+
+    assert t.step >= 2
+    assert t._train_reg > 0.0
+    assert cbm._log_Z_cache is None  # invalidated after the final step

@@ -17,6 +17,8 @@ For classification, a special output tensor yields a class-conditioned amplitude
 | `experiments/train.py` | `nat` | NLL training; α=0 discriminative (`hpo_a0`, `seed_sweep_a0`) or α>0 generative (`seed_sweep_a1`, …) |
 | `experiments/train.py` | `at` | Adversarial training; loads a pretrained `nat` checkpoint via `model_path` |
 
+**Norm control** (shared by both regimes, configured via `trainer.*.norm_control`) keeps the log-partition function log Z near a target during α>0 training: `hard_every` steps the tensors are rescaled (`cbm.renormalize_`), and `soft_strength>0` adds a `(log Z − log_target)²` penalty to the loss. `log_target` may be a float, `null` (the pretrained model's log Z), or an expression in `n_features`/`in_dim`/`out_dim`/`bond_dim`. It is **on by default for `nat`** (`hard_every=1`) and **off by default for `at`** (`hard_every=0, soft_strength=0`).
+
 ## Trustworthiness Evaluation
 
 **Adversarial robustness** — Post-hoc PGD attack (L2, 20 steps) at multiple ε fractions of the embedding range. Robust accuracy reported per seed; sweep statistics include mean ± std and Pareto frontiers (clean accuracy vs. robust accuracy).

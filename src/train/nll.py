@@ -6,9 +6,16 @@ import torch
 from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, Optional
 
-from src.utils.train import OptimizerConfig, NormRegularizer, eval_metrics, optimizer
+from src.utils.train import (
+    OptimizerConfig,
+    NormControlConfig,
+    NormRegularizer,
+    eval_metrics,
+    optimizer,
+    resolve_log_target,
+)
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 
@@ -21,14 +28,6 @@ logger = logging.getLogger(__name__)
 _LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss"}
 _ACC_METRICS = {"acc", "rob"}
 _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "mixed_loss", "acc", "rob"}
-
-
-@dataclass
-class NormControlConfig:
-    log_target: Optional[Union[float, str]] = 0.0
-    hard_every: int = 1
-    soft_strength: float = 0.0
-    debug: bool = False
 
 
 @dataclass
@@ -84,57 +83,6 @@ class NLLTrainer:
                 f"Invalid stop_crit '{self.stopping_criterion_name}'. "
                 f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
             )
-
-    def _resolve_nc_log_target(self) -> float:
-        import math as _math
-        raw = self._nc.log_target
-
-        if raw is None:
-            with torch.no_grad():
-                log_Z0 = self.cbm.log_partition_function()
-            log_target = log_Z0.item()
-            logger.info(f"NormControl: log_target (pretrained) = {log_target:.6g}")
-            return log_target
-
-        if isinstance(raw, str):
-            n_features = self.cbm.n_features
-            data_dim = self.datahandler.data_dim
-            in_dim = self.cbm.in_dim
-            out_dim = self.cbm.out_dim
-            bond_dim = self.cbm.bond_dim
-            _ns = {
-                "__builtins__": {},
-                "n_features": n_features,
-                "data_dim": data_dim,
-                "in_dim": in_dim,
-                "out_dim": out_dim,
-                "bond_dim": bond_dim,
-                "sqrt": _math.sqrt,
-                "log": _math.log,
-                "exp": _math.exp,
-            }
-            try:
-                result = eval(raw, _ns)  # noqa: S307
-            except Exception as exc:
-                raise ValueError(
-                    f"NormControl: could not evaluate log_target expression "
-                    f"{raw!r} (n_features={n_features}, data_dim={data_dim}, "
-                    f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}): {exc}"
-                ) from exc
-            log_target = float(result)
-            if not _math.isfinite(log_target):
-                raise ValueError(
-                    f"NormControl: log_target expression {raw!r} evaluated to "
-                    f"{log_target}, but log_target must be finite."
-                )
-            logger.info(
-                f"NormControl: log_target (expression {raw!r}) = {log_target:.6g} "
-                f"[n_features={n_features}, data_dim={data_dim}, "
-                f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}]"
-            )
-            return log_target
-
-        return float(raw)
 
     def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
         """log_Z and log|amp|² stats. Prefers the caches populated by the failing
@@ -340,7 +288,7 @@ class NLLTrainer:
         self._collapsed = False
 
         self.cbm.prepare(device=self.device)
-        self._nc_log_target = self._resolve_nc_log_target()
+        self._nc_log_target = resolve_log_target(self.cbm, self.datahandler, self._nc)
         if self._nc.soft_strength > 0.0:
             self.norm_regularizer = NormRegularizer(
                 strength=self._nc.soft_strength, log_target=self._nc_log_target
