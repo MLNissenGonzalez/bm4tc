@@ -147,6 +147,37 @@ def test_diagnostics_falls_back_when_cache_empty():
     assert math.isfinite(diag["log_amp_sq_mean"])
 
 
+# ── _format_diagnostics tagging ────────────────────────────────────────────
+
+def test_amp_nonfinite_count_always_tagged_overflow():
+    """A non-finite amplitude count is always overflow: 2·log(|amp|.clamp(min=tiny))
+    floors underflow, so the count can never be an underflow — including when the
+    mean log|amp|² is small (the old `mean_ > 80 else underflow` mislabel)."""
+    s = NLLTrainer._format_diagnostics({
+        "log_Z": 0.0,
+        "log_amp_sq_mean": 1.0, "log_amp_sq_min": 0.0, "log_amp_sq_max": 2.0,
+        "amp_nonfinite_count": 3,
+    })
+    assert "3 non-finite → overflow" in s
+    assert "underflow" not in s
+
+
+def test_format_diagnostics_surfaces_overflow_headroom():
+    """A finite log_Z with a headroom value is rendered with the remaining
+    overflow headroom; absent the key, the plain log_Z is shown."""
+    with_headroom = NLLTrainer._format_diagnostics({"log_Z": 100.0, "log_Z_headroom": 77.45})
+    assert "overflow headroom=77.45" in with_headroom
+
+    without = NLLTrainer._format_diagnostics({"log_Z": 100.0})
+    assert "headroom" not in without
+
+
+def test_log_Z_overflow_ceiling_matches_float32():
+    """The float32/complex64 overflow ceiling is 2·log(finfo.max) ≈ 177.45."""
+    ceiling = 2.0 * math.log(torch.finfo(torch.float32).max)
+    assert ceiling == pytest.approx(177.45, abs=0.1)
+
+
 # ── Alpha=0 fast path ──────────────────────────────────────────────────────
 
 def test_alpha0_skips_log_partition_function_in_mixed_nll():
