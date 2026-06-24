@@ -179,14 +179,19 @@ class NLLTrainer:
         return result
 
 
-    def _format_diagnostics(self, d: Dict[str, float]) -> str:
+    @staticmethod
+    def _format_diagnostics(d: Dict[str, float]) -> str:
         parts = []
         log_Z = d.get("log_Z", float("nan"))
         if not math.isfinite(log_Z):
             tag = "overflow" if log_Z > 0 else ("underflow" if log_Z < 0 else "nan")
             parts.append(f"norm {tag} (log_Z={log_Z:.4g})")
         else:
-            parts.append(f"log_Z={log_Z:.4g}")
+            headroom = d.get("log_Z_headroom", float("nan"))
+            if math.isfinite(headroom):
+                parts.append(f"log_Z={log_Z:.4g} (overflow headroom={headroom:.4g})")
+            else:
+                parts.append(f"log_Z={log_Z:.4g}")
         mean_ = d.get("log_amp_sq_mean", float("nan"))
         min_ = d.get("log_amp_sq_min", float("nan"))
         max_ = d.get("log_amp_sq_max", float("nan"))
@@ -196,8 +201,11 @@ class NLLTrainer:
         else:
             s = f"log|amp|² mean={mean_:.4g} min={min_:.4g} max={max_:.4g}"
             if nf_count > 0:
-                tag = "overflow" if mean_ > 80 else "underflow"
-                s += f" ({nf_count} non-finite → {tag})"
+                # The count comes from non-finite 2·log(|amp|.clamp(min=tiny))
+                # (model._cache_amp_diag / the recompute fallback below). The clamp
+                # floors amplitude underflow to a finite value, so a non-finite
+                # entry can only be an amplitude that overflowed float32.
+                s += f" ({nf_count} non-finite → overflow)"
             parts.append(s)
         return "; ".join(parts)
 
@@ -385,6 +393,12 @@ class NLLTrainer:
                         metrics["norm/log_Z_mean"] = sum(log_Zs) / len(log_Zs)
                         metrics["norm/log_Z_min"]  = min(log_Zs)
                         metrics["norm/log_Z_max"]  = max(log_Zs)
+                        # Amplitudes overflow once ‖ψ‖ = exp(log_Z/2) crosses the
+                        # dtype max, i.e. log_Z > 2·log(finfo.max) (177.45 for
+                        # float32/complex64). Surface the remaining headroom so an
+                        # impending overflow is visible before it happens.
+                        ceiling = 2.0 * math.log(torch.finfo(self.cbm.dtype).max)
+                        metrics["norm/log_Z_headroom"] = ceiling - metrics["norm/log_Z_max"]
                     if means:
                         metrics["norm/log_amp_sq_mean"] = sum(means) / len(means)
                     if mins:
@@ -393,6 +407,7 @@ class NLLTrainer:
                         f"[debug] epoch {self.epoch}: "
                         + self._format_diagnostics({
                             "log_Z":         metrics.get("norm/log_Z_mean", float("nan")),
+                            "log_Z_headroom": metrics.get("norm/log_Z_headroom", float("nan")),
                             "log_amp_sq_mean": metrics.get("norm/log_amp_sq_mean", float("nan")),
                             "log_amp_sq_min":  metrics.get("norm/log_amp_sq_min", float("nan")),
                             "amp_nonfinite_frac": 0.0,
