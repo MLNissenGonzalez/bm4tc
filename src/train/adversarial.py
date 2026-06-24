@@ -16,6 +16,7 @@ from src.model import ConditionalBornMachine
 class AdversarialConfig:
     max_epoch: int = 100
     batch_size: int = 64
+    alpha: float = 0.0  # mixed-NLL weight for the training objective: alpha*gen + (1-alpha)*dis
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     evasion: EvasionConfig = field(default_factory=EvasionConfig)
     stop_crit: str = "acc"
@@ -31,9 +32,9 @@ class AdversarialConfig:
 import logging
 logger = logging.getLogger(__name__)
 
-_LOSS_METRICS = {"dis_loss", "gen_loss"}
+_LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss"}
 _ACC_METRICS = {"acc", "rob"}
-_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "acc", "rob"}
+_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "mixed_loss", "acc", "rob"}
 
 
 class AdversarialTrainer:
@@ -84,7 +85,10 @@ class AdversarialTrainer:
         self._abs_curriculum_start = self.train_cfg.curriculum_start * range_size
 
     def _init_best(self):
-        self.best = {"dis_loss": float("inf"), "acc": 0.0}
+        self.best = {
+            "dis_loss": float("inf"), "gen_loss": float("inf"),
+            "mixed_loss": float("inf"), "acc": 0.0,
+        }
         if self.train_cfg.eval_rob_freq > 0:
             self.best["rob"] = 0.0
         self.stopping_criterion_name = self.train_cfg.stop_crit
@@ -122,10 +126,10 @@ class AdversarialTrainer:
             adv_data = self._generate_adversarial(data, labels, epsilon)
             self.cbm.train()
 
-            adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=0.0)
+            adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=self.train_cfg.alpha)
 
             if self.train_cfg.clean_weight > 0:
-                clean_loss = self.cbm.mixed_nll(data, labels, alpha=0.0)
+                clean_loss = self.cbm.mixed_nll(data, labels, alpha=self.train_cfg.alpha)
                 loss = (1 - self.train_cfg.clean_weight) * adv_loss + \
                        self.train_cfg.clean_weight * clean_loss
             else:
@@ -213,10 +217,15 @@ class AdversarialTrainer:
             epsilon = self._get_epsilon(self.epoch)
             self._train_epoch(epsilon)
 
-            dis_loss, acc, _ = eval_metrics(
+            dis_loss, acc, gen_loss = eval_metrics(
                 self.cbm, self.datahandler.classification["valid"], self.device
             )
-            self.valid_perf = {"dis_loss": dis_loss, "acc": acc}
+            alpha = self.train_cfg.alpha
+            mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
+            self.valid_perf = {
+                "dis_loss": dis_loss, "gen_loss": gen_loss,
+                "mixed_loss": mixed_loss, "acc": acc,
+            }
 
             if rob_freq and (self.epoch % rob_freq == 0):
                 rob = eval_rob(
@@ -232,10 +241,12 @@ class AdversarialTrainer:
 
             if on_epoch_end is not None:
                 metrics = {
-                    "dis_loss/train": self._train_loss,
-                    "epsilon/train":  epsilon,
-                    "dis_loss/valid": dis_loss,
-                    "acc/valid":      acc,
+                    "dis_loss/train":   self._train_loss,
+                    "epsilon/train":    epsilon,
+                    "dis_loss/valid":   dis_loss,
+                    "gen_loss/valid":   gen_loss,
+                    "mixed_loss/valid": mixed_loss,
+                    "acc/valid":        acc,
                 }
                 if "rob" in self.valid_perf:
                     metrics["rob/valid"] = self.valid_perf["rob"]
