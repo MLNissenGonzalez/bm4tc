@@ -6,7 +6,15 @@ from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
-from src.utils.train import OptimizerConfig, eval_metrics, eval_rob, optimizer
+from src.utils.train import (
+    OptimizerConfig,
+    NormControlConfig,
+    NormRegularizer,
+    eval_metrics,
+    eval_rob,
+    optimizer,
+    resolve_log_target,
+)
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
@@ -27,6 +35,11 @@ class AdversarialConfig:
     curriculum: bool = False
     curriculum_start: float = 0.0
     curriculum_end_epoch: Optional[int] = None
+    # Norm control is opt-in for AT (defaults off): hard_every=0 + soft_strength=0
+    # is a complete no-op, preserving the small-lr / normalized-start regime.
+    norm_control: NormControlConfig = field(
+        default_factory=lambda: NormControlConfig(hard_every=0)
+    )
     save: bool = False
 
 import logging
@@ -59,6 +72,10 @@ class AdversarialTrainer:
         self.cbm = cbm
         self.best_tensors = [t.cpu().clone().detach() for t in self.cbm.tensors]
         self._init_attack()
+
+        self._nc = train_cfg.norm_control
+        self.norm_regularizer: NormRegularizer | None = None
+        self._nc_log_target: float | None = None
 
     def _init_attack(self):
         evasion = self.train_cfg.evasion
@@ -115,7 +132,7 @@ class AdversarialTrainer:
         )
 
     def _train_epoch(self, epsilon: float):
-        losses = []
+        losses, nll_losses, reg_losses = [], [], []
         self.cbm.train()
 
         for data, labels in self.datahandler.classification["train"]:
@@ -130,17 +147,39 @@ class AdversarialTrainer:
 
             if self.train_cfg.clean_weight > 0:
                 clean_loss = self.cbm.mixed_nll(data, labels, alpha=self.train_cfg.alpha)
-                loss = (1 - self.train_cfg.clean_weight) * adv_loss + \
-                       self.train_cfg.clean_weight * clean_loss
+                nll = (1 - self.train_cfg.clean_weight) * adv_loss + \
+                      self.train_cfg.clean_weight * clean_loss
             else:
-                loss = adv_loss
+                nll = adv_loss
+
+            if self.norm_regularizer is not None:
+                reg = self.norm_regularizer(self.cbm)
+                loss = nll + reg
+            else:
+                reg = None
+                loss = nll
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            # The soft penalty reads the with-grad log_Z via recompute=False; the
+            # in-place optimizer step left that cache pointing at a freed graph, so
+            # drop it before the next step (mirrors NLLTrainer). Only needed when a
+            # regularizer is active — renormalize_() invalidates the cache itself.
+            if self.norm_regularizer is not None:
+                self.cbm._invalidate_log_Z_cache()
+
+            if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
+                self.cbm.renormalize_(log_target=self._nc_log_target)
+
+            nll_losses.append(nll.detach().cpu().item())
+            reg_losses.append(reg.detach().cpu().item() if reg is not None else 0.0)
             losses.append(loss.detach().cpu().item())
 
-        self._train_loss = sum(losses) / len(losses) if losses else float("nan")
+        n = len(losses)
+        self._train_loss = sum(losses)     / n if losses else float("nan")
+        self._train_nll  = sum(nll_losses) / n if nll_losses else float("nan")
+        self._train_reg  = sum(reg_losses) / n if reg_losses else float("nan")
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
@@ -203,6 +242,11 @@ class AdversarialTrainer:
         self.epoch_times = []
 
         self.cbm.prepare(device=self.device)
+        self._nc_log_target = resolve_log_target(self.cbm, self.datahandler, self._nc)
+        if self._nc.soft_strength > 0.0:
+            self.norm_regularizer = NormRegularizer(
+                strength=self._nc.soft_strength, log_target=self._nc_log_target
+            )
         self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         rob_freq = self.train_cfg.eval_rob_freq
@@ -241,7 +285,8 @@ class AdversarialTrainer:
 
             if on_epoch_end is not None:
                 metrics = {
-                    "dis_loss/train":   self._train_loss,
+                    "dis_loss/train":   self._train_nll,
+                    "reg/train":        self._train_reg,
                     "epsilon/train":    epsilon,
                     "dis_loss/valid":   dis_loss,
                     "gen_loss/valid":   gen_loss,

@@ -32,6 +32,12 @@ curriculum: false
 curriculum_start: 0.0
 curriculum_end_epoch: null
 
+norm_control:
+  log_target: 0.0
+  hard_every: 0
+  soft_strength: 0.0
+  debug: false
+
 save: false
 auto_stack: true
 auto_unbind: false
