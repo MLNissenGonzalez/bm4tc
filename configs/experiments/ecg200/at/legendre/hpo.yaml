@@ -1,6 +1,6 @@
 # @package _global_
 # ---------------------------------------------------------------------------
-# General adversarial-training (AT) HPO for cricketx, with alpha>=0 support.
+# General adversarial-training (AT) HPO for ecg200, with alpha>=0 support.
 #
 # One config covers every bond dimension AND every alpha. Like hpo_pretrained,
 # AT fine-tunes from the best clean (alpha=0) checkpoint supplied via
@@ -17,22 +17,22 @@
 #
 # Usage (alpha and matching model_path required):
 #   python -m experiments.train --multirun \
-#       +experiments=cricketx/at/legendre/hpo \
+#       +experiments=ecg200/at/legendre/hpo \
 #       born=legendre/d3r60c64 \
 #       trainer.adversarial.alpha=0.5 \
-#       model_path=outputs/cricketx/nat/legendre/d3r60c64/hpo_a0_{DDMM}/0/models/model
+#       model_path=outputs/ecg200/nat/legendre/d3r60c64/hpo_a0_{DDMM}/0/models/model
 #
 #   # large r: add a smaller batch size
 #   ... born=legendre/d3r100c64 trainer.adversarial.batch_size=64 ...
 #
-# Output:  outputs/cricketx/at/legendre/d3r{R}c64/hpo_a{X}_{DDMM}/{job}/
+# Output:  outputs/ecg200/at/legendre/d3r{R}c64/hpo_a{X}_{DDMM}/{job}/
 # ---------------------------------------------------------------------------
 experiment: "hpo_${alpha_suffix:}"
 descriptor: at_pretrained
 
 defaults:
   - override /born: legendre/d3r60c64
-  - override /dataset: ucr_ts/cricketx
+  - override /dataset: ucr_ts/ecg200
   - override /trainer/nll: null
   - override /trainer/adversarial: pgd_at
   - override /tracking: online

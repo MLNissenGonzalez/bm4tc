@@ -1,0 +1,58 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Per-arch, per-alpha AT seed sweep for chlorineconcentration at legendre/d3r20c64, alpha=0.2.
+#
+# Seeds 1-5 of adversarial training, fine-tuned from the best clean (alpha=0)
+# checkpoint for this bond dim (model_path, supplied on launch). Hyperparameters
+# (lr, clean_weight, soft_strength) are left open as `???  # FILL FROM HPO` and
+# populated from the matching chlorineconcentration/at/legendre/hpo.yaml HPO run via
+# tools/fill_hpo.py (HPO launched with born=legendre/d3r20c64 alpha=0.2).
+#
+# Usage (after filling HPs; model_path on the CLI):
+#   python -m experiments.train --multirun \
+#       +experiments=chlorineconcentration/at/legendre/d3r20c64/seed_sweep_a02 \
+#       model_path=outputs/chlorineconcentration/nat/legendre/d3r20c64/hpo_a0_{DDMM}/0/models/model
+#
+# Output:  outputs/chlorineconcentration/at/legendre/d3r20c64/seed_sweep_a02_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+experiment: "seed_sweep_${alpha_suffix:}"
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: ucr_ts/chlorineconcentration
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Required on the CLI: best clean (alpha=0) checkpoint for this bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+
+trainer:
+  adversarial:
+    alpha: 0.2
+    max_epoch: 800
+    batch_size: 100
+    patience: 200
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: ???  # FILL FROM HPO
+      log_target: null
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???  # FILL FROM HPO
+        weight_decay: 0.0
+    clean_weight: ???  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
