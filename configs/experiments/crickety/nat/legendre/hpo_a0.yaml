@@ -1,0 +1,68 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# General alpha=0 (discriminative) HPO for crickety.
+#
+# One config covers every bond dimension. Only `born` (and, for large r, the
+# batch size) is overridden on the CLI; the output/analysis folder tracks the
+# arch automatically via born.init_kwargs.{in_dim,bond_dim} + dtype_suffix.
+#
+# Bond-dim set (all d=3, complex64): r in {10, 20, 40, 60, 100}.
+# Sweeps both learning rate and norm-control soft_strength.
+#
+# Usage:
+#   # default arch (d3r60c64)
+#   python -m experiments.train --multirun \
+#       +experiments=crickety/nat/legendre/hpo_a0
+#
+#   # other bond dim (+ smaller batch for large r to fit GPU memory)
+#   python -m experiments.train --multirun \
+#       +experiments=crickety/nat/legendre/hpo_a0 \
+#       born=legendre/d3r100c64 trainer.nll.batch_size=64
+#
+# Output:  outputs/crickety/nat/legendre/d3r{R}c64/hpo_a0_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+experiment: hpo_a0
+descriptor: nll
+
+defaults:
+  - override /born: legendre/d3r60c64
+  - override /dataset: ucr_ts/crickety
+  - override /trainer/adversarial: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 0.0
+    max_epoch: 800
+    batch_size: 100
+    patience: 300
+    stop_crit: "acc"
+    save: false
+    norm_control:
+      hard_every: 0
+      soft_strength: 1.0
+      log_target: "n_features * log(in_dim) / 2"
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    study_name: "${experiment}_${dataset.name}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 6
+    direction: minimize
+    n_trials: 16
+    n_jobs: 1
+    params:
+      trainer.nll.optimizer.kwargs.lr: tag(log, interval(1e-6, 5e-3))
+      trainer.nll.norm_control.soft_strength: tag(log, interval(1e-6, 1e2))

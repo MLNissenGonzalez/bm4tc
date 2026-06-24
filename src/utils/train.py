@@ -3,7 +3,7 @@ import logging
 import random
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 import numpy as np
 import torch
@@ -128,6 +128,14 @@ class TrainResult:
     best_metrics: dict
 
 
+@dataclass
+class NormControlConfig:
+    log_target: Optional[Union[float, str]] = 0.0
+    hard_every: int = 1
+    soft_strength: float = 0.0
+    debug: bool = False
+
+
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
@@ -154,6 +162,67 @@ class NormRegularizer(nn.Module):
         # back to a fresh contraction if nothing is cached (e.g. alpha=0).
         log_Z: torch.Tensor = cbm.log_Z(recompute=False)
         return self.strength * (log_Z - self.log_target) ** 2
+
+
+def resolve_log_target(cbm, datahandler, nc: NormControlConfig) -> float:
+    """Resolve ``NormControlConfig.log_target`` to a finite float.
+
+    - ``None`` → the pretrained model's current ``log Z`` (a no-op target that
+      pins the norm wherever the (already normalized) start model sits).
+    - ``str``  → a Python expression in terms of ``n_features``, ``data_dim``,
+      ``in_dim``, ``out_dim``, ``bond_dim`` and ``sqrt``/``log``/``exp``.
+    - ``float`` → used directly.
+
+    Shared by NLLTrainer and AdversarialTrainer.
+    """
+    raw = nc.log_target
+
+    if raw is None:
+        with torch.no_grad():
+            log_Z0 = cbm.log_partition_function()
+        log_target = log_Z0.item()
+        logger.info(f"NormControl: log_target (pretrained) = {log_target:.6g}")
+        return log_target
+
+    if isinstance(raw, str):
+        n_features = cbm.n_features
+        data_dim = datahandler.data_dim
+        in_dim = cbm.in_dim
+        out_dim = cbm.out_dim
+        bond_dim = cbm.bond_dim
+        _ns = {
+            "__builtins__": {},
+            "n_features": n_features,
+            "data_dim": data_dim,
+            "in_dim": in_dim,
+            "out_dim": out_dim,
+            "bond_dim": bond_dim,
+            "sqrt": math.sqrt,
+            "log": math.log,
+            "exp": math.exp,
+        }
+        try:
+            result = eval(raw, _ns)  # noqa: S307
+        except Exception as exc:
+            raise ValueError(
+                f"NormControl: could not evaluate log_target expression "
+                f"{raw!r} (n_features={n_features}, data_dim={data_dim}, "
+                f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}): {exc}"
+            ) from exc
+        log_target = float(result)
+        if not math.isfinite(log_target):
+            raise ValueError(
+                f"NormControl: log_target expression {raw!r} evaluated to "
+                f"{log_target}, but log_target must be finite."
+            )
+        logger.info(
+            f"NormControl: log_target (expression {raw!r}) = {log_target:.6g} "
+            f"[n_features={n_features}, data_dim={data_dim}, "
+            f"in_dim={in_dim}, out_dim={out_dim}, bond_dim={bond_dim}]"
+        )
+        return log_target
+
+    return float(raw)
 
 
 def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, float, float]:
