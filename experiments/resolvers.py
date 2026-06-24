@@ -29,6 +29,18 @@ def _outputs_root() -> str:
     return f"{root}/outputs" if root else "outputs"
 
 
+def _alpha_suffix(*, _root_) -> str:
+    """Kind-suffix token encoding the NLL alpha (e.g. 0.0->a0, 0.5->a05, 1.0->a1).
+
+    Matches the manual naming convention (a0, a001, a01, a02, a05, a1) so that
+    pretrained HPO sweeps over a CLI-supplied ``trainer.nll.alpha`` land in
+    distinct ``{experiment}`` output folders (and analysis mirrors) per alpha.
+    """
+    alpha = OmegaConf.select(_root_, "trainer.nll.alpha")
+    digits = str(float(alpha)).replace(".", "").rstrip("0")
+    return "a" + (digits if digits else "0")
+
+
 def _stage_path(*, _root_) -> str:
     """Path segment for the experiment stage (hpo/ | seed_sweep/).
 
@@ -54,6 +66,8 @@ def register_resolvers():
         OmegaConf.register_new_resolver("dtype_suffix", _dtype_suffix, use_cache=False)
     if not OmegaConf.has_resolver("stage_path"):
         OmegaConf.register_new_resolver("stage_path", _stage_path, use_cache=False)
+    if not OmegaConf.has_resolver("alpha_suffix"):
+        OmegaConf.register_new_resolver("alpha_suffix", _alpha_suffix, use_cache=False)
     if not OmegaConf.has_resolver("geom_lr"):
         OmegaConf.register_new_resolver(
             "geom_lr",
