@@ -22,13 +22,13 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: ???   # FILL FROM HPO (hpo/a0)
+      soft_strength: 0.00037268   # FILL FROM HPO (hpo/a0)
       log_target: "n_features * log(in_dim) / 2"
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???            # FILL FROM HPO (hpo/a0)
+        lr: 0.00012253            # FILL FROM HPO (hpo/a0)
         weight_decay: 0.0
 
 hydra:
