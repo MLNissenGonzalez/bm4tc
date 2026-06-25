@@ -225,6 +225,90 @@ def resolve_log_target(cbm, datahandler, nc: NormControlConfig) -> float:
     return float(raw)
 
 
+class NormTracker:
+    """Accumulate per-step training-side norm (log Z) and mean-amplitude
+    (log|ψ|²) statistics over one epoch, then emit one ``norm/*`` metric dict.
+
+    Reads the caches ``mixed_nll`` (``_amp_diag_cache``, always) and the forward
+    / ``NormRegularizer`` (``_log_Z_cache``, when ``alpha>0`` or
+    ``soft_strength>0``) already populate, so it adds no contraction in the
+    common cases. Call :meth:`record_amp` / :meth:`record_logZ` per step *before*
+    ``optimizer.step()`` invalidates the caches, then :meth:`finalize` once.
+
+    Running max/min are kept alongside the mean so an intra-epoch explosion (a
+    spike) survives aggregation instead of being smeared by the mean. ``log Z``
+    is taken only from finite cache values; if it is never cached during the
+    epoch (``alpha=0`` with no soft norm control), :meth:`finalize` falls back to
+    a single post-epoch ``log_partition_function()`` snapshot.
+    """
+
+    def __init__(self):
+        self._logZ_sum, self._logZ_n = 0.0, 0
+        self._logZ_max, self._logZ_min = -math.inf, math.inf
+        self._amp_sum, self._amp_n = 0.0, 0
+        self._amp_max, self._amp_min = -math.inf, math.inf
+
+    def record_amp(self, cbm) -> None:
+        """Fold in this step's log|ψ|² batch stats (cached by ``mixed_nll``)."""
+        d = getattr(cbm, "_amp_diag_cache", None)
+        if not d:
+            return
+        mean = d.get("log_amp_sq_mean", float("nan"))
+        if math.isfinite(mean):
+            self._amp_sum += mean
+            self._amp_n += 1
+        mx = d.get("log_amp_sq_max", float("nan"))
+        if math.isfinite(mx):
+            self._amp_max = max(self._amp_max, mx)
+        mn = d.get("log_amp_sq_min", float("nan"))
+        if math.isfinite(mn):
+            self._amp_min = min(self._amp_min, mn)
+
+    def record_logZ(self, cbm) -> None:
+        """Fold in this step's log Z if it is cached and finite."""
+        cached = getattr(cbm, "_log_Z_cache", None)
+        if cached is None:
+            return
+        v = cached.detach().item()
+        if math.isfinite(v):
+            self._logZ_sum += v
+            self._logZ_n += 1
+            self._logZ_max = max(self._logZ_max, v)
+            self._logZ_min = min(self._logZ_min, v)
+
+    def finalize(self, cbm) -> Dict[str, float]:
+        if self._logZ_n == 0:
+            # alpha=0 without soft norm control never forms log Z during the
+            # step; take one post-epoch snapshot so norm/log_Z is still reported.
+            with torch.no_grad():
+                try:
+                    v = cbm.log_partition_function().item()
+                except Exception:
+                    v = float("nan")
+            if math.isfinite(v):
+                self._logZ_sum, self._logZ_n = v, 1
+                self._logZ_max = self._logZ_min = v
+
+        out: Dict[str, float] = {}
+        if self._logZ_n:
+            out["norm/log_Z_mean"] = self._logZ_sum / self._logZ_n
+            out["norm/log_Z_max"] = self._logZ_max
+            out["norm/log_Z_min"] = self._logZ_min
+            # Amplitudes overflow once ‖ψ‖ = exp(log_Z/2) crosses the dtype max,
+            # i.e. log_Z > 2·log(finfo.max) (≈177.45 for float32/complex64).
+            ceiling = 2.0 * math.log(torch.finfo(cbm.dtype).max)
+            out["norm/log_Z_headroom"] = ceiling - self._logZ_max
+        # Emit each amp stat on its own guard: a step can contribute a finite
+        # max/min even if its mean was non-finite (and vice versa).
+        if self._amp_n:
+            out["norm/log_amp_sq_mean"] = self._amp_sum / self._amp_n
+        if math.isfinite(self._amp_max):
+            out["norm/log_amp_sq_max"] = self._amp_max
+        if math.isfinite(self._amp_min):
+            out["norm/log_amp_sq_min"] = self._amp_min
+        return out
+
+
 def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, float, float]:
     """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss).
 

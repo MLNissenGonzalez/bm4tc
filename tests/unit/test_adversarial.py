@@ -5,6 +5,7 @@ tests don't construct a DataHandler or PGD attack — they target the selection 
 (`acc_floor` gating, patience accounting, best-tensor bookkeeping) directly.
 """
 
+import math
 import torch
 from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
@@ -250,3 +251,22 @@ def test_soft_norm_control_multistep_backward():
     assert t.step >= 2
     assert t._train_reg > 0.0
     assert cbm._log_Z_cache is None  # invalidated after the final step
+
+
+def test_norm_stats_populated_after_epoch():
+    """norm/* training stats are tracked every epoch by default (no debug flag)."""
+    cbm = _tiny_cbm()
+    cbm.prepare(device=torch.device("cpu"))
+    dh = _FakeDataHandler()
+    cfg = AdversarialConfig(
+        norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),  # off
+    )
+    t = _bare_epoch_trainer(cbm, dh, cfg)
+
+    t._train_epoch(epsilon=0.1)
+
+    # alpha=0 / no soft → log_Z via the end-of-epoch snapshot; amp from the adv forward.
+    for key in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_amp_sq_mean"):
+        assert key in t._norm_stats, f"missing {key}"
+    assert math.isfinite(t._norm_stats["norm/log_Z_mean"])
+    assert math.isfinite(t._norm_stats["norm/log_amp_sq_mean"])
