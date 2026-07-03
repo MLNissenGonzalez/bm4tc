@@ -420,3 +420,159 @@ def test_mixed_nll_term1_gradient_at_small_amplitude():
     assert len(grads) > 0, "no gradients computed"
     assert all(g.isfinite().all() for g in grads), "gradients contain non-finite values"
     assert any(g.abs().max() > 0 for g in grads), "all gradients are zero (clamp floor too high)"
+
+
+# ── Norm-accumulating (overflow-safe) contraction ────────────────────────────
+# amplitudes_accumulate / log_amp_sq contract while keeping the running node O(1)
+# and accumulate the extracted norm in log space, so log|ψ|² is recoverable
+# without ever materializing an overflowing amplitude. Verified against the
+# default (non-accumulating) amplitudes() path.
+
+def _acc_cbm(dtype="float32", data_dim=3, num_classes=2, bond_dim=3,
+             std=0.3, out_position=None):
+    cfg = CBMConfig(
+        embedding="fourier",
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype,
+                                  std=std, out_position=out_position),
+    )
+    return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_log_amp_sq_matches_amplitudes(dtype):
+    """log_amp_sq(x) reproduces 2·log|amplitudes(x)| where the latter doesn't
+    overflow (real + complex)."""
+    torch.manual_seed(0)
+    cbm = _acc_cbm(dtype=dtype)
+    x = torch.rand(5, 3) * 1.6 - 0.8
+    ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
+    got = cbm.log_amp_sq(x)
+    assert got.shape == ref.shape == (5, cbm.out_dim)
+    assert torch.allclose(got, ref, atol=1e-4)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_amplitude_reconstruction(dtype):
+    """psi_renorm · exp(log_norm) reconstructs the true amplitude magnitude."""
+    torch.manual_seed(1)
+    cbm = _acc_cbm(dtype=dtype)
+    x = torch.rand(4, 3) * 1.6 - 0.8
+    psi, log_norm = cbm.amplitudes_accumulate(x)
+    assert psi.shape == log_norm.shape == (4, cbm.out_dim)
+    assert not torch.is_complex(log_norm)
+    assert torch.allclose(psi.abs(), torch.ones_like(psi.abs()), atol=1e-5)  # unit-modulus
+    recon = psi.abs() * torch.exp(log_norm)
+    assert torch.allclose(recon, cbm.amplitudes(x).abs(), atol=1e-5)
+
+
+def test_class_probabilities_from_log_amp_sq():
+    """class_probabilities rebuilt from log_amp_sq matches the native method —
+    guards the per-(batch, class) accumulation (a per-batch collapse fails here)."""
+    torch.manual_seed(2)
+    cbm = _acc_cbm(num_classes=3)
+    x = torch.rand(6, 3) * 1.6 - 0.8
+    las = cbm.log_amp_sq(x)
+    log_probs = las - torch.logsumexp(las, dim=-1, keepdim=True)
+    assert torch.allclose(log_probs.exp(), cbm.class_probabilities(x), atol=1e-5)
+
+
+def test_mixed_nll_alpha0_from_log_amp_sq():
+    """mixed_nll(alpha=0) = mean[-las[c] + logsumexp(las)] reconstructed from
+    log_amp_sq (term1 + term2)."""
+    torch.manual_seed(3)
+    cbm = _acc_cbm()
+    x = torch.rand(5, 3) * 1.6 - 0.8
+    y = torch.randint(0, cbm.out_dim, (5,))
+    las = cbm.log_amp_sq(x)
+    term1 = -las[torch.arange(5), y]
+    term2 = torch.logsumexp(las, dim=-1)
+    recon = (term1 + term2).mean()
+    assert torch.allclose(recon, cbm.mixed_nll(x, y, alpha=0.0), atol=1e-4)
+
+
+def test_log_amp_sq_overflow_safe():
+    """When the raw amplitude overflows to inf, log_amp_sq stays finite and
+    equals the pre-scale value plus the analytic shift 2·n_sites·log(scale)."""
+    torch.manual_seed(4)
+    cbm = _acc_cbm(data_dim=4)
+    x = torch.rand(3, 4) * 1.6 - 0.8
+    las_base = cbm.log_amp_sq(x).detach().clone()
+    # Per-site scale whose product over the chain overflows the amplitude, while
+    # no single contraction step does (that would overflow the norm itself).
+    scale = 1e10
+    with torch.no_grad():
+        for node in cbm._mats_env:
+            node.tensor.data.mul_(scale)
+    amp = cbm.amplitudes(x)
+    las = cbm.log_amp_sq(x)
+    assert (~torch.isfinite(amp)).any(), "test scale did not overflow the amplitude"
+    assert torch.isfinite(las).all()
+    shift = 2.0 * cbm.n_features * math.log(scale)
+    assert torch.allclose(las, las_base + shift, atol=1e-3, rtol=1e-4)
+
+
+@pytest.mark.parametrize("out_position", [0, 2, 4])
+def test_log_amp_sq_out_position(out_position):
+    """Correct across class site at first / middle / last position (obc
+    boundaries + accumulator alignment across regions)."""
+    torch.manual_seed(5)
+    cbm = _acc_cbm(data_dim=4, num_classes=3, out_position=out_position)
+    x = torch.rand(4, 4) * 1.6 - 0.8
+    ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
+    assert torch.allclose(cbm.log_amp_sq(x), ref, atol=1e-4)
+
+
+def test_accumulate_gradients_match():
+    """Gradients of log_amp_sq match the direct 2·log|amplitudes| path on the
+    parameters that participate in the amplitude forward."""
+    torch.manual_seed(6)
+    cbm = _acc_cbm()
+    x = torch.rand(4, 3) * 1.6 - 0.8
+
+    cbm.zero_grad()
+    cbm.log_amp_sq(x).sum().backward()
+    g_acc = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
+
+    cbm.zero_grad()
+    amp = cbm.amplitudes(x)
+    (2.0 * torch.log(amp.abs().clamp(min=1e-30))).sum().backward()
+    g_ref = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
+
+    assert [a is None for a in g_acc] == [b is None for b in g_ref]
+    for a, b in zip(g_acc, g_ref):
+        if a is not None:
+            assert torch.allclose(a, b, atol=1e-4)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_amplitudes_accumulate_forward_backward(dtype):
+    """The accumulate path is differentiable end-to-end: forward returns
+    grad-tracking outputs and backward through *both* psi_renorm and log_norm
+    reaches the parameters with finite, non-zero gradients (the reset() around
+    the eager contraction must not sever the autograd graph)."""
+    torch.manual_seed(8)
+    cbm = _acc_cbm(dtype=dtype)
+    x = torch.rand(4, 3) * 1.6 - 0.8
+
+    psi, log_norm = cbm.amplitudes_accumulate(x)          # forward
+    assert psi.requires_grad and log_norm.requires_grad
+    assert psi.grad_fn is not None and log_norm.grad_fn is not None
+
+    cbm.zero_grad()
+    (psi.abs().sum() + log_norm.sum()).backward()          # backward through both
+    grads = [p.grad for p in cbm.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert any(g.abs().max() > 0 for g in grads)
+
+
+def test_accumulate_mode_isolation():
+    """A renormalize=True call resets around itself, leaving the default traced
+    amplitudes() path bit-identical before and after."""
+    torch.manual_seed(7)
+    cbm = _acc_cbm()
+    x = torch.rand(4, 3) * 1.6 - 0.8
+    before = cbm.amplitudes(x)
+    _ = cbm.amplitudes_accumulate(x)
+    after = cbm.amplitudes(x)
+    assert torch.equal(before, after)
