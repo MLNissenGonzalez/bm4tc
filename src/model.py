@@ -225,6 +225,10 @@ class ConditionalBornMachine(tk.models.MPS):
         # DISTINCT from _log_Z above (that one is detached/param-constant).
         self._log_Z_cache: torch.Tensor | None = None
         self._amp_diag_cache: dict | None = None
+        # Per-forward accumulator for the norm-accumulating (overflow-safe)
+        # contraction; reset/read inside forward(renormalize=True). None between
+        # accumulate forwards. See _inline_contraction / amplitudes_accumulate.
+        self._log_norm_acc: torch.Tensor | None = None
 
     # ======================================================================
     # Auxiliary network sync
@@ -258,6 +262,126 @@ class ConditionalBornMachine(tk.models.MPS):
     def amplitudes(self, data: torch.Tensor) -> torch.Tensor:
         """Single parallel forward pass → (B, num_classes) amplitudes ψ."""
         return super().forward(data=self.embed(data))
+
+    # ── Norm-accumulating (overflow-safe) contraction ─────────────────────
+    # Contract the amplitude while renormalizing each step to keep the running
+    # node O(1), but *keep* the extracted norm in log space (unlike tk's
+    # renormalize op, which discards it). ψ(x,c) = psi_renorm(x,c)·exp(log_norm),
+    # so log|ψ|² = 2·log|psi_renorm| + 2·log_norm never materializes an
+    # overflowing amplitude. Eager / untraced, opt-in via renormalize=True.
+
+    def _inline_contraction(self, mats_env, renormalize=False, from_left=True):
+        """Inline MPS contraction (overrides tk's static helper).
+
+        Byte-equivalent to ``tk.models.MPS._inline_contraction`` when
+        ``renormalize=False`` (the default traced path is unaffected). When
+        ``renormalize=True`` each step's bond-axis norm is computed *once*,
+        folded into ``self._log_norm_acc`` at (batch, class) granularity, and
+        used to divide the running node via the ``div`` op — no second norm, no
+        tk ``renormalize``.
+        """
+        if from_left:
+            result_node = mats_env[0]
+            for node in mats_env[1:]:
+                result_node @= node
+                if renormalize:
+                    axes = [ax for ax in result_node.axes_names if 'right' in ax]
+                    if axes:
+                        n = result_node.norm(axis=axes, keepdim=True)
+                        self._accumulate_log_norm(n, result_node)
+                        result_node = result_node / n
+            return result_node
+        else:
+            result_node = mats_env[-1]
+            for node in mats_env[-2::-1]:
+                result_node = node @ result_node
+                if renormalize:
+                    axes = [ax for ax in result_node.axes_names if 'left' in ax]
+                    if axes:
+                        n = result_node.norm(axis=axes, keepdim=True)
+                        self._accumulate_log_norm(n, result_node)
+                        result_node = result_node / n
+            return result_node
+
+    def _accumulate_log_norm(self, n: torch.Tensor, node) -> None:
+        """Fold a keepdim bond-norm tensor into ``self._log_norm_acc`` at
+        (batch, class) granularity.
+
+        The batch axis is found via ``Axis.is_batch()`` and the open class axis
+        via the physical edge name ``'input'``; the reduced bond axes (size 1,
+        keepdim) are summed away. Pre-class steps contribute (B, 1) and broadcast
+        over the class axis once the output site opens it.
+        """
+        log_n = n.log()
+        b_idx, c_idx = None, None
+        for i, ax in enumerate(node.axes):
+            if ax.is_batch():
+                b_idx = i
+            elif 'input' in ax.name:
+                c_idx = i
+        order = [b_idx] + ([c_idx] if c_idx is not None else [])
+        rest = [i for i in range(log_n.ndim) if i not in order]
+        log_n = log_n.permute(*order, *rest)
+        if c_idx is None:
+            contrib = log_n.reshape(log_n.shape[0], -1).sum(dim=1, keepdim=True)   # (B, 1)
+        else:
+            contrib = log_n.reshape(log_n.shape[0], log_n.shape[1], -1).sum(dim=2)  # (B, C)
+        self._log_norm_acc = (
+            contrib if self._log_norm_acc is None else self._log_norm_acc + contrib
+        )
+
+    def forward(self, data=None, *args, renormalize: bool = False, **kwargs):
+        """Dispatch between the default traced contraction and the eager
+        norm-accumulating one.
+
+        ``renormalize=False`` (default) → tk's traced ``MPS.forward`` unchanged
+        (``data`` already embedded, matching ``amplitudes``/``trace``).
+        ``renormalize=True`` → eager contraction returning
+        ``(psi_renorm (B, C), log_norm (B, C))``. Runs ``contract`` directly with
+        ``inline_mats=True`` so the sole renorm site is the overridden
+        ``_inline_contraction``; ``reset()`` around it so this untraced path
+        never pollutes (or is polluted by) the default traced ``_seq_ops``. This
+        makes it eager (no trace reuse) — the accepted cost.
+        """
+        if not renormalize:
+            return super().forward(data, *args, **kwargs)
+        self.reset()
+        if not self._data_nodes:
+            self.set_data_nodes()
+        self._log_norm_acc = None
+        self.add_data(data)
+        result = self.contract(renormalize=True, inline_mats=True)
+        out = result.tensor                                    # (B, C), finite (running node kept O(1))
+        acc = self._log_norm_acc                               # (B, 1) class-independent step factors, or None
+        self.reset()
+        # Final split: the class site is contracted as a single output node, so
+        # the per-step renorm never factors its (class-dependent) magnitude — it
+        # sits in `out` (still O(1), finite). Fold |out| into log space so
+        # psi_renorm is unit-modulus (pure phase/sign) and log_norm is full (B,C).
+        mag = out.abs().clamp(min=_LOG_PROB_EPS)               # (B, C)
+        log_norm = mag.log() if acc is None else acc + mag.log()
+        psi_renorm = out / mag
+        return psi_renorm, log_norm
+
+    def amplitudes_accumulate(self, data: torch.Tensor):
+        """Overflow-safe amplitudes → ``(psi_renorm (B, C), log_norm (B, C))``.
+
+        ψ(x,c) = psi_renorm(x,c)·exp(log_norm(x,c)); ``psi_renorm`` is
+        unit-modulus (pure phase/sign), ``log_norm`` is the real log-magnitude —
+        the norm/phase split. Eager / untraced (see :meth:`forward`). Use
+        :meth:`log_amp_sq` for |ψ|². Opt-in; not yet wired into training/eval.
+        """
+        return self(self.embed(data), renormalize=True)
+
+    def log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
+        """Overflow-safe ``log|ψ(x,c)|²`` (B, C) = 2·log|psi_renorm| + 2·log_norm.
+
+        Drop-in replacement for ``2·log|amplitudes(data)|`` that never
+        materializes an overflowing amplitude.
+        """
+        psi, log_norm = self.amplitudes_accumulate(data)
+        log_abs = torch.log(psi.abs().clamp(min=_LOG_PROB_EPS))
+        return 2.0 * log_abs + 2.0 * log_norm
 
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """Born-rule normalized class probabilities → (B, num_classes)."""
@@ -765,6 +889,15 @@ if __name__ == "__main__":
     log_px = cbm.marginal_log_probability(x)
     assert log_px.shape == (8,) and log_px.isfinite().all()
     print(f"  marginal_log_prob shape={tuple(log_px.shape)} finite=True OK")
+
+    # norm-accumulating (overflow-safe) contraction
+    psi_r, log_norm = cbm.amplitudes_accumulate(x)
+    las = cbm.log_amp_sq(x)
+    ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
+    assert psi_r.shape == log_norm.shape == (8, 2)
+    assert torch.allclose(las, ref, atol=1e-4), "log_amp_sq mismatch vs amplitudes()"
+    assert torch.allclose(psi_r.abs(), torch.ones_like(psi_r.abs()), atol=1e-5)
+    print(f"  amplitudes_accumulate |ψ|² err={ (las-ref).abs().max().item():.2e} OK")
 
     import tempfile, os
     with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as f:
