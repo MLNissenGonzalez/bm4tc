@@ -187,11 +187,11 @@ def _bare_epoch_trainer(cbm, dh, train_cfg, *, norm_regularizer=None, log_target
     return t
 
 
-def test_adversarial_config_norm_control_default_off():
-    """AT norm control is opt-in: the default config is a complete no-op."""
+def test_adversarial_config_norm_control_defaults():
+    """AT norm control default: hard renormalization off, soft log_Z penalty on."""
     nc = AdversarialConfig().norm_control
     assert nc.hard_every == 0
-    assert nc.soft_strength == 0.0
+    assert nc.soft_strength == 0.1
 
 
 def test_norm_control_off_skips_renormalize():

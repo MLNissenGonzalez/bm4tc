@@ -47,8 +47,8 @@ def test_nll_config_defaults():
 def test_norm_control_config_defaults():
     nc = NormControlConfig()
     assert nc.log_target == 0.0
-    assert nc.hard_every == 1
-    assert nc.soft_strength == 0.0
+    assert nc.hard_every == 0
+    assert nc.soft_strength == 0.1
 
 
 def test_nll_config_invalid_stop_crit():
