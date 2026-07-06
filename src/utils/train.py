@@ -131,8 +131,8 @@ class TrainResult:
 @dataclass
 class NormControlConfig:
     log_target: Optional[Union[float, str]] = 0.0
-    hard_every: int = 1
-    soft_strength: float = 0.0
+    hard_every: int = 0
+    soft_strength: float = 0.1
     debug: bool = False
 
 

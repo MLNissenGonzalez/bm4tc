@@ -33,13 +33,13 @@ curriculum: false
 curriculum_start: 0.0
 curriculum_end_epoch: null
 
-# Norm control is opt-in for AT (off here): hard_every=0 + soft_strength=0 is a
-# no-op. Enable (hard_every>0 and/or soft_strength>0) for alpha>0 runs where
-# log_Z must be pinned. log_target: 0.0 | null (pretrained log_Z) | expression str.
+# Norm control: hard renormalization off (hard_every=0), soft log_Z penalty on
+# (soft_strength=0.1 toward log_target). Set soft_strength=0 to disable, or
+# hard_every>0 to hard-pin. log_target: 0.0 | null (pretrained log_Z) | expression str.
 norm_control:
   log_target: 0.0
   hard_every: 0
-  soft_strength: 0.0
+  soft_strength: 0.1
   debug: false
 
 save: true

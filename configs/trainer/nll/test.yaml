@@ -10,7 +10,7 @@ patience: 50
 stop_crit: "dis_loss"
 norm_control:
   log_target: 0.0
-  hard_every: 1
-  soft_strength: 0.0
+  hard_every: 0
+  soft_strength: 0.1
   debug: false
 save: false
