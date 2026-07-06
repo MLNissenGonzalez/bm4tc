@@ -10,6 +10,7 @@ from src.utils.train import (
     OptimizerConfig,
     NormControlConfig,
     NormRegularizer,
+    NormTracker,
     eval_metrics,
     eval_rob,
     optimizer,
@@ -133,6 +134,7 @@ class AdversarialTrainer:
 
     def _train_epoch(self, epsilon: float):
         losses, nll_losses, reg_losses = [], [], []
+        tracker = NormTracker()
         self.cbm.train()
 
         for data, labels in self.datahandler.classification["train"]:
@@ -144,6 +146,9 @@ class AdversarialTrainer:
             self.cbm.train()
 
             adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=self.train_cfg.alpha)
+            # Track amplitude stats on the adversarial batch (where amplitudes
+            # explode), before the optional clean forward overwrites the cache.
+            tracker.record_amp(self.cbm)
 
             if self.train_cfg.clean_weight > 0:
                 clean_loss = self.cbm.mixed_nll(data, labels, alpha=self.train_cfg.alpha)
@@ -158,6 +163,10 @@ class AdversarialTrainer:
             else:
                 reg = None
                 loss = nll
+
+            # log_Z is cached by mixed_nll (alpha>0) or the regularizer (soft);
+            # read it before optimizer.step() invalidates the cache.
+            tracker.record_logZ(self.cbm)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -180,6 +189,7 @@ class AdversarialTrainer:
         self._train_loss = sum(losses)     / n if losses else float("nan")
         self._train_nll  = sum(nll_losses) / n if nll_losses else float("nan")
         self._train_reg  = sum(reg_losses) / n if reg_losses else float("nan")
+        self._norm_stats = tracker.finalize(self.cbm)
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
@@ -278,7 +288,8 @@ class AdversarialTrainer:
                 )
                 self.valid_perf["rob"] = rob
 
-            postfix = dict(loss=f"{self._train_loss:.4f}", acc=f"{acc:.4f}")
+            postfix = dict(loss=f"{self._train_loss:.4f}", acc=f"{acc:.4f}",
+                           logZ=f"{self._norm_stats.get('norm/log_Z_mean', float('nan')):.3g}")
             if "rob" in self.valid_perf:
                 postfix["rob"] = f"{self.valid_perf['rob']:.4f}"
             pbar.set_postfix(**postfix)
@@ -293,6 +304,7 @@ class AdversarialTrainer:
                     "mixed_loss/valid": mixed_loss,
                     "acc/valid":        acc,
                 }
+                metrics.update(self._norm_stats)
                 if "rob" in self.valid_perf:
                     metrics["rob/valid"] = self.valid_perf["rob"]
                 on_epoch_end(self.epoch, metrics)
