@@ -2,7 +2,7 @@
 experiment: seed_sweep_a0
 
 defaults:
-  - override /born: legendre/d3r10c64
+  - override /born: legendre/d3r20c64
   - override /dataset: ucr_ts/ecg200
   - override /trainer/adversarial: null
   - override /tracking: online

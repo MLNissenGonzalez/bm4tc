@@ -2,8 +2,8 @@
 experiment: seed_sweep_a0
 
 defaults:
-  - override /born: legendre/d3r10c64
-  - override /dataset: ucr_ts/ecg200
+  - override /born: legendre/d3r20c64
+  - override /dataset: ucr_ts/syntheticcontrol
   - override /trainer/adversarial: null
   - override /tracking: online
 
@@ -25,7 +25,6 @@ trainer:
     norm_control:
       soft_strength: 0.46193 # FILL FROM HPO
       hard_every: 0
-
 hydra:
   sweeper:
     params:
