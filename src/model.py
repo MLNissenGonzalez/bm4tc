@@ -58,6 +58,11 @@ class CBMConfig:
     init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
     embedding: str = "fourier"
     model_path: Optional[str] = None
+    # Opt-in overflow-safe amplitudes: route mixed_nll + class_probabilities
+    # through the norm-accumulating contraction (log_amp_sq) instead of the raw
+    # amplitudes() path. Off by default; enable per-run for overflow-prone
+    # configs (high bond dim, alpha=1). See _log_amp_sq.
+    overflow_safe_amplitudes: bool = False
 
 
 class ConditionalBornMachine(tk.models.MPS):
@@ -120,6 +125,12 @@ class ConditionalBornMachine(tk.models.MPS):
         self.embedding = embedding(self.embedding_name, _in_dim, dtype=_dtype)
         self.input_range = range_from_embedding(self.embedding_name)
         self.dtype = _dtype
+
+        # Opt-in overflow-safe amplitude path (getattr so checkpoints whose saved
+        # config predates the flag default to off). See _log_amp_sq.
+        self.overflow_safe_amplitudes = bool(
+            getattr(cfg, "overflow_safe_amplitudes", False)
+        )
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────
         _cls_pos = getattr(cfg.init_kwargs, "out_position", None)
@@ -383,10 +394,23 @@ class ConditionalBornMachine(tk.models.MPS):
         log_abs = torch.log(psi.abs().clamp(min=_LOG_PROB_EPS))
         return 2.0 * log_abs + 2.0 * log_norm
 
+    def _log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
+        """log|ψ(x,c)|² (B, C) — the shared entry point for the loss and eval.
+
+        Routes through the overflow-safe accumulate path (:meth:`log_amp_sq`)
+        when ``overflow_safe_amplitudes`` is set, else the direct traced path
+        ``2·log|amplitudes|``. The two are numerically equivalent where the raw
+        amplitude does not overflow (see ``test_log_amp_sq_matches_amplitudes``).
+        """
+        if self.overflow_safe_amplitudes:
+            return self.log_amp_sq(data)
+        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
+        return 2.0 * log_abs
+
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """Born-rule normalized class probabilities → (B, num_classes)."""
-        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
-        log_probs = 2.0 * log_abs - torch.logsumexp(2.0 * log_abs, dim=-1, keepdim=True)
+        las = self._log_amp_sq(data)
+        log_probs = las - torch.logsumexp(las, dim=-1, keepdim=True)
         return log_probs.exp()
 
     def log_partition_function(self) -> torch.Tensor:
@@ -580,24 +604,23 @@ class ConditionalBornMachine(tk.models.MPS):
             return f"mean={m:.4g} nonfinite={nf}"
 
         B = data.shape[0]
-        amp     = self.amplitudes(data)                                    # (B, C)
-        log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))           # (B, C)
-        self._cache_amp_diag(2.0 * log_abs)                               # detached, for diagnostics
+        las = self._log_amp_sq(data)                                      # (B, C) = log|ψ|²
+        self._cache_amp_diag(las)                                         # detached, for diagnostics
 
         if debug:
-            nf_amp = int((~torch.isfinite(amp)).sum().item())
+            nf_las = int((~torch.isfinite(las)).sum().item())
             logger.warning(
-                f"  [mixed_nll/grad] amp: abs_max={amp.abs().max().item():.4g} nonfinite={nf_amp}"
+                f"  [mixed_nll/grad] log|ψ|²: max={las.max().item():.4g} nonfinite={nf_las}"
             )
 
-        term1 = -2.0 * log_abs[torch.arange(B), labels]
+        term1 = -las[torch.arange(B), labels]
 
         if debug:
-            logger.warning(f"  [mixed_nll/grad] term1(-2·log|ψ(x,c)|): {_stats(term1)}")
+            logger.warning(f"  [mixed_nll/grad] term1(-log|ψ(x,c)|²): {_stats(term1)}")
 
         # Guard: skip when alpha=1 since it contributes nothing.
         if alpha < 1.0:
-            term2 = (1.0 - alpha) * torch.logsumexp(2.0 * log_abs, dim=-1)
+            term2 = (1.0 - alpha) * torch.logsumexp(las, dim=-1)
             if debug:
                 logger.warning(f"  [mixed_nll/grad] term2((1-α)·log Σ|ψ|²): {_stats(term2)}")
         else:

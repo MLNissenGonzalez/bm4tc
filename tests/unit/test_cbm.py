@@ -429,13 +429,22 @@ def test_mixed_nll_term1_gradient_at_small_amplitude():
 # default (non-accumulating) amplitudes() path.
 
 def _acc_cbm(dtype="float32", data_dim=3, num_classes=2, bond_dim=3,
-             std=0.3, out_position=None):
+             std=0.3, out_position=None, overflow_safe=False):
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype,
                                   std=std, out_position=out_position),
+        overflow_safe_amplitudes=overflow_safe,
     )
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
+
+
+def _overflow_scale_(cbm, scale=1e10):
+    """Blow up the amplitude past float32 (no single contraction step overflows,
+    so the accumulate/log_Z paths stay finite; the raw product does not)."""
+    with torch.no_grad():
+        for node in cbm._mats_env:
+            node.tensor.data.mul_(scale)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
@@ -576,3 +585,64 @@ def test_accumulate_mode_isolation():
     _ = cbm.amplitudes_accumulate(x)
     after = cbm.amplitudes(x)
     assert torch.equal(before, after)
+
+
+# ── overflow_safe_amplitudes flag: opt-in routing of mixed_nll + eval ─────────
+# _log_amp_sq dispatches on the flag; off = direct 2·log|amplitudes|, on = the
+# norm-accumulating log_amp_sq. Default off, so training/eval are unchanged
+# unless a run opts in (born.overflow_safe_amplitudes=true).
+
+def test_cbmconfig_overflow_safe_default_false():
+    assert CBMConfig().overflow_safe_amplitudes is False
+    assert _acc_cbm().overflow_safe_amplitudes is False
+    assert _acc_cbm(overflow_safe=True).overflow_safe_amplitudes is True
+
+
+def test_overflow_safe_off_matches_direct():
+    """Flag off: mixed_nll and class_probabilities equal the direct (raw
+    amplitudes) computation — regression guard on the default path."""
+    torch.manual_seed(10)
+    cbm = _acc_cbm()  # flag off
+    x = torch.rand(5, 3) * 1.6 - 0.8
+    y = torch.randint(0, cbm.out_dim, (5,))
+
+    log_abs = torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
+    ref_probs = (2 * log_abs
+                 - torch.logsumexp(2 * log_abs, dim=-1, keepdim=True)).exp()
+    assert torch.allclose(cbm.class_probabilities(x), ref_probs, atol=1e-6)
+
+    term1 = -2 * log_abs[torch.arange(5), y]
+    term2 = torch.logsumexp(2 * log_abs, dim=-1)
+    assert torch.allclose(cbm.mixed_nll(x, y, alpha=0.0),
+                          (term1 + term2).mean(), atol=1e-5)
+
+
+@pytest.mark.parametrize("alpha", [0.0, 1.0])
+def test_overflow_safe_mixed_nll_finite_on_overflow(alpha):
+    """Flag on: mixed_nll stays finite when the raw amplitude overflows (both
+    the discriminative and generative ends); flag off it is non-finite."""
+    torch.manual_seed(11)
+    cbm_on = _acc_cbm(data_dim=4, overflow_safe=True)
+    cbm_off = _acc_cbm(data_dim=4, overflow_safe=False)
+    x = torch.rand(3, 4) * 1.6 - 0.8
+    y = torch.randint(0, cbm_on.out_dim, (3,))
+    # 1e8 overflows the raw amplitude (product over 5 sites > float32 max) while
+    # keeping log_Z finite, so the α=1 term3 does not raise on the off path.
+    _overflow_scale_(cbm_on, scale=1e8)
+    _overflow_scale_(cbm_off, scale=1e8)
+
+    assert (~torch.isfinite(cbm_off.amplitudes(x))).any(), "scale did not overflow"
+    assert torch.isfinite(cbm_on.mixed_nll(x, y, alpha=alpha))
+    assert not torch.isfinite(cbm_off.mixed_nll(x, y, alpha=alpha))
+
+
+def test_overflow_safe_class_probabilities_finite_on_overflow():
+    """Flag on: class_probabilities stays finite and normalized when the raw
+    amplitude overflows (covers eval / all class_probabilities consumers)."""
+    torch.manual_seed(12)
+    cbm = _acc_cbm(data_dim=4, num_classes=3, overflow_safe=True)
+    x = torch.rand(4, 4) * 1.6 - 0.8
+    _overflow_scale_(cbm)
+    probs = cbm.class_probabilities(x)
+    assert torch.isfinite(probs).all()
+    assert torch.allclose(probs.sum(dim=-1), torch.ones(4), atol=1e-5)
