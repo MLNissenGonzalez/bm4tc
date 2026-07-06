@@ -12,6 +12,7 @@ from src.utils.train import (
     OptimizerConfig,
     NormControlConfig,
     NormRegularizer,
+    NormTracker,
     eval_metrics,
     optimizer,
     resolve_log_target,
@@ -162,7 +163,7 @@ class NLLTrainer:
         nll_losses = []
         reg_losses = []
         self._collapsed = False
-        self._debug_diags: list = []
+        tracker = NormTracker()
         self.cbm.train()
 
         for data, labels in self.datahandler.classification["train"]:
@@ -203,6 +204,11 @@ class NLLTrainer:
                 reg = None
                 loss = nll
 
+            # Norm/amplitude tracking: read the caches mixed_nll (+ regularizer)
+            # just populated, before optimizer.step() invalidates them.
+            tracker.record_amp(self.cbm)
+            tracker.record_logZ(self.cbm)
+
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -216,11 +222,6 @@ class NLLTrainer:
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.cbm.renormalize_(log_target=self._nc_log_target)
 
-            if self._nc.debug:
-                diag = self._diagnostics(data)
-                logger.debug(f"step={self.step}: {self._format_diagnostics(diag)}")
-                self._debug_diags.append(diag)
-
             nll_losses.append(nll.detach().cpu().item())
             reg_losses.append(reg.detach().cpu().item() if reg is not None else 0.0)
             losses.append(loss.detach().cpu().item())
@@ -229,6 +230,7 @@ class NLLTrainer:
         self._train_loss = sum(losses)    / n if losses else float("nan")
         self._train_nll  = sum(nll_losses) / n if nll_losses else float("nan")
         self._train_reg  = sum(reg_losses) / n if reg_losses else float("nan")
+        self._norm_stats = tracker.finalize(self.cbm)
 
     def _update(self):
         current_value = self.valid_perf.get(self.stopping_criterion_name)
@@ -321,6 +323,7 @@ class NLLTrainer:
                 reg=f"{self._train_reg:.4f}",
                 dis=f"{dis_loss:.4f}",
                 acc=f"{acc:.4f}",
+                logZ=f"{self._norm_stats.get('norm/log_Z_mean', float('nan')):.3g}",
             )
 
             if on_epoch_end is not None:
@@ -333,34 +336,7 @@ class NLLTrainer:
                     "mixed_loss/valid": mixed_loss,
                     "acc/valid":        acc,
                 }
-                if self._nc.debug and self._debug_diags:
-                    log_Zs = [d["log_Z"] for d in self._debug_diags if math.isfinite(d.get("log_Z", float("nan")))]
-                    means  = [d["log_amp_sq_mean"] for d in self._debug_diags if math.isfinite(d.get("log_amp_sq_mean", float("nan")))]
-                    mins   = [d["log_amp_sq_min"] for d in self._debug_diags if math.isfinite(d.get("log_amp_sq_min", float("nan")))]
-                    if log_Zs:
-                        metrics["norm/log_Z_mean"] = sum(log_Zs) / len(log_Zs)
-                        metrics["norm/log_Z_min"]  = min(log_Zs)
-                        metrics["norm/log_Z_max"]  = max(log_Zs)
-                        # Amplitudes overflow once ‖ψ‖ = exp(log_Z/2) crosses the
-                        # dtype max, i.e. log_Z > 2·log(finfo.max) (177.45 for
-                        # float32/complex64). Surface the remaining headroom so an
-                        # impending overflow is visible before it happens.
-                        ceiling = 2.0 * math.log(torch.finfo(self.cbm.dtype).max)
-                        metrics["norm/log_Z_headroom"] = ceiling - metrics["norm/log_Z_max"]
-                    if means:
-                        metrics["norm/log_amp_sq_mean"] = sum(means) / len(means)
-                    if mins:
-                        metrics["norm/log_amp_sq_min"] = min(mins)
-                    logger.info(
-                        f"[debug] epoch {self.epoch}: "
-                        + self._format_diagnostics({
-                            "log_Z":         metrics.get("norm/log_Z_mean", float("nan")),
-                            "log_Z_headroom": metrics.get("norm/log_Z_headroom", float("nan")),
-                            "log_amp_sq_mean": metrics.get("norm/log_amp_sq_mean", float("nan")),
-                            "log_amp_sq_min":  metrics.get("norm/log_amp_sq_min", float("nan")),
-                            "amp_nonfinite_frac": 0.0,
-                        })
-                    )
+                metrics.update(self._norm_stats)
                 on_epoch_end(self.epoch, metrics)
 
             self._update()

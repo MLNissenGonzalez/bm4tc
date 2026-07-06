@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.utils.train import NormRegularizer
+from src.utils.train import NormRegularizer, NormTracker
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -180,10 +180,14 @@ def test_log_Z_overflow_ceiling_matches_float32():
 
 # ── Alpha=0 fast path ──────────────────────────────────────────────────────
 
-def test_alpha0_skips_log_partition_function_in_mixed_nll():
-    """mixed_nll(alpha=0) must not call log_partition_function (norm control disabled)."""
+def test_alpha0_skips_per_step_log_partition_function():
+    """mixed_nll(alpha=0) must not call log_partition_function per step (norm
+    control disabled). The one call per epoch is the NormTracker's end-of-epoch
+    log_Z snapshot (alpha=0 / no soft control never caches log_Z during a step),
+    not a per-step contraction — so over 4 steps we expect exactly 1 call.
+    """
     cbm = _tiny_cbm()
-    dh = _FakeDataHandler()
+    dh = _FakeDataHandler(n=16, batch_size=4)  # 4 batches → 4 steps
     # Disable norm control so renormalize_() is never called
     cfg = NLLConfig(
         alpha=0.0, max_epoch=1,
@@ -191,13 +195,99 @@ def test_alpha0_skips_log_partition_function_in_mixed_nll():
     )
     trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
     trainer.cbm.prepare(device=torch.device("cpu"))
-    trainer._nc_target = 1.0
+    trainer._nc_log_target = 1.0
     trainer.optimizer = torch.optim.Adam(cbm.parameters(), lr=1e-3)
 
     with patch.object(cbm, "log_partition_function", wraps=cbm.log_partition_function) as mock_logZ:
         trainer._train_epoch()
 
-    mock_logZ.assert_not_called()
+    assert mock_logZ.call_count == 1  # the epoch-end norm snapshot only
+    assert math.isfinite(trainer._norm_stats["norm/log_Z_mean"])
+
+
+# ── NormTracker ─────────────────────────────────────────────────────────────
+
+class _FakeNormCBM:
+    """Minimal cbm exposing the caches + dtype NormTracker reads."""
+    def __init__(self, dtype=torch.complex64, snapshot=3.0):
+        self._log_Z_cache = None
+        self._amp_diag_cache = None
+        self.dtype = dtype
+        self._snapshot = snapshot
+    def log_partition_function(self):
+        return torch.tensor(self._snapshot)
+
+
+def test_norm_tracker_aggregates_mean_max_min():
+    """Per-step caches → epoch mean (of means), running max, running min, plus
+    the float overflow headroom off log_Z_max."""
+    t = NormTracker()
+    cbm = _FakeNormCBM()
+    steps = [
+        (1.0, {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}),
+        (5.0, {"log_amp_sq_mean": -4.0, "log_amp_sq_max":  0.0, "log_amp_sq_min": -6.0}),
+    ]
+    for lz, amp in steps:
+        cbm._log_Z_cache = torch.tensor(lz)
+        cbm._amp_diag_cache = amp
+        t.record_amp(cbm)
+        t.record_logZ(cbm)
+    out = t.finalize(cbm)
+
+    assert out["norm/log_Z_mean"] == pytest.approx(3.0)   # (1+5)/2
+    assert out["norm/log_Z_max"] == 5.0
+    assert out["norm/log_Z_min"] == 1.0
+    assert out["norm/log_amp_sq_mean"] == pytest.approx(-3.0)  # (-2-4)/2
+    assert out["norm/log_amp_sq_max"] == 0.0
+    assert out["norm/log_amp_sq_min"] == -6.0
+    ceiling = 2.0 * math.log(torch.finfo(torch.complex64).max)
+    assert out["norm/log_Z_headroom"] == pytest.approx(ceiling - 5.0)
+
+
+def test_norm_tracker_logZ_snapshot_fallback():
+    """No log_Z cached during the epoch (alpha=0 / no soft) → finalize takes one
+    log_partition_function snapshot so norm/log_Z is still reported."""
+    t = NormTracker()
+    cbm = _FakeNormCBM(snapshot=3.0)
+    cbm._amp_diag_cache = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
+    t.record_amp(cbm)
+    t.record_logZ(cbm)  # _log_Z_cache is None → skipped
+    out = t.finalize(cbm)
+
+    assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 3.0
+    assert out["norm/log_amp_sq_mean"] == pytest.approx(-2.0)
+
+
+def test_norm_tracker_ignores_nonfinite():
+    """Non-finite cache values are excluded from mean/max/min."""
+    t = NormTracker()
+    cbm = _FakeNormCBM()
+    cbm._log_Z_cache = torch.tensor(float("inf"))
+    cbm._amp_diag_cache = {"log_amp_sq_mean": float("nan"),
+                           "log_amp_sq_max": float("inf"), "log_amp_sq_min": -5.0}
+    t.record_logZ(cbm)
+    t.record_amp(cbm)
+    # log_Z never finite → snapshot fallback (finite); amp min is the only finite stat
+    out = t.finalize(cbm)
+    assert out["norm/log_Z_mean"] == 3.0          # from snapshot, not inf
+    assert out["norm/log_amp_sq_min"] == -5.0
+    assert "norm/log_amp_sq_mean" not in out      # the only mean was nan → no count
+
+
+def test_nll_logs_norm_metrics_by_default():
+    """norm/* metrics are emitted every epoch with no debug flag set."""
+    cbm = _tiny_cbm()
+    dh = _FakeDataHandler()
+    cfg = NLLConfig(alpha=0.0, max_epoch=2,
+                    norm_control=NormControlConfig(hard_every=0, soft_strength=0.0))
+    trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
+    logged = []
+    trainer.train(on_epoch_end=lambda ep, m: logged.append(m))
+
+    assert logged
+    for key in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_Z_min",
+                "norm/log_Z_headroom", "norm/log_amp_sq_mean"):
+        assert key in logged[-1], f"missing {key}"
 
 
 def test_alpha0_soft_norm_control_multistep_backward():
