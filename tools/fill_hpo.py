@@ -153,6 +153,24 @@ def _extract_params(config: Dict, trainer: str) -> Dict[str, Any]:
 # W&B query
 # =============================================================================
 
+def _best_metric_from_history(run: Any, metric_key: str, minimize: bool) -> Optional[float]:
+    """Best (min if ``minimize`` else max) value of ``metric_key`` over the run's
+    full training history, or None if the metric was never logged.
+
+    The run summary holds only the *last* logged value. With early stopping the
+    run is selected on its best epoch, not its final one, so we scan the full
+    step history for the true best rather than trusting ``run.summary``.
+    """
+    best: Optional[float] = None
+    for row in run.scan_history(keys=[metric_key]):
+        val = row.get(metric_key)
+        if not isinstance(val, (int, float)):
+            continue
+        if best is None or (val < best if minimize else val > best):
+            best = val
+    return best
+
+
 def query_wandb(
     dataset: str,
     trainer: str,
@@ -167,8 +185,10 @@ def query_wandb(
 ) -> Optional[Dict[str, Any]]:
     """Query W&B for the best finished HPO run matching the combo.
 
-    W&B group format: {dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}/{date}
-    We match by prefix: ^{dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}/
+    W&B group format: {dataset}/{trainer}/{embedding}/{arch}/[{stage}/]{hpo_kind}{sep}{date}
+    where {sep} is "/" (older runs) or "_" (newer runs, e.g. hpo_a0_2506).
+    We match by prefix ending at that separator so, e.g., hpo_a0 does not also
+    match hpo_a05.
     """
     if not WANDB_AVAILABLE:
         return None
@@ -176,8 +196,9 @@ def query_wandb(
     import wandb
 
     stage_seg = f"{hpo_stage}/" if hpo_stage else ""
-    group_prefix = f"{dataset}/{trainer}/{embedding}/{arch}/{stage_seg}{hpo_kind}/"
-    group_pattern = f"^{re.escape(group_prefix)}"
+    group_base = f"{dataset}/{trainer}/{embedding}/{arch}/{stage_seg}{hpo_kind}"
+    group_prefix = group_base + "/"
+    group_pattern = f"^{re.escape(group_base)}[/_]"
 
     try:
         api = wandb.Api()
@@ -196,21 +217,35 @@ def query_wandb(
         print(f"  [wandb] No finished runs found for group prefix: {group_prefix}")
         return None
 
-    sentinel = float("inf") if minimize else float("-inf")
+    # Rank by the best value reached during training (not the last-logged
+    # summary value), falling back to summary only if history lacks the metric.
+    scored: List[Tuple[float, Any]] = []
+    for run in runs:
+        metric_val = _best_metric_from_history(run, metric_key, minimize)
+        if metric_val is None:
+            metric_val = run.summary.get(metric_key)
+        if isinstance(metric_val, (int, float)):
+            scored.append((metric_val, run))
 
-    def get_metric(run: Any) -> float:
-        val = run.summary.get(metric_key)
-        return val if val is not None else sentinel
+    if not scored:
+        print(f"  [wandb] No runs logged metric {metric_key} for: {group_prefix}")
+        return None
 
-    best_run = min(runs, key=get_metric) if minimize else max(runs, key=get_metric)
-    metric_val = best_run.summary.get(metric_key)
+    best_metric, best_run = (min if minimize else max)(scored, key=lambda x: x[0])
     print(
         f"  [wandb] Best run: {best_run.name} (group={best_run.group}), "
-        f"{metric_key}={metric_val:.6g}" if metric_val is not None
-        else f"  [wandb] Best run: {best_run.name} (group={best_run.group}), {metric_key}=N/A"
+        f"best {metric_key}={best_metric:.6g}"
     )
 
-    params = _extract_params(best_run.config, trainer)
+    # Slim run objects from api.runs() frequently carry an empty .config; fetch
+    # the full run so hyperparameters are read reliably.
+    try:
+        config = api.run(f"{entity}/{project}/{best_run.id}").config
+    except Exception as e:
+        print(f"  [wandb] Error fetching full run config ({e}); using slim config.")
+        config = best_run.config
+
+    params = _extract_params(config, trainer)
     if not params:
         print("  [wandb] Could not extract params from run config.")
         return None
@@ -232,7 +267,13 @@ def query_local(
     outputs_dir: Path,
     hpo_stage: str = "",
 ) -> Optional[Dict[str, Any]]:
-    """Walk outputs dir to find matching HPO trials; return params from best."""
+    """Walk outputs dir to find matching HPO trials; return params from best.
+
+    NOTE: this fallback ranks trials by the *last-epoch* value in each run's
+    local ``wandb-summary.json`` — training history is not available on disk, so
+    (unlike ``query_wandb``) it cannot select on the best-over-training value.
+    Prefer ``--source wandb`` when the runs are on W&B.
+    """
     trainer_key = TRAINER_CONFIG_KEY[trainer]
 
     best_metric: Optional[float] = None
