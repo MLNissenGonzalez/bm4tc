@@ -5,3 +5,4 @@ init_kwargs:
   init_method: "randn_eye"
   std: 1e-9
 embedding: "fourier"
+accumulate: false

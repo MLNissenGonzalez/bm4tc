@@ -429,12 +429,12 @@ def test_mixed_nll_term1_gradient_at_small_amplitude():
 # default (non-accumulating) amplitudes() path.
 
 def _acc_cbm(dtype="float32", data_dim=3, num_classes=2, bond_dim=3,
-             std=0.3, out_position=None, overflow_safe=False):
+             std=0.3, out_position=None, accumulate=False):
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype,
                                   std=std, out_position=out_position),
-        overflow_safe_amplitudes=overflow_safe,
+        accumulate=accumulate,
     )
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
 
@@ -587,18 +587,18 @@ def test_accumulate_mode_isolation():
     assert torch.equal(before, after)
 
 
-# ── overflow_safe_amplitudes flag: opt-in routing of mixed_nll + eval ─────────
+# ── accumulate flag: opt-in routing of mixed_nll + eval ──────────────────────
 # _log_amp_sq dispatches on the flag; off = direct 2·log|amplitudes|, on = the
 # norm-accumulating log_amp_sq. Default off, so training/eval are unchanged
-# unless a run opts in (born.overflow_safe_amplitudes=true).
+# unless a run opts in (born.accumulate=true).
 
-def test_cbmconfig_overflow_safe_default_false():
-    assert CBMConfig().overflow_safe_amplitudes is False
-    assert _acc_cbm().overflow_safe_amplitudes is False
-    assert _acc_cbm(overflow_safe=True).overflow_safe_amplitudes is True
+def test_cbmconfig_accumulate_default_false():
+    assert CBMConfig().accumulate is False
+    assert _acc_cbm().accumulate is False
+    assert _acc_cbm(accumulate=True).accumulate is True
 
 
-def test_overflow_safe_off_matches_direct():
+def test_accumulate_flag_off_matches_direct():
     """Flag off: mixed_nll and class_probabilities equal the direct (raw
     amplitudes) computation — regression guard on the default path."""
     torch.manual_seed(10)
@@ -618,12 +618,12 @@ def test_overflow_safe_off_matches_direct():
 
 
 @pytest.mark.parametrize("alpha", [0.0, 1.0])
-def test_overflow_safe_mixed_nll_finite_on_overflow(alpha):
+def test_accumulate_flag_mixed_nll_finite_on_overflow(alpha):
     """Flag on: mixed_nll stays finite when the raw amplitude overflows (both
     the discriminative and generative ends); flag off it is non-finite."""
     torch.manual_seed(11)
-    cbm_on = _acc_cbm(data_dim=4, overflow_safe=True)
-    cbm_off = _acc_cbm(data_dim=4, overflow_safe=False)
+    cbm_on = _acc_cbm(data_dim=4, accumulate=True)
+    cbm_off = _acc_cbm(data_dim=4, accumulate=False)
     x = torch.rand(3, 4) * 1.6 - 0.8
     y = torch.randint(0, cbm_on.out_dim, (3,))
     # 1e8 overflows the raw amplitude (product over 5 sites > float32 max) while
@@ -636,13 +636,36 @@ def test_overflow_safe_mixed_nll_finite_on_overflow(alpha):
     assert not torch.isfinite(cbm_off.mixed_nll(x, y, alpha=alpha))
 
 
-def test_overflow_safe_class_probabilities_finite_on_overflow():
+def test_accumulate_flag_class_probabilities_finite_on_overflow():
     """Flag on: class_probabilities stays finite and normalized when the raw
     amplitude overflows (covers eval / all class_probabilities consumers)."""
     torch.manual_seed(12)
-    cbm = _acc_cbm(data_dim=4, num_classes=3, overflow_safe=True)
+    cbm = _acc_cbm(data_dim=4, num_classes=3, accumulate=True)
     x = torch.rand(4, 4) * 1.6 - 0.8
     _overflow_scale_(cbm)
     probs = cbm.class_probabilities(x)
     assert torch.isfinite(probs).all()
     assert torch.allclose(probs.sum(dim=-1), torch.ones(4), atol=1e-5)
+
+
+def test_accumulate_save_load_roundtrip(tmp_path):
+    """accumulate is persisted in the saved config and restored by load()."""
+    p = str(tmp_path / "model")
+    _acc_cbm(accumulate=True).save(p)
+    assert ConditionalBornMachine.load(p).accumulate is True
+    _acc_cbm(accumulate=False).save(p)
+    assert ConditionalBornMachine.load(p).accumulate is False
+
+
+def test_accumulate_is_settable_post_load(tmp_path):
+    """The loaded model's accumulate can be overridden (train.py honors the
+    current run's born.accumulate on model_path loads, since a0 checkpoints
+    predate the flag) and the override actually routes _log_amp_sq."""
+    p = str(tmp_path / "model")
+    _acc_cbm(data_dim=4, accumulate=False).save(p)
+    cbm = ConditionalBornMachine.load(p)
+    assert cbm.accumulate is False
+    cbm.accumulate = True  # what train.py does after load
+    x = torch.rand(3, 4) * 1.6 - 0.8
+    _overflow_scale_(cbm)
+    assert torch.isfinite(cbm.class_probabilities(x)).all()  # accumulate path active

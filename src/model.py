@@ -62,7 +62,7 @@ class CBMConfig:
     # through the norm-accumulating contraction (log_amp_sq) instead of the raw
     # amplitudes() path. Off by default; enable per-run for overflow-prone
     # configs (high bond dim, alpha=1). See _log_amp_sq.
-    overflow_safe_amplitudes: bool = False
+    accumulate: bool = False
 
 
 class ConditionalBornMachine(tk.models.MPS):
@@ -128,9 +128,7 @@ class ConditionalBornMachine(tk.models.MPS):
 
         # Opt-in overflow-safe amplitude path (getattr so checkpoints whose saved
         # config predates the flag default to off). See _log_amp_sq.
-        self.overflow_safe_amplitudes = bool(
-            getattr(cfg, "overflow_safe_amplitudes", False)
-        )
+        self.accumulate = bool(getattr(cfg, "accumulate", False))
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────
         _cls_pos = getattr(cfg.init_kwargs, "out_position", None)
@@ -398,11 +396,11 @@ class ConditionalBornMachine(tk.models.MPS):
         """log|ψ(x,c)|² (B, C) — the shared entry point for the loss and eval.
 
         Routes through the overflow-safe accumulate path (:meth:`log_amp_sq`)
-        when ``overflow_safe_amplitudes`` is set, else the direct traced path
+        when ``accumulate`` is set, else the direct traced path
         ``2·log|amplitudes|``. The two are numerically equivalent where the raw
         amplitude does not overflow (see ``test_log_amp_sq_matches_amplitudes``).
         """
-        if self.overflow_safe_amplitudes:
+        if self.accumulate:
             return self.log_amp_sq(data)
         log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
         return 2.0 * log_abs
