@@ -46,6 +46,11 @@ def main(cfg: Config) -> float:
     if model_path is not None:
         logger.info(f"Loading ConditionalBornMachine from {model_path}")
         cbm = ConditionalBornMachine.load(model_path)
+        # accumulate is an inference-path toggle, not part of the checkpoint
+        # weights — honor the current run's born.accumulate on loaded models
+        # (fresh models read it at construction). Lets pretrained/fine-tune runs
+        # opt into the overflow-safe path even though the a0 checkpoint predates it.
+        cbm.accumulate = bool(cfg.born.get("accumulate", False))
         cbm.to(device)
     else:
         cbm = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)

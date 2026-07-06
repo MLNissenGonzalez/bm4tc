@@ -4,3 +4,4 @@ init_kwargs:
   boundary: "obc"
   init_method: "canonical"
 embedding: "hermite"
+accumulate: false
