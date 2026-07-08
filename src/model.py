@@ -567,11 +567,16 @@ class ConditionalBornMachine(tk.models.MPS):
 
         Differentiable w.r.t. input data (for purification). _log_Z is a
         detached constant, so not differentiable w.r.t. model parameters.
+
+        Always routes through the overflow-safe ``log_amp_sq`` contraction,
+        independent of the ``accumulate`` flag: this is an analysis primitive
+        (log-density for purification/UQ/MIA), so correctness beats the fast
+        traced path — a raw ``amplitudes()`` here would overflow to inf and
+        silently corrupt every downstream log-density on overflow-prone models.
         """
         if self._log_Z is None:
             self.cache_log_Z()
-        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
-        return torch.logsumexp(2.0 * log_abs, dim=-1) - self._log_Z
+        return torch.logsumexp(self.log_amp_sq(data), dim=-1) - self._log_Z
 
     # ======================================================================
     # Training

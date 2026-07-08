@@ -306,6 +306,12 @@ class GibbsPurification:
 
                     with torch.no_grad():
                         # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}).
+                        # KNOWN BUG (open): raw amplitudes() overflows to inf on
+                        # overflow-prone models → p=inf → draw_from_grid maps
+                        # posinf→0, silently zeroing the HIGHEST-probability bins
+                        # (sampling goes backwards). Unlike marginal_log_probability
+                        # (always overflow-safe), this Gibbs-weight path is still
+                        # raw. Fix = log-domain sampler on logsumexp(log_amp_sq).
                         abs_sq = born.abs_square(born.amplitudes(x_cand))  # (bs*bins, C)
                         p = abs_sq.sum(dim=-1).view(bs, self.num_bins)     # (bs, bins)
 
