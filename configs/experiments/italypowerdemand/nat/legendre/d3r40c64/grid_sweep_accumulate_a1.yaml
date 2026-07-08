@@ -23,7 +23,7 @@ trainer:
     max_epoch: 1000
     batch_size: 128
     patience: 300
-    stop_crit: "acc"
+    stop_crit: "gen_loss"   # generative NLL on valid (== mixed_loss at alpha=1)
     save: false
     norm_control:
       log_target: 0.0     # fixed target; no capture (cold start)
