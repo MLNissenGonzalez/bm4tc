@@ -692,6 +692,43 @@ def test_eval_metrics_accumulate_finite_on_overflow():
     assert math.isfinite(dis_on) and math.isfinite(gen_on)
 
 
+def test_marginal_log_probability_safe_parity():
+    """marginal_log_probability (always overflow-safe) equals the raw
+    2·log|amplitudes| formula where the amplitude does not overflow — including
+    the input gradient purification relies on."""
+    torch.manual_seed(15)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
+    cbm.cache_log_Z()
+
+    x = (torch.rand(5, 4) * 1.6 - 0.8).requires_grad_(True)
+    lp = cbm.marginal_log_probability(x)
+    lp.sum().backward()
+    g_safe = x.grad.clone()
+
+    x_raw = x.detach().clone().requires_grad_(True)
+    log_abs = torch.log(cbm.amplitudes(x_raw).abs().clamp(min=1e-30))
+    lp_raw = torch.logsumexp(2.0 * log_abs, dim=-1) - cbm._log_Z
+    lp_raw.sum().backward()
+
+    assert torch.allclose(lp.detach(), lp_raw.detach(), atol=1e-4)
+    assert torch.isfinite(g_safe).all() and g_safe.abs().max() > 0
+    assert torch.allclose(g_safe, x_raw.grad, atol=1e-4)
+
+
+def test_marginal_log_probability_finite_on_overflow():
+    """marginal_log_probability stays finite when the raw amplitude overflows —
+    the log-density primitive behind purification/UQ/MIA, so it must not go inf
+    regardless of the accumulate flag."""
+    torch.manual_seed(16)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)  # accumulate flag off — must still be safe
+    _overflow_scale_(cbm, scale=1e8)
+    cbm.cache_log_Z()
+    x = torch.rand(4, 4) * 1.6 - 0.8
+
+    assert (~torch.isfinite(cbm.amplitudes(x))).any(), "scale did not overflow"
+    assert torch.isfinite(cbm.marginal_log_probability(x)).all()
+
+
 def test_accumulate_save_load_roundtrip(tmp_path):
     """accumulate is persisted in the saved config and restored by load()."""
     p = str(tmp_path / "model")
