@@ -1,0 +1,42 @@
+# @package _global_
+# Accumulate stabilization study on MNIST 12x12 (alpha=1, cold start, norm
+# control OFF). Same design as the italypowerdemand d3r40c64 study, moved to a
+# far more overflow-prone regime: mnist_full_r12 has ~144 sites vs italy's ~24,
+# so the per-site amplitude product is much likelier to over-/under-flow. These
+# configs normally keep norm control ON (soft_strength=1.0, large log_target);
+# here it is deliberately disabled so that born.accumulate is the ONLY thing
+# that can keep the loss finite. Crosses lr against accumulate at a fixed seed.
+experiment: grid_sweep_accumulate_a1
+
+defaults:
+  - override /born: legendre/d3r40c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 100
+    batch_size: 256
+    patience: 50
+    stop_crit: "gen_loss"   # generative NLL on valid (== mixed_loss at alpha=1)
+    save: false
+    norm_control:
+      log_target: 0.0     # fixed target; no capture (cold start)
+      hard_every: 0       # disabled
+      soft_strength: 0.0  # disabled — accumulate is the only stabilizer
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4          # overridden by grid sweep
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.nll.optimizer.kwargs.lr: choice(1e-5, 1e-4, 1e-3, 1e-2)
+      born.accumulate: choice(true, false)
