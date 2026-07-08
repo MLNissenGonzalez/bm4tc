@@ -4,7 +4,9 @@ import pytest
 import torch
 import tensorkrowch as tk
 from unittest.mock import patch
+from torch.utils.data import DataLoader, TensorDataset
 from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from src.utils.train import eval_metrics
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
@@ -646,6 +648,85 @@ def test_accumulate_flag_class_probabilities_finite_on_overflow():
     probs = cbm.class_probabilities(x)
     assert torch.isfinite(probs).all()
     assert torch.allclose(probs.sum(dim=-1), torch.ones(4), atol=1e-5)
+
+
+def test_eval_metrics_accumulate_parity():
+    """eval_metrics returns the same (dis_loss, acc, gen_loss) with the flag on
+    or off on a non-overflowing model — the accumulate path only changes the
+    contraction, not the result. Regression guard that existing (flag-off) valid
+    numbers are unchanged by routing eval through _log_amp_sq."""
+    torch.manual_seed(13)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
+    ds = TensorDataset(torch.rand(12, 4) * 1.6 - 0.8, torch.randint(0, 3, (12,)))
+    loader = DataLoader(ds, batch_size=5)
+
+    cbm.accumulate = False
+    dis_off, acc_off, gen_off = eval_metrics(cbm, loader, "cpu")
+    cbm.accumulate = True
+    dis_on, acc_on, gen_on = eval_metrics(cbm, loader, "cpu")
+
+    assert acc_off == acc_on
+    assert dis_on == pytest.approx(dis_off, abs=1e-4)
+    assert gen_on == pytest.approx(gen_off, abs=1e-4)
+
+
+def test_eval_metrics_accumulate_finite_on_overflow():
+    """eval_metrics valid losses stay finite with accumulate on when the raw
+    amplitude overflows; with it off they are nan — the MNIST-resize symptom
+    (stable training, nan valid) that motivated routing eval through the same
+    _log_amp_sq path as the loss."""
+    torch.manual_seed(14)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
+    _overflow_scale_(cbm, scale=1e8)  # overflows the raw amplitude, keeps log_Z finite
+    x = torch.rand(9, 4) * 1.6 - 0.8
+    assert (~torch.isfinite(cbm.amplitudes(x))).any(), "scale did not overflow"
+    ds = TensorDataset(x, torch.randint(0, 3, (9,)))
+    loader = DataLoader(ds, batch_size=4)
+
+    cbm.accumulate = False
+    dis_off, _, gen_off = eval_metrics(cbm, loader, "cpu")
+    assert math.isnan(dis_off) and math.isnan(gen_off)
+
+    cbm.accumulate = True
+    dis_on, _, gen_on = eval_metrics(cbm, loader, "cpu")
+    assert math.isfinite(dis_on) and math.isfinite(gen_on)
+
+
+def test_marginal_log_probability_safe_parity():
+    """marginal_log_probability (always overflow-safe) equals the raw
+    2·log|amplitudes| formula where the amplitude does not overflow — including
+    the input gradient purification relies on."""
+    torch.manual_seed(15)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
+    cbm.cache_log_Z()
+
+    x = (torch.rand(5, 4) * 1.6 - 0.8).requires_grad_(True)
+    lp = cbm.marginal_log_probability(x)
+    lp.sum().backward()
+    g_safe = x.grad.clone()
+
+    x_raw = x.detach().clone().requires_grad_(True)
+    log_abs = torch.log(cbm.amplitudes(x_raw).abs().clamp(min=1e-30))
+    lp_raw = torch.logsumexp(2.0 * log_abs, dim=-1) - cbm._log_Z
+    lp_raw.sum().backward()
+
+    assert torch.allclose(lp.detach(), lp_raw.detach(), atol=1e-4)
+    assert torch.isfinite(g_safe).all() and g_safe.abs().max() > 0
+    assert torch.allclose(g_safe, x_raw.grad, atol=1e-4)
+
+
+def test_marginal_log_probability_finite_on_overflow():
+    """marginal_log_probability stays finite when the raw amplitude overflows —
+    the log-density primitive behind purification/UQ/MIA, so it must not go inf
+    regardless of the accumulate flag."""
+    torch.manual_seed(16)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)  # accumulate flag off — must still be safe
+    _overflow_scale_(cbm, scale=1e8)
+    cbm.cache_log_Z()
+    x = torch.rand(4, 4) * 1.6 - 0.8
+
+    assert (~torch.isfinite(cbm.amplitudes(x))).any(), "scale did not overflow"
+    assert torch.isfinite(cbm.marginal_log_probability(x)).all()
 
 
 def test_accumulate_save_load_roundtrip(tmp_path):

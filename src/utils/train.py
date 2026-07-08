@@ -13,8 +13,6 @@ from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
-_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
-
 
 # ---------------------------------------------------------------------------
 # Seed
@@ -328,12 +326,13 @@ def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, fl
             dynamic_ncols=True, disable=not progress,
         ):
             data, labels = data.to(device), labels.to(device)
-            amp     = cbm.amplitudes(data)
-            log_abs = torch.log(amp.abs().clamp(min=_LOG_PROB_EPS))
-            log_sq_obs     = 2.0 * log_abs[range(len(labels)), labels]
-            log_class_marg = torch.logsumexp(2.0 * log_abs, dim=1)
+            # Shared entry point with the loss: dispatches on cbm.accumulate, so
+            # eval uses the same log|ψ|² path as training (overflow-safe when on).
+            las = cbm._log_amp_sq(data)                       # (B, C) = log|ψ|²
+            log_sq_obs     = las[range(len(labels)), labels]
+            log_class_marg = torch.logsumexp(las, dim=1)
             losses_dis.append((log_class_marg - log_sq_obs).mean().item())
-            correct += (log_abs.argmax(dim=1) == labels).sum().item()
+            correct += (las.argmax(dim=1) == labels).sum().item()
             total += len(labels)
             if gen_finite:
                 gen_batch = (log_Z - log_sq_obs).mean().item()
