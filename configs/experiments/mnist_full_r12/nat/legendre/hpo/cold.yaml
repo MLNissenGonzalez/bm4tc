@@ -36,7 +36,7 @@ trainer:
   nll:
     alpha: 0.01                                # CLI-overridden: trainer.nll.alpha=...
     max_epoch: 150
-    batch_size: 512
+    batch_size: 256                            # ~8.3GB at r100 on 11GB GPU (mem ~ batch x bond^2)
     patience: 50
     stop_crit: "mixed_loss"                    # HPO objective (minimize); == gen_loss at alpha=1
     save: false
