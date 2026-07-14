@@ -1,0 +1,47 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start (NOT pretrained) seed sweep, alpha=0.01, overflow-safe accumulate.
+# HPs filled from the cold HPO best-by-loss run (mixed_loss/valid objective):
+#   study cold_a001_mnist_full_r12_r60 -> lr=4.541e-5, soft_strength=7.802e-7
+# Model starts at the flat prior (randn_eye init); norm control targets the
+# flat-prior log-norm. Selected on lowest validation mixed loss (not accuracy).
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a001
+descriptor: nll_cold
+
+defaults:
+  - override /born: legendre/d3r60c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+born:
+  accumulate: true                             # overflow-safe amplitudes ON
+
+trainer:
+  nll:
+    alpha: 0.01
+    max_epoch: 150
+    batch_size: 256
+    patience: 50
+    stop_crit: "mixed_loss"
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 7.801786329523621e-7      # FROM HPO (hpo/cold_a001, best-by-loss)
+      log_target: "n_features * log(in_dim) / 2"   # flat-prior log-norm
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.00004541389925912718             # FROM HPO (hpo/cold_a001, best-by-loss)
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
