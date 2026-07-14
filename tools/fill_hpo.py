@@ -114,6 +114,8 @@ def get_metric_info(hpo_cfg: Dict, trainer: str) -> Tuple[str, bool]:
         return "dis_loss/valid", True
     elif stop_crit == "gen_loss":
         return "gen_loss/valid", True
+    elif stop_crit == "mixed_loss":
+        return "mixed_loss/valid", True
     elif stop_crit == "acc":
         return "acc/valid", False
     elif stop_crit == "rob":
