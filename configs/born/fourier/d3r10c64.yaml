@@ -6,4 +6,4 @@ init_kwargs:
   std: 1e-9
   dtype: "complex64"
 embedding: "fourier"
-accumulate: false
+accumulate: true   # realistic high-feature dataset -> overflow-safe path on by default
