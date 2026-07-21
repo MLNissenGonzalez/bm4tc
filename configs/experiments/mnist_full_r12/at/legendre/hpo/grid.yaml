@@ -1,0 +1,105 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cheap adversarial-training HPO for mnist_full_r12, alpha>=0: grid over
+# learning rate ONLY, at fixed soft_strength and fixed clean_weight.
+#
+# One config covers every bond dim AND every alpha (both CLI overrides). Like
+# the NAT warm-start ladder, AT fine-tunes from the best clean (alpha=0)
+# checkpoint supplied via `model_path`. Alpha sets the *training* objective on
+# adversarial (and clean) examples: alpha*gen + (1-alpha)*dis; the PGD attack
+# keeps its discriminative NLL criterion, inherited from pgd_at.
+#
+# CAVEAT on the two fixed values -- neither is supported by AT evidence:
+#   * soft_strength=1e-3 is carried over from the NAT warm-start analysis
+#     (240 trials, d3r{10,20,40}c64), where the objective was flat across
+#     ~6 decades. AT has a different objective (adv + clean_weight*clean), so
+#     this is an untested extrapolation across trainer type.
+#   * clean_weight=0.421 is the best value from the OLD-style r20 AT Optuna HPO
+#     (at/legendre/d3r20c64/hpo/at.yaml), which had no alpha and no norm control.
+# If the lr grid comes back flat or uniformly poor, these are the first two
+# things to re-open -- ideally with one 2D Optuna study at a single cheap arch.
+#
+# Evasion budget follows the existing mnist AT config: L-inf, strength 0.3 as a
+# fraction of range_size(2.0), i.e. the standard 0.3 MNIST budget (Madry et al.)
+# in [0,1] pixel space.
+#
+# Usage (alpha, born and matching model_path all required):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/at/legendre/hpo/grid \
+#       born=legendre/d3r40c64 \
+#       trainer.adversarial.alpha=0.1 \
+#       model_path=outputs/mnist_full_r12/nat/legendre/d3r40c64/seed_sweep/a0_{DDMM}/{job}/models/model
+#
+# Output:  outputs/mnist_full_r12/at/legendre/d3r{R}c64/hpo/grid_a{X}_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "grid_${alpha_suffix:}"
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r10c64        # CLI-overridden: born=legendre/d3r{10,20,40,60,100}c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Required on the CLI: best clean (alpha=0) NAT checkpoint for this bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+  evasion:
+    norm: "inf"
+    method: "PGD"
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    alpha: 0.0               # CLI-overridden: trainer.adversarial.alpha={0,0.01,0.1,0.2,0.5,1.0}
+    max_epoch: 100
+    batch_size: 512
+    patience: 10
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
+    save: false
+
+    evasion:
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.3]       # standard MNIST L-inf budget (Madry et al.)
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 70
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3    # FIXED -- extrapolated from NAT, see caveat above
+      log_target: null
+      debug: false
+
+    clean_weight: 0.4210913468712624   # FIXED from the r20 AT Optuna HPO best
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 3e-4             # overridden by the grid below
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.optimizer.kwargs.lr: choice(1.5e-4, 3e-4, 6e-4, 1.2e-3)
