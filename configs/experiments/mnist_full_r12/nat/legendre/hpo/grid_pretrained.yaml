@@ -1,0 +1,72 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cheap warm-start alpha>0 HPO: grid over learning rate ONLY, at fixed
+# soft_strength. Replaces the 16-trial Optuna search in the per-arch
+# hpo/pretrained.yaml for the higher bond dims, where runs are too slow to
+# afford a full 2D search.
+#
+# Rationale for fixing soft_strength (from all 240 trials of the
+# d3r{10,20,40}c64 hpo/pretrained_a* studies, scored on MIN mixed_loss/valid):
+# once lr clears ~1e-4, the objective is FLAT in soft_strength across ~6 decades
+# (mean normalised score 0.02-0.06 for every bin from <1e-5 up to 1e-2); the only
+# reliably bad region is soft_strength > 1e-1. There was no alpha trend and no
+# bond-dim trend once lr was controlled for. 1e-3 is the geometric centre of the
+# flat region.
+#
+# The lr grid deliberately extends past 5e-4: in those studies the objective
+# saturated above ~1e-4 but never turned over at the top of the old
+# interval(1e-6, 5e-4), so that ceiling truncated the search rather than
+# bracketing an optimum.
+#
+# One config covers every alpha AND every bond dim: both are CLI overrides, and
+# alpha is folded into `experiment` via `alpha_suffix` so each alpha lands in its
+# own output/analysis folder.
+#
+# Usage (alpha, born and matching model_path all required):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/nat/legendre/hpo/grid_pretrained \
+#       born=legendre/d3r60c64 \
+#       trainer.nll.alpha=0.5 \
+#       model_path=outputs/mnist_full_r12/nat/legendre/d3r60c64/seed_sweep/a0_{DDMM}/{job}/models/model
+#
+# Output:  outputs/mnist_full_r12/nat/legendre/d3r{R}c64/hpo/grid_a{X}_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "grid_${alpha_suffix:}"
+descriptor: nll_pretrained
+
+defaults:
+  - override /born: legendre/d3r60c64        # CLI-overridden: born=legendre/d3r{60,100}c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+# Required on the CLI: best norm-controlled a0 seed-sweep checkpoint for this bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 0.5                 # CLI-overridden: trainer.nll.alpha={0.01,0.1,0.2,0.5,1.0}
+    max_epoch: 100
+    batch_size: 512
+    patience: 50
+    stop_crit: "mixed_loss"
+    save: false
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3      # FIXED: objective is flat 1e-5..1e-2, only >1e-1 hurts
+      log_target: null
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 3e-4               # overridden by the grid below
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.nll.optimizer.kwargs.lr: choice(1.5e-4, 3e-4, 6e-4, 1.2e-3)
