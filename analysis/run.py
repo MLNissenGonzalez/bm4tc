@@ -171,7 +171,7 @@ def analyze_run(
 
     # 2. Load model
     checkpoint_path = find_model_checkpoint(run_dir)
-    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm = ConditionalBornMachine.load(str(checkpoint_path), accumulate=True)
     cbm.to(device)
 
     # 3. Load data

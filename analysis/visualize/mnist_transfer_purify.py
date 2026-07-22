@@ -110,7 +110,7 @@ def _load_model(sweep_dir: str, device: str) -> Tuple[ConditionalBornMachine, ob
         run_dir = sweep / "0"  # no CSV: fall back to first run
         logger.warning(f"No evaluation_data.csv at {csv}; using {run_dir}")
     run_cfg = load_run_config(run_dir)
-    cbm = ConditionalBornMachine.load(str(find_model_checkpoint(run_dir)))
+    cbm = ConditionalBornMachine.load(str(find_model_checkpoint(run_dir)), accumulate=True)
     cbm.to(device)
     cbm.eval()
     cbm.cache_log_Z()

@@ -86,7 +86,7 @@ def _load_bm(run_path: str, device: torch.device):
         run_dir = PROJECT_ROOT / run_dir
     cfg = load_run_config(run_dir)
     ckpt = find_model_checkpoint(run_dir)
-    cbm = ConditionalBornMachine.load(str(ckpt))
+    cbm = ConditionalBornMachine.load(str(ckpt), accumulate=True)
     cbm.to(device)
     return cbm, cfg
 

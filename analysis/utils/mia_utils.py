@@ -70,7 +70,7 @@ def find_model_checkpoint(
 
     Example:
         >>> checkpoint = find_model_checkpoint("outputs/classification_2024_01_15")
-        >>> cbm = ConditionalBornMachine.load(str(checkpoint))
+        >>> cbm = ConditionalBornMachine.load(str(checkpoint), accumulate=True)
     """
     run_dir = Path(run_dir)
     models_dir = run_dir / "models"

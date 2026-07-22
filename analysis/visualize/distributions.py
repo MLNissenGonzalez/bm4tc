@@ -280,7 +280,7 @@ def visualize_from_run_dir(
     # Load config and model
     cfg = load_run_config(run_dir)
     checkpoint_path = find_model_checkpoint(run_dir)
-    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm = ConditionalBornMachine.load(str(checkpoint_path), accumulate=True)
     cbm.to(device)
     logger.info(f"Loaded model from {checkpoint_path}")
 
@@ -346,7 +346,7 @@ def load_model_and_data():
 
     checkpoint_path = find_model_checkpoint(run_dir)
     logger.info(f"Loading model from: {checkpoint_path}")
-    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm = ConditionalBornMachine.load(str(checkpoint_path), accumulate=True)
     cbm.to(device)
 
     # Reconstruct DataHandler

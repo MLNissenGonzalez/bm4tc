@@ -750,3 +750,39 @@ def test_accumulate_is_settable_post_load(tmp_path):
     x = torch.rand(3, 4) * 1.6 - 0.8
     _overflow_scale_(cbm)
     assert torch.isfinite(cbm.class_probabilities(x)).all()  # accumulate path active
+
+
+def test_load_accumulate_override(tmp_path):
+    """load(path, accumulate=...) overrides the saved flag; None keeps it.
+
+    The analysis pipeline passes accumulate=True so eval/analysis always uses the
+    overflow-safe path regardless of the checkpoint's stored flag."""
+    p = str(tmp_path / "model")
+    _acc_cbm(accumulate=False).save(p)
+    assert ConditionalBornMachine.load(p, accumulate=True).accumulate is True
+    assert ConditionalBornMachine.load(p).accumulate is False  # None → saved flag
+
+    _acc_cbm(accumulate=True).save(p)
+    assert ConditionalBornMachine.load(p, accumulate=False).accumulate is False
+    assert ConditionalBornMachine.load(p).accumulate is True   # None → saved flag
+
+
+def test_accumulate_cfg_sync_persists_override(tmp_path):
+    """The train.py cfg-sync makes save() record the actually-used flag.
+
+    A warm-started run loads an a0 checkpoint (accumulate=False), overrides the
+    flag, and syncs cbm.cfg; the model saved after training must report the true
+    flag when reloaded with no override (as the analysis pipeline would)."""
+    from omegaconf import OmegaConf
+    p = str(tmp_path / "model")
+    _acc_cbm(accumulate=False).save(p)
+
+    cbm = ConditionalBornMachine.load(p)
+    cbm.accumulate = True
+    # mirror experiments/train.py: persist the override into the model config
+    OmegaConf.set_struct(cbm.cfg, False)
+    cbm.cfg.accumulate = cbm.accumulate
+    OmegaConf.set_struct(cbm.cfg, True)
+    cbm.save(p)
+
+    assert ConditionalBornMachine.load(p).accumulate is True

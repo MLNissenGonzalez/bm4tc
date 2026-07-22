@@ -47,7 +47,7 @@ def sample_and_plot(
 ):
     run_dir = Path(run_dir)
     checkpoint_path = find_model_checkpoint(run_dir)
-    cbm = ConditionalBornMachine.load(str(checkpoint_path))
+    cbm = ConditionalBornMachine.load(str(checkpoint_path), accumulate=True)
     cbm.to(device)
     cbm.eval()
     logger.info(f"Loaded model from {checkpoint_path}")
