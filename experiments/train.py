@@ -28,6 +28,7 @@ from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 from src.train import NLLTrainer, AdversarialTrainer
 import torch
+from omegaconf import OmegaConf
 
 logger = logging.getLogger(__name__)
 register()
@@ -51,6 +52,13 @@ def main(cfg: Config) -> float:
         # (fresh models read it at construction). Lets pretrained/fine-tune runs
         # opt into the overflow-safe path even though the a0 checkpoint predates it.
         cbm.accumulate = bool(cfg.born.get("accumulate", False))
+        # Persist the override into the model's own config so the checkpoint
+        # saved after training records the flag actually used — otherwise save()
+        # would serialize the stale flag inherited from the loaded checkpoint,
+        # and later analysis loads would read the wrong value.
+        OmegaConf.set_struct(cbm.cfg, False)
+        cbm.cfg.accumulate = cbm.accumulate
+        OmegaConf.set_struct(cbm.cfg, True)
         cbm.to(device)
     else:
         cbm = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)

@@ -855,10 +855,21 @@ class ConditionalBornMachine(tk.models.MPS):
         )
 
     @classmethod
-    def load(cls, path: str) -> "ConditionalBornMachine":
+    def load(cls, path: str, accumulate: bool | None = None) -> "ConditionalBornMachine":
+        """Restore a model from a checkpoint.
+
+        ``accumulate`` overrides the overflow-safe amplitude flag on the loaded
+        model: ``None`` (default) keeps the saved-config value — used by training
+        entry points; the analysis pipeline passes ``True`` so eval/analysis
+        always uses the overflow-safe path regardless of the checkpoint's flag
+        (numerically identical where nothing overflows).
+        """
         ckpt = torch.load(path, weights_only=False)
         cfg = OmegaConf.create(ckpt["config"])
-        return cls(cfg=cfg, tensors=ckpt["tensors"])
+        inst = cls(cfg=cfg, tensors=ckpt["tensors"])
+        if accumulate is not None:
+            inst.accumulate = bool(accumulate)
+        return inst
 
 
 # ==============================================================================
