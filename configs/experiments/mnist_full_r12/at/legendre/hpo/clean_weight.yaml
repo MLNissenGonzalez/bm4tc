@@ -1,0 +1,120 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training HPO over clean_weight ONLY, at fixed lr and
+# soft_strength. Intended for bond dims 10-40 at alpha in {0, 0.01}, where a
+# full 3D Optuna search is unaffordable.
+#
+# WHY clean_weight is the swept axis (from the 27 finished trials of the r20
+# Optuna study mnist_full_r12/at/legendre/d3r20c64/hpo_1306_2003, scored on MAX
+# rob/valid over history, after dropping 4 collapsed runs with acc ~ chance and
+# 1 gradient-masking artifact):
+#
+#     corr(clean_weight, rob) = -0.664       <- dominant
+#     corr(log lr,       rob) = -0.200       <- weak, broad plateau
+#
+#     clean_weight   n   mean rob   mean acc
+#        0.20-0.30   8     0.5550     0.9740
+#        0.30-0.45   6     0.3852     0.9656
+#        0.45-0.60   2     0.4726     0.9719
+#        0.60-1.00   6     0.2726     0.9701
+#
+# Lower clean_weight buys a large robustness gain for ~0.4% clean accuracy. The
+# old study's search interval was interval(0.2, 1.0) and its good trials pile up
+# against the 0.2 floor (top-6 clean_weights: 0.207 0.231 0.237 0.258 0.274
+# 0.421), so the optimum may lie BELOW that floor -- this grid probes down to
+# 0.0 (pure adversarial, the pgd_at default).
+#
+# WHY lr is fixed at 3e-4: it sits in the AT plateau (1.5e-4..7e-4, mean rob
+# 0.52-0.56 vs 0.37 above and 0.38 below) and near the 4.05e-4 the r20 study
+# selected. An alpha-dependent lr is NOT used here: across the 240 warm-start
+# NAT trials the good-trial geo-mean lr falls monotonically with alpha
+# (2.59e-4 -> 1.99e-4 from alpha 0.01 to 1), but that is only a 1.3x drift over
+# the whole alpha range, i.e. ~0.2% between alpha=0 and alpha=0.01 -- far below
+# seed noise. Fixing lr keeps alpha the only difference between the two arms.
+#
+# WHY soft_strength is fixed at 1e-3: across those same 240 trials the objective
+# is flat in soft_strength over ~6 decades once lr clears ~1e-4; only >1e-1 is
+# reliably bad. Per-alpha transfer would inject noise (the alpha=0 and
+# alpha=0.01 NAT winners differ by up to 6000x at r20) into the very comparison
+# this experiment makes.
+#
+# Usage (alpha, born and matching model_path all required):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/at/legendre/hpo/clean_weight \
+#       born=legendre/d3r20c64 \
+#       trainer.adversarial.alpha=0.01 \
+#       model_path=outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/a0_2406/2/models/model
+#
+# Output:  outputs/mnist_full_r12/at/legendre/d3r{R}c64/hpo/cw_a{X}_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "cw_${alpha_suffix:}"
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r10c64        # CLI-overridden: born=legendre/d3r{10,20,40}c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Required on the CLI: best clean (alpha=0) NAT checkpoint for this bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+  evasion:
+    norm: "inf"
+    method: "PGD"
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    alpha: 0.0               # CLI-overridden: trainer.adversarial.alpha={0.0, 0.01}
+    max_epoch: 100
+    batch_size: 512
+    patience: 10
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
+    save: false
+
+    evasion:
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.3]       # standard MNIST L-inf budget (Madry et al.)
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 70
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3    # FIXED -- flat over ~6 decades in the NAT studies
+      log_target: null
+      debug: false
+
+    clean_weight: 0.2        # overridden by the grid below
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 3e-4             # FIXED -- centre of the AT plateau (1.5e-4..7e-4)
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.clean_weight: choice(0.0, 0.1, 0.2, 0.4)

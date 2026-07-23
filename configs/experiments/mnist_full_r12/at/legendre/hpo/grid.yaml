@@ -9,15 +9,22 @@
 # adversarial (and clean) examples: alpha*gen + (1-alpha)*dis; the PGD attack
 # keeps its discriminative NLL criterion, inherited from pgd_at.
 #
-# CAVEAT on the two fixed values -- neither is supported by AT evidence:
+# NOTE on the fixed values:
 #   * soft_strength=1e-3 is carried over from the NAT warm-start analysis
 #     (240 trials, d3r{10,20,40}c64), where the objective was flat across
 #     ~6 decades. AT has a different objective (adv + clean_weight*clean), so
-#     this is an untested extrapolation across trainer type.
-#   * clean_weight=0.421 is the best value from the OLD-style r20 AT Optuna HPO
-#     (at/legendre/d3r20c64/hpo/at.yaml), which had no alpha and no norm control.
-# If the lr grid comes back flat or uniformly poor, these are the first two
-# things to re-open -- ideally with one 2D Optuna study at a single cheap arch.
+#     this remains an untested extrapolation across trainer type.
+#   * clean_weight=0.2 comes from re-analysing the 27 finished trials of the r20
+#     Optuna study (hpo_1306_2003) on MAX rob/valid, after dropping 4 collapsed
+#     runs (acc ~ chance) and 1 gradient-masking artifact (rob 0.948 ~ acc 0.981
+#     at wd=4e-2; an identical-config duplicate scored 0.173). Robustness falls
+#     steadily with clean_weight -- mean rob 0.5550 at cw 0.2-0.3 vs 0.2726 at
+#     cw 0.6-1.0, for ~0.4% clean accuracy -- so the previously used 0.421 was
+#     measurably suboptimal. corr(clean_weight, rob) = -0.664.
+#
+# clean_weight matters MORE than lr here (corr -0.664 vs -0.200), so for the
+# cheap alpha in {0, 0.01} runs at r10-r40 prefer the sibling config
+# hpo/clean_weight.yaml, which sweeps clean_weight at fixed lr instead.
 #
 # Evasion budget follows the existing mnist AT config: L-inf, strength 0.3 as a
 # fraction of range_size(2.0), i.e. the standard 0.3 MNIST budget (Madry et al.)
@@ -91,7 +98,7 @@ trainer:
       log_target: null
       debug: false
 
-    clean_weight: 0.4210913468712624   # FIXED from the r20 AT Optuna HPO best
+    clean_weight: 0.2      # FIXED -- best region of the re-analysed r20 AT study
 
     optimizer:
       name: "adam"
@@ -102,4 +109,8 @@ trainer:
 hydra:
   sweeper:
     params:
-      trainer.adversarial.optimizer.kwargs.lr: choice(1.5e-4, 3e-4, 6e-4, 1.2e-3)
+      # Bracketed to the AT plateau measured on the r20 study: mean rob 0.52-0.56
+      # over 1.5e-4..7e-4, falling to 0.370 over 7e-4..1.5e-3, with outright
+      # collapse (acc ~ chance) at every trial above 2.7e-3. The NAT grid's
+      # 1.2e-3 upper point is therefore dropped for AT.
+      trainer.adversarial.optimizer.kwargs.lr: choice(1e-4, 2e-4, 4e-4, 7e-4)
