@@ -136,7 +136,7 @@ Note: gradient **descent** on NLL = ascent on log p(x). The final clamp ensures 
 
 **After purification, classify x* instead of x_adv.**
 
-> ⚠️ **Known bug (Gibbs purification variant, open)**: the grid Gibbs sampler in `purification.py` (`abs_sq = abs_square(amplitudes(x_cand))` → `draw_from_grid`) computes its per-bin weights from raw amplitudes, which overflow to `inf` on overflow-prone models; `draw_from_grid` maps `posinf → 0`, so the highest-probability bins are silently zeroed and sampling goes *backwards*. The gradient-ascent path above is safe (it uses `marginal_log_probability`, which is always overflow-safe). Fix pending: a log-domain sampler on `logsumexp(log_amp_sq(x_cand))`.
+> ✅ **Overflow-safe (was a known bug)**: the grid Gibbs sampler in `purification.py` now computes its per-bin weights in log space — `logsumexp(log_amp_sq(x_cand))` with the radius mask applied as `-inf`, sampled by `draw_from_grid_log`. Previously it used raw `abs_square(amplitudes(x_cand))` → `draw_from_grid`, which overflowed to `inf` on overflow-prone models; `draw_from_grid` mapped `posinf → 0`, silently zeroing the highest-probability bins so sampling ran *backwards*. Like the gradient-ascent path (which uses `marginal_log_probability`), it is now always overflow-safe.
 
 Reported metrics:
 - `eval/uq_purify_acc/<eps>/<r>` — accuracy on purified samples
