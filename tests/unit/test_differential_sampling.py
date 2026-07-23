@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.model import draw_from_grid
+from src.model import draw_from_grid, draw_from_grid_log
 
 BATCH = 8
 BINS = 20
@@ -62,4 +62,62 @@ def test_draw_from_grid_posinf_handled(grid):
 def test_draw_from_grid_batch_size_1(grid):
     p = torch.ones(1, BINS)
     samples = draw_from_grid(p, grid)
+    assert samples.shape == (1,)
+
+
+# ---- draw_from_grid_log ----
+
+def test_draw_from_grid_log_output_in_grid_and_shape(grid):
+    samples = draw_from_grid_log(torch.zeros(BATCH, BINS), grid)
+    assert samples.shape == (BATCH,)
+    grid_set = grid.tolist()
+    for s in samples.tolist():
+        assert any(abs(s - g) < 1e-5 for g in grid_set)
+
+
+def test_draw_from_grid_log_matches_linear_on_benign_weights(grid):
+    """log-domain and linear leaves agree bin-for-bin on the same weights."""
+    torch.manual_seed(0)
+    p = torch.rand(BATCH, BINS) + 1e-3
+    torch.manual_seed(42)
+    lin = draw_from_grid(p / p.amax(-1, keepdim=True), grid)
+    torch.manual_seed(42)
+    log = draw_from_grid_log(p.log(), grid)
+    assert torch.equal(lin, log)
+
+
+def test_draw_from_grid_log_survives_overflowing_scale(grid):
+    """Weights whose linear form would overflow float32 still sample correctly.
+
+    log-weights ~1e4 => exp overflows to inf in linear space; the row-max
+    subtraction keeps the relative magnitudes exact."""
+    log_p = torch.full((BATCH, BINS), -1e4)
+    log_p[:, 3] = 1e4        # single dominant bin
+    samples = draw_from_grid_log(log_p, grid)
+    assert torch.allclose(samples, grid[3].expand(BATCH))
+
+
+def test_draw_from_grid_log_neg_inf_bins_never_chosen(grid):
+    """-inf is the log-space mask: those bins must have zero probability."""
+    log_p = torch.zeros(BATCH, BINS)
+    log_p[:, 5:] = float("-inf")
+    samples = draw_from_grid_log(log_p, grid)
+    assert (samples < grid[5]).all()
+
+
+def test_draw_from_grid_log_all_neg_inf_row_uniform_fallback(grid):
+    """A fully-masked row has no admissible bin -> uniform, not NaN."""
+    samples = draw_from_grid_log(torch.full((BATCH, BINS), float("-inf")), grid)
+    assert samples.shape == (BATCH,)
+    assert torch.isfinite(samples).all()
+
+
+def test_draw_from_grid_log_nan_handled(grid):
+    samples = draw_from_grid_log(torch.full((BATCH, BINS), float("nan")), grid)
+    assert samples.shape == (BATCH,)
+    assert torch.isfinite(samples).all()
+
+
+def test_draw_from_grid_log_batch_size_1(grid):
+    samples = draw_from_grid_log(torch.zeros(1, BINS), grid)
     assert samples.shape == (1,)

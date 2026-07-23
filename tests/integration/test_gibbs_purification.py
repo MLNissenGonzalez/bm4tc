@@ -151,6 +151,51 @@ def test_purify_snapshots_partial_batch_valid(cbm):
         assert (xp >= lo - 1e-5).all() and (xp <= hi + 1e-5).all()
 
 
+@pytest.mark.parametrize("radius", [None, 0.2])
+def test_gibbs_stable_when_amplitudes_overflow(radius):
+    """Gibbs weights stay correct when the raw |ψ|² would overflow to inf.
+
+    The sweep evaluates a full-chain contraction per candidate, so on a long
+    chain raw amplitudes() overflows; the old linear path then produced p=inf and
+    draw_from_grid mapped posinf->0, silently zeroing the HIGHEST-probability bins
+    so sampling ran backwards. The log-domain path (log_amp_sq + logsumexp) has no
+    such regime. Guards against a *backwards* sampler, not just NaN.
+    """
+    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+
+    data_dim = 60
+    cbm = ConditionalBornMachine(
+        cfg=CBMConfig(embedding="fourier",
+                      init_kwargs=MPSInitConfig(in_dim=2, bond_dim=4, std=0.3)),
+        data_dim=data_dim, num_classes=2, device=torch.device("cpu"))
+    with torch.no_grad():
+        for node in cbm._mats_env:
+            node.tensor.data.mul_(8.0)
+    cbm.prepare(device=torch.device("cpu")); cbm.eval(); cbm.cache_log_Z()
+
+    lo, hi = cbm.input_range
+    # precondition: the linear path this replaced really is broken here
+    x_probe = lo + (hi - lo) * torch.rand(2, data_dim)
+    assert not torch.isfinite(cbm.amplitudes(x_probe)).all(), \
+        "fixture no longer overflows; the regime this guards is untested"
+
+    torch.manual_seed(0)
+    x_adv = lo + (hi - lo) * torch.rand(6, data_dim)
+    purifier = GibbsPurification(num_bins=8, gibbs_batch_size=4, radius=radius)
+    torch.manual_seed(1)
+    # n_sweeps=1 so the radius restriction (centred on the sweep-start snapshot)
+    # is well-defined relative to x_adv; across multiple sweeps x_cur may drift up
+    # to n_sweeps*radius from the original, so a single-radius bound wouldn't hold.
+    xp, lp = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
+
+    assert xp.shape == x_adv.shape
+    assert torch.isfinite(xp).all()
+    assert (xp >= lo).all() and (xp <= hi).all()
+    assert len(torch.unique(xp)) > 1, "sampler collapsed to a single bin"
+    if radius is not None:
+        assert (xp - x_adv).abs().max() <= radius * (hi - lo) + 1e-6
+
+
 def test_gibbs_numeric_regression():
     """Pin Gibbs output so future changes (e.g. the reset hoist) can't silently alter it.
 

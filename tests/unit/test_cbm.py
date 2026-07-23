@@ -213,15 +213,51 @@ def test_make_conditioned_net_returns_mps():
 
 
 def test_make_conditioned_net_is_canonical():
+    """Sites 1..n-1 are left-isometric up to a constant: A†A ≈ c²·P.
+
+    Not A†A ≈ I. Two reasons, both by design:
+      * canonicalize(renormalize=True) distributes a constant c per node, so the
+        right environment contracts to c²·I rather than I. Uniform across grid
+        bins, so torch.multinomial's per-row normalization divides it out.
+      * A randn-init MPS is near rank-deficient, so some bond directions carry no
+        weight and A†A is a scaled *projector* P, not full identity. What sampling
+        needs is that the retained directions share one common scale — that is
+        what makes the right environment a single multiplicative constant.
+    """
     cbm = _tiny_cbm()
     cond_mps = cbm._make_conditioned_net(0)
-    # Sites 1..n-1 must be left-isometric: A†A ≈ I (summed over left and phys dims)
     for k in range(1, cond_mps.n_features):
         A = cond_mps._mats_env[k].tensor   # (D_l, d, D_r)
-        D_l, d, D_r = A.shape
         ATA = torch.einsum('ijk,ijl->kl', A.conj(), A)  # (D_r, D_r)
-        assert torch.allclose(ATA, torch.eye(D_r, dtype=ATA.dtype), atol=1e-5), \
-            f"Site {k} not left-isometric: max err {(ATA - torch.eye(D_r, dtype=ATA.dtype)).abs().max():.2e}"
+        diag = torch.diagonal(ATA).real
+        off = ATA - torch.diag_embed(torch.diagonal(ATA))
+        assert torch.allclose(off, torch.zeros_like(off), atol=1e-5), \
+            f"Site {k} not orthogonal: max off-diag {off.abs().max():.2e}"
+        live = diag[diag > 1e-8]
+        assert len(live) > 0, f"Site {k} entirely degenerate"
+        # every populated direction carries the SAME constant c²
+        assert torch.allclose(live, live[0].expand_as(live), rtol=1e-4), \
+            f"Site {k} live directions not a common scale: {live}"
+
+
+def test_make_conditioned_net_degenerate_dirs_unused():
+    """Rank-deficient bond directions are never populated during sampling.
+
+    A zero direction in A†A is harmless only if the running left environment H
+    never acquires weight there — otherwise the right-environment-is-a-constant
+    assumption behind the sampler would break."""
+    cbm = _tiny_cbm()
+    cond_mps = cbm._make_conditioned_net(0)
+    for k in range(1, cond_mps.n_features):
+        A = cond_mps._mats_env[k].tensor
+        dead = torch.diagonal(torch.einsum('ijk,ijl->kl', A.conj(), A)).real <= 1e-8
+        if not dead.any():
+            continue
+        # any vector pushed through A has zero weight on the dead directions
+        H = torch.randn(16, A.shape[0], dtype=A.dtype)
+        out = torch.einsum('bi,ijk->bjk', H, A)          # (batch, d, D_r)
+        assert out[..., dead].abs().max() < 1e-6, \
+            f"Site {k}: degenerate direction carries weight {out[..., dead].abs().max():.2e}"
 
 
 def test_make_conditioned_net_no_mutation():
@@ -765,6 +801,29 @@ def test_load_accumulate_override(tmp_path):
     _acc_cbm(accumulate=True).save(p)
     assert ConditionalBornMachine.load(p, accumulate=False).accumulate is False
     assert ConditionalBornMachine.load(p).accumulate is True   # None → saved flag
+
+
+@pytest.mark.parametrize("data_dim,scale", [(120, 2.0), (200, 2.0), (120, 4.0)])
+def test_sample_stable_on_long_overscaled_chain(data_dim, scale):
+    """sample() survives the many-site regime that used to break canonicalize.
+
+    Before per-site pre-normalization + renormalize=True, canonicalize(oc=0)
+    concentrated the whole MPS norm into site 0 (~1e25 at data_dim=120), so these
+    raised either `probability tensor contains inf, nan or element < 0` from
+    multinomial or `_LinAlgError` from a non-converging SVD. Note the first case
+    tripped while raw amplitudes() was still finite — this failure mode is
+    distinct from amplitude overflow and is not addressed by born.accumulate.
+    """
+    cbm = _acc_cbm(data_dim=data_dim, bond_dim=4)
+    _overflow_scale_(cbm, scale=scale)
+    torch.manual_seed(0)
+    s = cbm.sample(class_idx=0, n=4, num_bins=16)
+    lo, hi = cbm.input_range
+    assert s.shape == (4, data_dim)
+    assert torch.isfinite(s).all()
+    assert (s >= lo).all() and (s <= hi).all()
+    # not collapsed onto a single grid value
+    assert len(torch.unique(s)) > 1
 
 
 def test_accumulate_cfg_sync_persists_override(tmp_path):

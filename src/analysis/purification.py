@@ -165,7 +165,7 @@ class LikelihoodPurification:
 import torch
 from typing import Optional, Tuple
 
-from src.model import draw_from_grid
+from src.model import draw_from_grid_log
 
 
 class GibbsPurification:
@@ -305,23 +305,24 @@ class GibbsPurification:
                     x_cand[:, k] = input_space.repeat(bs)
 
                     with torch.no_grad():
-                        # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}).
-                        # KNOWN BUG (open): raw amplitudes() overflows to inf on
-                        # overflow-prone models → p=inf → draw_from_grid maps
-                        # posinf→0, silently zeroing the HIGHEST-probability bins
-                        # (sampling goes backwards). Unlike marginal_log_probability
-                        # (always overflow-safe), this Gibbs-weight path is still
-                        # raw. Fix = log-domain sampler on logsumexp(log_amp_sq).
-                        abs_sq = born.abs_square(born.amplitudes(x_cand))  # (bs*bins, C)
-                        p = abs_sq.sum(dim=-1).view(bs, self.num_bins)     # (bs, bins)
+                        # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}),
+                        # computed entirely in log space. Each candidate is a full
+                        # chain contraction over every site, so the linear |ψ|²
+                        # overflows on long chains; log_amp_sq is the norm-
+                        # accumulating (always overflow-safe) contraction, and
+                        # logsumexp does the class sum without leaving log space.
+                        las = born.log_amp_sq(x_cand)                      # (bs*bins, C)
+                        log_p = torch.logsumexp(las, dim=-1).view(bs, self.num_bins)
 
                     if delta_abs is not None:
                         lo_k = (x_bar[:, k] - delta_abs).clamp(lo, hi).unsqueeze(1)
                         hi_k = (x_bar[:, k] + delta_abs).clamp(lo, hi).unsqueeze(1)
                         mask = (input_space[None, :] >= lo_k) & (input_space[None, :] <= hi_k)
-                        p = p * mask
+                        # Excluded bins are -inf (weight 0), the log-space
+                        # equivalent of the previous multiply-by-zero mask.
+                        log_p = log_p.masked_fill(~mask, float("-inf"))
 
-                    x_cur[:, k] = draw_from_grid(p, input_space)
+                    x_cur[:, k] = draw_from_grid_log(log_p, input_space)
 
                 if s in snap_results:
                     snap_results[s].append(x_cur.cpu().clone())

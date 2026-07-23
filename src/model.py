@@ -40,6 +40,43 @@ def draw_from_grid(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     return z[indices]
 
 
+def draw_from_grid_log(log_p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    """Log-domain counterpart of :func:`draw_from_grid`.
+
+    Same contract, but takes *log* weights, so callers whose weights would
+    overflow in linear space (a full-chain |ψ|² over many sites) never have to
+    materialize them. Only relative magnitudes matter: the per-row max is
+    subtracted before exponentiating, which is exact and puts every row in
+    (0, 1]. Excluded bins should be passed as ``-inf`` (they map to weight 0).
+
+    Parameters
+    ----------
+    log_p : torch.Tensor
+        Unnormalized log weights, shape (batch, num_bins). ``-inf`` allowed.
+    z : torch.Tensor
+        Grid of candidate values, shape (num_bins,).
+
+    Returns
+    -------
+    torch.Tensor
+        Sampled grid values, shape (batch,).
+    """
+    lp = torch.nan_to_num(log_p.float(), nan=float("-inf"), posinf=float("inf"))
+    row_max = lp.amax(dim=-1, keepdim=True)
+    # Rows that are entirely -inf (e.g. a fully-masked radius window) have no
+    # admissible bin; fall back to uniform rather than producing NaN.
+    finite_row = torch.isfinite(row_max)
+    lp = torch.where(finite_row, lp - torch.where(finite_row, row_max,
+                                                  torch.zeros_like(row_max)),
+                     torch.zeros_like(lp))
+    p = lp.exp()
+    p = torch.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
+    row_sums = p.sum(dim=-1, keepdim=True)
+    p = torch.where(row_sums > 0, p, torch.ones_like(p))
+    indices = torch.multinomial(p, num_samples=1).squeeze(1)
+    return z[indices]
+
+
 @dataclass
 class MPSInitConfig:
     in_dim: int = 4
@@ -720,11 +757,39 @@ class ConditionalBornMachine(tk.models.MPS):
         shared tensors with self._mats_env), then calls canonicalize(oc=0) on
         it. The caller owns the returned object and should delete it when done.
         Does not mutate self._mats_env.
+
+        Two scale controls keep this usable on long chains, and BOTH are needed:
+
+        * Per-site pre-normalization rescales each tensor to unit Frobenius
+          norm. This only multiplies the whole MPS by a global scalar, but it
+          keeps the SVD inside canonicalize well-conditioned — without it the
+          decomposition raises _LinAlgError once the accumulated scale is large
+          (observed at n_features ≳ 200 with per-site scale 2).
+        * ``renormalize=True`` stops canonicalize from concentrating the product
+          of all singular-value scalings into the orthogonality center. With
+          renormalize=False site 0 reaches ~1e25 (overflowing the sampler) or
+          underflows to a denormal, depending on the input scale.
+
+        Both are invisible to sampling: the first is a global scalar, the second
+        distributes a constant c per node, so the right environment contracts to
+        c²·I instead of I — a factor uniform across grid bins, which the per-row
+        normalization in torch.multinomial divides out.
+
+        NOTE on ``cutoff``: it is an absolute singular-value threshold, so
+        pre-normalization changes its meaning — it is now relative to unit-norm
+        site tensors ("drop directions 1e-6 below a unit-norm tensor") instead of
+        scaling with the init magnitude. This is the intended semantics: with raw
+        tensors a small-std model had singular values near the cutoff itself, so
+        canonicalize could truncate a bond down to dimension 1 and silently
+        discard half the state.
         """
-        cond_tensors = self.condition_on_class(class_idx)
+        cond_tensors = [
+            t / t.norm().clamp_min(_LOG_PROB_EPS)
+            for t in self.condition_on_class(class_idx)
+        ]
         cond_mps = tk.models.MPS(tensors=cond_tensors)
         cond_mps.canonicalize(oc=0, mode=mode, rank=rank, cutoff=cutoff,
-                              renormalize=False)
+                              renormalize=True)
         return cond_mps
 
     def sample(
@@ -772,7 +837,14 @@ class ConditionalBornMachine(tk.models.MPS):
                 T_embs = torch.einsum('ijk,bj->ibk', T, Phi)   # (D_l, bins, D_r)
                 self._u_node._direct_set_tensor(T_embs)
                 C = (self._h_node @ self._u_node).tensor        # (N, bins, D_r)
-                p = (C * C.conj()).real.sum(-1).clamp(min=0)    # (N, bins)
+                p = (C * C.conj()).real.sum(-1)                 # (N, bins)
+                # Only relative magnitudes between bins matter (multinomial
+                # normalizes each row), so divide by the per-row max: this makes
+                # the epsilon below scale-free. With a bare `p + 1e-15` a row
+                # whose weights all sit far below 1e-15 would be swamped by the
+                # epsilon and sampled uniformly.
+                p = torch.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
+                p = p / p.amax(dim=-1, keepdim=True).clamp_min(_LOG_PROB_EPS)
                 idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
                 samples[:, k] = grid[idx]
                 H_next = C[torch.arange(N, device=dev), idx, :]  # (N, D_r)
