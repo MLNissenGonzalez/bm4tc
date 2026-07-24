@@ -22,6 +22,12 @@ The JEM marginal score is unnormalised because its partition function is
 intractable. It is valid for ranking, detection, SGLD and purification, but its
 absolute value is not comparable to the exact MPS log-likelihood.
 
+All entry points use `device=auto`, matching the MPS training entry point:
+CUDA is selected whenever `torch.cuda.is_available()` and CPU is the fallback.
+Training minibatches, adversarial examples, purification and SGLD transitions
+therefore run on the GPU. Use `device=cuda:0` or `device=cpu` to override
+training, and `--device cuda:0` or `--device cpu` for analysis/generation.
+
 ## 0. Smoke test
 
 ```bash

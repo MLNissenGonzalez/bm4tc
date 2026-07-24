@@ -10,6 +10,7 @@ run_name: default
 stage: test
 regime: natural
 model_path: null
+device: auto
 
 hydra:
   run:

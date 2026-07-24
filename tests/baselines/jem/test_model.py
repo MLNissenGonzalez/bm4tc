@@ -7,6 +7,7 @@ from baselines.jem.model import (
     mps_parameter_count,
     nearest_uniform_width,
 )
+from baselines.jem.device import resolve_device
 
 
 def make_model():
@@ -50,3 +51,8 @@ def test_probabilities_normalize():
     probs = make_model().class_probabilities(torch.randn(4, 144))
     assert probs.shape == (4, 10)
     assert torch.allclose(probs.sum(1), torch.ones(4), atol=1e-6)
+
+
+def test_auto_device_has_mps_training_policy():
+    expected = "cuda" if torch.cuda.is_available() else "cpu"
+    assert resolve_device("auto").type == expected

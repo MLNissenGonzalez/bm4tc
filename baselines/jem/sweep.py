@@ -15,7 +15,7 @@ from .analysis import analyze_run
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("sweep_dir")
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--no-ood", action="store_true")
     parser.add_argument("--defense-subsample", type=int, default=None)
     parser.add_argument("--threshold-split", choices=("test", "valid"), default="test")
