@@ -1,0 +1,17 @@
+# @package _global_
+stage: seed_sweep
+run_name: a02
+regime: natural
+model_path: ???
+defaults:
+  - override /trainer: natural
+  - override /tracking: online
+trainer:
+  alpha: 0.2
+  max_epoch: 60
+  patience: 20
+  save: true
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
