@@ -1,0 +1,21 @@
+# @package _global_
+stage: test
+run_name: smoke
+regime: natural
+model_path: null
+
+defaults:
+  - override /dataset: mnist_1k_r12
+  - override /trainer: natural
+  - override /tracking: disabled
+
+trainer:
+  alpha: 0.01
+  max_epoch: 2
+  batch_size: 64
+  patience: 5
+  save: true
+
+sampler:
+  num_steps: 2
+  buffer_size: 256
