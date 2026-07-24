@@ -16,6 +16,7 @@ from src.datahandler import DataHandler
 from src.utils.paths import data_root
 
 from .attacks import PGDConfig, pgd_classification, pgd_likelihood_aware
+from .device import resolve_device
 from .model import JEMMLP
 from .purification import PurificationConfig, gradient_purify, sgld_purify
 from .sampler import ReplayBuffer, SGLDConfig, SGLDSampler
@@ -126,7 +127,7 @@ def _load_mnist_like_ood(name: str, datahandler, resize: int = 12) -> torch.Tens
 def analyze_run(
     run_dir: str | Path,
     *,
-    device: str = "cuda",
+    device: str = "auto",
     attack_eps: tuple[float, ...] = (0.1, 0.2, 0.3),
     percentiles: tuple[int, ...] = (1, 5, 10, 20),
     radii: tuple[float, ...] = (0.2, 0.3),
@@ -136,7 +137,7 @@ def analyze_run(
     adaptive_score_weight: float = 1.0,
 ) -> dict[str, float | str]:
     run_dir = Path(run_dir)
-    dev = torch.device(device if device != "cuda" or torch.cuda.is_available() else "cpu")
+    dev = resolve_device(device)
     cfg, model, dh, sampler = _load(run_dir, dev)
     model.eval()
     results: dict[str, float | str] = {}
@@ -326,7 +327,7 @@ def analyze_run(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_dir")
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--defense-subsample", type=int, default=None)
     parser.add_argument("--threshold-split", choices=("test", "valid"), default="test")
     parser.add_argument("--adaptive-score-weight", type=float, default=1.0)

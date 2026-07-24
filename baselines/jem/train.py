@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 
 import hydra
-import torch
 import wandb
 from omegaconf import DictConfig, OmegaConf
 
 from src.datahandler import DataHandler
 from src.utils.train import OptimizerConfig, set_seed
 
+from .device import resolve_device
 from .model import JEMMLP, JEMMLPConfig, mps_parameter_count
 from .sampler import ReplayBuffer, SGLDConfig, SGLDSampler
 from .trainer import (
@@ -108,7 +108,7 @@ def _init_wandb(cfg, output_dir: Path):
 
 @hydra.main(config_path="configs", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> float:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(str(cfg.device))
     set_seed(int(cfg.tracking.seed))
 
     datahandler = DataHandler(cfg.dataset)
