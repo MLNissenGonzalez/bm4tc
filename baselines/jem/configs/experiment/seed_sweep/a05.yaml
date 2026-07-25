@@ -15,3 +15,6 @@ hydra:
   sweeper:
     params:
       tracking.seed: range(1, 6)
+      trainer.optimizer.kwargs.lr: 1.0282311118421753e-05
+      trainer.energy_l2: 0.0009749919720020119
+      sampler.step_size: 0.008377535897765385

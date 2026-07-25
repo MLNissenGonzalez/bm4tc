@@ -17,3 +17,5 @@ hydra:
   sweeper:
     params:
       tracking.seed: range(1, 6)
+      trainer.optimizer.kwargs.lr: 0.0009822036655933496
+      trainer.clean_weight: 0.007141025907089427
