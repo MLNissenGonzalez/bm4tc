@@ -8,8 +8,9 @@ while on the `jem` branch.
 
 - Same 70k MNIST pool, split, 12×12 bilinear resize and global scaling to
   `[-1, 1]` as the MPS pipeline.
-- Parameter-matched MLP: `144 → 347 → 347 → 10`, 174,551 real parameters
-  versus 174,520 complex elements in `d3r20c64`.
+- Degree-of-freedom-matched MLP: `144 → 550 → 480 → 10`, exactly 349,040
+  real parameters versus 174,520 complex elements in `d3r20c64`
+  (two real degrees of freedom per complex element).
 - Convex objective
   `L_alpha = (1-alpha) CE + alpha joint_contrastive_loss`.
 - Alpha ladder: `0, 0.01, 0.1, 0.2, 0.5, 1`.
@@ -46,9 +47,11 @@ python -m baselines.jem.train --multirun \
   +experiment=hpo/a0
 ```
 
-Inspect the Optuna results and copy the selected learning rate and weight decay
-into `configs/experiment/seed_sweep/a0.yaml` or pass them as CLI overrides.
 Selection uses validation accuracy; the returned Hydra objective is `-accuracy`.
+When Optuna finishes, its callback automatically writes the selected learning
+rate and weight decay into `configs/experiment/seed_sweep/a0.yaml`.
+This intentionally leaves a small version-controlled YAML diff so the selected
+hyperparameters remain reproducible and reviewable.
 
 ## 2. Train the alpha=0 seed sweep
 
@@ -60,7 +63,7 @@ python -m baselines.jem.train --multirun \
 Runs seeds 1–5. Note the path of the selected alpha=0 checkpoint, for example:
 
 ```text
-outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 ```
 
 ## 3. HPO for each alpha>0
@@ -72,7 +75,7 @@ python -m baselines.jem.train --multirun \
   +experiment=hpo/pretrained \
   run_name=pretrained_a001 \
   trainer.alpha=0.01 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 ```
 
 Repeat with:
@@ -85,9 +88,24 @@ Repeat with:
 | `pretrained_a05` | 0.5 |
 | `pretrained_a1` | 1.0 |
 
-The small search varies learning rate, energy regularisation and SGLD step
-size. Copy the selected values into the corresponding seed-sweep YAML before
-the final run, or provide them through CLI overrides.
+The search varies learning rate, energy regularisation, and the training-SGLD
+step size, noise and number of steps. For alpha>0, checkpoints and Optuna trials
+are selected by validation mixed CD loss. Validation uses an independent fixed
+100-step sampler from `configs/validation_sampler/default.yaml`, so a weak
+candidate sampler cannot win merely by producing easy negatives. Accuracy is
+still logged and CE retains unit weight in the mixed objective. On successful
+completion, the Optuna callback writes all five selected values directly into
+the seed-sweep YAML corresponding to `trainer.alpha`.
+
+The values currently present in the alpha>0 seed-sweep YAMLs came from the
+previous accuracy-only protocol. Re-running this HPO replaces all five selected
+parameters (`lr`, `energy_l2`, SGLD step size, noise and number of steps)
+automatically before the final comparison.
+
+`log.json` and W&B also record training- and validation-chain score gain,
+L2 displacement and boundary saturation. These diagnostics distinguish a
+useful negative sampler from chains that remain near their initialization or
+collapse onto the `[-1,1]` boundary.
 
 ## 4. Train the alpha ladder
 
@@ -96,23 +114,23 @@ For each config, provide the selected alpha=0 checkpoint:
 ```bash
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/a001 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/a01 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/a02 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/a05 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/a1 \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 ```
 
 ## 5. MLP adversarial-training baseline
@@ -122,15 +140,16 @@ First tune the AT learning rate and clean weight:
 ```bash
 python -m baselines.jem.train --multirun \
   +experiment=hpo/at \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 ```
 
-Then run five seeds with the chosen settings:
+The callback updates `seed_sweep/at.yaml`; then run five seeds with the chosen
+settings:
 
 ```bash
 python -m baselines.jem.train --multirun \
   +experiment=seed_sweep/at \
-  model_path=outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a0_DDMM/2/models/model.pt
+  model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_DDMM/2/models/model.pt
 ```
 
 This trainer is deliberately discriminative. It does not expose `alpha`.
@@ -141,14 +160,14 @@ One run:
 
 ```bash
 python -m baselines.jem.analysis \
-  outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a001_DDMM/0
+  outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_DDMM/0
 ```
 
 Full sweep:
 
 ```bash
 python -m baselines.jem.sweep \
-  outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a001_DDMM
+  outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_DDMM
 ```
 
 The sweep produces:
@@ -162,16 +181,19 @@ analysis/outputs/baselines/jem/.../evaluation_summary.txt
 Metric names follow the current MPS analysis where applicable:
 
 - `acc`, `dis_loss`, `rob/{eps}`
+- `uq_adv_acc/{eps}` and `uq_joint_adv_acc/{eps}`
 - `uq_detection/{q}pct/{eps}`
 - `uq_det_err_detected/{q}pct/{eps}`
 - `uq_det_err_passed/{q}pct/{eps}`
 - `uq_purify_acc/{eps}/{radius}`
 
-JEM-specific additions are:
+The likelihood-aware adaptive attack also uses the MPS-compatible
+`uq_joint_*` metric family. JEM-specific additions are:
 
 - `adaptive_rob/{eps}`, `adaptive_detection/{q}pct/{eps}`
+- `px_cd_loss`, `joint_cd_loss` and separated positive/negative scores
 - `sgld_purify_acc/{eps}/{radius}` and purification recovery rates
-- adaptive-attack purification metrics with the `adaptive_` prefix
+- `sgld_joint_purify_acc/{eps}/{radius}`
 - `ood/{dataset}/{auroc,aupr_in,aupr_out,fpr95}` and `ood_msp/...`
 
 Attack epsilons are absolute in `[-1,1]`, matching MPS analysis. By default,
@@ -186,7 +208,7 @@ of the likelihood-aware attack and defaults to `1.0`.
 
 ```bash
 python -m baselines.jem.generate \
-  outputs/baselines/jem/mnist_full_r12/natural/mlp_h347/seed_sweep/a001_DDMM/0 \
+  outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_DDMM/0 \
   --steps 1000 --per-class 8
 ```
 
@@ -202,8 +224,8 @@ python -m baselines.jem.compare \
   --jem 0=analysis/outputs/baselines/jem/.../a0/evaluation_data.csv \
   --jem 0.01=analysis/outputs/baselines/jem/.../a001/evaluation_data.csv \
   --jem 0.1=analysis/outputs/baselines/jem/.../a01/evaluation_data.csv \
-  --mps 0=analysis/outputs/outputs/mnist_full_r12/.../a0/evaluation_data.csv \
-  --mps 0.01=analysis/outputs/outputs/mnist_full_r12/.../a001/evaluation_data.csv \
+  --mps 0=analysis/outputs/mnist_full_r12/.../a0/evaluation_data.csv \
+  --mps 0.01=analysis/outputs/mnist_full_r12/.../a001/evaluation_data.csv \
   --at MLP-AT=analysis/outputs/baselines/jem/.../at/evaluation_data.csv
 ```
 
@@ -221,6 +243,12 @@ metrics are compared.
 6. MLP-AT HPO and seed sweep.
 7. Analyze every sweep.
 8. Generate samples for the selected JEM runs.
+
+The same workflow is available interactively in
+`notebooks/jem_mnist.ipynb`. It mirrors the MPS `notebooks/mnist.ipynb`
+structure and produces alpha curves, purification-radius comparisons,
+per-epsilon defense bar charts, detection-threshold curves and sample commands
+under `figures/jem_mnist/`.
 
 Validation data are used for model selection. Detector thresholds default to
 the clean test percentiles solely to reproduce the current MPS protocol; the

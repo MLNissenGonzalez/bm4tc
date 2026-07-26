@@ -144,31 +144,61 @@ def analyze_run(
 
     core = evaluate_classifier(model, dh.classification["test"], dev)
     results.update(core)
-    alpha = float(cfg.trainer.get("alpha", 0.0))
+    results["uq_clean_accuracy"] = core["acc"]
+    raw_alpha = cfg.trainer.get("alpha")
+    alpha = float(raw_alpha) if raw_alpha is not None else float("nan")
     results["alpha"] = alpha
     results["parameters"] = float(model.count_parameters())
 
     test_x, test_y = _collect(dh.classification["test"])
-    # Diagnostic counterpart of the MPS gen_loss. This is a contrastive
-    # estimate using the saved replay buffer, not a normalized NLL.
-    n_test = len(test_x)
-    repeats = (n_test + len(sampler.buffer.data) - 1) // len(sampler.buffer.data)
-    negatives = sampler.buffer.data.repeat(repeats, 1)[:n_test]
-    with torch.no_grad():
-        pos_joint, neg_score = [], []
-        for i in range(0, n_test, 256):
-            xb = test_x[i : i + 256].to(dev)
-            yb = test_y[i : i + 256].to(dev)
-            logits = model(xb)
-            pos_joint.append(logits.gather(1, yb[:, None]).squeeze(1).cpu())
-            neg_score.append(
-                model.marginal_score(negatives[i : i + 256].to(dev)).cpu()
-            )
-    results["gen_loss"] = float(-torch.cat(pos_joint).mean() + torch.cat(neg_score).mean())
-    results["mixed_loss"] = (
-        (1.0 - alpha) * results["dis_loss"] + alpha * results["gen_loss"]
-    )
-    results["gen_loss_kind"] = "contrastive_replay_estimate"
+    # JEM cannot evaluate normalized joint NLL. For alpha>0 report the
+    # decomposed CD surrogate using the saved, trained replay buffer.
+    if np.isfinite(alpha) and alpha > 0:
+        n_test = len(test_x)
+        repeats = (n_test + len(sampler.buffer.data) - 1) // len(sampler.buffer.data)
+        negatives = sampler.buffer.data.repeat(repeats, 1)[:n_test]
+        with torch.no_grad():
+            pos_joint, pos_score, neg_score = [], [], []
+            for i in range(0, n_test, 256):
+                xb = test_x[i : i + 256].to(dev)
+                yb = test_y[i : i + 256].to(dev)
+                logits = model(xb)
+                pos_joint.append(logits.gather(1, yb[:, None]).squeeze(1).cpu())
+                pos_score.append(torch.logsumexp(logits, dim=-1).cpu())
+                neg_score.append(
+                    model.marginal_score(negatives[i : i + 256].to(dev)).cpu()
+                )
+        positive_joint = float(torch.cat(pos_joint).mean())
+        positive_marginal = float(torch.cat(pos_score).mean())
+        negative_marginal = float(torch.cat(neg_score).mean())
+        px_cd = negative_marginal - positive_marginal
+        joint_cd = negative_marginal - positive_joint
+        results.update(
+            {
+                "positive_joint_score": positive_joint,
+                "positive_marginal_score": positive_marginal,
+                "negative_marginal_score": negative_marginal,
+                "px_cd_loss": px_cd,
+                "joint_cd_loss": joint_cd,
+                # Kept for the common MPS CSV schema, with kind made explicit.
+                "gen_loss": joint_cd,
+                "mixed_loss": results["dis_loss"] + alpha * px_cd,
+                "gen_loss_kind": "joint_cd_replay_surrogate",
+            }
+        )
+    else:
+        results.update(
+            {
+                "positive_joint_score": float("nan"),
+                "positive_marginal_score": float("nan"),
+                "negative_marginal_score": float("nan"),
+                "px_cd_loss": float("nan"),
+                "joint_cd_loss": float("nan"),
+                "gen_loss": float("nan"),
+                "mixed_loss": results["dis_loss"],
+                "gen_loss_kind": "not_applicable_alpha_zero",
+            }
+        )
     clean_score = _score_batches(model, test_x, dev).numpy()
     results["uq_clean_log_px_mean"] = float(clean_score.mean())
     if threshold_split == "test":
@@ -215,6 +245,7 @@ def analyze_run(
         )
         adv_pred = _pred_batches(model, adv, dev)
         results[f"rob/{eps}"] = float((adv_pred == test_y).float().mean())
+        results[f"uq_adv_acc/{eps}"] = results[f"rob/{eps}"]
         adv_score = _score_batches(model, adv, dev).numpy()
         wrong = (adv_pred != test_y).numpy()
         for q, threshold in thresholds.items():
@@ -241,10 +272,24 @@ def analyze_run(
         results[f"adaptive_rob/{eps}"] = float(
             (adaptive_pred == test_y).float().mean()
         )
+        results[f"uq_joint_adv_acc/{eps}"] = results[f"adaptive_rob/{eps}"]
         adaptive_score = _score_batches(model, adaptive, dev).numpy()
+        adaptive_wrong = (adaptive_pred != test_y).numpy()
         for q, threshold in thresholds.items():
-            results[f"adaptive_detection/{q}pct/{eps}"] = float(
-                (adaptive_score < threshold).mean()
+            detected = adaptive_score < threshold
+            rate = float(detected.mean())
+            results[f"adaptive_detection/{q}pct/{eps}"] = rate
+            results[f"uq_joint_detection/{q}pct/{eps}"] = rate
+            results[f"uq_joint_det_err_detected/{q}pct/{eps}"] = (
+                float(adaptive_wrong[detected].mean())
+                if detected.any()
+                else float("nan")
+            )
+            passed = ~detected
+            results[f"uq_joint_det_err_passed/{q}pct/{eps}"] = (
+                float(adaptive_wrong[passed].mean())
+                if passed.any()
+                else float("nan")
             )
 
         # Purification is intentionally estimated on one fixed paired subset.
@@ -269,9 +314,9 @@ def analyze_run(
         adaptive_sub_pred = _pred_batches(model, adaptive_sub.cpu(), dev)
         for radius in radii:
             pur_cfg = PurificationConfig(radius=radius, num_steps=20)
-            for prefix, attacked, before_pred in (
-                ("", adv_sub, adv_sub_pred),
-                ("adaptive_", adaptive_sub, adaptive_sub_pred),
+            for attack_kind, attacked, before_pred in (
+                ("standard", adv_sub, adv_sub_pred),
+                ("joint", adaptive_sub, adaptive_sub_pred),
             ):
                 grad_chunks, sgld_chunks = [], []
                 for i in range(0, len(attacked), 256):
@@ -286,22 +331,32 @@ def analyze_run(
                 sgld_pred = _pred_batches(model, sgld_pur, dev)
                 wrong_before = before_pred != defense_y
                 denom = int(wrong_before.sum())
-                results[f"{prefix}uq_purify_acc/{eps}/{radius}"] = float(
+                grad_prefix = "uq_purify" if attack_kind == "standard" else "uq_joint_purify"
+                sgld_prefix = "sgld_purify" if attack_kind == "standard" else "sgld_joint_purify"
+                results[f"{grad_prefix}_acc/{eps}/{radius}"] = float(
                     (grad_pred == defense_y).float().mean()
                 )
-                results[f"{prefix}sgld_purify_acc/{eps}/{radius}"] = float(
+                results[f"{sgld_prefix}_acc/{eps}/{radius}"] = float(
                     (sgld_pred == defense_y).float().mean()
                 )
-                results[f"{prefix}uq_purify_recovery/{eps}/{radius}"] = (
+                results[f"{grad_prefix}_recovery/{eps}/{radius}"] = (
                     float((wrong_before & (grad_pred == defense_y)).sum() / denom)
                     if denom
                     else 1.0
                 )
-                results[f"{prefix}sgld_purify_recovery/{eps}/{radius}"] = (
+                results[f"{sgld_prefix}_recovery/{eps}/{radius}"] = (
                     float((wrong_before & (sgld_pred == defense_y)).sum() / denom)
                     if denom
                     else 1.0
                 )
+                if attack_kind == "joint":
+                    # Backward-compatible aliases for early JEM outputs.
+                    results[f"adaptive_uq_purify_acc/{eps}/{radius}"] = results[
+                        f"{grad_prefix}_acc/{eps}/{radius}"
+                    ]
+                    results[f"adaptive_sgld_purify_acc/{eps}/{radius}"] = results[
+                        f"{sgld_prefix}_acc/{eps}/{radius}"
+                    ]
 
     if compute_ood:
         clean_msp = _msp_batches(model, test_x, dev).numpy()

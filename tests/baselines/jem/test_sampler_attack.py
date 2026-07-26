@@ -1,4 +1,5 @@
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 from baselines.jem.attacks import (
     PGDConfig,
@@ -12,6 +13,7 @@ from baselines.jem.purification import (
     sgld_purify,
 )
 from baselines.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
+from baselines.jem.trainer import ValidationSamplerConfig, evaluate_jem
 
 
 def make_small():
@@ -82,3 +84,32 @@ def test_sgld_purification_respects_radius():
     assert (purified - x).abs().max() <= 0.200001
     assert purified.min() >= -1
     assert purified.max() <= 1
+
+
+def test_standardized_validation_mixed_loss_decomposition():
+    model = make_small()
+    x = torch.empty(16, 4).uniform_(-0.7, 0.7)
+    y = torch.randint(0, 2, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=8)
+    buffer = ReplayBuffer(32, 4, model.input_range, seed=123)
+    sampler = SGLDSampler(
+        SGLDConfig(num_steps=2, step_size=0.01, noise_std=0.0, buffer_size=32),
+        buffer,
+    )
+    cfg = ValidationSamplerConfig(
+        num_steps=2,
+        step_size=0.01,
+        noise_std=0.0,
+        buffer_size=32,
+        batch_size=8,
+        num_batches=2,
+    )
+    metrics = evaluate_jem(model, loader, sampler, 0.5, cfg, "cpu", epoch=1)
+    assert abs(
+        metrics["mixed_loss"]
+        - (metrics["dis_loss"] + 0.5 * metrics["px_cd_loss"])
+    ) < 1e-8
+    assert abs(
+        metrics["joint_cd_loss"]
+        - (metrics["dis_loss"] + metrics["px_cd_loss"])
+    ) < 1e-8

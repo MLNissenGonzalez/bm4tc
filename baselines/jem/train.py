@@ -20,6 +20,7 @@ from .trainer import (
     AdversarialTrainerConfig,
     NaturalTrainer,
     NaturalTrainerConfig,
+    ValidationSamplerConfig,
     make_json_logger,
 )
 
@@ -29,8 +30,14 @@ def _outputs_root() -> str:
     return f"{root}/outputs" if root else "outputs"
 
 
+def _regime_dir(regime: str) -> str:
+    return {"natural": "nat", "adversarial": "at"}.get(str(regime), str(regime))
+
+
 if not OmegaConf.has_resolver("jem_outputs_root"):
     OmegaConf.register_new_resolver("jem_outputs_root", _outputs_root)
+if not OmegaConf.has_resolver("jem_regime_dir"):
+    OmegaConf.register_new_resolver("jem_regime_dir", _regime_dir)
 
 
 def _optimizer(raw) -> OptimizerConfig:
@@ -69,6 +76,19 @@ def _adversarial_cfg(raw) -> AdversarialTrainerConfig:
         grad_clip=None if raw.grad_clip is None else float(raw.grad_clip),
         save=bool(raw.save),
         optimizer=_optimizer(raw.optimizer),
+    )
+
+
+def _validation_sampler_cfg(raw) -> ValidationSamplerConfig:
+    return ValidationSamplerConfig(
+        num_steps=int(raw.num_steps),
+        step_size=float(raw.step_size),
+        noise_std=float(raw.noise_std),
+        reinit_probability=float(raw.reinit_probability),
+        buffer_size=int(raw.buffer_size),
+        batch_size=int(raw.batch_size),
+        num_batches=int(raw.num_batches),
+        seed=int(raw.seed),
     )
 
 
@@ -129,6 +149,7 @@ def main(cfg: DictConfig) -> float:
     metadata = {
         "model/parameters": model.count_parameters(),
         "model/matched_mps_complex_parameters": expected_mps,
+        "model/matched_mps_real_degrees_of_freedom": 2 * expected_mps,
     }
     callback(0, metadata)
 
@@ -141,6 +162,7 @@ def main(cfg: DictConfig) -> float:
             noise_std=float(cfg.sampler.noise_std),
             reinit_probability=float(cfg.sampler.reinit_probability),
             buffer_size=int(cfg.sampler.buffer_size),
+            track_diagnostics=bool(cfg.sampler.track_diagnostics),
         )
         buffer = ReplayBuffer(
             sgld_cfg.buffer_size,
@@ -149,7 +171,31 @@ def main(cfg: DictConfig) -> float:
             seed=int(cfg.tracking.seed),
         )
         sampler = SGLDSampler(sgld_cfg, buffer)
-        trainer = NaturalTrainer(model, train_cfg, datahandler, sampler, device)
+        val_cfg = _validation_sampler_cfg(cfg.validation_sampler)
+        val_sgld_cfg = SGLDConfig(
+            num_steps=val_cfg.num_steps,
+            step_size=val_cfg.step_size,
+            noise_std=val_cfg.noise_std,
+            reinit_probability=val_cfg.reinit_probability,
+            buffer_size=val_cfg.buffer_size,
+            track_diagnostics=False,
+        )
+        val_buffer = ReplayBuffer(
+            val_cfg.buffer_size,
+            datahandler.data_dim,
+            model.input_range,
+            seed=val_cfg.seed,
+        )
+        validation_sampler = SGLDSampler(val_sgld_cfg, val_buffer)
+        trainer = NaturalTrainer(
+            model,
+            train_cfg,
+            datahandler,
+            sampler,
+            validation_sampler,
+            val_cfg,
+            device,
+        )
     elif str(cfg.regime) == "adversarial":
         train_cfg = _adversarial_cfg(cfg.trainer)
         datahandler.get_classification_loaders(train_cfg.batch_size)
@@ -163,7 +209,9 @@ def main(cfg: DictConfig) -> float:
 
     if str(cfg.regime) == "adversarial":
         return -float(trainer.best["rob"])
-    return -float(trainer.best["acc"])
+    if train_cfg.stop_crit == "acc":
+        return -float(trainer.best["acc"])
+    return float(trainer.best[train_cfg.stop_crit])
 
 
 if __name__ == "__main__":

@@ -6,10 +6,12 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+from omegaconf import OmegaConf
 
 from src.utils.paths import data_root
 
 from .analysis import analyze_run
+from .report import write_summary
 
 
 def main() -> None:
@@ -35,6 +37,16 @@ def main() -> None:
 
     rows = []
     for run in runs:
+        run_cfg = OmegaConf.load(run / ".hydra/config.yaml")
+        config_values = {
+            "config/dataset.name": OmegaConf.select(run_cfg, "dataset.name"),
+            "config/tracking.seed": OmegaConf.select(run_cfg, "tracking.seed"),
+            "config/trainer.alpha": OmegaConf.select(run_cfg, "trainer.alpha"),
+            "config/trainer.stop_crit": OmegaConf.select(run_cfg, "trainer.stop_crit"),
+            "config/sampler.num_steps": OmegaConf.select(run_cfg, "sampler.num_steps"),
+            "config/sampler.step_size": OmegaConf.select(run_cfg, "sampler.step_size"),
+            "config/sampler.noise_std": OmegaConf.select(run_cfg, "sampler.noise_std"),
+        }
         result = analyze_run(
             run,
             device=args.device,
@@ -43,7 +55,14 @@ def main() -> None:
             threshold_split=args.threshold_split,
             adaptive_score_weight=args.adaptive_score_weight,
         )
-        rows.append({"run_name": run.name, "run_path": str(run.resolve()), **result})
+        rows.append(
+            {
+                "run_name": run.name,
+                "run_path": str(run.resolve()),
+                **config_values,
+                **result,
+            }
+        )
 
     df = pd.DataFrame(rows)
     try:
@@ -56,10 +75,12 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_dir / "evaluation_data.csv", index=False)
 
-    numeric = df.select_dtypes(include="number")
-    summary = numeric.agg(["mean", "std"]).T
-    summary.to_csv(output_dir / "evaluation_summary.csv")
-    (output_dir / "evaluation_summary.txt").write_text(summary.to_string())
+    write_summary(
+        df,
+        output_dir,
+        sweep_name=str(sweep_suffix),
+        device=args.device,
+    )
     print(f"Saved {output_dir / 'evaluation_data.csv'}")
 
 

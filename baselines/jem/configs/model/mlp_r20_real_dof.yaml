@@ -1,5 +1,5 @@
-name: "mlp_h518"
-hidden_dims: [518, 518]
+name: "mlp_h550x480"
+hidden_dims: [550, 480]
 activation: "silu"
 input_range: [-1.0, 1.0]
 match_mps:

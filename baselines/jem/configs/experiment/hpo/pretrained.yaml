@@ -14,9 +14,14 @@ trainer:
   alpha: 0.01
   max_epoch: 60
   patience: 20
+  stop_crit: "mixed_loss"
   save: false
 
 hydra:
+  callbacks:
+    export_best:
+      _target_: baselines.jem.hpo_export.HPOExportCallback
+      target: auto_alpha
   sweeper:
     study_name: "jem_${run_name}_${dataset.name}"
     sampler:
@@ -29,4 +34,6 @@ hydra:
     params:
       trainer.optimizer.kwargs.lr: tag(log, interval(1e-5, 5e-4))
       trainer.energy_l2: tag(log, interval(1e-6, 1e-3))
-      sampler.step_size: tag(log, interval(1e-3, 3e-2))
+      sampler.step_size: tag(log, interval(1e-3, 3e-1))
+      sampler.noise_std: tag(log, interval(1e-3, 3e-2))
+      sampler.num_steps: choice(20, 40)
