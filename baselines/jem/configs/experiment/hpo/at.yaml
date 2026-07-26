@@ -14,6 +14,10 @@ trainer:
   save: false
 
 hydra:
+  callbacks:
+    export_best:
+      _target_: baselines.jem.hpo_export.HPOExportCallback
+      target: at
   sweeper:
     study_name: "mlp_at_${dataset.name}"
     sampler:

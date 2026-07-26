@@ -1,0 +1,8 @@
+num_steps: 100
+step_size: 0.05
+noise_std: 0.005
+reinit_probability: 0.1
+buffer_size: 2048
+batch_size: 256
+num_batches: 4
+seed: 12345

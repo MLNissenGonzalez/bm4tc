@@ -1,9 +1,10 @@
 defaults:
   - _self_
   - dataset: mnist_full_r12
-  - model: mlp_r20
+  - model: mlp_r20_real_dof
   - trainer: natural
   - sampler: default
+  - validation_sampler: default
   - tracking: disabled
 
 run_name: default
@@ -14,8 +15,8 @@ device: auto
 
 hydra:
   run:
-    dir: ${jem_outputs_root:}/baselines/jem/${dataset.name}/${regime}/${model.name}/${stage}/${run_name}_${now:%d%m_%H%M}
+    dir: ${jem_outputs_root:}/baselines/jem/${dataset.name}/${jem_regime_dir:${regime}}/${model.name}/${stage}/${run_name}_${now:%d%m_%H%M}
   sweep:
-    dir: ${jem_outputs_root:}/baselines/jem/${dataset.name}/${regime}/${model.name}/${stage}/${run_name}_${now:%d%m}
+    dir: ${jem_outputs_root:}/baselines/jem/${dataset.name}/${jem_regime_dir:${regime}}/${model.name}/${stage}/${run_name}_${now:%d%m}
     subdir: ${hydra.job.num}
   output_subdir: .hydra

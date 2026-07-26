@@ -16,6 +16,7 @@ class SGLDConfig:
     noise_std: float = 0.005
     reinit_probability: float = 0.05
     buffer_size: int = 10000
+    track_diagnostics: bool = False
 
 
 class ReplayBuffer:
@@ -68,6 +69,7 @@ class SGLDSampler:
     def __init__(self, cfg: SGLDConfig, buffer: ReplayBuffer):
         self.cfg = cfg
         self.buffer = buffer
+        self.last_diagnostics: dict[str, float] = {}
 
     def refine(
         self,
@@ -122,8 +124,25 @@ class SGLDSampler:
         initial, indices = self.buffer.initial(
             batch_size, self.cfg.reinit_probability, device
         )
+        if self.cfg.track_diagnostics:
+            with torch.no_grad():
+                score_start = model.marginal_score(initial).mean().item()
         samples = self.refine(model, initial)
         self.buffer.update(indices, samples)
+        if self.cfg.track_diagnostics:
+            with torch.no_grad():
+                score_end = model.marginal_score(samples).mean().item()
+                lo, hi = model.input_range
+                boundary = ((samples <= lo + 1e-5) | (samples >= hi - 1e-5))
+                self.last_diagnostics = {
+                    "score_start": score_start,
+                    "score_end": score_end,
+                    "score_gain": score_end - score_start,
+                    "displacement_l2": (
+                        (samples - initial).flatten(1).norm(dim=1).mean().item()
+                    ),
+                    "boundary_fraction": boundary.float().mean().item(),
+                }
         return samples
 
     def sample_fresh(

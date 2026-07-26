@@ -12,16 +12,17 @@ from baselines.jem.device import resolve_device
 
 def make_model():
     return JEMMLP(
-        JEMMLPConfig(input_dim=144, hidden_dims=(347, 347), num_classes=10)
+        JEMMLPConfig(input_dim=144, hidden_dims=(550, 480), num_classes=10)
     )
 
 
 def test_parameter_match_r20():
     model = make_model()
-    target = mps_parameter_count(144, 3, 20, 10)
-    assert target == 174_520
-    assert model.count_parameters() == 174_551
-    assert nearest_uniform_width(target) == (347, 31)
+    complex_parameters = mps_parameter_count(144, 3, 20, 10)
+    real_degrees_of_freedom = 2 * complex_parameters
+    assert complex_parameters == 174_520
+    assert model.count_parameters() == real_degrees_of_freedom == 349_040
+    assert nearest_uniform_width(real_degrees_of_freedom) == (518, 102)
 
 
 def test_alpha_zero_is_exact_cross_entropy():

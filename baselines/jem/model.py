@@ -13,7 +13,7 @@ from torch.nn import functional as F
 @dataclass
 class JEMMLPConfig:
     input_dim: int = 144
-    hidden_dims: tuple[int, ...] = (347, 347)
+    hidden_dims: tuple[int, ...] = (550, 480)
     num_classes: int = 10
     activation: str = "silu"
     input_range: tuple[float, float] = (-1.0, 1.0)
@@ -111,15 +111,32 @@ class JEMMLP(nn.Module):
         """
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"alpha must be in [0, 1], got {alpha}")
-        dis = self.discriminative_loss(positives, labels)
+        logits_pos = self(positives)
+        dis = F.cross_entropy(logits_pos, labels)
+        pos_marginal = torch.logsumexp(logits_pos, dim=-1).mean()
         if alpha == 0.0:
-            gen = dis.detach().new_zeros(())
+            px_cd = dis.detach().new_full((), float("nan"))
+            joint_cd = dis.detach().new_full((), float("nan"))
+            neg_marginal = dis.detach().new_full((), float("nan"))
+            mixed = dis
         else:
             if negatives is None:
                 raise ValueError("Negative samples are required when alpha > 0.")
-            gen = self.joint_contrastive_loss(positives, labels, negatives)
-        mixed = (1.0 - alpha) * dis + alpha * gen
-        return mixed, {"dis_loss": dis, "gen_loss": gen, "mixed_loss": mixed}
+            neg_marginal = self.marginal_score(negatives.detach()).mean()
+            px_cd = neg_marginal - pos_marginal
+            joint_cd = dis + px_cd
+            # Equivalent to (1-alpha) * CE + alpha * joint-CD, but this form
+            # makes explicit that CE keeps unit weight, as in the original JEM.
+            mixed = dis + alpha * px_cd
+        return mixed, {
+            "dis_loss": dis,
+            "px_cd_loss": px_cd,
+            "joint_cd_loss": joint_cd,
+            "gen_loss": joint_cd,
+            "mixed_loss": mixed,
+            "positive_marginal_score": pos_marginal,
+            "negative_marginal_score": neg_marginal,
+        }
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
