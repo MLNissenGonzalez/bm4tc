@@ -1,0 +1,32 @@
+# @package _global_
+stage: hpo
+run_name: at
+regime: adversarial
+model_path: ???
+
+defaults:
+  - override /trainer: at
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+trainer:
+  max_epoch: 60
+  save: false
+
+hydra:
+  callbacks:
+    export_best:
+      _target_: baselines.jem.hpo_export.HPOExportCallback
+      target: at
+  sweeper:
+    study_name: "mlp_at_${dataset.name}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 4
+    direction: minimize
+    n_trials: 12
+    n_jobs: 1
+    params:
+      trainer.optimizer.kwargs.lr: tag(log, interval(5e-5, 1e-3))
+      trainer.clean_weight: interval(0.0, 0.6)

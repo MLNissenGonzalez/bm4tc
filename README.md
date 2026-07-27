@@ -167,6 +167,16 @@ resolves the repo root, so the working directory does not matter):
 
 Generated figures are written under `figures/` (git-ignored; regenerate by running the notebook).
 
+## JEM baseline (`jem` branch)
+
+The real-degree-of-freedom-matched MLP/JEM baseline is isolated under
+`baselines/jem/`.
+Its ordered workflow—HPO, alpha seed sweeps, MLP adversarial training,
+post-hoc analysis, OOD evaluation, purification and generation—is documented in
+[`baselines/jem/GUIDE.md`](baselines/jem/GUIDE.md).
+The matching interactive MNIST workflow is in
+[`notebooks/jem_mnist.ipynb`](notebooks/jem_mnist.ipynb).
+
 ## Repository Structure
 
 ```
