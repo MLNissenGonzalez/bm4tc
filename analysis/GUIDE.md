@@ -13,6 +13,7 @@ For the full CSV column schema, see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
 |--------|-------------|
 | `run.py` | Single-model deep analysis (acc, rob, MIA, UQ) — callable API |
 | `sweep.py` | Post-hoc evaluation of a full seed sweep; primary analysis tool |
+| `gibbs.py` | Gibbs-purification defense on a seed sweep — split out because it costs orders of magnitude more than everything in `sweep.py` |
 | `hpo.py` | Explore HPO results: parameter-metric correlations, surface plots |
 | `batch.py` | Batch-queue runner: processes all unanalyzed sweeps via `sweep.py` |
 
@@ -173,6 +174,64 @@ df = pd.read_csv("analysis/outputs/alpha_curve/gen/legendre/d10r6/circles_1404/e
 alpha_col = "config/trainer.generative.criterion.kwargs.alpha"
 df.groupby(alpha_col)["eval/test/acc"].agg(["mean", "std"])
 ```
+
+---
+
+## `gibbs.py` — Gibbs Purification Analysis
+
+Separate from `sweep.py` because Gibbs purification dominates the cost of everything else
+combined: every candidate value of every feature is a full chain contraction, so cost is
+`N × data_dim × num_bins × max(n_sweeps)` per attack strength, per run.
+
+### Running it
+
+```bash
+# Defaults: PGD at 0.05/0.10/0.15 of the range, Gibbs for k = 1, 3, 6 sweeps
+python analysis/gibbs.py outputs/moons/nat/legendre/d10r6/seed_sweep_a1_2707
+
+# Cheap smoke run
+python analysis/gibbs.py <sweep_dir> --n-eval 100 --sweeps 1,3 --limit-runs 1
+
+# Full test split (expensive)
+python analysis/gibbs.py <sweep_dir> --n-eval all
+```
+
+### `--n-eval` is the cost knob
+
+Cost is **linear** in the number of test samples evaluated, so `--n-eval` is the first thing
+to reach for. The same fixed, seeded subsample is reused for the clean row and every epsilon,
+and across every run in the sweep — so all comparisons are paired even though the set is a
+subsample. Binomial sampling error on a reported accuracy is about `0.5/√N_EVAL`:
+
+| `--n-eval` | error |
+|---|---|
+| 100 | ~±5% |
+| 1000 (default) | ~±1.6% |
+| 4000 | ~±0.8% |
+
+The resolved count is printed up front with a projected contraction count, written to every
+CSV row as `gibbs_n_samples`, and echoed in the summary header — a subsampled table can never
+be silently misread as a full-test-set one.
+
+Other overrides: `--sweeps`, `--step-radius`, `--num-bins`, `--batch-size`, `--strengths`
+(fractions), `--device`, `--limit-runs`, `--n-eval-seed`.
+
+### Attack-radius agnostic — read the `k`, not a radius
+
+`step_radius` (default 0.05 of the feature domain) is a **per-sweep** L∞ move, not a global
+budget: the restriction window re-centres at the start of every sweep, so after `k` sweeps a
+coordinate can have travelled up to `k × step_radius × range_size`. Purification strength is
+therefore controlled by `--sweeps` alone, and the defense never has to be told the attacker's
+epsilon. Keep `step_radius` small and vary `k`.
+
+### Output files
+
+Written to the same `analysis/outputs/<sweep_path>/` directory as `sweep.py`'s output:
+
+| File | Description |
+|------|-------------|
+| `gibbs_data.csv` | One row per run. Schema in `CSV_SCHEMA.md`. |
+| `gibbs_summary.txt` | Accuracy table (no-defense + one row per `k` × one column per eps), across-run std/stderr, recovery rates, runtime |
 
 ---
 

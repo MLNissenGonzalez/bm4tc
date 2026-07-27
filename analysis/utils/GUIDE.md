@@ -136,13 +136,25 @@ Note: gradient **descent** on NLL = ascent on log p(x). The final clamp ensures 
 
 **After purification, classify x* instead of x_adv.**
 
-> ✅ **Overflow-safe (was a known bug)**: the grid Gibbs sampler in `purification.py` now computes its per-bin weights in log space — `logsumexp(log_amp_sq(x_cand))` with the radius mask applied as `-inf`, sampled by `draw_from_grid_log`. Previously it used raw `abs_square(amplitudes(x_cand))` → `draw_from_grid`, which overflowed to `inf` on overflow-prone models; `draw_from_grid` mapped `posinf → 0`, silently zeroing the highest-probability bins so sampling ran *backwards*. Like the gradient-ascent path (which uses `marginal_log_probability`), it is now always overflow-safe.
+> ✅ **Overflow-safe (was a known bug)**: the grid Gibbs sampler in `purification.py` computes its per-bin weights in log space — `logsumexp(log_amp_sq(x_cand))`, sampled by `draw_from_grid_log`. Previously it used raw `abs_square(amplitudes(x_cand))` → `draw_from_grid`, which overflowed to `inf` on overflow-prone models; `draw_from_grid` mapped `posinf → 0`, silently zeroing the highest-probability bins so sampling ran *backwards*. Like the gradient-ascent path (which uses `marginal_log_probability`), it is now always overflow-safe.
+
+> 🔎 **Local candidate grid**: when a `step_radius` is set, the restricted sweep discretizes *each sample's own* window `[x̄_k ± δ] ∩ input_range` with all `num_bins` points, instead of masking a global `linspace(lo, hi, num_bins)` down to it. At δ = 0.05 the window is 10% of the domain, so the old scheme left ~10 admissible bins out of 96 and spent ~90% of every forward pass on candidates the mask then discarded. The local grid removes the mask entirely (no bin can be inadmissible, no row can be all `-inf`) and gives full resolution inside the window. Trade-off: the proposal support moves each sweep, so this is a local Metropolis-within-Gibbs-style move rather than exact Gibbs on one fixed discretization — `step_radius=None` remains the fixed-grid path.
 
 Reported metrics:
 - `eval/uq_purify_acc/<eps>/<r>` — accuracy on purified samples
 - `eval/uq_purify_recovery/<eps>/<r>` — fraction of originally misclassified samples that become correct after purification
 
 **Choosing r**: r should be ≥ ε (the attack radius) to have any chance of reversing the attack. In practice r ≈ ε works well; too large means purification can change the semantic content of the input.
+
+### Gibbs purification — no r to choose
+
+The Gibbs defense has no such knob, which is the point of it. `step_radius` is a *per-sweep*
+L∞ move (default 0.05 of the domain in `analysis/gibbs.py`), and the window re-centres at the
+start of every sweep, so after `k` sweeps a coordinate can have travelled up to
+`k × step_radius × range_size`. Strength is set by `n_sweeps` alone — no ε needs to be known
+or guessed. Reported as `gibbs_purify_acc/<eps>/<k>`, keyed by sweep count, not radius. Run it
+with `analysis/gibbs.py` (see `analysis/GUIDE.md`); `sweep.py` can also produce these columns
+via `COMPUTE_GIBBS_PURIFICATION`, but it is expensive enough to usually want its own run.
 
 ---
 
