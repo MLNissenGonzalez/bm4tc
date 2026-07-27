@@ -45,7 +45,12 @@ experiments/debug.py
 # Tracking
 wandb/
 experiments/wandb_test.py
-hpo/
+
+# HPO run outputs (the studies themselves are not worth keeping; the winning
+# hyperparameters live in the seed_sweep configs). Anchored to the output trees
+# only -- a bare `hpo/` would also swallow every configs/**/hpo/*.yaml.
+outputs/**/hpo/
+analysis/outputs/**/hpo/
 
 # scratchpad
 maxBond_2d.py
