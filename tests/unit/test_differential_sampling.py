@@ -121,3 +121,37 @@ def test_draw_from_grid_log_nan_handled(grid):
 def test_draw_from_grid_log_batch_size_1(grid):
     samples = draw_from_grid_log(torch.zeros(1, BINS), grid)
     assert samples.shape == (1,)
+
+
+# ---- draw_from_grid_log with a per-row grid ----
+# Restricted Gibbs builds a candidate window centred on each sample, so `z` is
+# (batch, bins) rather than a single shared grid.
+
+def test_draw_from_grid_log_batched_z():
+    """With a per-row grid, each sample must come from its OWN row's grid."""
+    # Disjoint per-row grids: row i spans [10i, 10i + 1].
+    z = torch.stack([torch.linspace(10.0 * i, 10.0 * i + 1.0, BINS) for i in range(BATCH)])
+    samples = draw_from_grid_log(torch.zeros(BATCH, BINS), z)
+    assert samples.shape == (BATCH,)
+    for i in range(BATCH):
+        assert samples[i] in z[i], f"row {i} sampled outside its own grid"
+
+
+def test_draw_from_grid_log_batched_z_respects_weights():
+    """A single finite bin per row is always selected, at that row's own value."""
+    z = torch.stack([torch.linspace(10.0 * i, 10.0 * i + 1.0, BINS) for i in range(BATCH)])
+    log_p = torch.full((BATCH, BINS), float("-inf"))
+    picks = torch.arange(BATCH) % BINS
+    log_p[torch.arange(BATCH), picks] = 0.0
+    samples = draw_from_grid_log(log_p, z)
+    assert torch.equal(samples, z[torch.arange(BATCH), picks])
+
+
+def test_draw_from_grid_log_batched_z_matches_1d(grid):
+    """A (batch, bins) grid whose rows are all the same 1-D grid is equivalent to it."""
+    log_p = torch.randn(BATCH, BINS)
+    torch.manual_seed(0)
+    one_d = draw_from_grid_log(log_p, grid)
+    torch.manual_seed(0)
+    batched = draw_from_grid_log(log_p, grid.unsqueeze(0).expand(BATCH, BINS).contiguous())
+    assert torch.equal(one_d, batched)
