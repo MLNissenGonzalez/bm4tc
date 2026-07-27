@@ -1,0 +1,24 @@
+# @package _global_
+stage: seed_sweep
+run_name: a0
+regime: natural
+model_path: null
+
+defaults:
+  - override /trainer: natural
+  - override /tracking: online
+
+trainer:
+  alpha: 0.0
+  input_noise_std: 0.0
+  max_epoch: 100
+  patience: 30
+  save: true
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
+      trainer.optimizer.kwargs.lr: 0.0019643589897305577
+      trainer.optimizer.kwargs.weight_decay: 1.8756206282287313e-06
+

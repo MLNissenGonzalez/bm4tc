@@ -1,0 +1,23 @@
+# @package _global_
+stage: seed_sweep
+run_name: a05
+regime: natural
+model_path: ???
+defaults:
+  - override /trainer: natural
+  - override /tracking: online
+trainer:
+  alpha: 0.5
+  stop_crit: "mixed_loss"
+  max_epoch: 60
+  patience: 20
+  save: true
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
+      trainer.optimizer.kwargs.lr: 1.0282311118421753e-05
+      trainer.energy_l2: 0.0009749919720020119
+      sampler.step_size: 0.008377535897765385
+      sampler.noise_std: 0.005
+      sampler.num_steps: 40
