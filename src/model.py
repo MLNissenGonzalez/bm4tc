@@ -54,7 +54,10 @@ def draw_from_grid_log(log_p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     log_p : torch.Tensor
         Unnormalized log weights, shape (batch, num_bins). ``-inf`` allowed.
     z : torch.Tensor
-        Grid of candidate values, shape (num_bins,).
+        Grid of candidate values. Either shape (num_bins,) — one grid shared by
+        every row — or (batch, num_bins), a per-row grid, so callers whose
+        candidate values differ per sample (e.g. a window centred on each
+        sample) can sample without a shared discretization.
 
     Returns
     -------
@@ -74,7 +77,9 @@ def draw_from_grid_log(log_p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     row_sums = p.sum(dim=-1, keepdim=True)
     p = torch.where(row_sums > 0, p, torch.ones_like(p))
     indices = torch.multinomial(p, num_samples=1).squeeze(1)
-    return z[indices]
+    if z.ndim == 1:
+        return z[indices]
+    return z.gather(1, indices.unsqueeze(1)).squeeze(1)
 
 
 @dataclass

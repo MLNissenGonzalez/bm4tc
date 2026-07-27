@@ -107,6 +107,12 @@ false-positive rate in percent (the threshold `τ` is the `{q}`-th percentile of
 | `gibbs_purify_acc/{eps}/{n_sweeps}` | Accuracy after Gibbs-sampling purification. Only when `COMPUTE_GIBBS_PURIFICATION=True`. |
 | `gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification. |
 
+> The Gibbs columns are keyed by **`n_sweeps`, not a radius** — Gibbs purification is
+> attack-radius agnostic. `step_radius` is a *per-sweep* L∞ move (the window re-centres
+> every sweep, so the k-sweep envelope is `k × step_radius × range_size`), and strength is
+> set by the number of sweeps alone. For a dedicated, more thoroughly reported Gibbs run
+> see `gibbs_data.csv` below.
+
 **`uq_joint_*` family** (`uq_joint_adv_acc/{eps}`, `uq_joint_detection/…`,
 `uq_joint_det_err_{detected,passed}/…`, `uq_joint_purify_{acc,recovery}/…`) — the **same
 metrics measured under the joint / adaptive attack** (`COMPUTE_JOINT_ATTACK=True`): a PGD
@@ -117,6 +123,42 @@ detector**. These are *harder-attack* counterparts of the columns above, **not**
 ### Companion file: `evaluation_summary.txt`
 
 Human-readable table with mean ± std across seeds, Pareto-frontier runs, and acc-vs-eps band. Contains no data not derivable from `evaluation_data.csv`.
+
+---
+
+## `gibbs_data.csv` — written by `analysis/gibbs.py`
+
+Lands in the **same** `analysis/outputs/{rel}/` directory as `evaluation_data.csv`; the two
+coexist because the filenames differ. One row per run, same `{eps}` absolute-value convention
+as above. Gibbs is orders of magnitude more expensive than every other post-hoc metric, which
+is why it has its own script and its own file.
+
+| Column | Description |
+|--------|-------------|
+| `gibbs_clean_acc` | Clean accuracy on the evaluated subsample, no attack, no defense. |
+| `gibbs_adv_acc/{eps}` | Accuracy under PGD at `eps`, **no defense**. |
+| `gibbs_clean_purify_acc/{k}` | Accuracy after `k` Gibbs sweeps on **clean** inputs (cost of purifying something that did not need it). |
+| `gibbs_purify_acc/{eps}/{k}` | Accuracy after `k` Gibbs sweeps on `eps`-attacked inputs. **The headline defense number.** |
+| `gibbs_purify_recovery/{eps}/{k}` | Fraction of previously-misclassified adversarial examples corrected by `k` sweeps. |
+| `gibbs_clean_log_px_mean`, `gibbs_adv_log_px_mean/{eps}` | Mean `log p(x)` before purification. |
+| `gibbs_clean_log_px_mean/{k}`, `gibbs_purify_log_px_mean/{eps}/{k}` | Mean `log p(x)` after `k` sweeps — should rise toward the clean level. |
+| `gibbs_n_samples` | **Test samples actually evaluated.** Cost is linear in this; it is often a subsample, so never read a table as full-test-set without checking. |
+| `gibbs_n_eval_seed` | Seed for the subsample. Fixed across runs ⇒ every column is paired. |
+| `gibbs_step_radius`, `gibbs_num_bins` | Purifier settings used (provenance). |
+| `gibbs_runtime_s` | Wall-clock seconds for the run — use it to size larger sweeps. |
+
+**Reading the `k` columns:** `k` is a sweep count, not a radius. Because the restriction
+window re-centres each sweep, `k` sweeps reach up to `k × gibbs_step_radius × range_size`
+from the input, so the defense is parameterized without reference to the attacker's budget.
+Comparing `gibbs_purify_acc/{eps}/{k}` across `k` at fixed `eps` traces the
+purification-strength curve; comparing against `gibbs_clean_purify_acc/{k}` shows what that
+strength costs on clean data.
+
+### Companion file: `gibbs_summary.txt`
+
+Human-readable accuracy table (rows: no-defense + one per `k`; columns: `eps=0` and each
+`eps`), plus across-run std/stderr, recovery rates, and the resolved `N_EVAL` / `step_radius`
+/ `num_bins` in the header. Contains no data not derivable from `gibbs_data.csv`.
 
 ### Reconstructing aggregates
 
@@ -334,6 +376,7 @@ summary_df = pd.DataFrame(summary_rows)
 | CSV location | Script | Grouping key | Row = | Diff columns saved? |
 |---|---|---|---|---|
 | `{seed_sweep\|alpha_curve}/{type}/{emb}/{arch}/{ds}/evaluation_data.csv` | `sweep.py` | `config/tracking.seed` | one run | N/A |
+| `…/{same dir}/gibbs_data.csv` | `gibbs.py` | `run_name` | one run | N/A |
 | `seed_sweep/cls_reg/{regime}/{emb}/{arch}/{ds}/evaluation_data.csv` | `cls_reg_analysis.py` | `max_epoch` + `seed` | one (run, epoch) | No — recomputed from `max_epoch=0` rows |
 | `seed_sweep/comb/{emb}/{arch}/{ds}/evaluation_data.csv` | `dev_comb_analysis.py` | `cls_epoch` + `seed` | one run | No — recomputed as `gen/` − `cls/` |
 

@@ -176,27 +176,48 @@ class GibbsPurification:
     joint amplitudes over a discrete grid.  Multiple sweeps produce a sample
     more consistent with the model's learned distribution.
 
+    **Attack-radius agnostic.**  ``step_radius`` is a *per-sweep* L∞ step, not a
+    global perturbation budget: the restriction window is re-centred on the
+    sweep-start snapshot at the beginning of every sweep, so after ``k`` sweeps a
+    coordinate can have travelled up to ``k · step_radius · (hi - lo)`` from where
+    it started.  Purification strength is therefore controlled by ``n_sweeps``
+    alone, which means the defense never has to be told the attacker's budget.
+    Keep ``step_radius`` small (a local move) and vary ``n_sweeps``.
+
     Args:
-        num_bins: Resolution of the discrete grid over the input range.
+        num_bins: Number of candidate values evaluated per feature.  With a
+            ``step_radius`` these all fall *inside* the window (see below), so
+            this is the resolution of the window, not of the full input range.
         gibbs_batch_size: Number of adversarial samples processed per batch.
             Controls memory: gibbs_batch_size × num_bins inputs per forward pass.
             At bs=8, bins=200: 1600 forward evals per feature per sweep.
-        radius: Perturbation budget as a fraction of the input range size
-            (b - a).  Each sweep restricts resampling of feature i to
-            [x̄_i ± delta_abs] where delta_abs = radius * (hi - lo).
-            The same budget applies regardless of n_sweeps.  Intervals are
-            clamped to input_range.  If None, samples from the full input range.
+        step_radius: Per-sweep L∞ step as a fraction of the input range size
+            (hi - lo).  Feature i is resampled on a grid spanning
+            [x̄_i ± delta_abs] ∩ input_range, where delta_abs =
+            step_radius * (hi - lo) and x̄ is the sweep-start snapshot.
+            If None, samples from the full input range (unrestricted).
+
+    Note:
+        With a ``step_radius`` the candidate grid is built *locally*, per sample:
+        ``linspace(x̄_i - delta, x̄_i + delta, num_bins)`` clamped to the input
+        range.  This spends every candidate evaluation inside the window (a global
+        grid masked down to a 10%-wide window would discard ~90% of them) and gives
+        full ``num_bins`` resolution there.  The price is that the proposal support
+        moves each sweep, so this is a local Metropolis-within-Gibbs-style move
+        rather than exact Gibbs on one fixed discretization — the k→∞ limit is not
+        the model's discretized marginal.  That is the intended behaviour for a
+        local purification walk; ``step_radius=None`` is the fixed-grid path.
     """
 
     def __init__(
         self,
         num_bins: int,
         gibbs_batch_size: int = 8,
-        radius: Optional[float] = 0.1,
+        step_radius: Optional[float] = 0.1,
     ):
         self.num_bins = num_bins
         self.gibbs_batch_size = gibbs_batch_size
-        self.radius = radius
+        self.step_radius = step_radius
 
     def purify(
         self,
@@ -210,9 +231,10 @@ class GibbsPurification:
         Thin wrapper over :meth:`purify_snapshots` for the single-sweep-count case.
 
         Args:
-            born: ConditionalBornMachine instance (must be prepared and in eval mode).
+            born: ConditionalBornMachine instance.
             x_adv: Adversarial inputs, shape (n_samples, data_dim).
-            n_sweeps: Number of full sweeps over all features.
+            n_sweeps: Number of full sweeps over all features.  This, not
+                ``step_radius``, is the purification-strength knob.
             device: Torch device.
 
         Returns:
@@ -239,7 +261,7 @@ class GibbsPurification:
         the same RNG state.
 
         Args:
-            born: ConditionalBornMachine instance (must be prepared and in eval mode).
+            born: ConditionalBornMachine instance.
             x_adv: Adversarial inputs, shape (n_samples, data_dim).
             sweep_points: Sweep counts to snapshot (e.g. ``[1, 3, 5]``).
             device: Torch device.
@@ -257,11 +279,23 @@ class GibbsPurification:
         data_dim = x_adv.shape[1]
         lo, hi = born.input_range
 
-        input_space = torch.linspace(lo, hi, self.num_bins, device=device)
+        # Unrestricted path: one fixed grid over the whole input range, shared by
+        # every sample. Restricted path builds its grid per sample, per feature.
+        input_space = (
+            torch.linspace(lo, hi, self.num_bins, device=device)
+            if self.step_radius is None
+            else None
+        )
+        # Interpolation weights for the local windows, (num_bins,) in [0, 1].
+        unit_grid = (
+            torch.linspace(0.0, 1.0, self.num_bins, device=device)
+            if self.step_radius is not None
+            else None
+        )
 
-        # Convert relative radius to absolute.
+        # Convert the relative per-sweep step to an absolute one.
         delta_abs: Optional[float] = (
-            self.radius * (hi - lo) if self.radius is not None else None
+            self.step_radius * (hi - lo) if self.step_radius is not None else None
         )
 
         # Per-snapshot accumulation of purified batches (concatenated after the loop).
@@ -278,14 +312,15 @@ class GibbsPurification:
             bs = len(batch)
             x_cur = batch.clone()
 
-            # The candidate forward shape (bs*num_bins) is constant across all features
-            # and sweeps of this batch and never changes core roles, so a single reset
-            # here suffices — it re-traces only when bs changes (the final partial batch).
+            # Clear any data nodes left over from a previous batch. The candidate
+            # forward runs through the eager accumulate path (log_amp_sq), which
+            # resets around itself, so this is only hygiene between batches.
             born.reset()
 
             for s in range(1, max_sweeps + 1):
-                # Snapshot at sweep start; restriction intervals are centred on these
-                # values, not on within-sweep updated values.
+                # Snapshot at sweep start; the restriction window is centred on these
+                # values, not on within-sweep updated values. Re-centring each sweep is
+                # what makes the total budget k*delta rather than a single global ball.
                 x_bar = x_cur.clone() if delta_abs is not None else None
 
                 for k in tqdm(
@@ -295,6 +330,20 @@ class GibbsPurification:
                     leave=False,
                     dynamic_ncols=True,
                 ):
+                    # Candidate values for feature k. Unrestricted: the shared global
+                    # grid. Restricted: a per-sample grid spanning this sample's window
+                    # [x̄_k ± delta] ∩ [lo, hi], so every candidate is admissible by
+                    # construction and none of the num_bins resolution is wasted
+                    # outside the window.
+                    if delta_abs is None:
+                        grid_k = input_space                              # (bins,)
+                        flat_grid = input_space.repeat(bs)                # (bs*bins,)
+                    else:
+                        lo_k = (x_bar[:, k] - delta_abs).clamp(lo, hi)    # (bs,)
+                        hi_k = (x_bar[:, k] + delta_abs).clamp(lo, hi)    # (bs,)
+                        grid_k = lo_k[:, None] + (hi_k - lo_k)[:, None] * unit_grid[None, :]
+                        flat_grid = grid_k.reshape(-1)                    # (bs*bins,)
+
                     # Build (bs × num_bins) candidate inputs: x_cur with x[:, k] = grid.
                     x_cand = (
                         x_cur.unsqueeze(1)
@@ -302,7 +351,7 @@ class GibbsPurification:
                         .reshape(bs * self.num_bins, -1)
                         .clone()
                     )
-                    x_cand[:, k] = input_space.repeat(bs)
+                    x_cand[:, k] = flat_grid
 
                     with torch.no_grad():
                         # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}),
@@ -314,15 +363,9 @@ class GibbsPurification:
                         las = born.log_amp_sq(x_cand)                      # (bs*bins, C)
                         log_p = torch.logsumexp(las, dim=-1).view(bs, self.num_bins)
 
-                    if delta_abs is not None:
-                        lo_k = (x_bar[:, k] - delta_abs).clamp(lo, hi).unsqueeze(1)
-                        hi_k = (x_bar[:, k] + delta_abs).clamp(lo, hi).unsqueeze(1)
-                        mask = (input_space[None, :] >= lo_k) & (input_space[None, :] <= hi_k)
-                        # Excluded bins are -inf (weight 0), the log-space
-                        # equivalent of the previous multiply-by-zero mask.
-                        log_p = log_p.masked_fill(~mask, float("-inf"))
-
-                    x_cur[:, k] = draw_from_grid_log(log_p, input_space)
+                    # No masking needed: the grid *is* the window, so every bin is
+                    # admissible and no row can be entirely -inf.
+                    x_cur[:, k] = draw_from_grid_log(log_p, grid_k)
 
                 if s in snap_results:
                     snap_results[s].append(x_cur.cpu().clone())
@@ -385,7 +428,7 @@ if __name__ == "__main__":
     assert log_px.isfinite().all(), "LikelihoodPurification: non-finite log_px"
     print(f"  LikelihoodPurification  shape={tuple(x_pur.shape)}  log_px_mean={log_px.mean().item():.4f}")
 
-    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, radius=0.1)
+    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, step_radius=0.1)
     x_g, log_px_g = gibbs.purify(cbm, x_adv, n_sweeps=1, device=device)
     assert x_g.shape == x_adv.shape, "GibbsPurification: shape mismatch"
     print(f"  GibbsPurification       shape={tuple(x_g.shape)}  log_px_mean={log_px_g.mean().item():.4f}")
