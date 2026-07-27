@@ -56,13 +56,13 @@ def write_summary(
         },
         key=float,
     )
-    sgld_radii = sorted(
+    sgld_sweeps = sorted(
         {
-            column.split("/")[-1]
+            int(column.split("/")[-1])
             for column in df.columns
             if column.startswith(("sgld_purify_acc/", "sgld_clean_purify_acc/"))
-        },
-        key=float,
+            and column.split("/")[-1].isdigit()
+        }
     )
     percentiles = sorted(
         {
@@ -82,22 +82,33 @@ def write_summary(
                     [mean(f"uq_joint_adv_acc/{value}") for _, value in eps],
                 )
             )
+            if percentiles:
+                q = percentiles[0]
+                rows.append(
+                    (
+                        f"Detection (tau={q}%)",
+                        [
+                            mean(f"uq_joint_detection/{q}pct/{value}")
+                            for _, value in eps
+                        ],
+                    )
+                )
             for radius in radii:
                 rows.append(
                     (
-                        f"Gradient (r={radius})",
+                        f"Purif. (lk.) [r={radius}]",
                         [
                             mean(f"uq_joint_purify_acc/{value}/{radius}")
                             for _, value in eps
                         ],
                     )
                 )
-            for radius in sgld_radii:
+            for sweep in sgld_sweeps:
                 rows.append(
                     (
-                        f"SGLD (r={radius})",
+                        f"Purif. (samp., k={sweep})",
                         [
-                            mean(f"sgld_joint_purify_acc/{value}/{radius}")
+                            mean(f"sgld_joint_purify_acc/{value}/{sweep}")
                             for _, value in eps
                         ],
                     )
@@ -106,10 +117,22 @@ def write_summary(
             rows.append(
                 ("No defense", [mean("acc")] + [mean(f"rob/{value}") for _, value in eps])
             )
+            if percentiles:
+                q = percentiles[0]
+                rows.append(
+                    (
+                        f"Detection (tau={q}%)",
+                        [float("nan")]
+                        + [
+                            mean(f"uq_detection/{q}pct/{value}")
+                            for _, value in eps
+                        ],
+                    )
+                )
             for radius in radii:
                 rows.append(
                     (
-                        f"Gradient (r={radius})",
+                        f"Purif. (lk.) [r={radius}]",
                         [mean(f"uq_clean_purify_acc/{radius}")]
                         + [
                             mean(f"uq_purify_acc/{value}/{radius}")
@@ -117,13 +140,13 @@ def write_summary(
                         ],
                     )
                 )
-            for radius in sgld_radii:
+            for sweep in sgld_sweeps:
                 rows.append(
                     (
-                        f"SGLD (r={radius})",
-                        [mean(f"sgld_clean_purify_acc/{radius}")]
+                        f"Purif. (samp., k={sweep})",
+                        [mean(f"sgld_clean_purify_acc/{sweep}")]
                         + [
-                            mean(f"sgld_purify_acc/{value}/{radius}")
+                            mean(f"sgld_purify_acc/{value}/{sweep}")
                             for _, value in eps
                         ],
                     )
@@ -153,6 +176,22 @@ def write_summary(
         if not np.isnan(alpha_mean):
             handle.write(f"Alpha: {alpha_mean:.4g}\n")
         handle.write("Attack: PGD Linf, 40 steps\n\n")
+        sampling_radius = mean("sgld_purify_radius")
+        steps_per_sweep = mean("sgld_steps_per_sweep")
+        sampling_step_size = mean("sgld_purify_step_size")
+        sampling_noise_std = mean("sgld_purify_noise_std")
+        if not np.isnan(sampling_radius):
+            handle.write(
+                "Sampling purification: local projected SGLD"
+                f"  |  delta={sampling_radius:.4g}"
+                f"  |  steps/sweep={steps_per_sweep:.0f}"
+            )
+            if not np.isnan(sampling_step_size):
+                handle.write(
+                    f"  |  step_size={sampling_step_size:.4g}"
+                    f"  |  noise_std={sampling_noise_std:.4g}"
+                )
+            handle.write("\n\n")
 
         handle.write("Core metrics (mean ± std)\n")
         handle.write("-" * 76 + "\n")
@@ -191,15 +230,6 @@ def write_summary(
                 if joint in df:
                     handle.write(f"  |  joint {mean(joint):.4f} ± {std(joint):.4f}")
                 handle.write("\n")
-            handle.write("\n")
-
-        ood_columns = sorted(column for column in df if column.startswith("ood/"))
-        if ood_columns:
-            handle.write("-" * 76 + "\n")
-            handle.write("OOD detection with JEM marginal score (mean ± std)\n")
-            handle.write("-" * 76 + "\n\n")
-            for column in ood_columns:
-                handle.write(f"  {column:<42} {mean(column):.4f} ± {std(column):.4f}\n")
             handle.write("\n")
 
         handle.write("=" * 76 + "\n")

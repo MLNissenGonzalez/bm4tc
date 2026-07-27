@@ -17,7 +17,7 @@ while on the `jem` branch.
 - Separate discriminative MLP-PGD-AT baseline.
 - No JEM+AT interpolation in this phase.
 - Basic classification PGD and a likelihood-aware adaptive PGD.
-- Gradient-score and projected-SGLD purification. No Gibbs for JEM.
+- Gradient-score and locally projected-SGLD purification. No Gibbs for JEM.
 
 The JEM marginal score is unnormalised because its partition function is
 intractable. It is valid for ranking, detection, SGLD and purification, but its
@@ -192,17 +192,27 @@ The likelihood-aware adaptive attack also uses the MPS-compatible
 
 - `adaptive_rob/{eps}`, `adaptive_detection/{q}pct/{eps}`
 - `px_cd_loss`, `joint_cd_loss` and separated positive/negative scores
-- `sgld_purify_acc/{eps}/{radius}` and purification recovery rates
-- `sgld_joint_purify_acc/{eps}/{radius}`
-- `ood/{dataset}/{auroc,aupr_in,aupr_out,fpr95}` and `ood_msp/...`
+- `sgld_purify_acc/{eps}/{k}` and purification recovery rates
+- `sgld_joint_purify_acc/{eps}/{k}`
 
-Attack epsilons are absolute in `[-1,1]`, matching MPS analysis. By default,
-detector percentiles and purification use the complete clean test set, matching
-the current MPS analysis. Use `--threshold-split valid` for a stricter
-validation-calibrated detector, or `--defense-subsample 1000` for a cheap fixed
-purification estimate. Pass `--no-ood` when OOD datasets should not be
-downloaded. `--adaptive-score-weight` controls the classification/score balance
-of the likelihood-aware attack and defaults to `1.0`.
+Attack epsilons and likelihood-purification radii are absolute in `[-1,1]`,
+matching MPS analysis. Sampling purification uses `delta=0.2` absolute, which
+matches the MPS Gibbs setting `0.1 * input_range_size`. One SGLD sweep runs 20
+transitions inside the local L-infinity ball around its starting state; the
+next sweep is recentered on the previous output. The analysis records the same
+snapshots as MPS, `k=1,3,5`, under `Purif. (samp., k=...)`. Purification fixes
+`step_size=0.01` and `noise_std=0.005` across every model instead of inheriting
+the model-specific training-SGLD hyperparameters.
+
+By default, sampling purification uses a fixed 1000-example subset, matching
+the MPS Gibbs protocol, while likelihood purification uses the complete clean
+test set. Use `--sampling-subsample` or `--defense-subsample` to override these
+independently. Use `--threshold-split valid` for a stricter
+validation-calibrated detector. As in MPS, “OOD detection” here means
+likelihood-based detection of adversarial MNIST examples; no external image
+dataset is loaded. `--adaptive-score-weight` controls the
+classification/score balance of the likelihood-aware attack and defaults to
+`1.0`.
 
 ## 7. Generate samples
 
@@ -247,8 +257,11 @@ metrics are compared.
 The same workflow is available interactively in
 `notebooks/jem_mnist.ipynb`. It mirrors the MPS `notebooks/mnist.ipynb`
 structure and produces alpha curves, purification-radius comparisons,
-per-epsilon defense bar charts, detection-threshold curves and sample commands
-under `figures/jem_mnist/`.
+per-epsilon defense bar charts, detection-threshold curves, the per-class mean
+sample grid and the same LaTeX/plain-text tables as the MPS notebook under
+`figures/jem_mnist/`. Figure and strategy names are preserved. Locally
+projected SGLD replaces Gibbs and is reported as `Purif. (samp., k=...)` at
+`k=1,3,5`; the other purification remains named `Purif. (lk.)`.
 
 Validation data are used for model selection. Detector thresholds default to
 the clean test percentiles solely to reproduce the current MPS protocol; the

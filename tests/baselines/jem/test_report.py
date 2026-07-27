@@ -24,11 +24,21 @@ def test_compact_summary_contains_standard_and_joint_tables():
             row[f"uq_detection/10pct/{epsilon}"] = 0.5
             row[f"uq_joint_detection/10pct/{epsilon}"] = 0.4
             row[f"uq_purify_acc/{epsilon}/0.2"] = 0.85
-            row[f"sgld_purify_acc/{epsilon}/0.2"] = 0.84
+            row[f"sgld_purify_acc/{epsilon}/1"] = 0.84
+            row[f"sgld_purify_acc/{epsilon}/3"] = 0.85
+            row[f"sgld_purify_acc/{epsilon}/5"] = 0.86
             row[f"uq_joint_purify_acc/{epsilon}/0.2"] = 0.8
-            row[f"sgld_joint_purify_acc/{epsilon}/0.2"] = 0.79
+            row[f"sgld_joint_purify_acc/{epsilon}/1"] = 0.79
+            row[f"sgld_joint_purify_acc/{epsilon}/3"] = 0.8
+            row[f"sgld_joint_purify_acc/{epsilon}/5"] = 0.81
         row["uq_clean_purify_acc/0.2"] = 0.94
-        row["sgld_clean_purify_acc/0.2"] = 0.93
+        row["sgld_clean_purify_acc/1"] = 0.93
+        row["sgld_clean_purify_acc/3"] = 0.92
+        row["sgld_clean_purify_acc/5"] = 0.91
+        row["sgld_purify_radius"] = 0.2
+        row["sgld_steps_per_sweep"] = 20
+        row["sgld_purify_step_size"] = 0.01
+        row["sgld_purify_noise_std"] = 0.005
         rows.append(row)
 
     with TemporaryDirectory() as directory:
@@ -42,4 +52,10 @@ def test_compact_summary_contains_standard_and_joint_tables():
         text = (output / "evaluation_summary.txt").read_text()
         assert "Standard PGD" in text
         assert "Likelihood-aware joint PGD" in text
+        assert "Purif. (lk.) [r=0.2]" in text
+        assert "Purif. (samp., k=1)" in text
+        assert "Purif. (samp., k=3)" in text
+        assert "Purif. (samp., k=5)" in text
+        assert "delta=0.2" in text
+        assert "step_size=0.01" in text
         assert (output / "evaluation_summary.csv").exists()

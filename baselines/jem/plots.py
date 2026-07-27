@@ -11,6 +11,9 @@ from matplotlib.lines import Line2D
 
 
 ALPHA_TICKS = [0, 0.01, 0.1, 0.2, 0.5, 1.0]
+LABEL_FS = 18
+TICK_FS = 15
+LEGEND_FS = 14
 
 
 def load_alpha_sweeps(csv_by_alpha: dict[float, str | Path]) -> pd.DataFrame:
@@ -35,11 +38,28 @@ def _aggregate(df: pd.DataFrame, group: str, column: str):
     )
 
 
+def _require_column(frame: pd.DataFrame, column: str) -> None:
+    if column not in frame:
+        raise ValueError(
+            f"Missing required metric {column!r}. Rerun baselines.jem.sweep "
+            "with the locally projected SGLD analysis."
+        )
+
+
 def _line(ax, values, label, color, linestyle="-"):
     if values is None:
         return
     x, mean, std = values
-    ax.plot(x, mean, marker="o", linewidth=1.8, color=color, linestyle=linestyle, label=label)
+    ax.plot(
+        x,
+        mean,
+        marker="o",
+        markersize=4,
+        linewidth=1.8,
+        color=color,
+        linestyle=linestyle,
+        label=label,
+    )
     ax.fill_between(x, mean - std, mean + std, color=color, alpha=0.15)
 
 
@@ -47,7 +67,12 @@ def _alpha_axis(ax):
     ax.set_xscale("symlog", linthresh=0.005)
     ax.set_xlim(0, 1)
     ax.set_xticks(ALPHA_TICKS)
-    ax.set_xticklabels(["0", "0.01", "0.1", "0.2", "0.5", "1"], rotation=45)
+    ax.set_xticklabels(
+        ["0", "0.01", "0.1", "0.2", "0.5", "1"],
+        rotation=45,
+        ha="right",
+        fontsize=TICK_FS,
+    )
     ax.grid(alpha=0.3)
 
 
@@ -57,9 +82,11 @@ def plot_alpha_curves(
     *,
     epsilon: float = 0.3,
     radius: float = 0.2,
+    sampling_sweep: int = 1,
 ) -> tuple[Path, Path]:
     """MPS-notebook-style accuracy and loss figures over alpha."""
     df = load_alpha_sweeps(csv_by_alpha)
+    _require_column(df, f"sgld_purify_acc/{epsilon}/{sampling_sweep}")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,22 +102,23 @@ def plot_alpha_curves(
     _line(
         ax,
         _aggregate(df, "alpha", f"uq_purify_acc/{epsilon}/{radius}"),
-        rf"Gradient purif. ($r={radius}$)",
+        "Purif. (lk.)",
         "seagreen",
         "-.",
     )
     _line(
         ax,
-        _aggregate(df, "alpha", f"sgld_purify_acc/{epsilon}/{radius}"),
-        rf"SGLD purif. ($r={radius}$)",
+        _aggregate(df, "alpha", f"sgld_purify_acc/{epsilon}/{sampling_sweep}"),
+        rf"Purif. (samp., $k={sampling_sweep}$)",
         "mediumpurple",
         ":",
     )
-    ax.set_xlabel(r"$\alpha$")
-    ax.set_ylabel("Accuracy")
+    ax.set_xlabel(r"$\alpha$", fontsize=LABEL_FS)
+    ax.set_ylabel("Accuracy", fontsize=LABEL_FS)
+    ax.tick_params(axis="y", labelsize=TICK_FS)
     ax.set_ylim(0, 1.05)
     _alpha_axis(ax)
-    ax.legend()
+    ax.legend(fontsize=LEGEND_FS)
     fig.tight_layout()
     accuracy_path = output_dir / "alpha_curve_accuracy.png"
     fig.savefig(accuracy_path, dpi=150, bbox_inches="tight")
@@ -98,23 +126,23 @@ def plot_alpha_curves(
 
     fig, left = plt.subplots(figsize=(6, 4.5))
     right = left.twinx()
-    _line(left, _aggregate(df, "alpha", "dis_loss"), "Dis. CE", "darkred")
+    _line(left, _aggregate(df, "alpha", "dis_loss"), "Dis. loss", "darkred")
     _line(
         right,
-        _aggregate(df, "alpha", "px_cd_loss"),
-        r"$p(x)$ CD surrogate",
+        _aggregate(df, "alpha", "gen_loss"),
+        "Gen. loss (CD)",
         "steelblue",
     )
-    left.set_xlabel(r"$\alpha$")
-    left.set_ylabel("Discriminative CE", color="darkred")
-    right.set_ylabel(r"$p(x)$ CD surrogate", color="steelblue")
-    left.tick_params(axis="y", labelcolor="darkred")
-    right.tick_params(axis="y", labelcolor="steelblue")
+    left.set_xlabel(r"$\alpha$", fontsize=LABEL_FS)
+    left.set_ylabel("Dis. loss", color="darkred", fontsize=LABEL_FS)
+    right.set_ylabel("Gen. loss (CD)", color="steelblue", fontsize=LABEL_FS)
+    left.tick_params(axis="y", labelcolor="darkred", labelsize=TICK_FS)
+    right.tick_params(axis="y", labelcolor="steelblue", labelsize=TICK_FS)
     _alpha_axis(left)
     lines = left.get_lines() + right.get_lines()
-    left.legend(lines, [line.get_label() for line in lines])
+    left.legend(lines, [line.get_label() for line in lines], fontsize=LEGEND_FS)
     fig.tight_layout()
-    loss_path = output_dir / "alpha_curve_losses.png"
+    loss_path = output_dir / "alpha_curve_nll.png"
     fig.savefig(loss_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return accuracy_path, loss_path
@@ -135,12 +163,10 @@ def _mean_std(df: pd.DataFrame, column: str, *, flip: bool = False):
 def plot_purification_radii(
     models: dict[str, str | Path],
     output: str | Path,
-    *,
-    method: str = "gradient",
 ) -> Path:
     """Faceted radius comparison matching the MNIST MPS notebook."""
     frames = {label: pd.read_csv(path) for label, path in models.items()}
-    prefix = "uq_purify_acc/" if method == "gradient" else "sgld_purify_acc/"
+    prefix = "uq_purify_acc/"
     radii = sorted(
         {
             column.split("/")[-1]
@@ -150,6 +176,7 @@ def plot_purification_radii(
         },
         key=float,
     )
+    radius_colors = ("seagreen", "darkviolet", "saddlebrown", "teal")
     fig, axes = plt.subplots(
         1, len(frames), figsize=(5.2 * len(frames), 4.5), sharey=True, squeeze=False
     )
@@ -165,23 +192,41 @@ def plot_purification_radii(
             color="grey",
             linestyle="--",
             marker="x",
-            label="No defense",
+            markersize=5,
+            linewidth=1.4,
+            label="Rob. (no def.)",
         )
-        for radius in radii:
+        for index, radius in enumerate(radii):
             means, stds = zip(
                 *[
                     _mean_std(frame, f"{prefix}{value}/{radius}")
                     for value in eps
                 ]
             )
-            ax.plot(eps, means, marker="o", label=rf"$r={radius}$")
-            ax.fill_between(eps, np.array(means) - stds, np.array(means) + stds, alpha=0.15)
-        ax.set_title(label)
-        ax.set_xlabel(r"attack $\varepsilon$")
+            color = radius_colors[index % len(radius_colors)]
+            ax.plot(
+                eps,
+                means,
+                color=color,
+                linewidth=1.8,
+                marker="o",
+                markersize=4,
+                label=rf"$r={radius}$",
+            )
+            ax.fill_between(
+                eps,
+                np.array(means) - stds,
+                np.array(means) + stds,
+                color=color,
+                alpha=0.15,
+            )
+        ax.set_title(label, fontsize=LABEL_FS)
+        ax.set_xlabel(r"attack $\varepsilon$", fontsize=LABEL_FS)
+        ax.tick_params(axis="both", labelsize=TICK_FS)
         ax.set_ylim(0, 1.05)
         ax.grid(alpha=0.3)
-        ax.legend()
-    axes[0, 0].set_ylabel(f"{method.capitalize()} purification accuracy")
+        ax.legend(fontsize=LEGEND_FS - 1)
+    axes[0, 0].set_ylabel("Purify accuracy", fontsize=LABEL_FS)
     fig.tight_layout()
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -195,10 +240,21 @@ def plot_defense_comparison(
     output_dir: str | Path,
     *,
     radius: float = 0.2,
+    sampling_sweep: int = 5,
     percentile: int = 10,
 ) -> list[Path]:
     """One grouped defense bar chart per attack epsilon."""
     frames = {label: pd.read_csv(path) for label, path in models.items()}
+    for frame in frames.values():
+        for epsilon in (
+            float(column.split("/")[-1])
+            for column in frame
+            if column.startswith("rob/")
+        ):
+            _require_column(
+                frame,
+                f"sgld_purify_acc/{epsilon}/{sampling_sweep}",
+            )
     first = next(iter(frames.values()))
     eps = sorted(
         float(column.split("/")[-1])
@@ -208,8 +264,13 @@ def plot_defense_comparison(
     defenses = [
         ("Clean", "#9E9E9E", "acc", False),
         ("Rob.", "#FF9800", "rob/{eps}", False),
-        ("Gradient", "#4CAF50", f"uq_purify_acc/{{eps}}/{radius}", False),
-        ("SGLD", "#2196F3", f"sgld_purify_acc/{{eps}}/{radius}", False),
+        ("Purif. (lk.)", "#4CAF50", f"uq_purify_acc/{{eps}}/{radius}", False),
+        (
+            rf"Purif. (samp., $k={sampling_sweep}$)",
+            "#2196F3",
+            f"sgld_purify_acc/{{eps}}/{sampling_sweep}",
+            False,
+        ),
         (
             rf"Accept ($q={percentile}\%$)",
             "#9C27B0",
@@ -223,7 +284,7 @@ def plot_defense_comparison(
     x = np.arange(len(frames))
     width = 0.8 / len(defenses)
     for epsilon in eps:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
+        fig, ax = plt.subplots(figsize=(6, 4.5))
         for index, (label, color, template, flip) in enumerate(defenses):
             values = [
                 _mean_std(frame, template.format(eps=epsilon), flip=flip)
@@ -240,11 +301,12 @@ def plot_defense_comparison(
                 capsize=2,
             )
         ax.set_xticks(x)
-        ax.set_xticklabels(frames.keys())
-        ax.set_ylabel("Accuracy")
+        ax.set_xticklabels(frames.keys(), fontsize=TICK_FS)
+        ax.set_ylabel("Accuracy", fontsize=LABEL_FS)
+        ax.tick_params(axis="y", labelsize=TICK_FS)
         ax.set_ylim(0, 1.05)
         ax.grid(axis="y", alpha=0.3, linestyle="--")
-        ax.legend(fontsize=9)
+        ax.legend(fontsize=LEGEND_FS, loc="upper right")
         fig.tight_layout()
         path = output_dir / f"defense_comparison_eps{epsilon}.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -254,7 +316,7 @@ def plot_defense_comparison(
 
 
 def plot_detection_thresholds(
-    models: dict[str, str | Path],
+    models: dict[str, tuple[str, str | Path] | str | Path],
     output_dir: str | Path,
     *,
     percentiles: tuple[int, ...] = (1, 5, 10, 20),
@@ -264,7 +326,11 @@ def plot_detection_thresholds(
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
     colors = ("steelblue", "darkorange", "seagreen", "firebrick")
-    for model_label, csv_path in models.items():
+    for model_key, value in models.items():
+        if isinstance(value, tuple):
+            model_label, csv_path = value
+        else:
+            model_label, csv_path = model_key, value
         frame = pd.read_csv(csv_path)
         eps = sorted(
             float(column.split("/")[-1])
@@ -311,24 +377,36 @@ def plot_detection_thresholds(
                 alpha=0.1,
             )
             handles.append(line)
-        left.set_xlabel(r"Rejection threshold $q$ (clean percentile)")
-        left.set_ylabel("Accuracy on accepted")
-        right.set_ylabel("Detection rate")
+        percent_symbol = r"\%" if plt.rcParams["text.usetex"] else "%"
+        left.set_xlabel(
+            rf"Rejection threshold $q$ (clean percentile, {percent_symbol})",
+            fontsize=LABEL_FS,
+        )
+        left.set_ylabel("Accuracy on accepted", fontsize=LABEL_FS)
+        right.set_ylabel("Detection rate", fontsize=LABEL_FS)
+        left.tick_params(axis="both", labelsize=TICK_FS)
+        right.tick_params(axis="y", labelsize=TICK_FS)
         left.set_ylim(0, 1.05)
         right.set_ylim(0, 1.05)
         left.grid(alpha=0.3)
-        legend = left.legend(handles=handles, title=model_label, loc="upper left")
+        legend = left.legend(
+            handles=handles,
+            title=model_label,
+            fontsize=LEGEND_FS,
+            title_fontsize=LEGEND_FS,
+            loc="upper left",
+        )
         left.add_artist(legend)
         left.legend(
             handles=[
                 Line2D([], [], color="gray", marker="o", label="Acc. accepted"),
-                Line2D([], [], color="gray", linestyle="--", marker="s", label="Detection"),
+                Line2D([], [], color="gray", linestyle="--", marker="s", label="Det. rate"),
             ],
+            fontsize=LEGEND_FS - 1,
             loc="lower right",
         )
         fig.tight_layout()
-        safe = model_label.replace("$", "").replace("\\", "").replace(" ", "_")
-        path = output_dir / f"accept_acc_vs_threshold_{safe}.png"
+        path = output_dir / f"accept_acc_vs_threshold_{model_key}.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         outputs.append(path)
