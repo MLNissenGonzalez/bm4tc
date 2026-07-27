@@ -1,0 +1,59 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start seed sweep (10 seeds) for ecg200 at legendre/d3r20c64, alpha=0.1.
+#
+# Same setup as the HPO that selected these hyperparameters
+# (ecg200/nat/legendre/hpo/cold.yaml): flat-prior start (randn_eye), norm control
+# targeting the flat-prior log-norm, overflow-safe accumulate. lr and
+# soft_strength are the winning trial of
+# outputs/ecg200/nat/legendre/d3r20c64/hpo/cold_a01_0907/ (30 TPE trials, scored
+# on MIN mixed_loss/valid over history -- not the last-epoch summary).
+#
+# Seeds are range(1, 11) to match this dataset's alpha=0 seed sweep, so alpha=0
+# and alpha>0 are compared at equal n.
+#
+# Runnable as-is (born and all HPs are baked in):
+#   python -m experiments.train --multirun \
+#       +experiments=ecg200/nat/legendre/d3r20c64/seed_sweep/cold_a01
+#
+# Output:  outputs/ecg200/nat/legendre/d3r20c64/seed_sweep/cold_a01_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a01
+descriptor: nll_cold
+
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: ucr_ts/ecg200
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+
+born:
+  accumulate: true                             # overflow-safe amplitudes ON
+
+trainer:
+  nll:
+    alpha: 0.1
+    max_epoch: 1000
+    batch_size: 512
+    patience: 100
+    stop_crit: "mixed_loss"
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.00793898   # FROM HPO cold_a01
+      log_target: "n_features * log(in_dim) / 2"   # flat-prior log-norm
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.000997602   # FROM HPO cold_a01
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 11)
