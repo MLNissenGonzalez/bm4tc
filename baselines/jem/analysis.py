@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 import argparse
-import logging
 from pathlib import Path
 
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
-from torch.nn import functional as F
 
 from src.datahandler import DataHandler
-from src.utils.paths import data_root
 
 from .attacks import PGDConfig, pgd_classification, pgd_likelihood_aware
 from .device import resolve_device
 from .model import JEMMLP
-from .purification import PurificationConfig, gradient_purify, sgld_purify
+from .purification import (
+    PurificationConfig,
+    gradient_purify,
+    sgld_purify_snapshots,
+)
 from .sampler import ReplayBuffer, SGLDConfig, SGLDSampler
 from .trainer import evaluate_classifier
-
-logger = logging.getLogger(__name__)
 
 
 def _checkpoint(run_dir: Path) -> Path:
@@ -72,15 +70,6 @@ def _pred_batches(model, data: torch.Tensor, device, batch_size=256) -> torch.Te
     return torch.cat(out)
 
 
-def _msp_batches(model, data: torch.Tensor, device, batch_size=256) -> torch.Tensor:
-    out = []
-    with torch.no_grad():
-        for i in range(0, len(data), batch_size):
-            probs = model.class_probabilities(data[i : i + batch_size].to(device))
-            out.append(probs.max(1).values.cpu())
-    return torch.cat(out)
-
-
 def _attack_dataset(model, data, labels, attack_fn, attack_cfg, device, **kwargs):
     chunks = []
     for i in range(0, len(data), 256):
@@ -90,40 +79,6 @@ def _attack_dataset(model, data, labels, attack_fn, attack_cfg, device, **kwargs
     return torch.cat(chunks)
 
 
-def _ood_metrics(id_score: np.ndarray, ood_score: np.ndarray) -> dict[str, float]:
-    # Positive class is ID: larger JEM score should mean more in-distribution.
-    labels = np.concatenate([np.ones(len(id_score)), np.zeros(len(ood_score))])
-    scores = np.concatenate([id_score, ood_score])
-    auroc = roc_auc_score(labels, scores)
-    aupr_in = average_precision_score(labels, scores)
-    aupr_out = average_precision_score(1 - labels, -scores)
-    fpr, tpr, _ = roc_curve(labels, scores)
-    at_95 = np.where(tpr >= 0.95)[0]
-    fpr95 = float(fpr[at_95[0]]) if len(at_95) else 1.0
-    return {
-        "auroc": float(auroc),
-        "aupr_in": float(aupr_in),
-        "aupr_out": float(aupr_out),
-        "fpr95": fpr95,
-    }
-
-
-def _load_mnist_like_ood(name: str, datahandler, resize: int = 12) -> torch.Tensor:
-    """Load a torchvision grayscale OOD test set with the MNIST-r12 transform."""
-    import torchvision.datasets as tv_datasets
-
-    root = str(data_root() / ".datasets")
-    cls = {"fashion_mnist": tv_datasets.FashionMNIST, "kmnist": tv_datasets.KMNIST}[name]
-    dataset = cls(root=root, train=False, download=True)
-    raw = dataset.data.float().unsqueeze(1) / 255.0
-    resized = F.interpolate(
-        raw, size=(resize, resize), mode="bilinear", align_corners=False
-    )
-    flat = resized.squeeze(1).numpy().reshape(-1, resize * resize).astype(np.float32)
-    scaled = datahandler.scaler.transform(flat)
-    return torch.from_numpy(np.asarray(scaled, dtype=np.float32))
-
-
 def analyze_run(
     run_dir: str | Path,
     *,
@@ -131,8 +86,13 @@ def analyze_run(
     attack_eps: tuple[float, ...] = (0.1, 0.2, 0.3),
     percentiles: tuple[int, ...] = (1, 5, 10, 20),
     radii: tuple[float, ...] = (0.2, 0.3),
+    sampling_radius: float = 0.2,
+    sampling_sweeps: tuple[int, ...] = (1, 3, 5),
+    sampling_steps_per_sweep: int = 20,
+    sampling_step_size: float = 0.01,
+    sampling_noise_std: float = 0.005,
+    sampling_subsample: int | None = 1000,
     defense_subsample: int | None = None,
-    compute_ood: bool = True,
     threshold_split: str = "test",
     adaptive_score_weight: float = 1.0,
 ) -> dict[str, float | str]:
@@ -149,6 +109,25 @@ def analyze_run(
     alpha = float(raw_alpha) if raw_alpha is not None else float("nan")
     results["alpha"] = alpha
     results["parameters"] = float(model.count_parameters())
+    sampling_sweeps = tuple(sorted(set(int(value) for value in sampling_sweeps)))
+    if not sampling_sweeps or sampling_sweeps[0] < 1:
+        raise ValueError("sampling_sweeps must contain positive integers")
+    if (
+        sampling_radius <= 0
+        or sampling_steps_per_sweep < 1
+        or sampling_step_size <= 0
+        or sampling_noise_std < 0
+    ):
+        raise ValueError("sampling purification parameters are invalid")
+    if sampling_subsample is not None and sampling_subsample < 1:
+        raise ValueError("sampling_subsample must be positive or None")
+    if defense_subsample is not None and defense_subsample < 1:
+        raise ValueError("defense_subsample must be positive or None")
+    results["sgld_purify_mode"] = "local_sweeps"
+    results["sgld_purify_radius"] = float(sampling_radius)
+    results["sgld_steps_per_sweep"] = float(sampling_steps_per_sweep)
+    results["sgld_purify_step_size"] = float(sampling_step_size)
+    results["sgld_purify_noise_std"] = float(sampling_noise_std)
 
     test_x, test_y = _collect(dh.classification["test"])
     # JEM cannot evaluate normalized joint NLL. For alpha>0 report the
@@ -210,30 +189,61 @@ def analyze_run(
         raise ValueError("threshold_split must be 'test' or 'valid'")
     thresholds = {q: float(np.percentile(threshold_scores, q)) for q in percentiles}
 
+    defense_idx = None
     if defense_subsample is not None and defense_subsample < len(test_x):
         generator = torch.Generator().manual_seed(0)
-        idx = torch.randperm(len(test_x), generator=generator)[:defense_subsample]
-        defense_x, defense_y = test_x[idx], test_y[idx]
-        defense_is_full = False
+        defense_idx = torch.randperm(len(test_x), generator=generator)[
+            :defense_subsample
+        ]
+        defense_x, defense_y = test_x[defense_idx], test_y[defense_idx]
     else:
         defense_x, defense_y = test_x, test_y
-        defense_is_full = True
+
+    sampling_idx = None
+    if sampling_subsample is not None and sampling_subsample < len(test_x):
+        generator = torch.Generator().manual_seed(0)
+        sampling_idx = torch.randperm(len(test_x), generator=generator)[
+            :sampling_subsample
+        ]
+        sampling_x, sampling_y = test_x[sampling_idx], test_y[sampling_idx]
+    else:
+        sampling_x, sampling_y = test_x, test_y
+    results["sgld_purify_num_examples"] = float(len(sampling_x))
 
     # Clean-purification sanity checks, matching the MPS UQ analysis.
     for radius in radii:
         pur_cfg = PurificationConfig(radius=radius, num_steps=20)
-        grad_chunks, sgld_chunks = [], []
+        grad_chunks = []
         for i in range(0, len(defense_x), 256):
             batch = defense_x[i : i + 256].to(dev)
             grad_chunks.append(gradient_purify(model, batch, pur_cfg).cpu())
-            sgld_chunks.append(sgld_purify(model, sampler, batch, pur_cfg).cpu())
         grad_clean = torch.cat(grad_chunks)
-        sgld_clean = torch.cat(sgld_chunks)
         results[f"uq_clean_purify_acc/{radius}"] = float(
             (_pred_batches(model, grad_clean, dev) == defense_y).float().mean()
         )
-        results[f"sgld_clean_purify_acc/{radius}"] = float(
-            (_pred_batches(model, sgld_clean, dev) == defense_y).float().mean()
+
+    sampling_cfg = PurificationConfig(
+        radius=sampling_radius,
+        num_steps=sampling_steps_per_sweep,
+        step_size=sampling_step_size,
+        sgld_noise_std=sampling_noise_std,
+    )
+    clean_sampling_chunks = {sweep: [] for sweep in sampling_sweeps}
+    for i in range(0, len(sampling_x), 256):
+        batch = sampling_x[i : i + 256].to(dev)
+        snapshots = sgld_purify_snapshots(
+            model,
+            sampler,
+            batch,
+            sampling_cfg,
+            sampling_sweeps,
+        )
+        for sweep, snapshot in snapshots.items():
+            clean_sampling_chunks[sweep].append(snapshot.cpu())
+    for sweep, chunks in clean_sampling_chunks.items():
+        purified = torch.cat(chunks)
+        results[f"sgld_clean_purify_acc/{sweep}"] = float(
+            (_pred_batches(model, purified, dev) == sampling_y).float().mean()
         )
 
     for eps in attack_eps:
@@ -292,24 +302,11 @@ def analyze_run(
                 else float("nan")
             )
 
-        # Purification is intentionally estimated on one fixed paired subset.
-        if defense_is_full:
-            adv_sub = adv.to(dev)
-            adaptive_sub = adaptive.to(dev)
-        else:
-            sub_cfg = PGDConfig(epsilon=eps, num_steps=40, random_start=True)
-            adv_sub = _attack_dataset(
-                model, defense_x, defense_y, pgd_classification, sub_cfg, dev
-            ).to(dev)
-            adaptive_sub = _attack_dataset(
-                model,
-                defense_x,
-                defense_y,
-                pgd_likelihood_aware,
-                sub_cfg,
-                dev,
-                score_weight=adaptive_score_weight,
-            ).to(dev)
+        # Purification uses fixed paired subsets shared across models and seeds.
+        adv_sub = (adv if defense_idx is None else adv[defense_idx]).to(dev)
+        adaptive_sub = (
+            adaptive if defense_idx is None else adaptive[defense_idx]
+        ).to(dev)
         adv_sub_pred = _pred_batches(model, adv_sub.cpu(), dev)
         adaptive_sub_pred = _pred_batches(model, adaptive_sub.cpu(), dev)
         for radius in radii:
@@ -318,34 +315,24 @@ def analyze_run(
                 ("standard", adv_sub, adv_sub_pred),
                 ("joint", adaptive_sub, adaptive_sub_pred),
             ):
-                grad_chunks, sgld_chunks = [], []
+                grad_chunks = []
                 for i in range(0, len(attacked), 256):
                     batch = attacked[i : i + 256]
                     grad_chunks.append(gradient_purify(model, batch, pur_cfg).cpu())
-                    sgld_chunks.append(
-                        sgld_purify(model, sampler, batch, pur_cfg).cpu()
-                    )
                 grad_pur = torch.cat(grad_chunks)
-                sgld_pur = torch.cat(sgld_chunks)
                 grad_pred = _pred_batches(model, grad_pur, dev)
-                sgld_pred = _pred_batches(model, sgld_pur, dev)
                 wrong_before = before_pred != defense_y
                 denom = int(wrong_before.sum())
-                grad_prefix = "uq_purify" if attack_kind == "standard" else "uq_joint_purify"
-                sgld_prefix = "sgld_purify" if attack_kind == "standard" else "sgld_joint_purify"
+                grad_prefix = (
+                    "uq_purify"
+                    if attack_kind == "standard"
+                    else "uq_joint_purify"
+                )
                 results[f"{grad_prefix}_acc/{eps}/{radius}"] = float(
                     (grad_pred == defense_y).float().mean()
                 )
-                results[f"{sgld_prefix}_acc/{eps}/{radius}"] = float(
-                    (sgld_pred == defense_y).float().mean()
-                )
                 results[f"{grad_prefix}_recovery/{eps}/{radius}"] = (
                     float((wrong_before & (grad_pred == defense_y)).sum() / denom)
-                    if denom
-                    else 1.0
-                )
-                results[f"{sgld_prefix}_recovery/{eps}/{radius}"] = (
-                    float((wrong_before & (sgld_pred == defense_y)).sum() / denom)
                     if denom
                     else 1.0
                 )
@@ -354,27 +341,55 @@ def analyze_run(
                     results[f"adaptive_uq_purify_acc/{eps}/{radius}"] = results[
                         f"{grad_prefix}_acc/{eps}/{radius}"
                     ]
-                    results[f"adaptive_sgld_purify_acc/{eps}/{radius}"] = results[
-                        f"{sgld_prefix}_acc/{eps}/{radius}"
-                    ]
 
-    if compute_ood:
-        clean_msp = _msp_batches(model, test_x, dev).numpy()
-        for name in ("fashion_mnist", "kmnist"):
-            try:
-                ood = _load_mnist_like_ood(name, dh)
-                metrics = _ood_metrics(
-                    clean_score, _score_batches(model, ood, dev).numpy()
+        sampling_adv = (adv if sampling_idx is None else adv[sampling_idx]).to(dev)
+        sampling_adaptive = (
+            adaptive if sampling_idx is None else adaptive[sampling_idx]
+        ).to(dev)
+        for attack_kind, attacked in (
+            ("standard", sampling_adv),
+            ("joint", sampling_adaptive),
+        ):
+            before_pred = _pred_batches(model, attacked.cpu(), dev)
+            wrong_before = before_pred != sampling_y
+            denom = int(wrong_before.sum())
+            chunks = {sweep: [] for sweep in sampling_sweeps}
+            for i in range(0, len(attacked), 256):
+                snapshots = sgld_purify_snapshots(
+                    model,
+                    sampler,
+                    attacked[i : i + 256],
+                    sampling_cfg,
+                    sampling_sweeps,
                 )
-                for metric, value in metrics.items():
-                    results[f"ood/{name}/{metric}"] = value
-                msp_metrics = _ood_metrics(
-                    clean_msp, _msp_batches(model, ood, dev).numpy()
+                for sweep, snapshot in snapshots.items():
+                    chunks[sweep].append(snapshot.cpu())
+            prefix = (
+                "sgld_purify"
+                if attack_kind == "standard"
+                else "sgld_joint_purify"
+            )
+            for sweep, sweep_chunks in chunks.items():
+                purified = torch.cat(sweep_chunks)
+                purified_pred = _pred_batches(model, purified, dev)
+                results[f"{prefix}_acc/{eps}/{sweep}"] = float(
+                    (purified_pred == sampling_y).float().mean()
                 )
-                for metric, value in msp_metrics.items():
-                    results[f"ood_msp/{name}/{metric}"] = value
-            except Exception as exc:
-                logger.warning("Skipping OOD dataset %s: %s", name, exc)
+                results[f"{prefix}_recovery/{eps}/{sweep}"] = (
+                    float(
+                        (
+                            wrong_before
+                            & (purified_pred == sampling_y)
+                        ).sum()
+                        / denom
+                    )
+                    if denom
+                    else 1.0
+                )
+                if attack_kind == "joint":
+                    results[f"adaptive_sgld_purify_acc/{eps}/{sweep}"] = results[
+                        f"{prefix}_acc/{eps}/{sweep}"
+                    ]
 
     return results
 
@@ -384,15 +399,25 @@ def main() -> None:
     parser.add_argument("run_dir")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--defense-subsample", type=int, default=None)
+    parser.add_argument("--sampling-radius", type=float, default=0.2)
+    parser.add_argument("--sampling-sweeps", type=int, nargs="+", default=(1, 3, 5))
+    parser.add_argument("--sampling-steps-per-sweep", type=int, default=20)
+    parser.add_argument("--sampling-step-size", type=float, default=0.01)
+    parser.add_argument("--sampling-noise-std", type=float, default=0.005)
+    parser.add_argument("--sampling-subsample", type=int, default=1000)
     parser.add_argument("--threshold-split", choices=("test", "valid"), default="test")
     parser.add_argument("--adaptive-score-weight", type=float, default=1.0)
-    parser.add_argument("--no-ood", action="store_true")
     args = parser.parse_args()
     result = analyze_run(
         args.run_dir,
         device=args.device,
         defense_subsample=args.defense_subsample,
-        compute_ood=not args.no_ood,
+        sampling_radius=args.sampling_radius,
+        sampling_sweeps=tuple(args.sampling_sweeps),
+        sampling_steps_per_sweep=args.sampling_steps_per_sweep,
+        sampling_step_size=args.sampling_step_size,
+        sampling_noise_std=args.sampling_noise_std,
+        sampling_subsample=args.sampling_subsample,
         threshold_split=args.threshold_split,
         adaptive_score_weight=args.adaptive_score_weight,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 import torch
 
@@ -43,13 +44,41 @@ def sgld_purify(
     data: torch.Tensor,
     cfg: PurificationConfig,
 ) -> torch.Tensor:
-    """Projected SGLD around the observed input."""
-    return sampler.refine(
-        model,
-        data,
-        center=data,
-        radius=cfg.radius,
-        num_steps=cfg.num_steps,
-        step_size=cfg.step_size,
-        noise_std=cfg.sgld_noise_std,
-    )
+    """Run one locally projected SGLD purification sweep."""
+    return sgld_purify_snapshots(model, sampler, data, cfg, (1,))[1]
+
+
+def sgld_purify_snapshots(
+    model: JEMMLP,
+    sampler: SGLDSampler,
+    data: torch.Tensor,
+    cfg: PurificationConfig,
+    sweep_points: Iterable[int],
+) -> dict[int, torch.Tensor]:
+    """Run locally projected SGLD sweeps and return requested snapshots.
+
+    One sweep is ``cfg.num_steps`` SGLD transitions projected onto the
+    L-infinity ball of radius ``cfg.radius`` around the state at the start of
+    that sweep. The next sweep is recentered on the previous result, mirroring
+    the local restriction and between-sweep drift of MPS Gibbs purification.
+    """
+    points = sorted({int(value) for value in sweep_points})
+    if not points or points[0] < 1:
+        raise ValueError("sweep_points must contain positive integers")
+
+    current = data.detach()
+    snapshots = {}
+    for sweep in range(1, points[-1] + 1):
+        center = current.detach()
+        current = sampler.refine(
+            model,
+            current,
+            center=center,
+            radius=cfg.radius,
+            num_steps=cfg.num_steps,
+            step_size=cfg.step_size,
+            noise_std=cfg.sgld_noise_std,
+        )
+        if sweep in points:
+            snapshots[sweep] = current.detach().clone()
+    return snapshots

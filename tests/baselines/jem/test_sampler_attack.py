@@ -11,6 +11,7 @@ from baselines.jem.purification import (
     PurificationConfig,
     gradient_purify,
     sgld_purify,
+    sgld_purify_snapshots,
 )
 from baselines.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
 from baselines.jem.trainer import ValidationSamplerConfig, evaluate_jem
@@ -84,6 +85,39 @@ def test_sgld_purification_respects_radius():
     assert (purified - x).abs().max() <= 0.200001
     assert purified.min() >= -1
     assert purified.max() <= 1
+
+
+def test_sgld_purification_recenters_between_sweeps():
+    class LinearScore(torch.nn.Module):
+        input_range = (-1.0, 1.0)
+
+        def forward(self, data):
+            return data.sum(dim=1, keepdim=True)
+
+    model = LinearScore()
+    buffer = ReplayBuffer(4, 2, model.input_range, seed=0)
+    sampler = SGLDSampler(
+        SGLDConfig(num_steps=1, step_size=2.0, noise_std=0.0, buffer_size=4),
+        buffer,
+    )
+    initial = torch.zeros(1, 2)
+    snapshots = sgld_purify_snapshots(
+        model,
+        sampler,
+        initial,
+        PurificationConfig(
+            radius=0.2,
+            num_steps=1,
+            step_size=2.0,
+            sgld_noise_std=0.0,
+        ),
+        (1, 3, 5),
+    )
+
+    assert torch.allclose(snapshots[1], torch.full_like(initial, 0.2))
+    assert torch.allclose(snapshots[3], torch.full_like(initial, 0.6))
+    assert torch.allclose(snapshots[5], torch.full_like(initial, 1.0))
+    assert (snapshots[5] - initial).abs().max() > 0.2
 
 
 def test_standardized_validation_mixed_loss_decomposition():

@@ -18,8 +18,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("sweep_dir")
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--no-ood", action="store_true")
     parser.add_argument("--defense-subsample", type=int, default=None)
+    parser.add_argument("--sampling-radius", type=float, default=0.2)
+    parser.add_argument("--sampling-sweeps", type=int, nargs="+", default=(1, 3, 5))
+    parser.add_argument("--sampling-steps-per-sweep", type=int, default=20)
+    parser.add_argument("--sampling-step-size", type=float, default=0.01)
+    parser.add_argument("--sampling-noise-std", type=float, default=0.005)
+    parser.add_argument("--sampling-subsample", type=int, default=1000)
     parser.add_argument("--threshold-split", choices=("test", "valid"), default="test")
     parser.add_argument("--adaptive-score-weight", type=float, default=1.0)
     args = parser.parse_args()
@@ -51,7 +56,12 @@ def main() -> None:
             run,
             device=args.device,
             defense_subsample=args.defense_subsample,
-            compute_ood=not args.no_ood,
+            sampling_radius=args.sampling_radius,
+            sampling_sweeps=tuple(args.sampling_sweeps),
+            sampling_steps_per_sweep=args.sampling_steps_per_sweep,
+            sampling_step_size=args.sampling_step_size,
+            sampling_noise_std=args.sampling_noise_std,
+            sampling_subsample=args.sampling_subsample,
             threshold_split=args.threshold_split,
             adaptive_score_weight=args.adaptive_score_weight,
         )
