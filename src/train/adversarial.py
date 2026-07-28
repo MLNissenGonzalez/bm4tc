@@ -13,6 +13,7 @@ from src.utils.train import (
     NormTracker,
     eval_metrics,
     eval_rob,
+    eval_split,
     optimizer,
     resolve_log_target,
 )
@@ -23,6 +24,23 @@ from src.model import ConditionalBornMachine
 
 @dataclass
 class AdversarialConfig:
+    """Configuration for :class:`AdversarialTrainer`.
+
+    ``gen_on_clean`` selects between two training objectives at alpha > 0:
+
+    * ``False`` (default, backward compatible) — the whole mixed NLL is fitted to
+      adversarial examples: ``(1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x)``.
+    * ``True`` — the adversarial signal enters the *discriminative* half only,
+      the generative half sees clean data:
+      ``(1-a)*[(1-cw)*L_dis(x_adv) + cw*L_dis(x)] + a*L_gen(x)``.
+      ``clean_weight`` therefore mixes inside the discriminative term (mixing the
+      generative term with itself would be a no-op).
+
+    With ``gen_on_clean=True`` validation switches to :func:`eval_split`, which
+    runs *every* ``eval_rob_freq`` epochs and nothing in between. ``patience`` is
+    then counted in validation events, not epochs: ``eval_rob_freq=5`` with
+    ``patience=200`` means 1000 epochs without improvement.
+    """
     max_epoch: int = 100
     batch_size: int = 64
     alpha: float = 0.0  # mixed-NLL weight for the training objective: alpha*gen + (1-alpha)*dis
@@ -32,6 +50,7 @@ class AdversarialConfig:
     patience: int = 250
     eval_rob_freq: int = 5
     clean_weight: float = 0.0
+    gen_on_clean: bool = False  # adversarial signal in the discriminative term only
     acc_floor: Optional[float] = None  # min clean valid-acc for a model to be selectable
     curriculum: bool = False
     curriculum_start: float = 0.0
@@ -49,6 +68,10 @@ logger = logging.getLogger(__name__)
 _LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss"}
 _ACC_METRICS = {"acc", "rob"}
 _VALID_STOP_CRIT = {"dis_loss", "gen_loss", "mixed_loss", "acc", "rob"}
+
+# Constant (not the run seed) so every seed in a sweep evaluates robustness on
+# the same validation samples, keeping cross-seed rob comparisons clean.
+_ADV_SUBSET_SEED = 0
 
 
 class AdversarialTrainer:
@@ -77,6 +100,49 @@ class AdversarialTrainer:
         self._nc = train_cfg.norm_control
         self.norm_regularizer: NormRegularizer | None = None
         self._nc_log_target: float | None = None
+
+        self.adv_indices: set[int] = set()
+        self._n_rob_valid: int | None = None
+        if train_cfg.gen_on_clean:
+            self._init_split()
+
+    def _init_split(self):
+        """Validate the split objective and draw the fixed valid attack subset.
+
+        The subset holds ``(1 - clean_weight) * n_valid`` positions in the valid
+        loader's iteration order (stable: non-train splits are not shuffled). It
+        is drawn once, from a constant seed, so the rob curve within a run is not
+        perturbed by resampling and is comparable across seeds.
+        """
+        cfg = self.train_cfg
+
+        if cfg.eval_rob_freq < 1:
+            raise ValueError(
+                "gen_on_clean=True requires eval_rob_freq >= 1: it is the cadence "
+                "of the whole validation pass, not just of the robustness eval."
+            )
+        if cfg.alpha >= 1.0:
+            logger.warning(
+                "gen_on_clean=True with alpha=1: the discriminative term vanishes, "
+                "so training reduces to clean generative NLL and the generated "
+                "adversarial examples are discarded."
+            )
+        if cfg.clean_weight >= 1.0:
+            logger.warning(
+                "gen_on_clean=True with clean_weight=1: no adversarial examples "
+                "enter the objective and no valid samples are attacked, so 'rob' "
+                "is never reported."
+            )
+
+        n = len(self.datahandler.classification["valid"].dataset)
+        k = min(n, max(0, int(round((1.0 - cfg.clean_weight) * n))))
+        gen = torch.Generator().manual_seed(_ADV_SUBSET_SEED)
+        self.adv_indices = set(torch.randperm(n, generator=gen)[:k].tolist())
+        logger.info(
+            f"Split objective: attacking {k}/{n} valid samples every "
+            f"{cfg.eval_rob_freq} epoch(s); patience={cfg.patience} valid events "
+            f"(~{cfg.patience * cfg.eval_rob_freq} epochs)."
+        )
 
     def _init_attack(self):
         evasion = self.train_cfg.evasion
@@ -132,6 +198,39 @@ class AdversarialTrainer:
             device=self.device
         )
 
+    def _split_nll(self, adv_data, data, labels, tracker: NormTracker):
+        """Adversarial signal in the discriminative term only (``gen_on_clean``).
+
+            L = (1-a)*[(1-cw)*L_dis(x_adv) + cw*L_dis(x)] + a*L_gen(x)
+
+        ``mixed_nll(x, y, a) = (1-a)*L_dis + a*L_gen`` decomposes exactly, so both
+        clean terms fold into a single call at a rescaled alpha: with
+        ``s = (1-a)*cw + a`` and ``a' = a/s``,
+
+            s * mixed_nll(x, y, a') = (1-a)*cw*L_dis(x) + a*L_gen(x)
+
+        which keeps the step at two forwards (one log_Z) rather than three. At
+        least one of the two weights is always positive, so the sum is never an
+        empty tensor-free float.
+        """
+        alpha = self.train_cfg.alpha
+        cw = self.train_cfg.clean_weight
+        adv_w = (1.0 - alpha) * (1.0 - cw)
+        s = (1.0 - alpha) * cw + alpha
+
+        terms = []
+        if adv_w > 0.0:
+            terms.append(adv_w * self.cbm.mixed_nll(adv_data, labels, alpha=0.0))
+            # Amplitudes explode on the adversarial batch; record before the clean
+            # forward overwrites the cache.
+            tracker.record_amp(self.cbm)
+        if s > 0.0:
+            terms.append(s * self.cbm.mixed_nll(data, labels, alpha=alpha / s))
+            if adv_w <= 0.0:
+                tracker.record_amp(self.cbm)
+
+        return terms[0] if len(terms) == 1 else terms[0] + terms[1]
+
     def _train_epoch(self, epsilon: float):
         losses, nll_losses, reg_losses = [], [], []
         tracker = NormTracker()
@@ -145,17 +244,20 @@ class AdversarialTrainer:
             adv_data = self._generate_adversarial(data, labels, epsilon)
             self.cbm.train()
 
-            adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=self.train_cfg.alpha)
-            # Track amplitude stats on the adversarial batch (where amplitudes
-            # explode), before the optional clean forward overwrites the cache.
-            tracker.record_amp(self.cbm)
-
-            if self.train_cfg.clean_weight > 0:
-                clean_loss = self.cbm.mixed_nll(data, labels, alpha=self.train_cfg.alpha)
-                nll = (1 - self.train_cfg.clean_weight) * adv_loss + \
-                      self.train_cfg.clean_weight * clean_loss
+            if self.train_cfg.gen_on_clean:
+                nll = self._split_nll(adv_data, data, labels, tracker)
             else:
-                nll = adv_loss
+                adv_loss = self.cbm.mixed_nll(adv_data, labels, alpha=self.train_cfg.alpha)
+                # Track amplitude stats on the adversarial batch (where amplitudes
+                # explode), before the optional clean forward overwrites the cache.
+                tracker.record_amp(self.cbm)
+
+                if self.train_cfg.clean_weight > 0:
+                    clean_loss = self.cbm.mixed_nll(data, labels, alpha=self.train_cfg.alpha)
+                    nll = (1 - self.train_cfg.clean_weight) * adv_loss + \
+                          self.train_cfg.clean_weight * clean_loss
+                else:
+                    nll = adv_loss
 
             if self.norm_regularizer is not None:
                 reg = self.norm_regularizer(self.cbm)
@@ -260,6 +362,7 @@ class AdversarialTrainer:
         self.optimizer = optimizer(self.cbm.parameters(), self.train_cfg.optimizer)
 
         rob_freq = self.train_cfg.eval_rob_freq
+        split = self.train_cfg.gen_on_clean
 
         logger.info(f"Adversarial training ({self.train_cfg.evasion.method}) begins.")
 
@@ -271,26 +374,43 @@ class AdversarialTrainer:
             epsilon = self._get_epsilon(self.epoch)
             self._train_epoch(epsilon)
 
-            dis_loss, acc, gen_loss = eval_metrics(
-                self.cbm, self.datahandler.classification["valid"], self.device
-            )
-            alpha = self.train_cfg.alpha
-            mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
-            self.valid_perf = {
-                "dis_loss": dis_loss, "gen_loss": gen_loss,
-                "mixed_loss": mixed_loss, "acc": acc,
-            }
+            # Split mode runs one combined clean+robust pass every rob_freq epochs
+            # and nothing in between, so patience is counted in valid events.
+            do_valid = (not split) or (self.epoch % rob_freq == 0)
 
-            if rob_freq and (self.epoch % rob_freq == 0):
-                rob = eval_rob(
+            if do_valid and split:
+                self.valid_perf = eval_split(
                     self.cbm, self.datahandler.classification["valid"],
-                    self.attack, self.base_epsilon, self.device
+                    self.attack, self.base_epsilon, self.device,
+                    alpha=self.train_cfg.alpha,
+                    clean_weight=self.train_cfg.clean_weight,
+                    adv_indices=self.adv_indices,
                 )
-                self.valid_perf["rob"] = rob
+                # Kept out of valid_perf so it never leaks into `best`.
+                self._n_rob_valid = self.valid_perf.pop("n_rob")
+            elif do_valid:
+                dis_loss, acc, gen_loss = eval_metrics(
+                    self.cbm, self.datahandler.classification["valid"], self.device
+                )
+                alpha = self.train_cfg.alpha
+                mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
+                self.valid_perf = {
+                    "dis_loss": dis_loss, "gen_loss": gen_loss,
+                    "mixed_loss": mixed_loss, "acc": acc,
+                }
 
-            postfix = dict(loss=f"{self._train_loss:.4f}", acc=f"{acc:.4f}",
-                           logZ=f"{self._norm_stats.get('norm/log_Z_mean', float('nan')):.3g}")
-            if "rob" in self.valid_perf:
+                if rob_freq and (self.epoch % rob_freq == 0):
+                    rob = eval_rob(
+                        self.cbm, self.datahandler.classification["valid"],
+                        self.attack, self.base_epsilon, self.device
+                    )
+                    self.valid_perf["rob"] = rob
+
+            postfix = {"loss": f"{self._train_loss:.4f}"}
+            if do_valid:
+                postfix["acc"] = f"{self.valid_perf['acc']:.4f}"
+            postfix["logZ"] = f"{self._norm_stats.get('norm/log_Z_mean', float('nan')):.3g}"
+            if do_valid and "rob" in self.valid_perf:
                 postfix["rob"] = f"{self.valid_perf['rob']:.4f}"
             pbar.set_postfix(**postfix)
 
@@ -299,17 +419,25 @@ class AdversarialTrainer:
                     "dis_loss/train":   self._train_nll,
                     "reg/train":        self._train_reg,
                     "epsilon/train":    epsilon,
-                    "dis_loss/valid":   dis_loss,
-                    "gen_loss/valid":   gen_loss,
-                    "mixed_loss/valid": mixed_loss,
-                    "acc/valid":        acc,
                 }
                 metrics.update(self._norm_stats)
-                if "rob" in self.valid_perf:
-                    metrics["rob/valid"] = self.valid_perf["rob"]
+                if do_valid:
+                    metrics.update({
+                        "dis_loss/valid":   self.valid_perf["dis_loss"],
+                        "gen_loss/valid":   self.valid_perf["gen_loss"],
+                        "mixed_loss/valid": self.valid_perf["mixed_loss"],
+                        "acc/valid":        self.valid_perf["acc"],
+                    })
+                    if "rob" in self.valid_perf:
+                        metrics["rob/valid"] = self.valid_perf["rob"]
+                    if self._n_rob_valid is not None:
+                        # rob/valid is a (1-clean_weight) subset estimator in split
+                        # mode; log its size so that stays recoverable from the run.
+                        metrics["n_rob_valid"] = self._n_rob_valid
                 on_epoch_end(self.epoch, metrics)
 
-            self._update()
+            if do_valid:
+                self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)
 
             if self.patience_counter > self.train_cfg.patience:
