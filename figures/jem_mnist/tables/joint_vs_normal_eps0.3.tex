@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.5$ & AT \\
+    \midrule
+    Rob. & $+0.889 \pm 0.012$ & $+0.832 \pm 0.004$ & $+0.626 \pm 0.004$ & $+0.033 \pm 0.001$ \\
+    Purif.\ (lk.) & $+0.872 \pm 0.010$ & $+0.766 \pm 0.006$ & $+0.531 \pm 0.008$ & $+0.033 \pm 0.003$ \\
+    Purif.\ (samp., $k{=}5$) & $+0.884 \pm 0.010$ & $+0.783 \pm 0.011$ & $+0.563 \pm 0.005$ & $+0.030 \pm 0.006$ \\
+    Det.\ rate ($q{=}10\%$) & $-0.201 \pm 0.044$ & $-0.647 \pm 0.029$ & $-0.288 \pm 0.021$ & $-0.096 \pm 0.010$ \\
+    Accept.\ err ($q{=}10\%$) & $-0.888 \pm 0.014$ & $-0.868 \pm 0.008$ & $-0.650 \pm 0.007$ & $-0.022 \pm 0.003$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Difference (likelihood-aware adaptive minus standard attack) at $\varepsilon=0.3$, $q=10\%$, MNIST JEM. Negative means the adaptive attack is stronger.}
+  \label{tab:joint_vs_normal_jem_eps0.3}
+\end{table}

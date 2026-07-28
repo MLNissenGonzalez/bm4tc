@@ -1,0 +1,86 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training seed sweep (5 seeds) for mnist_full_r12 at legendre/d3r40c64,
+# alpha=0. Fine-tunes from the best clean (alpha=0) NAT checkpoint.
+#
+# clean_weight=0.0 is the best value for this bond dim, from the cw_a0 grid HPO
+# (hpo/clean_weight.yaml) selected on MAX rob/valid subject to acc_floor=0.90.
+# Per-bond-dim best: r10 -> 0.1, r20 -> 0.0, r40 -> 0.0 (lower is better across
+# the board; r10's 0.1 edges 0.0 by <0.003 rob, within noise). lr=3e-4 and
+# soft_strength=1e-3 are the fixed values used throughout the AT/NAT grids.
+#
+# Runnable as-is (born, model_path, and all HPs are baked in):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/at/legendre/d3r40c64/seed_sweep/a0
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: a0
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r40c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Best clean (alpha=0) NAT checkpoint for this bond dim.
+model_path: outputs/mnist_full_r12/nat/legendre/d3r40c64/seed_sweep/a0_2506/0/models/model
+
+tracking:
+  seed: 42
+  evasion:
+    norm: "inf"
+    method: "PGD"
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    alpha: 0.0
+    max_epoch: 100
+    batch_size: 512
+    patience: 10
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
+    save: true
+
+    evasion:
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.3]       # standard MNIST L-inf budget (Madry et al.)
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 70
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3    # FIXED -- flat over ~6 decades in the NAT studies
+      log_target: null
+      debug: false
+
+    clean_weight: 0.0       # FIXED -- best for d3r40c64 from the cw_a0 grid HPO
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 3e-4             # FIXED -- centre of the AT plateau (1.5e-4..7e-4)
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)

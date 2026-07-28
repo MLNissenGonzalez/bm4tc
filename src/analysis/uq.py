@@ -62,7 +62,10 @@ class UQConfig:
     gibbs_n_sweeps: List[int] = field(default_factory=lambda: [1, 3, 5])
     gibbs_num_bins: int = 200
     gibbs_batch_size: int = 8
-    gibbs_radius: Optional[float] = 0.1  # relative to input range; None = unrestricted
+    # Per-sweep L∞ step, as a fraction of the input range; None = unrestricted.
+    # NOT a global budget: the window re-centres each sweep, so after k sweeps the
+    # envelope is k*gibbs_step_radius*(hi-lo). Strength is set by gibbs_n_sweeps.
+    gibbs_step_radius: Optional[float] = 0.1
     # Gibbs is ~99% of UQ cost and reduces to a mean over the test set, so it runs on a
     # fixed random subsample (cheap metrics keep the full set). None = full set.
     gibbs_subsample: Optional[int] = None
@@ -583,7 +586,7 @@ class UQEvaluation:
             gibbs_purifier = GibbsPurification(
                 num_bins=cfg.gibbs_num_bins,
                 gibbs_batch_size=cfg.gibbs_batch_size,
-                radius=cfg.gibbs_radius,
+                step_radius=cfg.gibbs_step_radius,
             )
             sweep_points = sorted(set(cfg.gibbs_n_sweeps))
 

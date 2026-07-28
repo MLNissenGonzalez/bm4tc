@@ -1,0 +1,8 @@
+- tracking.seed=5
+- trainer.optimizer.kwargs.lr=0.00022793121943172549
+- trainer.energy_l2=8.271572640318972e-06
+- sampler.step_size=0.014760333599579359
+- sampler.noise_std=0.005
+- sampler.num_steps=40
+- +experiment=seed_sweep/a001
+- model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_2607/2/models/model.pt

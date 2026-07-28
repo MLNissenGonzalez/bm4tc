@@ -67,16 +67,18 @@ def test_purify_partial_batch(cbm):
     assert purified.shape == (n_samples, DATA_DIM)
 
 
-# --- Restricted Gibbs (radius) ---
+# --- Restricted Gibbs (step_radius) ---
+# step_radius is a PER-SWEEP L-inf step, not a global budget: the window re-centres
+# at the start of every sweep, so the k-sweep envelope is k*step_radius*(hi-lo).
 
 def test_restricted_purify_output_shape(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     assert purified.shape == (BATCH_SIZE, DATA_DIM)
 
 
 def test_restricted_purify_stays_in_input_range(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     lo, hi = cbm.input_range
     assert (purified >= lo - 1e-5).all()
@@ -84,24 +86,89 @@ def test_restricted_purify_stays_in_input_range(cbm, x_adv):
 
 
 def test_restricted_purify_stays_near_start(cbm):
-    # With a small radius, purified values must be within radius of x_adv
-    # (per feature, since each feature is sampled from [x_adv_k ± delta]).
+    # After ONE sweep the window is centred on x_adv, so every purified value must
+    # lie in [x_adv_k ± delta], and — since the candidate grid IS the window — must
+    # be one of the num_bins grid points of that window, not merely inside it.
     torch.manual_seed(0)
-    radius = 0.1
+    step_radius = 0.1
     x_adv = torch.full((BATCH_SIZE, DATA_DIM), 0.5)  # well inside input_range [0,1]
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, radius=radius)
+    purifier = GibbsPurification(
+        num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=step_radius
+    )
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     lo, hi = cbm.input_range
-    delta = radius * (hi - lo)
-    # Each feature must stay within [x_adv_k - delta, x_adv_k + delta] ∩ [lo, hi]
+    delta = step_radius * (hi - lo)
+
     lo_bound = (x_adv - delta).clamp(lo, hi)
     hi_bound = (x_adv + delta).clamp(lo, hi)
     assert (purified >= lo_bound - 1e-5).all(), "Purified values below lower restriction bound"
     assert (purified <= hi_bound + 1e-5).all(), "Purified values above upper restriction bound"
 
+    # Every sample lands exactly on its own window's local grid.
+    expected = lo_bound.unsqueeze(-1) + (hi_bound - lo_bound).unsqueeze(-1) * torch.linspace(
+        0.0, 1.0, NUM_BINS
+    )
+    on_grid = (purified.unsqueeze(-1) - expected).abs().min(dim=-1).values
+    assert (on_grid < 1e-5).all(), "Purified value is not a point of its local window grid"
+
+
+def test_local_grid_uses_full_resolution_inside_window(cbm):
+    """The window is discretized with num_bins points, not sliced out of a global grid.
+
+    The old implementation masked a global linspace(lo, hi, num_bins) down to the
+    window, leaving only ~2*step_radius*num_bins admissible values and throwing the
+    rest of every forward pass away. With a local grid the window carries all
+    num_bins values, so the reachable set is strictly larger than the old one.
+    """
+    import math
+
+    torch.manual_seed(0)
+    step_radius = 0.1
+    num_bins = 40
+    x_adv = torch.full((64, DATA_DIM), 0.5)
+    purifier = GibbsPurification(
+        num_bins=num_bins, gibbs_batch_size=64, step_radius=step_radius
+    )
+    purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
+
+    # Bins the old global-grid-plus-mask scheme could have offered inside the window.
+    old_admissible = math.ceil(2 * step_radius * num_bins) + 1
+    distinct = len(torch.unique(purified[:, 0]))
+    assert distinct > old_admissible, (
+        f"only {distinct} distinct values reachable, no better than the "
+        f"{old_admissible} a masked global grid would allow"
+    )
+
+
+def test_k_sweeps_widen_the_envelope(cbm):
+    """Purification strength comes from n_sweeps — this is the attack-agnostic property.
+
+    step_radius bounds a single sweep's move; k sweeps compose to at most
+    k*step_radius*(hi-lo). Pins BOTH directions: the k-sweep bound holds, and the
+    1-sweep bound does NOT (otherwise step_radius would be a global budget and the
+    number of sweeps would buy nothing).
+    """
+    torch.manual_seed(0)
+    step_radius = 0.1
+    k = 6
+    x0 = torch.full((32, DATA_DIM), 0.5)
+    purifier = GibbsPurification(
+        num_bins=NUM_BINS, gibbs_batch_size=32, step_radius=step_radius
+    )
+    purified, _ = purifier.purify(cbm, x0, n_sweeps=k, device="cpu")
+    lo, hi = cbm.input_range
+    delta = step_radius * (hi - lo)
+    drift = (purified - x0).abs().max()
+
+    assert drift <= k * delta + 1e-5, "drift exceeded the k-sweep envelope"
+    assert drift > delta + 1e-5, (
+        "drift never exceeded a single step — the window is not re-centring per "
+        "sweep, so n_sweeps is not acting as the strength knob"
+    )
+
 
 def test_restricted_purify_log_px_finite(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
     _, log_px = purifier.purify(cbm, x_adv, n_sweeps=3, device="cpu")
     assert torch.isfinite(log_px).all()
 
@@ -151,8 +218,8 @@ def test_purify_snapshots_partial_batch_valid(cbm):
         assert (xp >= lo - 1e-5).all() and (xp <= hi + 1e-5).all()
 
 
-@pytest.mark.parametrize("radius", [None, 0.2])
-def test_gibbs_stable_when_amplitudes_overflow(radius):
+@pytest.mark.parametrize("step_radius", [None, 0.2])
+def test_gibbs_stable_when_amplitudes_overflow(step_radius):
     """Gibbs weights stay correct when the raw |ψ|² would overflow to inf.
 
     The sweep evaluates a full-chain contraction per candidate, so on a long
@@ -181,27 +248,33 @@ def test_gibbs_stable_when_amplitudes_overflow(radius):
 
     torch.manual_seed(0)
     x_adv = lo + (hi - lo) * torch.rand(6, data_dim)
-    purifier = GibbsPurification(num_bins=8, gibbs_batch_size=4, radius=radius)
+    # step_radius=None also keeps the global fixed-grid path under test.
+    purifier = GibbsPurification(num_bins=8, gibbs_batch_size=4, step_radius=step_radius)
     torch.manual_seed(1)
-    # n_sweeps=1 so the radius restriction (centred on the sweep-start snapshot)
-    # is well-defined relative to x_adv; across multiple sweeps x_cur may drift up
-    # to n_sweeps*radius from the original, so a single-radius bound wouldn't hold.
+    # n_sweeps=1 so the restriction (centred on the sweep-start snapshot) is
+    # well-defined relative to x_adv; across k sweeps x_cur may drift up to
+    # k*step_radius from the original, so a single-step bound would not hold.
     xp, lp = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
 
     assert xp.shape == x_adv.shape
     assert torch.isfinite(xp).all()
     assert (xp >= lo).all() and (xp <= hi).all()
     assert len(torch.unique(xp)) > 1, "sampler collapsed to a single bin"
-    if radius is not None:
-        assert (xp - x_adv).abs().max() <= radius * (hi - lo) + 1e-6
+    if step_radius is not None:
+        assert (xp - x_adv).abs().max() <= step_radius * (hi - lo) + 1e-6
 
 
 def test_gibbs_numeric_regression():
-    """Pin Gibbs output so future changes (e.g. the reset hoist) can't silently alter it.
+    """Pin Gibbs output so future changes can't silently alter it.
 
-    Golden values captured from the per-feature-reset implementation; reproduced exactly
-    by the current per-batch-reset code for both a batch size that divides n_samples and
-    one that leaves a partial final batch.
+    Checked for both a batch size that divides n_samples and one that leaves a partial
+    final batch.
+
+    Goldens re-pinned 2026-07-27 for the local-grid change: the restricted sweep now
+    discretizes each sample's own [x̄ ± delta] window with num_bins points instead of
+    masking a global linspace(lo, hi, num_bins) down to it. That intentionally changes
+    which values are reachable, so the previous goldens
+    ({3: (-4.5714287758, -10.9865303040), 4: (-2.0, -9.3423662186)}) no longer apply.
     """
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
@@ -215,12 +288,12 @@ def test_gibbs_numeric_regression():
         m.prepare(device=torch.device("cpu")); m.eval(); m.cache_log_Z()
         return m
 
-    golden = {3: (-4.5714287758, -10.9865303040), 4: (-2.0000000000, -9.3423662186)}
+    golden = {3: (-0.4685872495, -13.2247095108), 4: (-2.3235769272, -13.2589607239)}
     for bs, (xp_sum, lp_sum) in golden.items():
         cbm = make_cbm()
         torch.manual_seed(123)
         x_adv = -1 + 2 * torch.rand(6, 4)
-        purifier = GibbsPurification(num_bins=8, gibbs_batch_size=bs, radius=0.2)
+        purifier = GibbsPurification(num_bins=8, gibbs_batch_size=bs, step_radius=0.2)
         torch.manual_seed(777)
         xp, lp = purifier.purify(cbm, x_adv, n_sweeps=2, device="cpu")
         assert xp.sum().item() == pytest.approx(xp_sum, abs=1e-5)
