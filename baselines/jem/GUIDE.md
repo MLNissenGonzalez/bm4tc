@@ -219,10 +219,14 @@ classification/score balance of the likelihood-aware attack and defaults to
 ```bash
 python -m baselines.jem.generate \
   outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_DDMM/0 \
-  --steps 1000 --per-class 8
+  --steps 1000 --per-class 64 --show-per-class 8
 ```
 
-This performs class-conditional SGLD, the natural sampler for JEM.
+This performs class-conditional SGLD, the natural sampler for JEM. It writes
+`jem_samples.png`, containing the first `--show-per-class` samples in one
+labelled row per class, and `jem_samples_mean.png`, containing the pixel-wise
+class means in a compact 2×5 grid. Sampling and display counts default to 64
+and 8 per class, respectively.
 
 ## 8. Combine with the existing MPS results
 
