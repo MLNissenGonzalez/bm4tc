@@ -20,7 +20,51 @@ from .purification import (
     sgld_purify_snapshots,
 )
 from .sampler import ReplayBuffer, SGLDConfig, SGLDSampler
-from .trainer import evaluate_classifier
+from .trainer import ValidationSamplerConfig, evaluate_classifier, evaluate_jem
+
+
+def load_run_config(run_dir: str | Path):
+    """Load Hydra's run config, or reconstruct it from final seed-sweep configs."""
+    run_dir = Path(run_dir)
+    hydra_config = run_dir / ".hydra/config.yaml"
+    if hydra_config.exists():
+        return OmegaConf.load(hydra_config)
+
+    sweep_dir = run_dir.parent.name
+    sweep_name = sweep_dir.rsplit("_", 1)[0]
+    config_root = Path(__file__).resolve().parent / "configs"
+    experiment_path = config_root / "experiment/seed_sweep" / f"{sweep_name}.yaml"
+    if not experiment_path.exists():
+        raise FileNotFoundError(
+            f"No Hydra config below {run_dir} and no fallback config {experiment_path}"
+        )
+
+    experiment = OmegaConf.load(experiment_path)
+    regime = str(experiment.get("regime", "natural"))
+    trainer_name = "at" if regime == "adversarial" else "natural"
+    cfg = OmegaConf.merge(
+        OmegaConf.load(config_root / "config.yaml"),
+        {"dataset": OmegaConf.load(config_root / "dataset/mnist_full_r12.yaml")},
+        {"model": OmegaConf.load(config_root / "model/mlp_r20_real_dof.yaml")},
+        {"trainer": OmegaConf.load(config_root / "trainer" / f"{trainer_name}.yaml")},
+        {"sampler": OmegaConf.load(config_root / "sampler/default.yaml")},
+        {
+            "validation_sampler": OmegaConf.load(
+                config_root / "validation_sampler/default.yaml"
+            )
+        },
+        {"tracking": OmegaConf.load(config_root / "tracking/online.yaml")},
+        experiment,
+    )
+    if OmegaConf.is_missing(cfg, "model_path"):
+        cfg.model_path = None
+
+    params = OmegaConf.select(cfg, "hydra.sweeper.params") or {}
+    for key, value in params.items():
+        if key == "tracking.seed" and isinstance(value, str) and value.startswith("range("):
+            value = int(run_dir.name) + 1
+        OmegaConf.update(cfg, key, value, merge=True)
+    return cfg
 
 
 def _checkpoint(run_dir: Path) -> Path:
@@ -31,7 +75,7 @@ def _checkpoint(run_dir: Path) -> Path:
 
 
 def _load(run_dir: Path, device):
-    cfg = OmegaConf.load(run_dir / ".hydra/config.yaml")
+    cfg = load_run_config(run_dir)
     model, extra = JEMMLP.load(_checkpoint(run_dir), device=device)
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
@@ -68,6 +112,50 @@ def _pred_batches(model, data: torch.Tensor, device, batch_size=256) -> torch.Te
         for i in range(0, len(data), batch_size):
             out.append(model(data[i : i + batch_size].to(device)).argmax(1).cpu())
     return torch.cat(out)
+
+
+def _validation_cd_surrogate(model, loader, cfg, data_dim: int, device):
+    """Evaluate a deterministic, post-hoc CD surrogate for a natural JEM.
+
+    This intentionally uses the standardized validation SGLD setup rather than
+    the checkpoint replay buffer.  In particular, alpha=0 never trained that
+    buffer, so a shared fresh sampler is required for a comparable alpha curve.
+    """
+    raw = cfg.validation_sampler
+    validation_cfg = ValidationSamplerConfig(
+        num_steps=int(raw.num_steps),
+        step_size=float(raw.step_size),
+        noise_std=float(raw.noise_std),
+        reinit_probability=float(raw.reinit_probability),
+        buffer_size=int(raw.buffer_size),
+        batch_size=int(raw.batch_size),
+        num_batches=int(raw.num_batches),
+        seed=int(raw.seed),
+    )
+    sampler_cfg = SGLDConfig(
+        num_steps=validation_cfg.num_steps,
+        step_size=validation_cfg.step_size,
+        noise_std=validation_cfg.noise_std,
+        reinit_probability=validation_cfg.reinit_probability,
+        buffer_size=validation_cfg.buffer_size,
+        track_diagnostics=False,
+    )
+    buffer = ReplayBuffer(
+        sampler_cfg.buffer_size,
+        data_dim,
+        model.input_range,
+        seed=validation_cfg.seed,
+    )
+    sampler = SGLDSampler(sampler_cfg, buffer)
+    return evaluate_jem(
+        model,
+        loader,
+        sampler,
+        alpha=0.0,
+        cfg=validation_cfg,
+        device=device,
+        epoch=0,
+    )
 
 
 def _attack_dataset(model, data, labels, attack_fn, attack_cfg, device, **kwargs):
@@ -130,39 +218,28 @@ def analyze_run(
     results["sgld_purify_noise_std"] = float(sampling_noise_std)
 
     test_x, test_y = _collect(dh.classification["test"])
-    # JEM cannot evaluate normalized joint NLL. For alpha>0 report the
-    # decomposed CD surrogate using the saved, trained replay buffer.
-    if np.isfinite(alpha) and alpha > 0:
-        n_test = len(test_x)
-        repeats = (n_test + len(sampler.buffer.data) - 1) // len(sampler.buffer.data)
-        negatives = sampler.buffer.data.repeat(repeats, 1)[:n_test]
-        with torch.no_grad():
-            pos_joint, pos_score, neg_score = [], [], []
-            for i in range(0, n_test, 256):
-                xb = test_x[i : i + 256].to(dev)
-                yb = test_y[i : i + 256].to(dev)
-                logits = model(xb)
-                pos_joint.append(logits.gather(1, yb[:, None]).squeeze(1).cpu())
-                pos_score.append(torch.logsumexp(logits, dim=-1).cpu())
-                neg_score.append(
-                    model.marginal_score(negatives[i : i + 256].to(dev)).cpu()
-                )
-        positive_joint = float(torch.cat(pos_joint).mean())
-        positive_marginal = float(torch.cat(pos_score).mean())
-        negative_marginal = float(torch.cat(neg_score).mean())
-        px_cd = negative_marginal - positive_marginal
-        joint_cd = negative_marginal - positive_joint
+    # JEM cannot evaluate normalized joint NLL.  For every natural model,
+    # including alpha=0, report a common post-hoc CD surrogate generated with
+    # the fixed validation SGLD setup.  The training replay buffer is not used:
+    # it was never trained when alpha=0, and would make that point incomparable.
+    if np.isfinite(alpha):
+        cd_metrics = _validation_cd_surrogate(
+            model, dh.classification["test"], cfg, dh.data_dim, dev
+        )
+        px_cd = cd_metrics["px_cd_loss"]
         results.update(
             {
-                "positive_joint_score": positive_joint,
-                "positive_marginal_score": positive_marginal,
-                "negative_marginal_score": negative_marginal,
+                "positive_joint_score": (
+                    cd_metrics["positive_marginal_score"] - results["dis_loss"]
+                ),
+                "positive_marginal_score": cd_metrics["positive_marginal_score"],
+                "negative_marginal_score": cd_metrics["negative_marginal_score"],
                 "px_cd_loss": px_cd,
-                "joint_cd_loss": joint_cd,
+                "joint_cd_loss": cd_metrics["joint_cd_loss"],
                 # Kept for the common MPS CSV schema, with kind made explicit.
-                "gen_loss": joint_cd,
+                "gen_loss": cd_metrics["gen_loss"],
                 "mixed_loss": results["dis_loss"] + alpha * px_cd,
-                "gen_loss_kind": "joint_cd_replay_surrogate",
+                "gen_loss_kind": "joint_cd_validation_sgld_surrogate",
             }
         )
     else:
@@ -209,6 +286,9 @@ def analyze_run(
     else:
         sampling_x, sampling_y = test_x, test_y
     results["sgld_purify_num_examples"] = float(len(sampling_x))
+    results["sgld_clean_acc"] = float(
+        (_pred_batches(model, sampling_x, dev) == sampling_y).float().mean()
+    )
 
     # Clean-purification sanity checks, matching the MPS UQ analysis.
     for radius in radii:
@@ -346,11 +426,20 @@ def analyze_run(
         sampling_adaptive = (
             adaptive if sampling_idx is None else adaptive[sampling_idx]
         ).to(dev)
-        for attack_kind, attacked in (
-            ("standard", sampling_adv),
-            ("joint", sampling_adaptive),
+        sampling_adv_pred = _pred_batches(model, sampling_adv.cpu(), dev)
+        sampling_adaptive_pred = _pred_batches(
+            model, sampling_adaptive.cpu(), dev
+        )
+        results[f"sgld_adv_acc/{eps}"] = float(
+            (sampling_adv_pred == sampling_y).float().mean()
+        )
+        results[f"sgld_joint_adv_acc/{eps}"] = float(
+            (sampling_adaptive_pred == sampling_y).float().mean()
+        )
+        for attack_kind, attacked, before_pred in (
+            ("standard", sampling_adv, sampling_adv_pred),
+            ("joint", sampling_adaptive, sampling_adaptive_pred),
         ):
-            before_pred = _pred_batches(model, attacked.cpu(), dev)
             wrong_before = before_pred != sampling_y
             denom = int(wrong_before.sum())
             chunks = {sweep: [] for sweep in sampling_sweeps}

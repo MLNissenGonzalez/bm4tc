@@ -62,8 +62,8 @@ def test_notebook_outputs_use_the_mps_filenames_and_strategy_names():
             alpha_csv[alpha] = path
         alpha_outputs = plot_alpha_curves(alpha_csv, root / "alpha")
         assert [path.name for path in alpha_outputs] == [
-            "alpha_curve_accuracy.png",
-            "alpha_curve_nll.png",
+            "alpha_curve_accuracy.pdf",
+            "alpha_curve_nll.pdf",
         ]
 
         models = {r"$\alpha{=}0$": csv, "AT": csv}
@@ -74,9 +74,9 @@ def test_notebook_outputs_use_the_mps_filenames_and_strategy_names():
         assert radius_output.name == "purify_acc_vs_radius.png"
         defense_outputs = plot_defense_comparison(models, root / "robustness")
         assert [path.name for path in defense_outputs] == [
-            "defense_comparison_eps0.1.png",
-            "defense_comparison_eps0.2.png",
-            "defense_comparison_eps0.3.png",
+            "defense_comparison_eps0.1.pdf",
+            "defense_comparison_eps0.2.pdf",
+            "defense_comparison_eps0.3.pdf",
         ]
 
         keyed_models = {
@@ -88,8 +88,8 @@ def test_notebook_outputs_use_the_mps_filenames_and_strategy_names():
             root / "detection",
         )
         assert [path.name for path in detection_outputs] == [
-            "accept_acc_vs_threshold_seed_sweep_a0.png",
-            "accept_acc_vs_threshold_at_seed_sweep.png",
+            "accept_acc_vs_threshold_seed_sweep_a0.pdf",
+            "accept_acc_vs_threshold_at_seed_sweep.pdf",
         ]
         table_outputs = write_mnist_tables(keyed_models, root / "tables")
         assert {path.name for path in table_outputs} == {
@@ -124,7 +124,7 @@ def test_jem_sampling_uses_the_mps_two_by_five_mean_grid():
         assert [ax.get_title() for ax in figure.axes] == [
             f"Class {class_idx}" for class_idx in range(10)
         ]
-        assert (Path(directory) / "mnist_samples.png").exists()
+        assert (Path(directory) / "mnist_samples.pdf").exists()
 
 
 def test_jem_sample_grid_shows_only_requested_samples_and_labels_rows():
@@ -175,8 +175,8 @@ def test_jem_generate_command_saves_sample_and_mean_images():
             steps=1,
             device="auto",
         )
-        assert (output / "jem_samples.png").exists()
-        assert (output / "jem_samples_mean.png").exists()
+        assert (output / "jem_samples.pdf").exists()
+        assert (output / "jem_samples_mean.pdf").exists()
 
 
 def test_jem_sampler_config_does_not_require_hydra_run_metadata():

@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 from src.utils.paths import data_root
 
-from .analysis import analyze_run
+from .analysis import analyze_run, load_run_config
 from .report import write_summary
 
 
@@ -33,16 +33,22 @@ def main() -> None:
     runs = sorted(
         (
             p for p in sweep_dir.iterdir()
-            if p.is_dir() and p.name.isdigit() and (p / ".hydra/config.yaml").exists()
+            if p.is_dir()
+            and p.name.isdigit()
+            and (
+                (p / ".hydra/config.yaml").exists()
+                or (p / "models/model.pt").exists()
+                or (p / "models/model").exists()
+            )
         ),
         key=lambda p: int(p.name),
     )
     if not runs:
-        raise FileNotFoundError(f"No numbered Hydra runs below {sweep_dir}")
+        raise FileNotFoundError(f"No numbered JEM runs below {sweep_dir}")
 
     rows = []
     for run in runs:
-        run_cfg = OmegaConf.load(run / ".hydra/config.yaml")
+        run_cfg = load_run_config(run)
         config_values = {
             "config/dataset.name": OmegaConf.select(run_cfg, "dataset.name"),
             "config/tracking.seed": OmegaConf.select(run_cfg, "tracking.seed"),
