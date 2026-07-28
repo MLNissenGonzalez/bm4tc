@@ -1,4 +1,0 @@
-- tracking.seed=2
-- trainer.optimizer.kwargs.lr=0.0019643589897305577
-- trainer.optimizer.kwargs.weight_decay=1.8756206282287313e-06
-- +experiment=seed_sweep/a0

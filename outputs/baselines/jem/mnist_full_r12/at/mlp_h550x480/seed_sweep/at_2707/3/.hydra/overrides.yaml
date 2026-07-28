@@ -1,5 +1,0 @@
-- tracking.seed=4
-- trainer.optimizer.kwargs.lr=0.0009822036655933496
-- trainer.clean_weight=0.007141025907089427
-- +experiment=seed_sweep/at
-- model_path=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_2607/2/models/model.pt
