@@ -259,7 +259,6 @@ def transfer_purify_analysis(
     eval_batch_size: int = EVAL_BATCH_SIZE,
     max_attack_samples: Optional[int] = MAX_ATTACK_SAMPLES,
     stats_cap: Optional[int] = STATS_CAP,
-    annotate: bool = True,
     seed: int = SEED,
     device: str = DEVICE,
     save_dir: Optional[str] = SAVE_DIR,
@@ -426,8 +425,8 @@ def transfer_purify_analysis(
         "row_index": row_index,
     }
 
-    fig = _plot_grid(models, attack_source, classes, row_index, pos_of, clean_imgs, adv_imgs,
-                     adv_pred, pur_pred, pur_imgs, lo, hi, annotate)
+    fig = _plot_grid(models, classes, row_index, pos_of, clean_imgs, adv_imgs, pur_imgs,
+                     lo, hi)
 
     if save_dir is not None:
         out = Path(save_dir)
@@ -440,12 +439,10 @@ def transfer_purify_analysis(
 
 
 # --- Plotting ---------------------------------------------------------------------------
-def _plot_grid(models, attack_source, classes, row_index, pos_of, clean, adv, adv_pred,
-               pur_pred, pur_imgs, lo, hi, annotate: bool = True):
+def _plot_grid(models, classes, row_index, pos_of, clean, adv, pur_imgs, lo, hi):
     """Grid: one row per class, columns [original | adversarial | one per model].
 
-    The adversarial caption reports the *attack source* model's prediction (every model
-    misclassifies these inputs by construction, so one representative label suffices).
+    Images only -- the per-example predictions live in the statistics file, not the figure.
     """
     import matplotlib.pyplot as plt
 
@@ -472,16 +469,13 @@ def _plot_grid(models, attack_source, classes, row_index, pos_of, clean, adv, ad
                             transform=ax.transAxes, fontsize=9, color="0.4")
                 continue
             if j == 0:
-                img, pred = _img(clean[i]), int(c)
+                img = _img(clean[i])
             elif j == 1:
-                img, pred = _img(adv[i]), int(adv_pred[attack_source][i])
+                img = _img(adv[i])
             else:
                 k, p = keys[j - 2], pos_of[int(i)]
-                img, pred = _img(pur_imgs[k][p]), int(pur_pred[k][p])
+                img = _img(pur_imgs[k][p])
             ax.imshow(img, cmap="gray", vmin=0, vmax=1)
-            if annotate and j > 0:
-                ax.set_xlabel(f"$\\rightarrow${pred}", fontsize=9, labelpad=2,
-                              color=("green" if pred == int(c) else "red"))
         axes[r, 0].set_ylabel(f"$y={int(c)}$", fontsize=11)
 
     for j, t in enumerate(col_titles):
@@ -530,7 +524,6 @@ if __name__ == "__main__":
     p.add_argument("--eval-batch-size", type=int, default=EVAL_BATCH_SIZE)
     p.add_argument("--max-attack-samples", type=int, default=MAX_ATTACK_SAMPLES)
     p.add_argument("--stats-cap", type=int, default=STATS_CAP)
-    p.add_argument("--no-annot", action="store_true", help="drop the predicted-class captions")
     p.add_argument("--seed", type=int, default=SEED)
     p.add_argument("--device", default=DEVICE)
     p.add_argument("--save-dir", default=SAVE_DIR)
@@ -542,5 +535,5 @@ if __name__ == "__main__":
         eps=a.eps, radius=a.radius, attack_num_steps=a.attack_num_steps,
         purify_num_steps=a.purify_num_steps, eval_batch_size=a.eval_batch_size,
         max_attack_samples=a.max_attack_samples, stats_cap=a.stats_cap,
-        annotate=not a.no_annot, seed=a.seed, device=a.device, save_dir=a.save_dir,
+        seed=a.seed, device=a.device, save_dir=a.save_dir,
     )
