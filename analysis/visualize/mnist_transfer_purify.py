@@ -19,10 +19,13 @@ One qualitative figure: rows are digit classes, columns are
 The AT model has a poor generative model, so it should purify worse than the generatively
 regularised models -- this script makes that contrast explicit on identical perturbations.
 
-CLI:
+The undefended (alpha=0) model is included as a purification column: it is trained purely
+discriminatively, so its density is a poor purifier and its column is the control.
+
+CLI (each --models path may be a checkpoint file, a run dir, or a sweep root):
     python -m analysis.visualize.mnist_transfer_purify \
-        --models a001=outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206 \
-        --models at=outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606
+        --models 'a001=purified $\alpha=0.01$=outputs/.../seed_sweep/a001_2007/0/models/model' \
+        --models 'at=AT-model purified=outputs/.../seed_sweep/a0_2507/0/models/model'
 
 Notebook:
     from analysis.visualize.mnist_transfer_purify import transfer_purify_analysis
@@ -49,15 +52,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- CONFIG (defaults; override via CLI flags or function args) -------------------------
-# (key, column label, sweep dir) in figure-column order. All models must share the
-# embedding (hence input_range) -- here all are legendre d3r20c64.
+# (key, column label, path) in figure-column order. `path` is a sweep root (best run picked
+# by clean accuracy), a numbered run dir, or a checkpoint file directly -- see
+# `_resolve_run_dir`. All models must share the embedding (hence input_range); here all are
+# legendre d3r20c64. a0 is the undefended baseline: discriminative, no purification-friendly
+# density, so its purification column is the control.
 MODELS: List[Tuple[str, str, str]] = [
+    ("a0", r"purified $\alpha=0$ (undef.)",
+     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/a0_2406/0/models/model"),
     ("a001", r"purified $\alpha=0.01$",
-     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206"),
+     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/a001_2007/0/models/model"),
     ("a01", r"purified $\alpha=0.1$",
-     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a01_1206"),
+     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/a01_2107/0/models/model"),
     ("at", "AT-model purified",
-     "outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606"),
+     "outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep/a0_2507/0/models/model"),
 ]
 ATTACK_SOURCE_KEY = "at"   # attack is crafted white-box on this model
 DISPLAY_CLASSES = [0, 3, 5, 9]  # one figure row per class
@@ -121,7 +129,7 @@ def _format_stats(stats: dict) -> str:
     L.append("--- config ---")
     for k in keys:
         mark = "  (attack source)" if k == src else ""
-        L.append(f"  {k:<{w}} {stats['sweeps'][k]}{mark}")
+        L.append(f"  {k:<{w}} {stats['paths'][k]}{mark}")
         L.append(f"  {'':<{w}} label={labels[k]}  run={stats['run_dirs'][k]}")
     L.append(f"  attack        PGD-inf  eps={stats['eps']} (rel) = {stats['abs_eps']:.4f} (abs), "
              f"{stats['attack_num_steps']} steps")
@@ -179,24 +187,42 @@ def _format_stats(stats: dict) -> str:
 
 
 # --- Model / data loading ---------------------------------------------------------------
-def _load_model(sweep_dir: str, device: str) -> Tuple[ConditionalBornMachine, object, Path]:
-    """Load the best (highest clean-acc) run of a seed sweep; return (cbm, run_cfg, run_dir)."""
-    sweep = Path(sweep_dir)
-    # analysis CSV mirrors the outputs/ path: <root>/outputs/X -> <root>/analysis/outputs/X
-    parts = list(sweep.parts)
+def _resolve_run_dir(path: str) -> Tuple[Path, Optional[Path]]:
+    """Resolve a --models path to (run_dir, checkpoint_or_None).
+
+    Three accepted forms, so remote checkpoint paths can be pasted verbatim:
+      * checkpoint file   ``.../<run>/models/model``  -> that exact checkpoint
+      * run dir           ``.../<sweep>/0``           -> its models/ checkpoint
+      * sweep root        ``.../<sweep>``             -> best run by clean accuracy
+    A returned ``None`` checkpoint means "let find_model_checkpoint search run_dir".
+    """
+    p = Path(path)
+    if p.is_file():
+        # <run>/models/<ckpt>
+        return p.parent.parent, p
+    if (p / ".hydra").is_dir():
+        return p, None
+    # sweep root: analysis CSV mirrors outputs/ -> analysis/outputs/
+    parts = list(p.parts)
     if "outputs" in parts:
         i = parts.index("outputs")
         csv = Path(*parts[:i], "analysis", *parts[i:]) / "evaluation_data.csv"
     else:
-        csv = sweep / "evaluation_data.csv"
+        csv = p / "evaluation_data.csv"
     if csv.exists():
         best = get_best_run(pd.read_csv(csv), "acc", minimize=False)
-        run_dir = sweep / str(best["run_name"])
-    else:
-        run_dir = sweep / "0"  # no CSV: fall back to first run
-        logger.warning(f"No evaluation_data.csv at {csv}; using {run_dir}")
+        return p / str(best["run_name"]), None
+    logger.warning(f"No evaluation_data.csv at {csv}; using {p / '0'}")
+    return p / "0", None
+
+
+def _load_model(path: str, device: str) -> Tuple[ConditionalBornMachine, object, Path]:
+    """Load a model from a checkpoint / run dir / sweep root; return (cbm, run_cfg, run_dir)."""
+    run_dir, ckpt = _resolve_run_dir(path)
     run_cfg = load_run_config(run_dir)
-    cbm = ConditionalBornMachine.load(str(find_model_checkpoint(run_dir)), accumulate=True)
+    if ckpt is None:
+        ckpt = find_model_checkpoint(run_dir)
+    cbm = ConditionalBornMachine.load(str(ckpt), accumulate=True)
     cbm.to(device)
     cbm.eval()
     cbm.cache_log_Z()
@@ -247,7 +273,7 @@ def transfer_purify_analysis(
 
     keys = [k for k, _, _ in models]
     labels_map = {k: lbl for k, lbl, _ in models}
-    sweeps = {k: sw for k, _, sw in models}
+    paths = {k: pth for k, _, pth in models}
     if attack_source not in keys:
         raise ValueError(f"attack_source={attack_source!r} not among model keys {keys}")
 
@@ -255,7 +281,7 @@ def transfer_purify_analysis(
     run_dirs: Dict[str, str] = {}
     src_cfg = None
     for k in keys:
-        cbm, cfg, run_dir = _load_model(sweeps[k], device)
+        cbm, cfg, run_dir = _load_model(paths[k], device)
         cbms[k] = cbm
         run_dirs[k] = str(run_dir)
         if k == attack_source:
@@ -375,7 +401,7 @@ def transfer_purify_analysis(
     stats = {
         "model_keys": keys,
         "model_labels": labels_map,
-        "sweeps": sweeps,
+        "paths": paths,
         "run_dirs": run_dirs,
         "attack_source": attack_source,
         "eps": eps, "abs_eps": abs_eps, "attack_num_steps": attack_num_steps,
@@ -466,18 +492,23 @@ def _plot_grid(models, attack_source, classes, row_index, pos_of, clean, adv, ad
 
 
 def _parse_models(specs: Optional[List[str]]) -> List[Tuple[str, str, str]]:
-    """Turn ``--models key=path`` (or ``key=label=path``) specs into the MODELS triples."""
+    """Turn ``--models key=path`` (or ``key=label=path``) specs into the MODELS triples.
+
+    The key is everything before the first ``=`` and the path everything after the last, so
+    labels may themselves contain ``=`` (mathtext such as ``$\\alpha=0.01$``).
+    """
     if not specs:
         return MODELS
     out = []
     for s in specs:
-        parts = s.split("=")
-        if len(parts) == 2:
-            key, path = parts
-            label = key
-        elif len(parts) == 3:
-            key, label, path = parts
+        if "=" not in s:
+            raise ValueError(f"--models expects key=path or key=label=path, got {s!r}")
+        key, rest = s.split("=", 1)
+        if "=" in rest:
+            label, path = rest.rsplit("=", 1)
         else:
+            label, path = key, rest
+        if not key or not path:
             raise ValueError(f"--models expects key=path or key=label=path, got {s!r}")
         out.append((key, label, path))
     return out
@@ -488,7 +519,8 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--models", action="append", default=None,
-                   help="key=path or key=label=path; repeat once per column (in order)")
+                   help="key=path or key=label=path; repeat once per column (in order). "
+                        "path = checkpoint file, run dir, or sweep root")
     p.add_argument("--attack-source", default=ATTACK_SOURCE_KEY)
     p.add_argument("--classes", default=",".join(str(c) for c in DISPLAY_CLASSES))
     p.add_argument("--eps", type=float, default=EPS)
