@@ -42,15 +42,19 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: ???  # FILL FROM HPO
+      soft_strength: 1e-3    # fixed in hpo/clean_weight.yaml, not swept
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???  # FILL FROM HPO
+        lr: 2e-4             # fixed in hpo/clean_weight.yaml, not swept
         weight_decay: 0.0
-    clean_weight: ???  # FILL FROM HPO
+    # NOT from this arch's own HPO: hpo/cw_a001_2807 for r20 never finished (only the
+    # cw=0.0 job ran). Transferred from the six completed cw studies on these two
+    # datasets, where the grid is flat to within 1-3 valid samples and 0.2 is
+    # top-or-tied in five of them. Revisit if the r20 study is ever completed.
+    clean_weight: 0.2
 
 hydra:
   sweeper:

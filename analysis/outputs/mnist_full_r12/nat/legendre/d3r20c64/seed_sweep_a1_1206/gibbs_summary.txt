@@ -1,0 +1,45 @@
+====================================================================
+Gibbs Purification: mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a1_1206
+====================================================================
+
+Regime: nat  |  Runs: 1  |  Device: cuda
+Embedding: legendre  (range size 2.0)
+Attack: PGD Linf steps=40  fractions=[0.05, 0.1, 0.15]
+N_EVAL: 96 test samples (seed 0)
+Gibbs: sweeps=[1]  step_radius=0.05 (per-sweep L-inf step, NOT a global budget: after k sweeps the
+       envelope is k x 0.05 x range)  num_bins=20
+
+--------------------------------------------------------------------
+Accuracy vs Perturbation Strength (mean across runs)
+--------------------------------------------------------------------
+
+                  eps=0       0.1       0.2       0.3
+No defense       0.4375    0.2396    0.1562    0.1354
+Gibbs (k=1)      0.4479    0.3125    0.2500    0.1979
+
+--------------------------------------------------------------------
+Across-run std / stderr (same layout)
+--------------------------------------------------------------------
+
+std:
+                  eps=0       0.1       0.2       0.3
+No defense            —         —         —         —
+Gibbs (k=1)           —         —         —         —
+
+stderr:
+                  eps=0       0.1       0.2       0.3
+No defense            —         —         —         —
+Gibbs (k=1)           —         —         —         —
+
+Note: the above is spread ACROSS RUNS. Within a single run, the
+binomial sampling error on each accuracy is about 0.0510 at this N_EVAL.
+
+--------------------------------------------------------------------
+Recovery rate (fraction of misclassified adv examples fixed)
+--------------------------------------------------------------------
+
+                    0.1       0.2       0.3
+Gibbs (k=1)      0.0959    0.1111    0.0723
+
+Runtime: 83.5s per run (total 83.5s)
+====================================================================

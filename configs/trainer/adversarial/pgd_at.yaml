@@ -28,6 +28,10 @@ patience: 30
 eval_rob_freq: 5
 
 clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)
+# true: adversarial signal in the discriminative term only, generative term on
+# clean data. Switches validation to eval_split (every eval_rob_freq epochs, none
+# in between), so patience is then counted in valid events, not epochs.
+gen_on_clean: false
 acc_floor: null  # min clean valid-acc for model selection (null = no floor)
 curriculum: false
 curriculum_start: 0.0
