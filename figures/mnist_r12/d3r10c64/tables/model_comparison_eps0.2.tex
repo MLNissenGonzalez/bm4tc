@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{@{}lrrrrrrr@{}}
+    \toprule
+    Model & Clean & Rob. & Purif.\ (lk., $r{=}0.2$) & Purif.\ (lk., $r{=}0.3$) & Purif.\ (Gibbs, $k{=}6$) & Det.\ rate ($q{=}10\%$) & Acc.\ passed ($q{=}10\%$) \\
+    \midrule
+    $\alpha{=}0$ & $\mathbf{0.973 \pm 0.001}$ & $0.009 \pm 0.005$ & $0.449 \pm 0.020$ & $0.434 \pm 0.019$ & --- & $\mathbf{0.347 \pm 0.043}$ & $0.011 \pm 0.005$ \\
+    $\alpha{=}0.01$ & $0.948 \pm 0.003$ & $0.401 \pm 0.013$ & $0.801 \pm 0.005$ & $0.807 \pm 0.003$ & $0.774 \pm 0.012$ & $0.323 \pm 0.005$ & $0.420 \pm 0.009$ \\
+    $\alpha{=}0.1$ & $0.783 \pm 0.005$ & $0.320 \pm 0.004$ & $0.602 \pm 0.002$ & $0.621 \pm 0.005$ & $0.573 \pm 0.008$ & $0.334 \pm 0.005$ & $0.340 \pm 0.002$ \\
+    $\alpha{=}0.2$ & $0.663 \pm 0.003$ & $0.326 \pm 0.002$ & $0.487 \pm 0.001$ & $0.507 \pm 0.004$ & $0.443 \pm 0.022$ & $0.346 \pm 0.005$ & $0.353 \pm 0.004$ \\
+    $\alpha{=}0.5$ & $0.555 \pm 0.028$ & $0.262 \pm 0.015$ & $0.414 \pm 0.020$ & $0.441 \pm 0.019$ & $0.406 \pm 0.013$ & $0.338 \pm 0.007$ & $0.301 \pm 0.014$ \\
+    $\alpha{=}1$ & $0.451 \pm 0.004$ & $0.217 \pm 0.004$ & $0.340 \pm 0.005$ & $0.367 \pm 0.004$ & $0.374 \pm 0.004$ & $0.323 \pm 0.008$ & $0.257 \pm 0.003$ \\
+    AT ($\alpha{=}0$) & $0.913 \pm 0.001$ & $\mathbf{0.846 \pm 0.001}$ & $\mathbf{0.838 \pm 0.003}$ & $\mathbf{0.833 \pm 0.003}$ & $\mathbf{0.799 \pm 0.014}$ & $0.168 \pm 0.020$ & $\mathbf{0.842 \pm 0.003}$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Defenses at $\varepsilon=0.2$, $q{=}10\%$. MNIST $12\times12$, Legendre $d{=}3$, $r{=}10$, 5 seeds (mean $\pm$ 1 std). Gibbs uses an $n_{\mathrm{eval}}=250$ subsample; all other columns use the full test split.}
+  \label{tab:mnist_r12_models_r10_eps0.2}
+\end{table}
