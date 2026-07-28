@@ -1,0 +1,95 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training HPO over clean_weight ONLY, at fixed lr and
+# soft_strength, for italypowerdemand. Fine-tunes from the best clean (alpha=0) NAT
+# checkpoint for the chosen bond dim. Alpha, bond dim and model_path are CLI
+# overrides.
+#
+# WHY clean_weight is the only swept axis: on the 27 finished trials of the
+# mnist_full_r12 r20 AT Optuna study (scored on MAX rob/valid, collapsed and
+# gradient-masking runs dropped), corr(clean_weight, rob) = -0.664 while
+# corr(log lr, rob) = -0.200 -- clean_weight dominates and lr has a broad
+# plateau. That study's search floor was 0.2 and its good trials piled up
+# against it, so this grid probes down to 0.0 (pure adversarial, the pgd_at
+# default).
+#
+# WHY lr is fixed at 1e-3: italypowerdemand's own alpha=0 NAT HPO
+# (hpo_a0_2506, 16 trials) has its top-4 at lr 3.86e-3, 3.88e-3, 1.43e-3,
+# 4.36e-3 (geo-mean 3.1e-3) -- 15x above ecg200's, so a shared lr is not
+# defensible for these two datasets. 1e-3 steps that down to the low end of this
+# dataset's own evidence band (its r20 alpha>=0.1 cold optima all cluster at
+# ~1.0e-3) to stay under the ~1.5e-3 threshold where AT collapsed to chance
+# accuracy on mnist_full_r12. If AT barely moves off the warm start, raise it
+# toward 3e-3 on the CLI.
+#
+# WHY soft_strength is fixed at 1e-3: across the 240 warm-start NAT trials on
+# mnist_full_r12 the objective is flat in soft_strength over ~6 decades once lr
+# clears ~1e-4, and only >1e-1 is reliably bad. The cold alpha>0 HPO on this
+# dataset agrees: 33 of the 40 pooled top-4 trials land in 1e-6..1e-2. Per-alpha
+# transfer would inject that noise into the very alpha comparison this
+# experiment makes.
+#
+# Evasion is left at the pgd_at defaults (L2, strengths [0.1] as a fraction of
+# the embedding range size, 10 steps), matching configs/tracking/online.yaml.
+# acc_floor stays null, matching the ecg200 config (where mnist's 0.90 floor
+# would select no epoch at all, its clean acc being ~0.86). This dataset's clean
+# acc is ~0.97, so a 0.90 floor WOULD be a usable guard here -- set
+# trainer.adversarial.acc_floor=0.90 on the CLI if a trial collapses.
+#
+# Usage (alpha, born and matching model_path all required):
+#   python -m experiments.train --multirun \
+#       +experiments=italypowerdemand/at/legendre/hpo/clean_weight \
+#       born=legendre/d3r20c64 \
+#       trainer.adversarial.alpha=0.01 \
+#       +model_path=outputs/italypowerdemand/nat/legendre/d3r20c64/seed_sweep_a0_0807/{J}/models/model
+#
+# Output:  outputs/italypowerdemand/at/legendre/d3r{R}c64/hpo/cw_a{X}_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "cw_${alpha_suffix:}"
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r10c64        # CLI-overridden: born=legendre/d3r{10,20}c64
+  - override /dataset: ucr_ts/italypowerdemand
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Required on the CLI: best clean (alpha=0) NAT checkpoint for this bond dim.
+model_path: ???
+
+tracking:
+  seed: 42
+
+trainer:
+  adversarial:
+    alpha: 0.0               # CLI-overridden: trainer.adversarial.alpha={0.0, 0.01}
+    max_epoch: 800
+    batch_size: 100
+    patience: 200
+    stop_crit: "rob"
+    eval_rob_freq: 5
+    acc_floor: null
+    save: false
+
+    curriculum: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3    # FIXED -- flat over ~6 decades in the NAT studies
+      log_target: null       # pin log_Z to the pretrained (normalized) start
+      debug: false
+
+    clean_weight: 0.2        # overridden by the grid below
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-3             # FIXED -- see header
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.clean_weight: choice(0.0, 0.1, 0.2, 0.4)

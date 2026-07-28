@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{lcccc}
+    \toprule
+    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.5$ & AT \\
+    \midrule
+    Rob. & $+0.545 \pm 0.012$ & $+0.185 \pm 0.010$ & $-0.086 \pm 0.009$ & $+0.042 \pm 0.001$ \\
+    Purif.\ (lk.) & $+0.226 \pm 0.007$ & $+0.177 \pm 0.006$ & $+0.084 \pm 0.003$ & $+0.030 \pm 0.001$ \\
+    Det.\ rate ($q{=}10\%$) & $-0.287 \pm 0.032$ & $-0.275 \pm 0.004$ & $-0.194 \pm 0.004$ & $-0.158 \pm 0.024$ \\
+    Accept.\ err ($q{=}10\%$) & $-0.538 \pm 0.014$ & $-0.194 \pm 0.011$ & $+0.086 \pm 0.010$ & $-0.042 \pm 0.002$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Difference (joint adaptive minus standard attack) at $\varepsilon=0.2$, $q{=}10\%$, MNIST, Legendre $d{=}3$, $r{=}20$. Negative $\Rightarrow$ the detector-aware joint attack is stronger (lower accuracy / lower detection rate).}
+  \label{tab:joint_vs_normal_mnist_eps0.2}
+\end{table}

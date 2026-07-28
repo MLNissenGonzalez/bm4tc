@@ -143,7 +143,9 @@ GIBBS_CONFIG = {
     # 24 is safe for resized MNIST (r12) at num_bins=96 (~1.5× the old 8×200 peak);
     # drop to ~8 for full-res mnist_full (784 sites).
     "gibbs_batch_size": 24,
-    "radius": 0.1,
+    # Per-sweep L∞ step (fraction of the input range), NOT a global budget: the
+    # window re-centres each sweep, so after k sweeps the envelope is k×this.
+    "step_radius": 0.1,
     # Gibbs is ~99% of analysis cost and only estimates a mean over the test set, so
     # run it on a fixed random subsample (cheap metrics keep the full set). ~±1.5%
     # stderr at 1000. None = full test set.
@@ -222,7 +224,7 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         _full_uq_config["gibbs_n_sweeps"] = GIBBS_CONFIG["n_sweeps"]
         _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
         _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
-        _full_uq_config["gibbs_radius"] = GIBBS_CONFIG.get("radius")
+        _full_uq_config["gibbs_step_radius"] = GIBBS_CONFIG.get("step_radius")
         _full_uq_config["gibbs_subsample"] = GIBBS_CONFIG.get("subsample")
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
