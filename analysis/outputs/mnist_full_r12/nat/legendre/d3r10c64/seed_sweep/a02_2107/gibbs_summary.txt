@@ -1,0 +1,53 @@
+====================================================================
+Gibbs Purification: mnist_full_r12/nat/legendre/d3r10c64/seed_sweep/a02_2107
+====================================================================
+
+Regime: nat  |  Runs: 5  |  Device: cuda
+Embedding: legendre  (range size 2.0)
+Attack: PGD Linf steps=40  fractions=[0.05, 0.1, 0.15]
+N_EVAL: 250 test samples (seed 0)
+Gibbs: sweeps=[1, 3, 6]  step_radius=0.05 (per-sweep L-inf step, NOT a global budget: after k sweeps the
+       envelope is k x 0.05 x range)  num_bins=20
+
+--------------------------------------------------------------------
+Accuracy vs Perturbation Strength (mean across runs)
+--------------------------------------------------------------------
+
+                  eps=0       0.1       0.2       0.3
+No defense       0.6680    0.4576    0.3104    0.1648
+Gibbs (k=1)      0.6640    0.5048    0.3656    0.2520
+Gibbs (k=3)      0.6480    0.5392    0.4176    0.3368
+Gibbs (k=6)      0.6416    0.5528    0.4432    0.3656
+
+--------------------------------------------------------------------
+Across-run std / stderr (same layout)
+--------------------------------------------------------------------
+
+std:
+                  eps=0       0.1       0.2       0.3
+No defense       0.0123    0.0193    0.0061    0.0066
+Gibbs (k=1)      0.0069    0.0195    0.0073    0.0057
+Gibbs (k=3)      0.0136    0.0182    0.0122    0.0151
+Gibbs (k=6)      0.0067    0.0137    0.0222    0.0231
+
+stderr:
+                  eps=0       0.1       0.2       0.3
+No defense       0.0055    0.0086    0.0027    0.0029
+Gibbs (k=1)      0.0031    0.0087    0.0032    0.0025
+Gibbs (k=3)      0.0061    0.0081    0.0055    0.0067
+Gibbs (k=6)      0.0030    0.0061    0.0099    0.0103
+
+Note: the above is spread ACROSS RUNS. Within a single run, the
+binomial sampling error on each accuracy is about 0.0316 at this N_EVAL.
+
+--------------------------------------------------------------------
+Recovery rate (fraction of misclassified adv examples fixed)
+--------------------------------------------------------------------
+
+                    0.1       0.2       0.3
+Gibbs (k=1)      0.1046    0.0858    0.1063
+Gibbs (k=3)      0.1723    0.1693    0.2059
+Gibbs (k=6)      0.2131    0.2042    0.2424
+
+Runtime: 973.4s per run (total 4867.2s)
+====================================================================
