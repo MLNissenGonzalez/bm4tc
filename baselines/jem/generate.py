@@ -188,7 +188,7 @@ def sample_and_plot(
     if save_dir is not None:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_dir / "mnist_samples.png", dpi=150, bbox_inches="tight")
+        fig.savefig(save_dir / "mnist_samples.pdf", dpi=150, bbox_inches="tight")
     return fig
 
 
@@ -234,7 +234,7 @@ def main() -> None:
             fig.savefig(output, dpi=150, bbox_inches="tight")
             target = output
         else:
-            target = output / "mnist_samples.png"
+            target = output / "mnist_samples.pdf"
         print(f"Saved {target}")
         return
 
@@ -254,16 +254,16 @@ def main() -> None:
     if args.output:
         requested_output = Path(args.output)
         if requested_output.is_dir() or not requested_output.suffix:
-            samples_output = requested_output / "jem_samples.png"
-            mean_output = requested_output / "jem_samples_mean.png"
+            samples_output = requested_output / "jem_samples.pdf"
+            mean_output = requested_output / "jem_samples_mean.pdf"
         else:
             samples_output = requested_output
             mean_output = requested_output.with_name(
                 f"{requested_output.stem}_mean{requested_output.suffix}"
             )
     else:
-        samples_output = run_dir / "jem_samples.png"
-        mean_output = run_dir / "jem_samples_mean.png"
+        samples_output = run_dir / "jem_samples.pdf"
+        mean_output = run_dir / "jem_samples_mean.pdf"
     samples_output.parent.mkdir(parents=True, exist_ok=True)
     mean_output.parent.mkdir(parents=True, exist_ok=True)
 
