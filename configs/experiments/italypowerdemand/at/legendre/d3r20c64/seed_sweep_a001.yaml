@@ -42,15 +42,17 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: ???  # FILL FROM HPO
+      soft_strength: 1e-3    # fixed in hpo/clean_weight.yaml, not swept
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???  # FILL FROM HPO
+        lr: 1e-3             # fixed in hpo/clean_weight.yaml, not swept
         weight_decay: 0.0
-    clean_weight: ???  # FILL FROM HPO
+    # From hpo/cw_a001_2807 (max rob/valid): cw 0.0/0.2/0.4 -> 0.9300, cw 0.1 -> 0.9261.
+    # Three-way tie at the top; 0.2 chosen as the non-zero member.
+    clean_weight: 0.2
 
 hydra:
   sweeper:

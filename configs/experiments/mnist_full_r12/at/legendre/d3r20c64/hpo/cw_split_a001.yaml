@@ -1,0 +1,118 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training HPO over clean_weight ONLY, at fixed lr and
+# soft_strength, for mnist_full_r12 at legendre/d3r20c64, alpha=0.01, with the
+# SPLIT objective (gen_on_clean=true). Fine-tunes from the best clean (alpha=0)
+# NAT checkpoint for this bond dim.
+#
+# WHAT gen_on_clean CHANGES: the adversarial signal enters the discriminative
+# half of the interpolation only, and the generative half sees clean data:
+#
+#     L = (1-a)*[(1-cw)*L_dis(x_adv) + cw*L_dis(x)] + a*L_gen(x)
+#
+# versus the default (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x). At alpha=0.01 the
+# two differ by 0.01*(1-cw)*[L_gen(x_adv) - L_gen(x)] -- a small weight on a term
+# that is NOT small on MNIST, since an L-inf 0.3 perturbation moves log|psi|^2 a
+# long way.
+#
+# WHY clean_weight is re-swept rather than reused at 0.2: cw no longer weights
+# the whole mixed NLL, it mixes *inside* the discriminative term. The cw_a001
+# grid's answer therefore does not transfer, even though the number would look
+# familiar. Grid repeated from that study: choice(0.0, 0.1, 0.2, 0.4), which
+# probes below the old Optuna floor of 0.2 that its good trials piled up against.
+#
+# WHY lr=3e-4 and soft_strength=1e-3 are unchanged: same values as the non-split
+# cw_a001 grid and the whole AT/NAT family here -- lr sits in the AT plateau
+# (1.5e-4..7e-4) and the objective is flat in soft_strength over ~6 decades once
+# lr clears ~1e-4. Holding both fixed keeps the split the only difference
+# against hpo/cw_a001, which is the comparison this study exists to make.
+#
+# eval_rob_freq=5 is now the cadence of the WHOLE validation pass (gen_on_clean
+# routes validation through eval_split), not just of the robustness eval; there
+# is no clean-only eval in between. patience=10 is unchanged and still means 10
+# validation events (~50 epochs): with stop_crit="rob" the default path already
+# skipped non-rob epochs without counting them.
+#
+# Robustness is measured on a fixed (1-cw) fraction of the valid set, drawn once
+# from a constant seed. Its size is logged as n_rob_valid; note this makes
+# rob/valid a subset estimator at cw>0, so it is not exactly comparable to a
+# non-split run's full-valid-set rob.
+#
+# Runnable as-is (born, model_path and all fixed HPs are baked in):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/at/legendre/d3r20c64/hpo/cw_split_a001
+#
+# Output:  outputs/mnist_full_r12/at/legendre/d3r20c64/hpo/cw_split_a001_{DDMM}/{job}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: cw_split_a001
+descriptor: at_pretrained
+
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+# Best clean (alpha=0) NAT checkpoint for this bond dim.
+model_path: outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/a0_2406/2/models/model
+
+tracking:
+  seed: 42
+  evasion:
+    norm: "inf"
+    method: "PGD"
+    criterion:
+      name: "negative log-likelihood"
+    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+trainer:
+  adversarial:
+    alpha: 0.01
+    gen_on_clean: true       # adversarial signal in the discriminative term only
+    max_epoch: 100
+    batch_size: 512
+    patience: 10             # validation events, i.e. ~50 epochs at eval_rob_freq=5
+    stop_crit: "rob"
+    eval_rob_freq: 5         # cadence of the whole validation pass under the split
+    acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
+    save: false
+
+    evasion:
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      strengths: [0.3]       # standard MNIST L-inf budget (Madry et al.)
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_start: 0.01
+    curriculum_end_epoch: 70
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 1e-3    # FIXED -- flat over ~6 decades in the NAT studies
+      log_target: null
+      debug: false
+
+    clean_weight: 0.2        # overridden by the grid below
+
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 3e-4             # FIXED -- centre of the AT plateau (1.5e-4..7e-4)
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      trainer.adversarial.clean_weight: choice(0.0, 0.1, 0.2, 0.4)
