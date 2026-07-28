@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{@{}lcccccc@{}}
+    \toprule
+    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.1$ & $\alpha{=}0.2$ & $\alpha{=}0.5$ & $\alpha{=}1$ \\
+    \midrule
+    Rob. & $+0.246 \pm 0.092$ & $+0.360 \pm 0.145$ & $+0.310 \pm 0.109$ & $+0.374 \pm 0.059$ & $+0.478 \pm 0.084$ & $+0.650 \pm 0.054$ \\
+    Purif.\ (lk.) & $+0.040 \pm 0.061$ & $+0.032 \pm 0.060$ & $+0.096 \pm 0.057$ & $+0.154 \pm 0.087$ & $+0.180 \pm 0.064$ & $+0.202 \pm 0.068$ \\
+    Det.\ rate ($q{=}10\%$) & $-0.288 \pm 0.052$ & $-0.310 \pm 0.052$ & $-0.538 \pm 0.058$ & $-0.650 \pm 0.048$ & $-0.708 \pm 0.056$ & $-0.740 \pm 0.067$ \\
+    Accept.\ err ($q{=}10\%$) & $-0.252 \pm 0.084$ & $-0.332 \pm 0.171$ & $-0.309 \pm 0.103$ & $-0.331 \pm 0.085$ & $-0.386 \pm 0.122$ & $-0.633 \pm 0.112$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Joint (detector-aware) minus standard attack at $\varepsilon=0.3$, $q{=}10\%$. Negative $\Rightarrow$ the joint attack is stronger. ecg200, Legendre $d{=}3$, $r{=}10$, 10 seeds (mean $\pm$ 1 std). All columns use the full test split.}
+  \label{tab:ecg200_joint_r10_eps0.3}
+\end{table}
