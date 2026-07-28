@@ -1,35 +1,38 @@
-"""Transfer-attack + differential-purification visualisation for MNIST CBMs.
+"""Transfer-attack + purification figure for MNIST CBMs.
 
-Compares an adversarially-trained (AT) model against a generatively-regularised model
-on the *same* adversarial inputs:
+One qualitative figure: rows are digit classes, columns are
+``original | adversarial | purified <model 1> | purified <model 2> | purified <model 3>``.
 
-1. Craft adversarial examples against the SOURCE model (default AT) with a standard
-   discriminative PGD attack at strength ``EPS`` (range-relative fraction).
-2. Keep only examples that **fool both** models (both classify the clean input correctly
-   and both misclassify the adversarial one) -- i.e. the attack transfers. No joint loss.
+1. Craft adversarial examples against the ATTACK SOURCE model (the adversarially-trained
+   one) with a standard discriminative PGD attack at strength ``EPS`` (range-relative
+   fraction).
+2. Keep only examples on which the attack **transfers to every model**: all models classify
+   the clean input correctly and all misclassify the adversarial one. Every purification
+   column therefore starts from an identical, genuinely adversarial input.
 3. Purify each transferring example with **each** model independently (likelihood
-   purification within radius ``RADIUS``), classify the purified input with the same
-   model, and record whether the correct label is recovered (self-purify, self-classify).
-4. Track, per example, which model purifies successfully (categories: both / source-only /
-   target-only / neither) and dump a per-example CSV + a summary figure + an example montage.
+   purification within radius ``RADIUS``) and classify the purified input with the same
+   model (self-purify, self-classify).
+4. Emit a ``len(classes) x (2 + n_models)`` grid figure plus a plain-text statistics file
+   holding the transferability and purification-success numbers over the whole eligible
+   set (not just the handful of displayed digits).
 
-The AT model has a poor generative model, so it should purify worse than the generative
-model -- this script makes that contrast explicit on identical perturbations.
+The AT model has a poor generative model, so it should purify worse than the generatively
+regularised models -- this script makes that contrast explicit on identical perturbations.
 
 CLI:
     python -m analysis.visualize.mnist_transfer_purify \
-        --source-sweep outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606 \
-        --target-sweep outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206
+        --models a001=outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206 \
+        --models at=outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606
 
 Notebook:
     from analysis.visualize.mnist_transfer_purify import transfer_purify_analysis
-    df, fig_summary, fig_montage = transfer_purify_analysis(SOURCE_SWEEP, TARGET_SWEEP, ...)
+    fig, stats = transfer_purify_analysis()
 """
 
 import logging
 import math
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,55 +49,138 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- CONFIG (defaults; override via CLI flags or function args) -------------------------
-SOURCE_SWEEP = "outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606"        # attack source = AT
-TARGET_SWEEP = "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206"  # transfer target = a=0.01
-EPS = 0.3                 # attack budget, range-relative fraction
+# (key, column label, sweep dir) in figure-column order. All models must share the
+# embedding (hence input_range) -- here all are legendre d3r20c64.
+MODELS: List[Tuple[str, str, str]] = [
+    ("a001", r"purified $\alpha=0.01$",
+     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a001_1206"),
+    ("a01", r"purified $\alpha=0.1$",
+     "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a01_1206"),
+    ("at", "AT-model purified",
+     "outputs/mnist_full_r12/at/legendre/d3r20c64/seed_sweep_1606"),
+]
+ATTACK_SOURCE_KEY = "at"   # attack is crafted white-box on this model
+DISPLAY_CLASSES = [0, 3, 5, 9]  # one figure row per class
+
+EPS = 0.2                 # attack budget, range-relative fraction
 RADIUS = 0.3              # purification radius, range-relative fraction
-TARGET_PER_CLASS = 10     # collect at least this many transferring examples per class
 ATTACK_NUM_STEPS = 40
 PURIFY_NUM_STEPS = 20
 EVAL_BATCH_SIZE = 128
-MAX_ATTACK_SAMPLES: Optional[int] = None  # cap #clean inputs attacked (None = whole test set)
+MAX_ATTACK_SAMPLES: Optional[int] = 2000  # #clean inputs attacked (None = whole test set)
+STATS_CAP: Optional[int] = 200            # #eligible examples purified for the statistics
 SEED = 0
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SAVE_DIR = "figures/mnist/transfer_purify"
 
-CATEGORIES = ["both", "source_only", "target_only", "neither"]
+FIG_NAME = "transfer_purify_grid.png"
+STATS_NAME = "transfer_purify_stats.txt"
 
 
 # --- Pure helpers (unit-tested; no model / no torch state) ------------------------------
 def _transfer_mask(
-    src_clean_pred: np.ndarray,
-    tgt_clean_pred: np.ndarray,
-    src_adv_pred: np.ndarray,
-    tgt_adv_pred: np.ndarray,
+    clean_preds: Sequence[np.ndarray],
+    adv_preds: Sequence[np.ndarray],
     labels: np.ndarray,
 ) -> np.ndarray:
-    """Boolean mask: keep examples both models classify clean-correctly AND both misclassify
-    adversarially (the attack fools both = transfers)."""
-    both_clean_ok = (src_clean_pred == labels) & (tgt_clean_pred == labels)
-    both_adv_wrong = (src_adv_pred != labels) & (tgt_adv_pred != labels)
-    return both_clean_ok & both_adv_wrong
+    """Boolean mask: keep examples **every** model classifies clean-correctly AND **every**
+    model misclassifies adversarially (the attack transfers to all of them)."""
+    labels = np.asarray(labels)
+    mask = np.ones(len(labels), dtype=bool)
+    for clean, adv in zip(clean_preds, adv_preds):
+        mask &= np.asarray(clean) == labels
+        mask &= np.asarray(adv) != labels
+    return mask
 
 
-def _categorize(src_success: np.ndarray, tgt_success: np.ndarray) -> np.ndarray:
-    """Map per-example purification successes to a category label array.
+def _select_rows(labels: np.ndarray, classes: Sequence[int]) -> Dict[int, Optional[int]]:
+    """First index of each requested class in ``labels`` (None if the class is absent).
 
-    both -> source & target recover; source_only / target_only -> exactly one; neither -> none.
+    Order of `classes` is preserved; `labels` is assumed to be in a deterministic
+    (test-set) order, so the pick is reproducible and not cherry-picked.
     """
-    src = np.asarray(src_success, dtype=bool)
-    tgt = np.asarray(tgt_success, dtype=bool)
-    out = np.empty(len(src), dtype=object)
-    out[src & tgt] = "both"
-    out[src & ~tgt] = "source_only"
-    out[~src & tgt] = "target_only"
-    out[~src & ~tgt] = "neither"
+    labels = np.asarray(labels)
+    out: Dict[int, Optional[int]] = {}
+    for c in classes:
+        hits = np.nonzero(labels == c)[0]
+        out[int(c)] = int(hits[0]) if len(hits) else None
     return out
 
 
+def _format_stats(stats: dict) -> str:
+    """Render the statistics dict as the plain-text report."""
+    keys: List[str] = list(stats["model_keys"])
+    labels: Dict[str, str] = stats["model_labels"]
+    src = stats["attack_source"]
+    w = max(len(k) for k in keys) + 2
+
+    L: List[str] = []
+    L.append("MNIST transfer-attack + purification statistics")
+    L.append("=" * 62)
+    L.append("")
+    L.append("--- config ---")
+    for k in keys:
+        mark = "  (attack source)" if k == src else ""
+        L.append(f"  {k:<{w}} {stats['sweeps'][k]}{mark}")
+        L.append(f"  {'':<{w}} label={labels[k]}  run={stats['run_dirs'][k]}")
+    L.append(f"  attack        PGD-inf  eps={stats['eps']} (rel) = {stats['abs_eps']:.4f} (abs), "
+             f"{stats['attack_num_steps']} steps")
+    L.append(f"  purification  likelihood-inf  radius={stats['radius']} (rel) = "
+             f"{stats['abs_radius']:.4f} (abs), {stats['purify_num_steps']} steps")
+    L.append(f"  input range   [{stats['lo']:.4f}, {stats['hi']:.4f}]")
+    L.append(f"  seed={stats['seed']}  device={stats['device']}  "
+             f"batch_size={stats['eval_batch_size']}")
+    L.append("")
+
+    L.append("--- population ---")
+    L.append(f"  test inputs attacked      {stats['n_attacked']}")
+    L.append(f"  eligible (all models fooled, all clean-correct)  {stats['n_eligible']}")
+    L.append("  eligible per class        " + ", ".join(
+        f"{c}:{n}" for c, n in sorted(stats["eligible_per_class"].items())))
+    L.append("")
+
+    L.append("--- accuracy on the attacked subset ---")
+    L.append(f"  {'model':<{w}} {'clean':>8} {'adv':>8} {'transfer':>10}")
+    for k in keys:
+        tr = stats["transfer_rate"][k]
+        tr_s = "     n/a" if tr is None else f"{tr:>10.3f}"
+        L.append(f"  {k:<{w}} {stats['clean_acc'][k]:>8.3f} {stats['adv_acc'][k]:>8.3f} {tr_s}")
+    L.append(f"  transfer = fraction of examples that '{src}' and the model both classify "
+             f"correctly when clean,")
+    L.append(f"             and that the '{src}'-crafted perturbation flips for the model.")
+    L.append("")
+
+    L.append("--- purification success (self-purify, self-classify) ---")
+    n_pur = stats["n_purified"]
+    cap = stats["stats_cap"]
+    note = ("" if cap is None or n_pur < cap
+            else f"  [capped at --stats-cap {cap}, plus any forced figure rows]")
+    L.append(f"  evaluated on {n_pur} of {stats['n_eligible']} eligible examples{note}")
+    cls = sorted(stats["purify_per_class"][keys[0]].keys()) if keys else []
+    L.append(f"  {'model':<{w}} {'overall':>8} " + " ".join(f"{'y=' + str(c):>7}" for c in cls))
+    for k in keys:
+        per = stats["purify_per_class"][k]
+        cells = " ".join(
+            ("      -" if per[c] is None else f"{per[c]:>7.3f}") for c in cls)
+        L.append(f"  {k:<{w}} {stats['purify_acc'][k]:>8.3f} " + cells)
+    L.append("  per-class counts          " + ", ".join(
+        f"{c}:{n}" for c, n in sorted(stats["purified_per_class_n"].items())))
+    L.append("")
+
+    L.append("--- figure rows ---")
+    for c, i in stats["row_index"].items():
+        L.append(f"  y={c}: " + ("NO ELIGIBLE EXAMPLE" if i is None
+                                 else f"eligible-set index {i}"))
+    missing = [c for c, i in stats["row_index"].items() if i is None]
+    if missing:
+        L.append(f"  WARNING: classes {missing} have no transferring example; "
+                 f"raise --max-attack-samples or --eps.")
+    return "\n".join(L) + "\n"
+
+
 # --- Model / data loading ---------------------------------------------------------------
-def _load_model(sweep_dir: str, device: str) -> Tuple[ConditionalBornMachine, object]:
-    """Load the best (highest clean-acc) run of a seed sweep; return (cbm, run_cfg)."""
+def _load_model(sweep_dir: str, device: str) -> Tuple[ConditionalBornMachine, object, Path]:
+    """Load the best (highest clean-acc) run of a seed sweep; return (cbm, run_cfg, run_dir)."""
     sweep = Path(sweep_dir)
     # analysis CSV mirrors the outputs/ path: <root>/outputs/X -> <root>/analysis/outputs/X
     parts = list(sweep.parts)
@@ -115,7 +201,7 @@ def _load_model(sweep_dir: str, device: str) -> Tuple[ConditionalBornMachine, ob
     cbm.eval()
     cbm.cache_log_Z()
     logger.info(f"Loaded {run_dir}")
-    return cbm, run_cfg
+    return cbm, run_cfg, run_dir
 
 
 def _test_loader(run_cfg, cbm, batch_size: int):
@@ -130,37 +216,53 @@ def _test_loader(run_cfg, cbm, batch_size: int):
 
 
 @torch.no_grad()
-def _classify(cbm: ConditionalBornMachine, x: torch.Tensor, device: str) -> torch.Tensor:
-    """Top-1 class predictions (CPU long tensor)."""
-    return cbm.class_probabilities(x.to(device)).argmax(dim=1).cpu()
+def _classify(cbm: ConditionalBornMachine, x: torch.Tensor, device: str) -> np.ndarray:
+    """Top-1 class predictions."""
+    return cbm.class_probabilities(x.to(device)).argmax(dim=1).cpu().numpy()
 
 
 # --- Main pipeline ----------------------------------------------------------------------
 def transfer_purify_analysis(
-    source_sweep: str = SOURCE_SWEEP,
-    target_sweep: str = TARGET_SWEEP,
+    models: Sequence[Tuple[str, str, str]] = MODELS,
+    attack_source: str = ATTACK_SOURCE_KEY,
+    classes: Sequence[int] = DISPLAY_CLASSES,
     eps: float = EPS,
     radius: float = RADIUS,
-    target_per_class: int = TARGET_PER_CLASS,
     attack_num_steps: int = ATTACK_NUM_STEPS,
     purify_num_steps: int = PURIFY_NUM_STEPS,
     eval_batch_size: int = EVAL_BATCH_SIZE,
     max_attack_samples: Optional[int] = MAX_ATTACK_SAMPLES,
+    stats_cap: Optional[int] = STATS_CAP,
+    annotate: bool = True,
     seed: int = SEED,
     device: str = DEVICE,
     save_dir: Optional[str] = SAVE_DIR,
-) -> Tuple[pd.DataFrame, "object", "object"]:
-    """Run the full transfer-attack + differential-purification analysis.
+) -> Tuple["object", dict]:
+    """Run the transfer-attack + purification analysis.
 
-    Returns (records_df, summary_fig, montage_fig).
+    Returns (grid_figure, stats_dict). The stats dict is what `_format_stats` renders.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    src_cbm, src_cfg = _load_model(source_sweep, device)
-    tgt_cbm, _ = _load_model(target_sweep, device)
+    keys = [k for k, _, _ in models]
+    labels_map = {k: lbl for k, lbl, _ in models}
+    sweeps = {k: sw for k, _, sw in models}
+    if attack_source not in keys:
+        raise ValueError(f"attack_source={attack_source!r} not among model keys {keys}")
 
-    # Both models share the legendre embedding => identical input_range; build data once.
+    cbms: Dict[str, ConditionalBornMachine] = {}
+    run_dirs: Dict[str, str] = {}
+    src_cfg = None
+    for k in keys:
+        cbm, cfg, run_dir = _load_model(sweeps[k], device)
+        cbms[k] = cbm
+        run_dirs[k] = str(run_dir)
+        if k == attack_source:
+            src_cfg = cfg
+
+    src_cbm = cbms[attack_source]
+    # All models share the legendre embedding => identical input_range; build data once.
     loader = _test_loader(src_cfg, src_cbm, eval_batch_size)
     lo, hi = float(src_cbm.input_range[0]), float(src_cbm.input_range[1])
     range_size = hi - lo
@@ -170,221 +272,243 @@ def transfer_purify_analysis(
 
     attack = ProjectedGradientDescent(norm="inf", num_steps=attack_num_steps, random_start=True)
 
-    # --- Stage 1+2: attack source, keep examples that fool both models -------------------
+    # --- Stage 1+2: attack the source, keep examples that fool every model ---------------
     kept_clean, kept_adv, kept_y = [], [], []
-    kept_src_adv_pred, kept_tgt_adv_pred = [], []
-    per_class: Dict[int, int] = {c: 0 for c in range(src_cbm.out_dim)}
-    n_seen = 0
+    kept_adv_pred: Dict[str, List[np.ndarray]] = {k: [] for k in keys}
+    # running totals over ALL attacked inputs (not just eligible ones)
+    n_attacked = 0
+    n_clean_ok = {k: 0 for k in keys}
+    n_adv_ok = {k: 0 for k in keys}
+    n_pair_ok = {k: 0 for k in keys}      # both src and k clean-correct
+    n_pair_flipped = {k: 0 for k in keys}  # ... and k flipped by the adv input
 
     for x, y in loader:
-        if max_attack_samples is not None and n_seen >= max_attack_samples:
+        if max_attack_samples is not None and n_attacked >= max_attack_samples:
             break
-        n_seen += len(x)
+        n_attacked += len(x)
         x = x.to(device)
         y_np = y.numpy()
 
-        src_clean = _classify(src_cbm, x, device).numpy()
-        tgt_clean = _classify(tgt_cbm, x, device).numpy()
+        clean_preds = {k: _classify(cbms[k], x, device) for k in keys}
         x_adv = attack.generate(src_cbm, x, y.to(device), abs_eps, device)
-        src_adv = _classify(src_cbm, x_adv, device).numpy()
-        tgt_adv = _classify(tgt_cbm, x_adv, device).numpy()
+        adv_preds = {k: _classify(cbms[k], x_adv, device) for k in keys}
 
-        mask = _transfer_mask(src_clean, tgt_clean, src_adv, tgt_adv, y_np)
+        src_clean_ok = clean_preds[attack_source] == y_np
+        for k in keys:
+            ck = clean_preds[k] == y_np
+            n_clean_ok[k] += int(ck.sum())
+            n_adv_ok[k] += int((adv_preds[k] == y_np).sum())
+            pair = src_clean_ok & ck
+            n_pair_ok[k] += int(pair.sum())
+            n_pair_flipped[k] += int((pair & (adv_preds[k] != y_np)).sum())
+
+        mask = _transfer_mask([clean_preds[k] for k in keys],
+                              [adv_preds[k] for k in keys], y_np)
         if mask.any():
             idx = np.nonzero(mask)[0]
             kept_clean.append(x[idx].cpu())
             kept_adv.append(x_adv[idx].cpu())
             kept_y.append(y_np[idx])
-            kept_src_adv_pred.append(src_adv[idx])
-            kept_tgt_adv_pred.append(tgt_adv[idx])
-            for c in y_np[idx]:
-                per_class[int(c)] += 1
-
-        if all(v >= target_per_class for v in per_class.values()):
-            logger.info(f"Reached >= {target_per_class} transferring per class after "
-                        f"{n_seen} attacked inputs.")
-            break
+            for k in keys:
+                kept_adv_pred[k].append(adv_preds[k][idx])
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     if not kept_y:
         raise RuntimeError("No transferring adversarial examples found. Try a stronger "
-                           "attack (more steps / larger eps) or a different target model.")
+                           "attack (more steps / larger eps) or more attacked samples.")
 
     clean_imgs = torch.cat(kept_clean)
     adv_imgs = torch.cat(kept_adv)
-    labels = np.concatenate(kept_y)
-    src_adv_pred = np.concatenate(kept_src_adv_pred)
-    tgt_adv_pred = np.concatenate(kept_tgt_adv_pred)
-    logger.info(f"Collected {len(labels)} transferring examples. "
-                f"Per-class counts: {dict(sorted(per_class.items()))}")
-    low = [c for c, v in per_class.items() if v < target_per_class]
-    if low:
-        logger.warning(f"Classes below target ({target_per_class}): {low}")
+    y_elig = np.concatenate(kept_y)
+    adv_pred = {k: np.concatenate(kept_adv_pred[k]) for k in keys}
+    n_eligible = len(y_elig)
+    elig_per_class = {int(c): int((y_elig == c).sum()) for c in np.unique(y_elig)}
+    logger.info(f"Attacked {n_attacked} inputs; {n_eligible} transfer to all models. "
+                f"Per-class: {dict(sorted(elig_per_class.items()))}")
 
-    # --- Stage 3: differential purification (self-purify, self-classify) -----------------
+    row_index = _select_rows(y_elig, classes)
+    missing = [c for c, i in row_index.items() if i is None]
+    if missing:
+        logger.warning(f"No transferring example for classes {missing}; "
+                       f"those rows will be blank.")
+
+    # --- Stage 3: purify with each model (self-purify, self-classify) --------------------
+    # Cost cap: purify the first `stats_cap` eligible examples, but always include the
+    # displayed rows so the figure never depends on the cap.
+    if stats_cap is None or stats_cap >= n_eligible:
+        sel = np.arange(n_eligible)
+    else:
+        forced = [i for i in row_index.values() if i is not None]
+        sel = np.unique(np.concatenate([np.arange(stats_cap), np.asarray(forced, dtype=int)]))
+        logger.info(f"Purifying {len(sel)} of {n_eligible} eligible examples (stats_cap).")
+    pos_of = {int(i): p for p, i in enumerate(sel)}  # eligible index -> row in purified arrays
+    sel_t = torch.as_tensor(sel, dtype=torch.long)
+    adv_sel = adv_imgs[sel_t]
+
     purifier = LikelihoodPurification(norm="inf", num_steps=purify_num_steps, random_start=False)
 
     def _purify_all(cbm):
-        """Purify all adv images (batched) with `cbm`; return (pred, logpx_adv, logpx_pur, pur_imgs)."""
-        preds, lpx_adv, lpx_pur, pur_chunks = [], [], [], []
-        for i in range(0, len(adv_imgs), eval_batch_size):
-            xb = adv_imgs[i:i + eval_batch_size].to(device)
-            with torch.no_grad():
-                lpx_adv.append(cbm.marginal_log_probability(xb).cpu())
-            xp, lpx = purifier.purify(cbm, xb, abs_radius, device)
-            pred = _classify(cbm, xp, device)
-            preds.append(pred); lpx_pur.append(lpx.cpu()); pur_chunks.append(xp.cpu())
+        """Purify the selected adv images (batched) with `cbm`; return (preds, images)."""
+        preds, chunks = [], []
+        for i in range(0, len(adv_sel), eval_batch_size):
+            xb = adv_sel[i:i + eval_batch_size].to(device)
+            xp, _ = purifier.purify(cbm, xb, abs_radius, device)
+            preds.append(_classify(cbm, xp, device))
+            chunks.append(xp.cpu())
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        return (torch.cat(preds).numpy(), torch.cat(lpx_adv).numpy(),
-                torch.cat(lpx_pur).numpy(), torch.cat(pur_chunks))
+        return np.concatenate(preds), torch.cat(chunks)
 
-    src_pur_pred, src_lpx_adv, src_lpx_pur, src_pur_imgs = _purify_all(src_cbm)
-    tgt_pur_pred, tgt_lpx_adv, tgt_lpx_pur, tgt_pur_imgs = _purify_all(tgt_cbm)
+    pur_pred: Dict[str, np.ndarray] = {}
+    pur_imgs: Dict[str, torch.Tensor] = {}
+    for k in keys:
+        pur_pred[k], pur_imgs[k] = _purify_all(cbms[k])
 
-    src_success = src_pur_pred == labels
-    tgt_success = tgt_pur_pred == labels
-    category = _categorize(src_success, tgt_success)
+    y_sel = y_elig[sel]
+    success = {k: pur_pred[k] == y_sel for k in keys}
+    sel_classes = sorted(int(c) for c in np.unique(y_sel))
+    for k in keys:
+        logger.info(f"Purification success [{k}]: {success[k].mean():.3f}")
 
-    records = pd.DataFrame({
-        "true_label": labels,
-        "src_pred_adv": src_adv_pred, "tgt_pred_adv": tgt_adv_pred,
-        "src_pur_pred": src_pur_pred, "tgt_pur_pred": tgt_pur_pred,
-        "src_success": src_success, "tgt_success": tgt_success,
-        "src_logpx_adv": src_lpx_adv, "src_logpx_pur": src_lpx_pur,
-        "tgt_logpx_adv": tgt_lpx_adv, "tgt_logpx_pur": tgt_lpx_pur,
-        "category": category,
-    })
+    stats = {
+        "model_keys": keys,
+        "model_labels": labels_map,
+        "sweeps": sweeps,
+        "run_dirs": run_dirs,
+        "attack_source": attack_source,
+        "eps": eps, "abs_eps": abs_eps, "attack_num_steps": attack_num_steps,
+        "radius": radius, "abs_radius": abs_radius, "purify_num_steps": purify_num_steps,
+        "lo": lo, "hi": hi, "seed": seed, "device": str(device),
+        "eval_batch_size": eval_batch_size,
+        "n_attacked": n_attacked,
+        "n_eligible": n_eligible,
+        "eligible_per_class": elig_per_class,
+        "clean_acc": {k: n_clean_ok[k] / n_attacked for k in keys},
+        "adv_acc": {k: n_adv_ok[k] / n_attacked for k in keys},
+        "transfer_rate": {
+            k: (n_pair_flipped[k] / n_pair_ok[k]) if n_pair_ok[k] else None for k in keys},
+        "stats_cap": stats_cap,
+        "n_purified": int(len(sel)),
+        "purify_acc": {k: float(success[k].mean()) for k in keys},
+        "purify_per_class": {
+            k: {c: (float(success[k][y_sel == c].mean()) if (y_sel == c).any() else None)
+                for c in sel_classes}
+            for k in keys},
+        "purified_per_class_n": {c: int((y_sel == c).sum()) for c in sel_classes},
+        "row_index": row_index,
+    }
 
-    logger.info(f"Purification success -- source: {src_success.mean():.3f}, "
-                f"target: {tgt_success.mean():.3f}")
-    logger.info("Category counts: " + ", ".join(
-        f"{c}={int((category == c).sum())}" for c in CATEGORIES))
-
-    # --- Figures -------------------------------------------------------------------------
-    summary_fig = _plot_summary(records, source_sweep, target_sweep)
-    montage_fig = _plot_montage(records, clean_imgs, adv_imgs, src_pur_imgs, tgt_pur_imgs,
-                                lo, hi)
+    fig = _plot_grid(models, attack_source, classes, row_index, pos_of, clean_imgs, adv_imgs,
+                     adv_pred, pur_pred, pur_imgs, lo, hi, annotate)
 
     if save_dir is not None:
-        out = Path(save_dir); out.mkdir(parents=True, exist_ok=True)
-        records.to_csv(out / "transfer_purify_records.csv", index=False)
-        summary_fig.savefig(out / "transfer_purify_summary.png", dpi=150, bbox_inches="tight")
-        montage_fig.savefig(out / "transfer_purify_montage.png", dpi=150, bbox_inches="tight")
-        logger.info(f"Saved CSV + 2 figures to {out}")
+        out = Path(save_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out / FIG_NAME, dpi=300, bbox_inches="tight")
+        (out / STATS_NAME).write_text(_format_stats(stats))
+        logger.info(f"Saved {out / FIG_NAME} and {out / STATS_NAME}")
 
-    return records, summary_fig, montage_fig
+    return fig, stats
 
 
 # --- Plotting ---------------------------------------------------------------------------
-def _plot_summary(records: pd.DataFrame, source_sweep: str, target_sweep: str):
+def _plot_grid(models, attack_source, classes, row_index, pos_of, clean, adv, adv_pred,
+               pur_pred, pur_imgs, lo, hi, annotate: bool = True):
+    """Grid: one row per class, columns [original | adversarial | one per model].
+
+    The adversarial caption reports the *attack source* model's prediction (every model
+    misclassifies these inputs by construction, so one representative label suffices).
+    """
     import matplotlib.pyplot as plt
 
-    LABEL_FS, TICK_FS = 14, 12
-    fig, (axc, axb) = plt.subplots(1, 2, figsize=(11, 4.5))
-
-    # (a) 2x2 contingency of purification success (source vs target).
-    cont = np.zeros((2, 2), dtype=int)  # rows: src fail/ok, cols: tgt fail/ok
-    for s, t in zip(records["src_success"], records["tgt_success"]):
-        cont[int(s), int(t)] += 1
-    axc.imshow(cont, cmap="Blues")
-    axc.set_xticks([0, 1]); axc.set_xticklabels(["tgt fail", "tgt ok"], fontsize=TICK_FS)
-    axc.set_yticks([0, 1]); axc.set_yticklabels(["src fail", "src ok"], fontsize=TICK_FS)
-    axc.set_title("Purification success contingency", fontsize=LABEL_FS)
-    for i in range(2):
-        for j in range(2):
-            axc.text(j, i, str(cont[i, j]), ha="center", va="center",
-                     color="black", fontsize=LABEL_FS + 2)
-
-    # (b) per-class purification-success rate, source vs target.
-    classes = sorted(records["true_label"].unique())
-    src_rate = [records.loc[records.true_label == c, "src_success"].mean() for c in classes]
-    tgt_rate = [records.loc[records.true_label == c, "tgt_success"].mean() for c in classes]
-    x = np.arange(len(classes)); w = 0.4
-    axb.bar(x - w / 2, src_rate, w, label="source (AT)", color="#FF9800")
-    axb.bar(x + w / 2, tgt_rate, w, label="target (gen.)", color="#4CAF50")
-    axb.set_xticks(x); axb.set_xticklabels(classes, fontsize=TICK_FS)
-    axb.set_xlabel("digit class", fontsize=LABEL_FS)
-    axb.set_ylabel("purification success rate", fontsize=LABEL_FS)
-    axb.set_ylim(0, 1.05); axb.grid(axis="y", alpha=0.3, ls="--"); axb.set_axisbelow(True)
-    axb.legend(fontsize=TICK_FS)
-    axb.set_title(f"n={len(records)} transferring examples", fontsize=LABEL_FS)
-
-    fig.tight_layout()
-    return fig
-
-
-def _plot_montage(records, clean, adv, src_pur, tgt_pur, lo, hi, per_cat: int = 3):
-    """Grid: columns [clean | adv | source-purified | target-purified], rows grouped by
-    outcome category. Purified-cell title coloured by classification correctness."""
-    import matplotlib.pyplot as plt
-
-    D = clean.shape[1]
-    img_dim = math.isqrt(D)
+    keys = [k for k, _, _ in models]
+    col_titles = ["original", "adversarial"] + [lbl for _, lbl, _ in models]
+    img_dim = math.isqrt(clean.shape[1])
 
     def _img(t):
         return ((t.float() - lo) / (hi - lo)).reshape(img_dim, img_dim).numpy()
 
-    # Pick up to `per_cat` representative rows per category (prefer distinct classes).
-    rows: List[Tuple[int, str]] = []
-    for cat in CATEGORIES:
-        idx = records.index[records["category"] == cat].tolist()
-        rows += [(i, cat) for i in idx[:per_cat]]
-    if not rows:
-        rows = [(records.index[0], records.loc[records.index[0], "category"])]
-
-    col_titles = ["clean", "adv", "src purified", "tgt purified"]
-    n = len(rows)
-    fig, axes = plt.subplots(n, 4, figsize=(7, 1.9 * n))
+    n_rows, n_cols = len(classes), len(col_titles)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(1.55 * n_cols, 1.75 * n_rows))
     axes = np.atleast_2d(axes)
-    for r, (i, cat) in enumerate(rows):
-        rec = records.loc[i]
-        y = int(rec["true_label"])
-        panels = [
-            (_img(clean[i]), f"y={y}", "black"),
-            (_img(adv[i]), f"adv->{int(rec['src_pred_adv'])}/{int(rec['tgt_pred_adv'])}", "black"),
-            (_img(src_pur[i]), f"src->{int(rec['src_pur_pred'])}",
-             "green" if rec["src_success"] else "red"),
-            (_img(tgt_pur[i]), f"tgt->{int(rec['tgt_pur_pred'])}",
-             "green" if rec["tgt_success"] else "red"),
-        ]
-        for c, (img, title, color) in enumerate(panels):
-            ax = axes[r, c]
-            ax.imshow(img, cmap="gray", vmin=0, vmax=1)
-            ax.set_title(title, fontsize=8, color=color)
+
+    for r, c in enumerate(classes):
+        i = row_index[int(c)]
+        for j in range(n_cols):
+            ax = axes[r, j]
             ax.set_xticks([]); ax.set_yticks([])
-        axes[r, 0].set_ylabel(cat, fontsize=9, rotation=90, labelpad=2)
-    for c, t in enumerate(col_titles):
-        axes[0, c].annotate(t, xy=(0.5, 1.35), xycoords="axes fraction",
-                            ha="center", fontsize=10, fontweight="bold")
+            if i is None:
+                ax.set_facecolor("0.9")
+                if j == 0:
+                    ax.text(0.5, 0.5, "n/a", ha="center", va="center",
+                            transform=ax.transAxes, fontsize=9, color="0.4")
+                continue
+            if j == 0:
+                img, pred = _img(clean[i]), int(c)
+            elif j == 1:
+                img, pred = _img(adv[i]), int(adv_pred[attack_source][i])
+            else:
+                k, p = keys[j - 2], pos_of[int(i)]
+                img, pred = _img(pur_imgs[k][p]), int(pur_pred[k][p])
+            ax.imshow(img, cmap="gray", vmin=0, vmax=1)
+            if annotate and j > 0:
+                ax.set_xlabel(f"$\\rightarrow${pred}", fontsize=9, labelpad=2,
+                              color=("green" if pred == int(c) else "red"))
+        axes[r, 0].set_ylabel(f"$y={int(c)}$", fontsize=11)
+
+    for j, t in enumerate(col_titles):
+        axes[0, j].set_title(t, fontsize=10)
+
     fig.tight_layout()
     return fig
+
+
+def _parse_models(specs: Optional[List[str]]) -> List[Tuple[str, str, str]]:
+    """Turn ``--models key=path`` (or ``key=label=path``) specs into the MODELS triples."""
+    if not specs:
+        return MODELS
+    out = []
+    for s in specs:
+        parts = s.split("=")
+        if len(parts) == 2:
+            key, path = parts
+            label = key
+        elif len(parts) == 3:
+            key, label, path = parts
+        else:
+            raise ValueError(f"--models expects key=path or key=label=path, got {s!r}")
+        out.append((key, label, path))
+    return out
 
 
 if __name__ == "__main__":
     import argparse
 
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--source-sweep", default=SOURCE_SWEEP)
-    p.add_argument("--target-sweep", default=TARGET_SWEEP)
+    p.add_argument("--models", action="append", default=None,
+                   help="key=path or key=label=path; repeat once per column (in order)")
+    p.add_argument("--attack-source", default=ATTACK_SOURCE_KEY)
+    p.add_argument("--classes", default=",".join(str(c) for c in DISPLAY_CLASSES))
     p.add_argument("--eps", type=float, default=EPS)
     p.add_argument("--radius", type=float, default=RADIUS)
-    p.add_argument("--target-per-class", type=int, default=TARGET_PER_CLASS)
     p.add_argument("--attack-num-steps", type=int, default=ATTACK_NUM_STEPS)
     p.add_argument("--purify-num-steps", type=int, default=PURIFY_NUM_STEPS)
     p.add_argument("--eval-batch-size", type=int, default=EVAL_BATCH_SIZE)
     p.add_argument("--max-attack-samples", type=int, default=MAX_ATTACK_SAMPLES)
+    p.add_argument("--stats-cap", type=int, default=STATS_CAP)
+    p.add_argument("--no-annot", action="store_true", help="drop the predicted-class captions")
     p.add_argument("--seed", type=int, default=SEED)
     p.add_argument("--device", default=DEVICE)
     p.add_argument("--save-dir", default=SAVE_DIR)
     a = p.parse_args()
 
     transfer_purify_analysis(
-        source_sweep=a.source_sweep, target_sweep=a.target_sweep, eps=a.eps, radius=a.radius,
-        target_per_class=a.target_per_class, attack_num_steps=a.attack_num_steps,
+        models=_parse_models(a.models), attack_source=a.attack_source,
+        classes=[int(c) for c in a.classes.split(",")],
+        eps=a.eps, radius=a.radius, attack_num_steps=a.attack_num_steps,
         purify_num_steps=a.purify_num_steps, eval_batch_size=a.eval_batch_size,
-        max_attack_samples=a.max_attack_samples, seed=a.seed, device=a.device,
-        save_dir=a.save_dir,
+        max_attack_samples=a.max_attack_samples, stats_cap=a.stats_cap,
+        annotate=not a.no_annot, seed=a.seed, device=a.device, save_dir=a.save_dir,
     )
