@@ -1,13 +1,18 @@
 """Unit tests for the pure helpers of analysis.visualize.mnist_transfer_purify.
 
-These target the prediction-array logic (transfer filtering, figure-row selection) and the
-statistics report formatter; no model, no GPU, so they run fast and unmarked.
+These target the prediction-array logic (transfer filtering, figure-row selection), the
+model-path resolution, and the statistics report formatter; no model, no GPU, so they run
+fast and unmarked.
 """
 
 import numpy as np
 
+import pytest
+
 from analysis.visualize.mnist_transfer_purify import (
     _format_stats,
+    _parse_models,
+    _resolve_run_dir,
     _select_rows,
     _transfer_mask,
 )
@@ -62,11 +67,82 @@ def test_select_rows_preserves_requested_order_and_reports_missing():
     assert rows[0] == 2
 
 
+def test_parse_models_label_may_contain_equals():
+    # mathtext labels carry '=' -- the key is before the first '=', the path after the last.
+    specs = [r"a001=purified $\alpha=0.01$=outputs/x/0/models/model",
+             "at=outputs/y/seed_sweep"]
+    assert _parse_models(specs) == [
+        ("a001", r"purified $\alpha=0.01$", "outputs/x/0/models/model"),
+        ("at", "at", "outputs/y/seed_sweep"),
+    ]
+
+
+def test_parse_models_defaults_when_empty():
+    from analysis.visualize.mnist_transfer_purify import MODELS
+
+    assert _parse_models(None) is MODELS
+    assert _parse_models([]) is MODELS
+
+
+@pytest.mark.parametrize("spec", ["nokey", "=onlypath", "keyonly="])
+def test_parse_models_rejects_malformed(spec):
+    with pytest.raises(ValueError):
+        _parse_models([spec])
+
+
+def _make_run(tmp_path, name="0", ckpt="model"):
+    """Build a minimal run dir: <name>/.hydra/config.yaml + <name>/models/<ckpt>."""
+    run = tmp_path / name
+    (run / ".hydra").mkdir(parents=True)
+    (run / ".hydra" / "config.yaml").write_text("{}\n")
+    (run / "models").mkdir()
+    (run / "models" / ckpt).write_text("checkpoint")
+    return run
+
+
+def test_resolve_run_dir_from_checkpoint_file(tmp_path):
+    run = _make_run(tmp_path)
+    run_dir, ckpt = _resolve_run_dir(str(run / "models" / "model"))
+    assert run_dir == run
+    assert ckpt == run / "models" / "model"
+
+
+def test_resolve_run_dir_from_run_dir(tmp_path):
+    run = _make_run(tmp_path)
+    run_dir, ckpt = _resolve_run_dir(str(run))
+    assert run_dir == run
+    assert ckpt is None  # left to find_model_checkpoint
+
+
+def test_resolve_run_dir_from_sweep_root_without_csv_falls_back_to_zero(tmp_path):
+    sweep = tmp_path / "seed_sweep_a001_1206"
+    _make_run(sweep, name="0")
+    _make_run(sweep, name="1")
+    run_dir, ckpt = _resolve_run_dir(str(sweep))
+    assert run_dir == sweep / "0"
+    assert ckpt is None
+
+
+def test_resolve_run_dir_from_sweep_root_uses_best_run_csv(tmp_path):
+    sweep = tmp_path / "outputs" / "ds" / "nat" / "seed_sweep_a001_1206"
+    _make_run(sweep, name="0")
+    _make_run(sweep, name="1")
+    csv = tmp_path / "analysis" / "outputs" / "ds" / "nat" / "seed_sweep_a001_1206"
+    csv.mkdir(parents=True)
+    # Mirror the real schema: run_path (str) keeps the selected row object-dtype, so
+    # str(run_name) stays "1" rather than being float-coerced to "1.0".
+    (csv / "evaluation_data.csv").write_text(
+        "run_name,run_path,acc\n0,/outputs/ds/nat/sweep/0,0.80\n1,/outputs/ds/nat/sweep/1,0.95\n")
+    run_dir, ckpt = _resolve_run_dir(str(sweep))
+    assert run_dir == sweep / "1"  # highest acc, not the first run
+    assert ckpt is None
+
+
 def _stats_fixture(**overrides):
     stats = {
         "model_keys": ["a001", "at"],
         "model_labels": {"a001": "purified a=0.01", "at": "AT-model purified"},
-        "sweeps": {"a001": "outputs/x/nat/a001", "at": "outputs/x/at/seed_sweep"},
+        "paths": {"a001": "outputs/x/nat/a001", "at": "outputs/x/at/seed_sweep"},
         "run_dirs": {"a001": "outputs/x/nat/a001/0", "at": "outputs/x/at/seed_sweep/2"},
         "attack_source": "at",
         "eps": 0.3, "abs_eps": 0.6, "attack_num_steps": 40,
