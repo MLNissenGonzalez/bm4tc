@@ -1,0 +1,226 @@
+============================================================
+Post-Hoc Sweep Analysis Summary
+============================================================
+
+Sweep: seed_sweep/adv/legendre/d10D6/circles_small_1503
+Regime: adv
+Total runs: 21
+Eval splits: ['valid', 'test']
+Selection split: valid
+Device: cuda
+Evasion config: {'method': 'PGD', 'norm': 2, 'num_steps': 20, 'strengths': [0.1, 0.2, 0.4, 1.0, 1.6]}
+Adversarial MIA: eps=0.2, steps=20, norm=2
+
+Metrics computed:
+  Accuracy: eval/valid/acc, eval/test/acc
+  Robustness (valid): ['eval/valid/rob/0.1', 'eval/valid/rob/0.2', 'eval/valid/rob/0.4', 'eval/valid/rob/1.0', 'eval/valid/rob/1.6']
+  Robustness (test):  ['eval/test/rob/0.1', 'eval/test/rob/0.2', 'eval/test/rob/0.4', 'eval/test/rob/1.0', 'eval/test/rob/1.6']
+  MIA: eval/mia_accuracy
+  Adversarial MIA: eval/adv_mia_wc_best
+  UQ: 5 purification (eps, radius) pairs, 20 detection (pct, eps) pairs
+
+------------------------------------------------------------
+Summary Statistics
+------------------------------------------------------------
+
+Split                    Metric     Best     Mean          Std    Std Error  N
+valid            Clean Accuracy 0.900585 0.760234 3.767280e-02 8.220880e-03 21
+valid Robust Accuracy (eps=0.1) 0.857074 0.794487 4.182810e-02 9.127639e-03 21
+valid Robust Accuracy (eps=0.2) 0.932534 0.837498 1.004400e-01 2.191781e-02 21
+valid Robust Accuracy (eps=0.4) 0.963663 0.861226 1.409471e-01 3.075719e-02 21
+valid Robust Accuracy (eps=1.0) 0.893411 0.796535 1.470550e-01 3.209002e-02 21
+valid Robust Accuracy (eps=1.6) 0.792030 0.682130 1.165777e-01 2.543934e-02 21
+valid              MIA Accuracy 0.742358 0.742358 1.137640e-16 2.482534e-17 21
+ test            Clean Accuracy 0.805882 0.757703 3.372077e-02 7.358475e-03 21
+ test Robust Accuracy (eps=0.1) 0.841176 0.798319 4.126641e-02 9.005069e-03 21
+ test Robust Accuracy (eps=0.2) 0.900000 0.841176 8.323062e-02 1.816241e-02 21
+ test Robust Accuracy (eps=0.4) 0.941176 0.864706 1.225310e-01 2.673845e-02 21
+ test Robust Accuracy (eps=1.0) 0.876471 0.778711 1.528560e-01 3.335592e-02 21
+ test Robust Accuracy (eps=1.6) 0.782353 0.683754 1.114066e-01 2.431092e-02 21
+ test              MIA Accuracy 0.742358 0.742358 1.137640e-16 2.482534e-17 21
+
+------------------------------------------------------------
+Best Run (by Valid Accuracy, selected on valid)
+------------------------------------------------------------
+
+Run: pretrained
+Path: /home/ubuntu/adversarial_training_mps/outputs/seed_sweep/cls/legendre/d10D6/circles_small_1203/17/models/circles_small_pre_mps_bd6_legendre10_300adamlr0.017649715848175724wd4.997040685255816e-08
+Valid Clean Accuracy: 0.9006
+Valid Robust Accuracy (eps=0.1): 0.6857
+Valid Robust Accuracy (eps=0.2): 0.4209
+Valid Robust Accuracy (eps=0.4): 0.2571
+Valid Robust Accuracy (eps=1.0): 0.1687
+Valid Robust Accuracy (eps=1.6): 0.2131
+Test Clean Accuracy: 0.8059
+Test Robust Accuracy (eps=0.1): 0.6706
+Test Robust Accuracy (eps=0.2): 0.5059
+Test Robust Accuracy (eps=0.4): 0.3471
+Test Robust Accuracy (eps=1.0): 0.1294
+Test Robust Accuracy (eps=1.6): 0.2294
+MIA Accuracy: 0.7424
+MIA WC Threshold (clean): nan
+MIA WC Threshold (adv, eps=0.2): nan
+  Adv MIA max_prob: nan
+  Adv MIA entropy: nan
+  Adv MIA correct_prob: nan
+UQ Clean Acc: 0.8059
+UQ Adv Acc (eps=0.1, no defense): 0.6706
+UQ Purify Acc (eps=0.1, r=0.2): 0.6941  (Δ=+0.0235)
+UQ Adv Acc (eps=0.2, no defense): 0.5059
+UQ Purify Acc (eps=0.2, r=0.2): 0.5529  (Δ=+0.0471)
+UQ Adv Acc (eps=0.4, no defense): 0.3471
+UQ Purify Acc (eps=0.4, r=0.2): 0.3941  (Δ=+0.0471)
+UQ Adv Acc (eps=1.0, no defense): 0.1294
+UQ Purify Acc (eps=1.0, r=0.2): 0.3118  (Δ=+0.1824)
+UQ Adv Acc (eps=1.6, no defense): 0.2294
+UQ Purify Acc (eps=1.6, r=0.2): 0.4235  (Δ=+0.1941)
+UQ Detect Rate (tau=10pct, eps=0.1): 0.1235
+UQ Detect Rate (tau=10pct, eps=0.2): 0.1412
+UQ Detect Rate (tau=10pct, eps=0.4): 0.0941
+UQ Detect Rate (tau=10pct, eps=1.0): 0.0529
+UQ Detect Rate (tau=10pct, eps=1.6): 0.0353
+UQ Detect Rate (tau=1pct, eps=0.1): 0.0059
+UQ Detect Rate (tau=1pct, eps=0.2): 0.0118
+UQ Detect Rate (tau=1pct, eps=0.4): 0.0000
+UQ Detect Rate (tau=1pct, eps=1.0): 0.0118
+UQ Detect Rate (tau=1pct, eps=1.6): 0.0118
+UQ Detect Rate (tau=20pct, eps=0.1): 0.2765
+UQ Detect Rate (tau=20pct, eps=0.2): 0.2706
+UQ Detect Rate (tau=20pct, eps=0.4): 0.1824
+UQ Detect Rate (tau=20pct, eps=1.0): 0.0941
+UQ Detect Rate (tau=20pct, eps=1.6): 0.0588
+UQ Detect Rate (tau=5pct, eps=0.1): 0.0471
+UQ Detect Rate (tau=5pct, eps=0.2): 0.0529
+UQ Detect Rate (tau=5pct, eps=0.4): 0.0235
+UQ Detect Rate (tau=5pct, eps=1.0): 0.0353
+UQ Detect Rate (tau=5pct, eps=1.6): 0.0176
+
+------------------------------------------------------------
+Adversarial MIA Worst-Case Threshold (eps=0.2)
+------------------------------------------------------------
+
+  WC Threshold (clean)       0.5554 +/- 0.0130
+  correct_prob               0.5561 +/- 0.0237
+  entropy                    0.5556 +/- 0.0137
+  max_prob                   0.5556 +/- 0.0137
+
+  BEST (across features)     0.5645 +/- 0.0180
+
+------------------------------------------------------------
+UQ Results — Purification (mean +/- std across runs)
+------------------------------------------------------------
+
+  Adv Acc (eps=0.1, no defense)  0.7983 +/- 0.0413
+  Purify Acc (eps=0.1, r=0.2)  0.8028 +/- 0.0387  (Δ=+0.0045)
+  Adv Acc (eps=0.2, no defense)  0.8412 +/- 0.0832
+  Purify Acc (eps=0.2, r=0.2)  0.8473 +/- 0.0759  (Δ=+0.0062)
+  Adv Acc (eps=0.4, no defense)  0.8647 +/- 0.1225
+  Purify Acc (eps=0.4, r=0.2)  0.8754 +/- 0.1160  (Δ=+0.0106)
+  Adv Acc (eps=1.0, no defense)  0.7787 +/- 0.1529
+  Purify Acc (eps=1.0, r=0.2)  0.8104 +/- 0.1216  (Δ=+0.0317)
+  Adv Acc (eps=1.6, no defense)  0.6838 +/- 0.1114
+  Purify Acc (eps=1.6, r=0.2)  0.7098 +/- 0.0765  (Δ=+0.0261)
+
+  Detect Rate (tau=10pct, eps=0.1)  0.1473 +/- 0.0165
+  Detect Rate (tau=10pct, eps=0.2)  0.1048 +/- 0.0282
+  Detect Rate (tau=10pct, eps=0.4)  0.0476 +/- 0.0250
+  Detect Rate (tau=10pct, eps=1.0)  0.0420 +/- 0.0195
+  Detect Rate (tau=10pct, eps=1.6)  0.0280 +/- 0.0137
+  Detect Rate (tau=1pct, eps=0.1)  0.0291 +/- 0.0153
+  Detect Rate (tau=1pct, eps=0.2)  0.0199 +/- 0.0156
+  Detect Rate (tau=1pct, eps=0.4)  0.0092 +/- 0.0127
+  Detect Rate (tau=1pct, eps=1.0)  0.0022 +/- 0.0044
+  Detect Rate (tau=1pct, eps=1.6)  0.0011 +/- 0.0030
+  Detect Rate (tau=20pct, eps=0.1)  0.2053 +/- 0.0236
+  Detect Rate (tau=20pct, eps=0.2)  0.1532 +/- 0.0397
+  Detect Rate (tau=20pct, eps=0.4)  0.0829 +/- 0.0412
+  Detect Rate (tau=20pct, eps=1.0)  0.0871 +/- 0.0267
+  Detect Rate (tau=20pct, eps=1.6)  0.0711 +/- 0.0225
+  Detect Rate (tau=5pct, eps=0.1)  0.0835 +/- 0.0182
+  Detect Rate (tau=5pct, eps=0.2)  0.0641 +/- 0.0269
+  Detect Rate (tau=5pct, eps=0.4)  0.0297 +/- 0.0189
+  Detect Rate (tau=5pct, eps=1.0)  0.0165 +/- 0.0128
+  Detect Rate (tau=5pct, eps=1.6)  0.0106 +/- 0.0098
+
+------------------------------------------------------------
+Pareto-Optimal Runs (selected on valid)
+------------------------------------------------------------
+
+Valid Acc vs Rob/0.2:
+  run_name  eval/valid/acc  eval/valid/rob/0.2
+pretrained        0.900585            0.420906
+         6        0.777778            0.828488
+        15        0.771930            0.896197
+        11        0.766082            0.903828
+        12        0.725146            0.932534
+
+
+------------------------------------------------------------
+Acc vs Perturbation Strength — Mean ± Std (test)
+------------------------------------------------------------
+
+  eps=0.00 (clean):     mean=0.7577  std=0.0337  stderr=0.0074
+  eps=0.10:             mean=0.7983  std=0.0413  stderr=0.0090
+  eps=0.20:             mean=0.8412  std=0.0832  stderr=0.0182
+  eps=0.40:             mean=0.8647  std=0.1225  stderr=0.0267
+  eps=1.00:             mean=0.7787  std=0.1529  stderr=0.0334
+  eps=1.60:             mean=0.6838  std=0.1114  stderr=0.0243
+
+
+------------------------------------------------------------
+Best Run Acc vs Perturbation Strength (test)
+------------------------------------------------------------
+
+  eps=0.00 (clean):  0.8059
+  eps=0.10:           0.6706
+  eps=0.20:           0.5059
+  eps=0.40:           0.3471
+  eps=1.00:           0.1294
+  eps=1.60:           0.2294
+
+
+------------------------------------------------------------
+Metric Correlations (valid)
+------------------------------------------------------------
+
+                   Valid / Acc  Mia Wc Best  Adv Mia Wc Best  Valid / Rob / 0.1  Valid / Rob / 0.2  Valid / Rob / 0.4  Valid / Rob / 1.0  Valid / Rob / 1.6
+Valid / Acc              1.000       -0.711            0.160             -0.532             -0.824             -0.851             -0.832             -0.759
+Mia Wc Best             -0.711        1.000            0.062             -0.221              0.114             -0.061             -0.298             -0.157
+Adv Mia Wc Best          0.160        0.062            1.000             -0.540             -0.319             -0.387              0.285             -0.075
+Valid / Rob / 0.1       -0.532       -0.221           -0.540              1.000              0.708              0.672              0.584              0.661
+Valid / Rob / 0.2       -0.824        0.114           -0.319              0.708              1.000              0.967              0.938              0.923
+Valid / Rob / 0.4       -0.851       -0.061           -0.387              0.672              0.967              1.000              0.961              0.927
+Valid / Rob / 1.0       -0.832       -0.298            0.285              0.584              0.938              0.961              1.000              0.894
+Valid / Rob / 1.6       -0.759       -0.157           -0.075              0.661              0.923              0.927              0.894              1.000
+
+
+------------------------------------------------------------
+Metric Correlations (test)
+------------------------------------------------------------
+
+                  Test / Acc  Mia Wc Best  Adv Mia Wc Best  Test / Rob / 0.1  Test / Rob / 0.2  Test / Rob / 0.4  Test / Rob / 1.0  Test / Rob / 1.6
+Test / Acc             1.000       -0.727            0.110            -0.067            -0.330            -0.332            -0.377            -0.330
+Mia Wc Best           -0.727        1.000            0.062            -0.319            -0.031            -0.112             0.242             0.179
+Adv Mia Wc Best        0.110        0.062            1.000            -0.570            -0.503            -0.501             0.315            -0.060
+Test / Rob / 0.1      -0.067       -0.319           -0.570             1.000             0.867             0.795             0.644             0.736
+Test / Rob / 0.2      -0.330       -0.031           -0.503             0.867             1.000             0.951             0.894             0.923
+Test / Rob / 0.4      -0.332       -0.112           -0.501             0.795             0.951             1.000             0.952             0.948
+Test / Rob / 1.0      -0.377        0.242            0.315             0.644             0.894             0.952             1.000             0.929
+Test / Rob / 1.6      -0.330        0.179           -0.060             0.736             0.923             0.948             0.929             1.000
+
+
+------------------------------------------------------------
+Cross-Split Consistency (valid vs test, Pearson r across runs)
+------------------------------------------------------------
+
+         valid_col          test_col  pearson_r
+    eval/valid/acc     eval/test/acc   0.736544
+eval/valid/rob/0.1 eval/test/rob/0.1   0.818554
+eval/valid/rob/0.2 eval/test/rob/0.2   0.943311
+eval/valid/rob/0.4 eval/test/rob/0.4   0.984618
+eval/valid/rob/1.0 eval/test/rob/1.0   0.963181
+eval/valid/rob/1.6 eval/test/rob/1.6   0.933723
+Mean cross-split r: 0.8967
+
+
+============================================================
