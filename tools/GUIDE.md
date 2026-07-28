@@ -10,6 +10,7 @@ Standalone maintenance scripts for the bm4tc experiment pipeline. Run from the p
 |--------|---------|
 | `fill_hpo.py` | Patch `seed_sweep` configs with best HPO hyperparameters (W&B or local fallback) |
 | `delete_runs.py` | Delete sweep outputs: local dirs, W&B runs/artifacts, analysis dirs |
+| `publish_results.py` | Snapshot `analysis/outputs/` onto the disposable `results` branch |
 | `migrate_configs.py` | One-off migration: old `nll/{dis,gen,mixed}/` layout → unified `{dataset}/{nat,at}/` layout |
 | `alpha_lr_interp.py` | Compute geometrically-interpolated LRs for alpha-curve sweeps (historical, post-migration) |
 | `fetcher.ipynb` | Interactive notebook for ad-hoc W&B data fetching |
@@ -62,6 +63,36 @@ python tools/delete_runs.py --analysis-only --list
 ```
 
 Filter flags (`--trainer`, `--kind`, `--embedding`, `--arch`, `--dataset`, `--date`) all accept one or more values; they are OR-within a flag, AND-across flags.
+
+---
+
+## `publish_results.py` — Snapshot analysis outputs to the `results` branch
+
+Both `outputs/` and `analysis/outputs/` are gitignored on `main`: nothing in `outputs/` is worth versioning, and re-running a sweep would otherwise rewrite multi-MB `evaluation_data.csv` files into `main`'s permanent history. Analysis results live instead on an orphan `results` branch, checked out in its own worktree at `../bm4tc-results`.
+
+```bash
+# First time: create the branch + worktree
+python tools/publish_results.py --setup
+
+# Preview what would be synced and committed
+python tools/publish_results.py --dry-run
+
+# Snapshot and commit
+python tools/publish_results.py
+python tools/publish_results.py --push -m "results: mnist r12 gibbs sweep"
+```
+
+**Separate worktree, on purpose.** If `results` were checked out in the main worktree, `git checkout main` would see `analysis/outputs/**` tracked in `HEAD` and absent in the target, and delete your analysis results from disk. The separate worktree removes that footgun.
+
+**Snapshot, not a log.** The sync is `rsync --delete`, so each commit mirrors `analysis/outputs/` exactly as it stands. Results deleted locally also leave the branch tip; older snapshots stay reachable through the branch's history until the branch itself is deleted.
+
+Recycle the branch when its history gets heavy — nothing on `main` depends on it:
+
+```bash
+git worktree remove ../bm4tc-results
+git branch -D results && git push origin --delete results
+python tools/publish_results.py --setup && python tools/publish_results.py
+```
 
 ---
 
