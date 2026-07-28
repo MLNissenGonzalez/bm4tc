@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
@@ -360,6 +360,7 @@ class NaturalTrainer:
                 best=self.best,
                 best_epoch=self.best_epoch,
                 replay_buffer=self.sampler.buffer.state_dict(),
+                sampler_config=asdict(self.sampler.cfg),
             )
 
 
