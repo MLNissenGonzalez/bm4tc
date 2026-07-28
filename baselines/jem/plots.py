@@ -120,7 +120,7 @@ def plot_alpha_curves(
     _alpha_axis(ax)
     ax.legend(fontsize=LEGEND_FS)
     fig.tight_layout()
-    accuracy_path = output_dir / "alpha_curve_accuracy.png"
+    accuracy_path = output_dir / "alpha_curve_accuracy.pdf"
     fig.savefig(accuracy_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -142,7 +142,7 @@ def plot_alpha_curves(
     lines = left.get_lines() + right.get_lines()
     left.legend(lines, [line.get_label() for line in lines], fontsize=LEGEND_FS)
     fig.tight_layout()
-    loss_path = output_dir / "alpha_curve_nll.png"
+    loss_path = output_dir / "alpha_curve_nll.pdf"
     fig.savefig(loss_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return accuracy_path, loss_path
@@ -308,7 +308,7 @@ def plot_defense_comparison(
         ax.grid(axis="y", alpha=0.3, linestyle="--")
         ax.legend(fontsize=LEGEND_FS, loc="upper right")
         fig.tight_layout()
-        path = output_dir / f"defense_comparison_eps{epsilon}.png"
+        path = output_dir / f"defense_comparison_eps{epsilon}.pdf"
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         outputs.append(path)
@@ -406,7 +406,7 @@ def plot_detection_thresholds(
             loc="lower right",
         )
         fig.tight_layout()
-        path = output_dir / f"accept_acc_vs_threshold_{model_key}.png"
+        path = output_dir / f"accept_acc_vs_threshold_{model_key}.pdf"
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         outputs.append(path)
