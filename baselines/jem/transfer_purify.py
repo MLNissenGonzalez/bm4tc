@@ -187,6 +187,9 @@ def _plot_grid(
     clean: torch.Tensor,
     adversarial: torch.Tensor,
     purified: dict[str, torch.Tensor],
+    true_labels: np.ndarray,
+    attack_predictions: np.ndarray,
+    purified_predictions: dict[str, np.ndarray],
     input_range: tuple[float, float],
 ):
     keys = [key for key, _, _ in models]
@@ -214,12 +217,27 @@ def _plot_grid(
                 continue
             if column == 0:
                 image = to_image(clean[eligible_index])
+                panel_prediction = int(true_labels[eligible_index])
             elif column == 1:
                 image = to_image(adversarial[eligible_index])
+                panel_prediction = int(attack_predictions[eligible_index])
             else:
-                image = to_image(purified[keys[column - 2]][selected_position[int(eligible_index)]])
+                key = keys[column - 2]
+                position = selected_position[int(eligible_index)]
+                image = to_image(purified[key][position])
+                panel_prediction = int(purified_predictions[key][position])
             axis.imshow(image, cmap="gray", vmin=0, vmax=1)
-        axes[row, 0].set_ylabel(f"$y={int(class_idx)}$", fontsize=11)
+            axis.set_xlabel(
+                f"Pred. {panel_prediction}", fontsize=8, color="0.35", labelpad=2
+            )
+        prediction = (
+            "n/a" if eligible_index is None
+            else str(int(attack_predictions[eligible_index]))
+        )
+        axes[row, 0].set_ylabel(
+            f"Class {int(class_idx)}\n(Pred. {prediction})",
+            fontsize=10, rotation=0, ha="right", va="center", labelpad=42,
+        )
     for column, title in enumerate(titles):
         axes[0, column].set_title(title, fontsize=10)
     figure.tight_layout()
@@ -297,6 +315,7 @@ def transfer_purify_analysis(
     clean = torch.cat(clean_parts)
     adversarial = torch.cat(adversarial_parts)
     labels = np.concatenate(label_parts)
+    attack_predictions = _classify(source, adversarial.to(resolved_device))
     row_index = _select_rows(labels, classes)
     eligible = len(labels)
     if stats_cap is None or stats_cap >= eligible:
@@ -340,7 +359,8 @@ def transfer_purify_analysis(
         "row_index": row_index,
     }
     figure = _plot_grid(
-        models, classes, row_index, selected_position, clean, adversarial, purified, (lo, hi)
+        models, classes, row_index, selected_position, clean, adversarial,
+        purified, labels, attack_predictions, purified_predictions, (lo, hi),
     )
     if save_dir is not None:
         output = Path(save_dir)
