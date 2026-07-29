@@ -1,12 +1,50 @@
 # @package _global_
 # ---------------------------------------------------------------------------
-# Adversarial-training seed sweep (5 seeds) for mnist_full_r12 at legendre/d3r40c64,
-# alpha=0.01. Fine-tunes from the best clean (alpha=0) NAT checkpoint.
+# Adversarial-training seed sweep (3 seeds) for mnist_full_r12 at legendre/d3r40c64,
+# alpha=0.01, with the SPLIT objective (gen_on_clean=true). Fine-tunes from the
+# best clean (alpha=0) NAT checkpoint.
 #
-# clean_weight=0.2, uniform across r10/r20/r40, from the cw_a001 grid HPO
-# (hpo/clean_weight.yaml, alpha=0.01) selected on MAX rob/valid subject to
-# acc_floor=0.90 -- 0.2 is the most consistent choice across bond dims. lr=3e-4
-# and soft_strength=1e-3 are the fixed values used throughout the AT/NAT grids.
+# RADIUS: eps_rel=0.1 (abs 0.2 in [-1,1]), the corrected training radius. The
+# published a001_2607 sweep trained at eps_rel=0.3 (abs 0.6) -- the Madry 28x28
+# MNIST convention, which does not transfer to 12x12 downsampled data where a
+# given L-inf budget removes far more class information.
+#
+# SPLIT OBJECTIVE: the adversarial signal enters the discriminative term only and
+# the generative half sees clean data,
+#     L = (1-a)*[(1-cw)*L_dis(x_adv) + cw*L_dis(x)] + a*L_gen(x)
+# versus the default (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x). clean_weight now
+# mixes INSIDE the discriminative term, so the cw_a001 grid's answer (0.2) does
+# not transfer even though the number would look familiar.
+#
+# clean_weight=0.1 is EXTRAPOLATED for this bond dim: the cw_split_a001 grid HPO
+# covered r10 and r20 only, and no split HPO was ever run at r40. cw=0.1 led at
+# both dims it covers (r10 0.5485 vs 0.5436 at cw=0; r20 0.5759 vs 0.5733) and
+# cw=0.2 fell below cw=0 at both, so it is taken as uniform here -- exactly as
+# cw=0.2 was taken uniform in the non-split sweeps. TWO FURTHER CAVEATS: that grid
+# ran at eps_rel=0.3, not the 0.1 used here, and its cw=0.4 trial never completed.
+# Reused rather than re-tuned per the "no new HPO" constraint.
+#
+# lr=3e-4 and soft_strength=1e-3 are the fixed values used throughout the AT/NAT
+# grids. batch_size=512 is unchanged from a001_2607 on purpose: the radius and the
+# split are meant to be the only differences from the published sweep.
+#
+# VALIDATION CADENCE: gen_on_clean routes validation through eval_split, which runs
+# every eval_rob_freq epochs and nothing in between, and patience counts validation
+# EVENTS. patience=10 at eval_rob_freq=5 therefore means 50 epochs without
+# improvement, not 10.
+#
+# ROB IS A SUBSET ESTIMATOR HERE: the split draws a fixed (1-cw)=90% slice of the
+# valid set for the attack (logged as n_rob_valid), so rob/valid is not exactly
+# comparable to the a0 sweeps' full-valid rob. This affects model selection and the
+# W&B curves only -- reported test robustness comes from analysis/sweep.py over the
+# full test set.
+#
+# 3 seeds, not 5: seed sd on the published AT sweeps is ~0.002-0.008 in rob/valid
+# against bond-dim effects of 0.05-0.08, so n=3 costs ~0.001 of standard error.
+# WATCH THIS SWEEP: seed 3 of a001_2607 crashed at epoch 31 and its selected
+# checkpoint scored rob 0.2008 against ~0.59 for the other four. At n=3 one such
+# failure costs a third of the sample -- if a seed exits before ~epoch 90, relaunch
+# that seed rather than accepting the sweep.
 #
 # Runnable as-is (born, model_path, and all HPs are baked in):
 #   python -m experiments.train --multirun \
@@ -41,6 +79,7 @@ tracking:
 trainer:
   adversarial:
     alpha: 0.01
+    gen_on_clean: true       # adversarial signal in the discriminative term only
     max_epoch: 100
     batch_size: 512
     patience: 10
@@ -71,7 +110,7 @@ trainer:
       log_target: null
       debug: false
 
-    clean_weight: 0.2        # FIXED -- most consistent cw across bond dims (cw_a001 HPO)
+    clean_weight: 0.1        # EXTRAPOLATED from r10/r20 (see caveats in header)
 
     optimizer:
       name: "adam"
@@ -82,4 +121,4 @@ trainer:
 hydra:
   sweeper:
     params:
-      tracking.seed: range(1, 6)
+      tracking.seed: range(1, 4)
