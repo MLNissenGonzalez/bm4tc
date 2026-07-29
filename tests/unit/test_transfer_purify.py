@@ -16,6 +16,7 @@ from analysis.visualize.mnist_transfer_purify import (
     _select_rows,
     _transfer_mask,
 )
+from analysis.utils import load_run_config
 
 
 def test_transfer_mask_requires_all_models_fooled():
@@ -136,6 +137,22 @@ def test_resolve_run_dir_from_sweep_root_uses_best_run_csv(tmp_path):
     run_dir, ckpt = _resolve_run_dir(str(sweep))
     assert run_dir == sweep / "1"  # highest acc, not the first run
     assert ckpt is None
+
+
+def test_load_run_config_reconstructs_a_final_mps_seed_sweep_without_hydra(tmp_path):
+    run = (
+        tmp_path
+        / "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_1206/3"
+    )
+    run.mkdir(parents=True)
+
+    cfg = load_run_config(run)
+
+    assert cfg.dataset.name == "mnist_full_r12"
+    assert cfg.born.embedding == "legendre"
+    assert cfg.born.init_kwargs.in_dim == 3
+    assert cfg.trainer.nll.alpha == 0.0
+    assert cfg.tracking.seed == 4
 
 
 def _stats_fixture(**overrides):

@@ -1,0 +1,34 @@
+JEM MNIST transfer-attack + purification statistics
+==============================================================
+
+--- config ---
+  a0     outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_2607/0
+         label=purified $\alpha=0$ (undef.)  run=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a0_2607/0
+  a001   outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_2607/0
+         label=purified $\alpha=0.01$  run=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a001_2607/0
+  a01    outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a01_2607/0
+         label=purified $\alpha=0.1$  run=outputs/baselines/jem/mnist_full_r12/nat/mlp_h550x480/seed_sweep/a01_2607/0
+  at     outputs/baselines/jem/mnist_full_r12/at/mlp_h550x480/seed_sweep/at_2707/0  (attack source)
+         label=AT-model purified  run=outputs/baselines/jem/mnist_full_r12/at/mlp_h550x480/seed_sweep/at_2707/0
+  attack        PGD-inf eps=0.2 (rel) = 0.4000 (abs), 40 steps
+  purification  score-ascent-inf radius=0.3 (rel) = 0.6000 (abs), 20 steps
+  input range   [-1.0000, 1.0000]
+
+--- population ---
+  test inputs attacked      2000
+  eligible (all models fooled, all clean-correct)  67
+  eligible per class        0:2, 1:3, 2:7, 3:11, 4:7, 5:7, 6:5, 7:11, 8:7, 9:7
+
+--- purification success (self-purify, self-classify) ---
+  evaluated on 67 of 67 eligible examples
+  model   overall
+  a0        0.000
+  a001      0.000
+  a01       0.104
+  at        0.328
+
+--- figure rows ---
+  y=0: eligible-set index 30
+  y=3: eligible-set index 5
+  y=5: eligible-set index 4
+  y=9: eligible-set index 0
