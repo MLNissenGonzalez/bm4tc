@@ -1,5 +1,5 @@
-ecg200 d3r10c64 — defenses at eps=0.2, q=10% (mean±std over 10 seeds); * = best per column
-Model         Clean            Rob.             Purif lk r0.2    Purif lk r0.3    Det rate         Acc passed       
+ecg200 d3r10c64 — defenses at eps=0.1, q=10% (mean±std over 10 seeds); * = best per column
+Model         Clean            Rob.             Purif lk r0.1    Purif lk r0.15   Det rate         Acc passed       
 --------------------------------------------------------------------------------------------------------------------
 a=0           0.792±0.033      0.108±0.085      0.338±0.115      0.374±0.090      0.264±0.054      0.131±0.128      
 a=0.01        0.808±0.017      0.370±0.086      0.658±0.054      0.680±0.059      0.230±0.038      0.431±0.124      
