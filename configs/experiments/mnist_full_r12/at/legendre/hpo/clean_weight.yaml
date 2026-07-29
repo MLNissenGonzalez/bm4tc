@@ -68,7 +68,7 @@ tracking:
     method: "PGD"
     criterion:
       name: "negative log-likelihood"
-    strengths: [0.3]   # L-inf, abs eps = 0.3 x range_size(2.0) = 0.3 in [0,1] pixel space
+    strengths: [0.1]   # relative; abs eps = 0.1 x 2.0 = 0.2 in [-1,1]
     num_steps: 10
     step_size: null
     random_start: true
@@ -88,7 +88,7 @@ trainer:
       norm: "inf"
       criterion:
         name: "negative log-likelihood"
-      strengths: [0.3]       # standard MNIST L-inf budget (Madry et al.)
+      strengths: [0.1]       # relative; abs eps = 0.2 in [-1,1]
       num_steps: 10
       step_size: null
       random_start: true
