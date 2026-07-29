@@ -6,36 +6,39 @@ Regime: nat  |  Runs: 5  |  Device: cuda
 Embedding: legendre  (range size 2.0)
 Attack: PGD Linf steps=40  fractions=[0.05, 0.1, 0.15]
 N_EVAL: 250 test samples (seed 0)
-Gibbs: sweeps=[1, 3, 6]  step_radius=0.05 (per-sweep L-inf step, NOT a global budget: after k sweeps the
-       envelope is k x 0.05 x range)  num_bins=20
+Gibbs: sweeps=[1, 3, 6, 10]  step_radius=0.05 (per-sweep L-inf step, NOT a global budget: after k sweeps the
+       envelope is k x 0.05 x range)  num_bins=96
 
 --------------------------------------------------------------------
 Accuracy vs Perturbation Strength (mean across runs)
 --------------------------------------------------------------------
 
-                  eps=0       0.1       0.2       0.3
-No defense       0.9448    0.7664    0.3864    0.0968
-Gibbs (k=1)      0.9448    0.8384    0.6160    0.3192
-Gibbs (k=3)      0.9448    0.8688    0.7280    0.4944
-Gibbs (k=6)      0.9416    0.8744    0.7744    0.5928
+                   eps=0       0.1       0.2       0.3
+No defense        0.9448    0.7664    0.3880    0.1016
+Gibbs (k=1)       0.9424    0.8408    0.6184    0.3168
+Gibbs (k=3)       0.9448    0.8672    0.7216    0.4792
+Gibbs (k=6)       0.9448    0.8736    0.7624    0.5752
+Gibbs (k=10)      0.9384    0.8872    0.7880    0.6544
 
 --------------------------------------------------------------------
 Across-run std / stderr (same layout)
 --------------------------------------------------------------------
 
 std:
-                  eps=0       0.1       0.2       0.3
-No defense       0.0044    0.0164    0.0248    0.0095
-Gibbs (k=1)      0.0087    0.0119    0.0152    0.0306
-Gibbs (k=3)      0.0082    0.0052    0.0117    0.0304
-Gibbs (k=6)      0.0088    0.0067    0.0115    0.0182
+                   eps=0       0.1       0.2       0.3
+No defense        0.0044    0.0151    0.0248    0.0061
+Gibbs (k=1)       0.0083    0.0059    0.0213    0.0308
+Gibbs (k=3)       0.0018    0.0163    0.0149    0.0236
+Gibbs (k=6)       0.0077    0.0115    0.0137    0.0128
+Gibbs (k=10)      0.0115    0.0077    0.0117    0.0268
 
 stderr:
-                  eps=0       0.1       0.2       0.3
-No defense       0.0020    0.0073    0.0111    0.0043
-Gibbs (k=1)      0.0039    0.0053    0.0068    0.0137
-Gibbs (k=3)      0.0037    0.0023    0.0052    0.0136
-Gibbs (k=6)      0.0039    0.0030    0.0052    0.0081
+                   eps=0       0.1       0.2       0.3
+No defense        0.0020    0.0068    0.0111    0.0027
+Gibbs (k=1)       0.0037    0.0027    0.0095    0.0138
+Gibbs (k=3)       0.0008    0.0073    0.0066    0.0105
+Gibbs (k=6)       0.0034    0.0052    0.0061    0.0057
+Gibbs (k=10)      0.0052    0.0034    0.0052    0.0120
 
 Note: the above is spread ACROSS RUNS. Within a single run, the
 binomial sampling error on each accuracy is about 0.0316 at this N_EVAL.
@@ -44,10 +47,11 @@ binomial sampling error on each accuracy is about 0.0316 at this N_EVAL.
 Recovery rate (fraction of misclassified adv examples fixed)
 --------------------------------------------------------------------
 
-                    0.1       0.2       0.3
-Gibbs (k=1)      0.3179    0.3733    0.2462
-Gibbs (k=3)      0.4371    0.5567    0.4403
-Gibbs (k=6)      0.4714    0.6323    0.5491
+                     0.1       0.2       0.3
+Gibbs (k=1)       0.3166    0.3761    0.2405
+Gibbs (k=3)       0.4324    0.5466    0.4204
+Gibbs (k=6)       0.4604    0.6131    0.5272
+Gibbs (k=10)      0.5226    0.6574    0.6154
 
-Runtime: 998.1s per run (total 4990.7s)
+Runtime: 5658.1s per run (total 28290.6s)
 ====================================================================
