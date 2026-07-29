@@ -12,7 +12,7 @@ from .model import JEMMLP
 
 @dataclass
 class PGDConfig:
-    epsilon: float = 0.6
+    epsilon: float = 0.2
     num_steps: int = 40
     step_size: float | None = None
     random_start: bool = True

@@ -195,9 +195,9 @@ The likelihood-aware adaptive attack also uses the MPS-compatible
 - `sgld_purify_acc/{eps}/{k}` and purification recovery rates
 - `sgld_joint_purify_acc/{eps}/{k}`
 
-Attack epsilons and likelihood-purification radii are absolute in `[-1,1]`,
-matching MPS analysis. Sampling purification uses `delta=0.2` absolute, which
-matches the MPS Gibbs setting `0.1 * input_range_size`. One SGLD sweep runs 20
+Attack epsilons are absolute in `[-1,1]`; every purification method uses the
+fixed absolute local radius `delta=0.2`. This matches the MPS Gibbs setting
+`0.1 * input_range_size`. One SGLD sweep runs 20
 transitions inside the local L-infinity ball around its starting state; the
 next sweep is recentered on the previous output. The analysis records the same
 snapshots as MPS, `k=1,3,5`, under `Purif. (samp., k=...)`. Purification fixes
