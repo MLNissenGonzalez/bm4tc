@@ -4,8 +4,7 @@ One qualitative figure: rows are digit classes, columns are
 ``original | adversarial | purified <model 1> | purified <model 2> | purified <model 3>``.
 
 1. Craft adversarial examples against the ATTACK SOURCE model (the adversarially-trained
-   one) with a standard discriminative PGD attack at strength ``EPS`` (range-relative
-   fraction).
+   one) with a standard discriminative PGD attack at absolute strength ``EPS``.
 2. Keep only examples on which the attack **transfers to every model**: all models classify
    the clean input correctly and all misclassify the adversarial one. Every purification
    column therefore starts from an identical, genuinely adversarial input.
@@ -70,8 +69,8 @@ MODELS: List[Tuple[str, str, str]] = [
 ATTACK_SOURCE_KEY = "at"   # attack is crafted white-box on this model
 DISPLAY_CLASSES = [0, 3, 5, 9]  # one figure row per class
 
-EPS = 0.2                 # attack budget, range-relative fraction
-RADIUS = 0.3              # purification radius, range-relative fraction
+EPS = 0.2                 # absolute attack budget in the model domain
+RADIUS = 0.2              # absolute purification radius in the model domain
 ATTACK_NUM_STEPS = 40
 PURIFY_NUM_STEPS = 20
 EVAL_BATCH_SIZE = 128
@@ -79,9 +78,9 @@ MAX_ATTACK_SAMPLES: Optional[int] = 2000  # #clean inputs attacked (None = whole
 STATS_CAP: Optional[int] = 200            # #eligible examples purified for the statistics
 SEED = 0
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-SAVE_DIR = "figures/mnist/transfer_purify"
+SAVE_DIR = "figures/mnist_r12/transfer_purify"
 
-FIG_NAME = "transfer_purify_grid.png"
+FIG_NAME = "transfer_purify_grid.pdf"
 STATS_NAME = "transfer_purify_stats.txt"
 
 
@@ -131,10 +130,10 @@ def _format_stats(stats: dict) -> str:
         mark = "  (attack source)" if k == src else ""
         L.append(f"  {k:<{w}} {stats['paths'][k]}{mark}")
         L.append(f"  {'':<{w}} label={labels[k]}  run={stats['run_dirs'][k]}")
-    L.append(f"  attack        PGD-inf  eps={stats['eps']} (rel) = {stats['abs_eps']:.4f} (abs), "
+    L.append(f"  attack        PGD-inf  eps={stats['eps']:.4f} (abs), "
              f"{stats['attack_num_steps']} steps")
-    L.append(f"  purification  likelihood-inf  radius={stats['radius']} (rel) = "
-             f"{stats['abs_radius']:.4f} (abs), {stats['purify_num_steps']} steps")
+    L.append(f"  purification  likelihood-inf  radius={stats['radius']:.4f} (abs), "
+             f"{stats['purify_num_steps']} steps")
     L.append(f"  input range   [{stats['lo']:.4f}, {stats['hi']:.4f}]")
     L.append(f"  seed={stats['seed']}  device={stats['device']}  "
              f"batch_size={stats['eval_batch_size']}")
@@ -290,9 +289,8 @@ def transfer_purify_analysis(
     # All models share the legendre embedding => identical input_range; build data once.
     loader = _test_loader(src_cfg, src_cbm, eval_batch_size)
     lo, hi = float(src_cbm.input_range[0]), float(src_cbm.input_range[1])
-    range_size = hi - lo
-    abs_eps, abs_radius = eps * range_size, radius * range_size
-    logger.info(f"range=[{lo:.3f},{hi:.3f}] size={range_size:.3f} | "
+    abs_eps, abs_radius = eps, radius
+    logger.info(f"range=[{lo:.3f},{hi:.3f}] | "
                 f"abs_eps={abs_eps:.4f} abs_radius={abs_radius:.4f}")
 
     attack = ProjectedGradientDescent(norm="inf", num_steps=attack_num_steps, random_start=True)

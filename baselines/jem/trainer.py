@@ -58,7 +58,7 @@ class AdversarialTrainerConfig:
     batch_size: int = 512
     patience: int = 20
     clean_weight: float = 0.2
-    epsilon: float = 0.6
+    epsilon: float = 0.2
     attack_steps: int = 10
     attack_step_size: float | None = None
     eval_rob_freq: int = 5

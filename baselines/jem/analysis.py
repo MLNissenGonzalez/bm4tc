@@ -173,7 +173,7 @@ def analyze_run(
     device: str = "auto",
     attack_eps: tuple[float, ...] = (0.1, 0.2, 0.3),
     percentiles: tuple[int, ...] = (1, 5, 10, 20),
-    radii: tuple[float, ...] = (0.2, 0.3),
+    radii: tuple[float, ...] = (0.2,),
     sampling_radius: float = 0.2,
     sampling_sweeps: tuple[int, ...] = (1, 3, 5),
     sampling_steps_per_sweep: int = 20,

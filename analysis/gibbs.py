@@ -93,7 +93,7 @@ GIBBS = {
     "gibbs_batch_size": 24,
     # Per-sweep L∞ step as a fraction of the feature domain. Deliberately small:
     # strength comes from n_sweeps, not from this.
-    "step_radius": 0.05,
+    "step_radius": 0.1,
 }
 
 # Chunk size for the non-Gibbs forwards (class probs, log p(x), attack generation).
