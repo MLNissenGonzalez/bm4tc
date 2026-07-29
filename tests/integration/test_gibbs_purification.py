@@ -72,13 +72,13 @@ def test_purify_partial_batch(cbm):
 # at the start of every sweep, so the k-sweep envelope is k*step_radius*(hi-lo).
 
 def test_restricted_purify_output_shape(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_delta_rel=0.3)
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     assert purified.shape == (BATCH_SIZE, DATA_DIM)
 
 
 def test_restricted_purify_stays_in_input_range(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_delta_rel=0.3)
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     lo, hi = cbm.input_range
     assert (purified >= lo - 1e-5).all()
@@ -93,7 +93,7 @@ def test_restricted_purify_stays_near_start(cbm):
     step_radius = 0.1
     x_adv = torch.full((BATCH_SIZE, DATA_DIM), 0.5)  # well inside input_range [0,1]
     purifier = GibbsPurification(
-        num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=step_radius
+        num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_delta_rel=step_radius
     )
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
     lo, hi = cbm.input_range
@@ -127,7 +127,7 @@ def test_local_grid_uses_full_resolution_inside_window(cbm):
     num_bins = 40
     x_adv = torch.full((64, DATA_DIM), 0.5)
     purifier = GibbsPurification(
-        num_bins=num_bins, gibbs_batch_size=64, step_radius=step_radius
+        num_bins=num_bins, gibbs_batch_size=64, step_delta_rel=step_radius
     )
     purified, _ = purifier.purify(cbm, x_adv, n_sweeps=1, device="cpu")
 
@@ -153,7 +153,7 @@ def test_k_sweeps_widen_the_envelope(cbm):
     k = 6
     x0 = torch.full((32, DATA_DIM), 0.5)
     purifier = GibbsPurification(
-        num_bins=NUM_BINS, gibbs_batch_size=32, step_radius=step_radius
+        num_bins=NUM_BINS, gibbs_batch_size=32, step_delta_rel=step_radius
     )
     purified, _ = purifier.purify(cbm, x0, n_sweeps=k, device="cpu")
     lo, hi = cbm.input_range
@@ -168,7 +168,7 @@ def test_k_sweeps_widen_the_envelope(cbm):
 
 
 def test_restricted_purify_log_px_finite(cbm, x_adv):
-    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_radius=0.3)
+    purifier = GibbsPurification(num_bins=NUM_BINS, gibbs_batch_size=BATCH_SIZE, step_delta_rel=0.3)
     _, log_px = purifier.purify(cbm, x_adv, n_sweeps=3, device="cpu")
     assert torch.isfinite(log_px).all()
 
@@ -248,8 +248,8 @@ def test_gibbs_stable_when_amplitudes_overflow(step_radius):
 
     torch.manual_seed(0)
     x_adv = lo + (hi - lo) * torch.rand(6, data_dim)
-    # step_radius=None also keeps the global fixed-grid path under test.
-    purifier = GibbsPurification(num_bins=8, gibbs_batch_size=4, step_radius=step_radius)
+    # step_delta_rel=None also keeps the global fixed-grid path under test.
+    purifier = GibbsPurification(num_bins=8, gibbs_batch_size=4, step_delta_rel=step_radius)
     torch.manual_seed(1)
     # n_sweeps=1 so the restriction (centred on the sweep-start snapshot) is
     # well-defined relative to x_adv; across k sweeps x_cur may drift up to
@@ -293,7 +293,7 @@ def test_gibbs_numeric_regression():
         cbm = make_cbm()
         torch.manual_seed(123)
         x_adv = -1 + 2 * torch.rand(6, 4)
-        purifier = GibbsPurification(num_bins=8, gibbs_batch_size=bs, step_radius=0.2)
+        purifier = GibbsPurification(num_bins=8, gibbs_batch_size=bs, step_delta_rel=0.2)
         torch.manual_seed(777)
         xp, lp = purifier.purify(cbm, x_adv, n_sweeps=2, device="cpu")
         assert xp.sum().item() == pytest.approx(xp_sum, abs=1e-5)

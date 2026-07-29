@@ -29,7 +29,7 @@
 # transfer would inject that noise into the very alpha comparison this
 # experiment makes.
 #
-# Evasion is left at the pgd_at defaults (L2, strengths [0.1] as a fraction of
+# Evasion is left at the pgd_at defaults (L2, eps_rel [0.1] as a fraction of
 # the embedding range size, 10 steps), matching configs/tracking/online.yaml.
 # acc_floor stays null, matching the ecg200 config (where mnist's 0.90 floor
 # would select no epoch at all, its clean acc being ~0.86). This dataset's clean

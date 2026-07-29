@@ -1,5 +1,15 @@
+"""Evasion (adversarial) attacks against a ConditionalBornMachine.
+
+Budget convention (see "Budget vocabulary" in CLAUDE.md):
+    ``eps_rel``  authored fraction of the embedding domain width ``hi - lo``. This is
+                 what configs carry, and it equals the budget in the data's own units.
+    ``eps_abs``  model-domain value, ``eps_rel * (hi - lo)``. Every attack method in
+                 this module takes ``eps_abs`` — conversion happens in the caller
+                 (``AdversarialTrainer._init_attack``, ``analysis/run.py``) via
+                 ``rel_to_abs``.
+"""
+
 import torch
-from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from src.utils.train import CriterionConfig
@@ -12,7 +22,7 @@ class EvasionConfig:
     method: str = "FGM"
     norm: int | str = "inf"
     criterion: CriterionConfig = field(default_factory=CriterionConfig)
-    strengths: list = field(default_factory=lambda: [0.1, 0.3])
+    eps_rel: list = field(default_factory=lambda: [0.1, 0.3])
     num_steps: int = 10
     step_size: Optional[float] = None
     random_start: bool = True
@@ -69,10 +79,13 @@ class FastGradientMethod:
             born,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
-            strength: float = 0.1,
+            eps_abs: float = 0.1,
             device: torch.device | str = "cpu"
     ):
-        """Generate adversarial examples using a single gradient step."""
+        """Generate adversarial examples using a single gradient step.
+
+        ``eps_abs`` is an absolute model-domain budget, not a fraction.
+        """
         born.to(device)
         naturals = naturals.to(device).detach().clone().requires_grad_(True)
         labels = labels.to(device)
@@ -88,7 +101,7 @@ class FastGradientMethod:
         grad = naturals.grad.detach()
         normalized_gradient = normalizing(grad, norm=self.norm)
 
-        ad_examples = (naturals + strength * normalized_gradient).detach()
+        ad_examples = (naturals + eps_abs * normalized_gradient).detach()
         return ad_examples
 
 
@@ -115,26 +128,26 @@ class ProjectedGradientDescent:
         self.step_size = step_size
         self.random_start = random_start
 
-    def _project(self, perturbation: torch.Tensor, strength: float) -> torch.Tensor:
+    def _project(self, perturbation: torch.Tensor, eps_abs: float) -> torch.Tensor:
         """Project perturbation back into the epsilon ball."""
         if self.norm == "inf":
-            return perturbation.clamp(-strength, strength)
+            return perturbation.clamp(-eps_abs, eps_abs)
         elif isinstance(self.norm, int):
             # Project onto Lp ball
             norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / strength, min=1.0)
+            scale = torch.clamp(norms / eps_abs, min=1.0)
             return perturbation / scale
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
 
-    def _random_init(self, shape: torch.Size, strength: float, device: torch.device) -> torch.Tensor:
+    def _random_init(self, shape: torch.Size, eps_abs: float, device: torch.device) -> torch.Tensor:
         """Initialize random perturbation within epsilon ball."""
         if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * strength
+            return (2 * torch.rand(shape, device=device) - 1) * eps_abs
         elif isinstance(self.norm, int):
             # Sample uniformly from Lp ball (approximate via normalize + scale)
             delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * strength * torch.rand(shape[0], 1, device=device)
+            delta = normalizing(delta, self.norm) * eps_abs * torch.rand(shape[0], 1, device=device)
             return delta
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
@@ -143,32 +156,35 @@ class ProjectedGradientDescent:
             self,
             perturbation: torch.Tensor,
             naturals: torch.Tensor,
-            strength: float,
+            eps_abs: float,
             input_range: Tuple[float, float],
     ) -> torch.Tensor:
         """Project onto both the valid input domain and the epsilon ball."""
         lo, hi = input_range
         in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
-        return self._project(in_domain, strength)
+        return self._project(in_domain, eps_abs)
 
     def generate(
             self,
             born,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
-            strength: float = 0.1,
+            eps_abs: float = 0.1,
             device: torch.device | str = "cpu"
     ):
-        """Generate adversarial examples using iterative PGD."""
+        """Generate adversarial examples using iterative PGD.
+
+        ``eps_abs`` is an absolute model-domain budget, not a fraction.
+        """
         born.to(device)
         naturals = naturals.to(device).detach()
         labels = labels.to(device)
 
-        step_size = self.step_size if self.step_size is not None else 2.5 * strength / self.num_steps
+        step_size = self.step_size if self.step_size is not None else 2.5 * eps_abs / self.num_steps
 
         if self.random_start:
-            delta = self._random_init(naturals.shape, strength, device)
-            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
+            delta = self._random_init(naturals.shape, eps_abs, device)
+            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
         else:
             delta = torch.zeros_like(naturals)
 
@@ -186,7 +202,7 @@ class ProjectedGradientDescent:
             normalized_gradient = normalizing(grad, norm=self.norm)
 
             delta = delta.detach() + step_size * normalized_gradient
-            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
+            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
 
         lo, hi = born.input_range
         return (naturals + delta).clamp(lo, hi).detach()
@@ -211,22 +227,22 @@ class JointProjectedGradientDescent:
         self.step_size = step_size
         self.random_start = random_start
 
-    def _project(self, perturbation: torch.Tensor, strength: float) -> torch.Tensor:
+    def _project(self, perturbation: torch.Tensor, eps_abs: float) -> torch.Tensor:
         if self.norm == "inf":
-            return perturbation.clamp(-strength, strength)
+            return perturbation.clamp(-eps_abs, eps_abs)
         elif isinstance(self.norm, int):
             norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / strength, min=1.0)
+            scale = torch.clamp(norms / eps_abs, min=1.0)
             return perturbation / scale
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
 
-    def _random_init(self, shape: torch.Size, strength: float, device: torch.device) -> torch.Tensor:
+    def _random_init(self, shape: torch.Size, eps_abs: float, device: torch.device) -> torch.Tensor:
         if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * strength
+            return (2 * torch.rand(shape, device=device) - 1) * eps_abs
         elif isinstance(self.norm, int):
             delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * strength * torch.rand(shape[0], 1, device=device)
+            delta = normalizing(delta, self.norm) * eps_abs * torch.rand(shape[0], 1, device=device)
             return delta
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
@@ -235,33 +251,36 @@ class JointProjectedGradientDescent:
             self,
             perturbation: torch.Tensor,
             naturals: torch.Tensor,
-            strength: float,
+            eps_abs: float,
             input_range: Tuple[float, float],
     ) -> torch.Tensor:
         """Project onto both the valid input domain and the epsilon ball."""
         lo, hi = input_range
         in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
-        return self._project(in_domain, strength)
+        return self._project(in_domain, eps_abs)
 
     def generate(
             self,
             born,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
-            strength: float = 0.1,
+            eps_abs: float = 0.1,
             device: torch.device | str = "cpu"
     ):
-        """Generate adversarial examples using the joint generative attack."""
+        """Generate adversarial examples using the joint generative attack.
+
+        ``eps_abs`` is an absolute model-domain budget, not a fraction.
+        """
         born.to(device)
         naturals = naturals.to(device).detach()
         labels   = labels.to(device)
 
         step_size = self.step_size if self.step_size is not None \
-                    else 2.5 * strength / self.num_steps
+                    else 2.5 * eps_abs / self.num_steps
 
-        delta = (self._random_init(naturals.shape, strength, device)
+        delta = (self._random_init(naturals.shape, eps_abs, device)
                  if self.random_start else torch.zeros_like(naturals))
-        delta = self._bounded_delta(delta, naturals, strength, born.input_range)
+        delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
 
         batch = len(labels)
         K = born.out_dim
@@ -283,7 +302,7 @@ class JointProjectedGradientDescent:
 
             grad  = delta.grad.detach()
             delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
-            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
+            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
 
         lo, hi = born.input_range
         return (naturals + delta).clamp(lo, hi).detach()
@@ -326,10 +345,10 @@ def build_attack(
 
 class RobustnessEvaluation:
     """
-    Evaluate adversarial robustness of a ConditionalBornMachine.
+    Dispatching wrapper around the attack methods.
 
-    Generates adversarial examples using FGM or PGD and computes accuracy
-    under attack at multiple perturbation strengths.
+    Builds an FGM / PGD / JOINT_PGD attack from a method name and forwards
+    :meth:`generate` to it.
     """
 
     def __init__(
@@ -337,7 +356,7 @@ class RobustnessEvaluation:
             method: str = "FGM",
             norm: int | str = "inf",
             criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
-            strengths: List[float] = [0.1, 0.3],
+            eps_rel: List[float] = [0.1, 0.3],
             # PGD-specific parameters (ignored for FGM)
             num_steps: int = 10,
             step_size: float | None = None,
@@ -347,15 +366,17 @@ class RobustnessEvaluation:
         Initialize robustness evaluator.
 
         Args:
-            method: Attack method - "FGM" or "PGD".
+            method: Attack method - "FGM", "PGD" or "JOINT_PGD".
             norm: Lp norm for perturbation ball.
             criterion: Loss function configuration.
-            strengths: List of epsilon values to evaluate.
+            eps_rel: Relative budgets (fractions of the input domain) this evaluator
+                was configured with. Carried for provenance only — :meth:`generate`
+                takes an absolute ``eps_abs``.
             num_steps: PGD iterations (ignored for FGM).
             step_size: PGD step size (ignored for FGM).
             random_start: PGD random initialization (ignored for FGM).
         """
-        self.strengths = strengths
+        self.eps_rel = eps_rel
         method_cls = _METHOD_MAP[method]
         if method == "PGD":
             self.method = method_cls(
@@ -383,50 +404,12 @@ class RobustnessEvaluation:
             born,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
-            strength: float,
+            eps_abs: float,
             device: torch.device | str = "cpu"
     ):
         return self.method.generate(
-            born, naturals, labels, strength, device
+            born, naturals, labels, eps_abs, device
         )
-
-    def evaluate(
-            self,
-            born,
-            loader: DataLoader,
-            device: torch.device | str = "cpu"
-    ):
-        """
-        Evaluate robustness at each relative strength; returns list of accuracies.
-
-        strengths values are relative fractions of the embedding range size:
-        abs_eps = strength * (input_range[1] - input_range[0]).
-        """
-        born.to(device)
-        born.eval()
-
-        range_size = born.input_range[1] - born.input_range[0]
-        strength_acc = []
-
-        for strength in self.strengths:
-            abs_strength = strength * range_size
-            batch_acc = []
-
-            for naturals, labels in loader:
-                ad_examples = self.generate(
-                    born, naturals, labels, abs_strength, device
-                )
-
-                with torch.no_grad():
-                    ad_probs = born.class_probabilities(ad_examples)
-                    ad_pred = torch.argmax(ad_probs, dim=1)
-                    acc = (ad_pred == labels.to(device)).float().mean().item()
-                    batch_acc.append(acc)
-
-            mean_acc = sum(batch_acc) / len(batch_acc)
-            strength_acc.append(mean_acc)
-
-        return strength_acc
 
 
 if __name__ == "__main__":
@@ -434,6 +417,7 @@ if __name__ == "__main__":
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.utils.embeddings import range_size_of, rel_to_abs
 
     device = torch.device("cpu")
     cbm = ConditionalBornMachine(
@@ -444,18 +428,18 @@ if __name__ == "__main__":
 
     x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
     y = torch.randint(0, 2, (8,))
-    # strength=0.05 is a relative fraction; abs_eps = 0.05 * range_size(legendre=2.0) = 0.1
-    strength_frac = 0.05
-    abs_eps = strength_frac * 2.0
+    # Authored relative; converted once, as every caller must.
+    eps_rel = 0.05
+    eps_abs = rel_to_abs(eps_rel, range_size_of(cbm))  # legendre: 0.05 * 2.0 = 0.1
 
     for name, ec in [
-        ("FGM", EvasionConfig(method="FGM", strengths=[abs_eps])),
-        ("PGD", EvasionConfig(method="PGD", num_steps=3, strengths=[abs_eps])),
+        ("FGM", EvasionConfig(method="FGM", eps_rel=[eps_rel])),
+        ("PGD", EvasionConfig(method="PGD", num_steps=3, eps_rel=[eps_rel])),
     ]:
         attack = build_attack(ec)
-        adv = attack.generate(born=cbm, naturals=x, labels=y, strength=abs_eps, device=device)
+        adv = attack.generate(born=cbm, naturals=x, labels=y, eps_abs=eps_abs, device=device)
         assert adv.shape == x.shape, f"{name}: shape mismatch"
         delta = (adv - x).abs().max().item()
-        print(f"  {name:5s}  max_delta={delta:.4f}  (eps_abs={abs_eps})")
+        print(f"  {name:5s}  max_delta={delta:.4f}  (eps_rel={eps_rel}, eps_abs={eps_abs})")
 
     print("evasion.py smoke test passed.")

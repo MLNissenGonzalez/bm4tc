@@ -6,9 +6,11 @@ Every analysis script writes one or more CSV files to `analysis/outputs/`. This 
 
 ## Common conventions
 
-### Epsilon / radius column names
+### Epsilon / delta column names
 
-Attack strengths and purification radii appear as **absolute values** in column names (e.g. `eval/test/rob/0.2`). These are computed from a fraction × `range_size`, where `range_size` depends on the embedding:
+Attack budgets and purification radii appear as **relative values** in column names — fractions of the input domain width (e.g. `eval/test/rob/0.1`). See the "Budget vocabulary" section of `CLAUDE.md` for the full convention; in short, `eps` is the attacker's budget, `delta` the defense's radius, and both are authored relative.
+
+Convert to absolute model-domain units with `range_size`, which depends on the embedding:
 
 | Embedding | Input range | `range_size` |
 |-----------|-------------|-------------|
@@ -18,16 +20,32 @@ Attack strengths and purification radii appear as **absolute values** in column 
 | `chebychev1` | (−0.99, 0.99) | ~1.98 |
 | `chebychev2` | (−1, 1) | 2.0 |
 
-The scripts use `STRENGTH_FRACTIONS = [0.1, 0.2, 0.5]` and `PURIF_RADIUS_FRAC = 0.1`, so for legendre (`range_size = 2.0`) the epsilon columns are `0.2`, `0.4`, `1.0` and the purification radius column suffix is `0.2`. The `range_size` value is stored in every `evaluation_data.csv` so you can always reconstruct which fractions were intended:
+The scripts use `EPS_REL = [0.05, 0.1, 0.15]` and `UQ_CONFIG["delta_rel"] = [0.1]`, so the epsilon columns are `0.05`, `0.1`, `0.15` and the purification suffix is `0.1` — **on every embedding**. For legendre those are absolute 0.1 / 0.2 / 0.3 and 0.2.
+
+Because the data is rescaled onto `cbm.input_range` at load time, the relative value is also the budget in the data's *own* units: on MNIST `eps_rel = 0.1` is 0.1 in `[0,1]` pixel space.
+
+Every CSV carries two provenance columns:
+
+| Column | Meaning |
+|---|---|
+| `range_size` | `hi − lo` for this sweep's embedding. Absolute budget = `eps_rel × range_size`. |
+| `eps_unit` | `"rel"`. Marks the convention, so relative-keyed files are distinguishable from pre-migration absolute-keyed ones. |
 
 ```python
-fracs = [round(eps / df["range_size"].iloc[0], 6) for eps in [0.2, 0.4, 1.0]]
-# → [0.1, 0.2, 0.5]
+rs = df["range_size"].iloc[0]                       # 2.0 for legendre
+abs_eps = [round(e * rs, 6) for e in [0.05, 0.1, 0.15]]
+# → [0.1, 0.2, 0.3]
 ```
 
-### `eval/uq_adv_acc/{eps}` vs `eval/test/rob/{eps}`
+> **Historical CSVs.** Files written before this convention landed key their columns by
+> *absolute* epsilon (`rob/0.2` where the same budget is now `rob/0.1` on legendre) and
+> have neither provenance column. `tools/migrate_metric_keys.py` converts them in place.
+> `baselines/jem/` is deliberately **not** migrated — JEM has no embedding, so its
+> budgets are absolute by design; `compare.py` refuses to merge the two conventions.
 
-When UQ is enabled, the test-split rob columns are *copied from* the UQ adversarial accuracy cache rather than re-running PGD. For any epsilon in both the UQ attack strengths and the evasion config strengths, `eval/test/rob/{eps}` == `eval/uq_adv_acc/{eps}`. They are stored as separate columns for clarity.
+### `eval/uq_adv_acc/{eps_rel}` vs `eval/test/rob/{eps_rel}`
+
+When UQ is enabled, the test-split rob columns are *copied from* the UQ adversarial accuracy cache rather than re-running PGD. For any budget in both the UQ attack budgets and the evasion config budgets, `eval/test/rob/{eps_rel}` == `eval/uq_adv_acc/{eps_rel}`. They are stored as separate columns for clarity.
 
 ---
 
@@ -53,7 +71,7 @@ Optional groups depend on which metrics were enabled in the `COMPUTE_*` flags at
 
 > **Prefix note (post-Phase-7).** The column names in the tables below are shown with the
 > historical `eval/` / `eval/test/` prefix. **Current `sweep.py` writes them WITHOUT that
-> prefix** — e.g. `acc`, `rob/0.2`, `uq_adv_acc/0.2`, `uq_purify_acc/0.2/0.2`. Strip the
+> prefix** — e.g. `acc`, `rob/0.1`, `uq_adv_acc/0.1`, `uq_purify_acc/0.1/0.1`. Strip the
 > `eval/test/` / `eval/` prefix when reading recent CSVs (the old prefixed names only appear
 > in pre-refactor outputs).
 
@@ -70,7 +88,7 @@ Optional groups depend on which metrics were enabled in the `COMPUTE_*` flags at
 
 | Column | Description |
 |--------|-------------|
-| `eval/{split}/rob/{eps}` | Robust accuracy at PGD epsilon `eps` (absolute). One column per strength. `split` ∈ {`valid`, `test`}. For the test split, values are reused from `uq_adv_acc` when UQ is enabled (see above). |
+| `eval/{split}/rob/{eps_rel}` | Robust accuracy at relative PGD budget `eps_rel`. One column per budget. `split` ∈ {`valid`, `test`}. For the test split, values are reused from `uq_adv_acc` when UQ is enabled (see above). |
 
 #### Membership inference (MIA)
 
@@ -91,7 +109,7 @@ Optional groups depend on which metrics were enabled in the `COMPUTE_*` flags at
 |--------|-------------|
 Column names below omit the dropped `eval/` prefix (see prefix note above). `{q}` is a clean
 false-positive rate in percent (the threshold `τ` is the `{q}`-th percentile of clean
-`log p(x)`); `{eps}` is the absolute attack budget; `{radius}` the purification ball radius.
+`log p(x)`); `{eps}` is the relative attack budget; `{radius}` the relative purification radius.
 
 | Column | Description |
 |--------|-------------|
@@ -108,8 +126,8 @@ false-positive rate in percent (the threshold `τ` is the `{q}`-th percentile of
 | `gibbs_purify_recovery/{eps}/{n_sweeps}` | Recovery rate after Gibbs purification. |
 
 > The Gibbs columns are keyed by **`n_sweeps`, not a radius** — Gibbs purification is
-> attack-radius agnostic. `step_radius` is a *per-sweep* L∞ move (the window re-centres
-> every sweep, so the k-sweep envelope is `k × step_radius × range_size`), and strength is
+> attack-radius agnostic. `step_delta_rel` is a *per-sweep* L∞ move (the window re-centres
+> every sweep, so the k-sweep envelope is `k × step_delta_rel × range_size`), and strength is
 > set by the number of sweeps alone. For a dedicated, more thoroughly reported Gibbs run
 > see `gibbs_data.csv` below.
 
@@ -129,7 +147,7 @@ Human-readable table with mean ± std across seeds, Pareto-frontier runs, and ac
 ## `gibbs_data.csv` — written by `analysis/gibbs.py`
 
 Lands in the **same** `analysis/outputs/{rel}/` directory as `evaluation_data.csv`; the two
-coexist because the filenames differ. One row per run, same `{eps}` absolute-value convention
+coexist because the filenames differ. One row per run, same `{eps_rel}` relative convention
 as above. Gibbs is orders of magnitude more expensive than every other post-hoc metric, which
 is why it has its own script and its own file.
 
@@ -144,11 +162,11 @@ is why it has its own script and its own file.
 | `gibbs_clean_log_px_mean/{k}`, `gibbs_purify_log_px_mean/{eps}/{k}` | Mean `log p(x)` after `k` sweeps — should rise toward the clean level. |
 | `gibbs_n_samples` | **Test samples actually evaluated.** Cost is linear in this; it is often a subsample, so never read a table as full-test-set without checking. |
 | `gibbs_n_eval_seed` | Seed for the subsample. Fixed across runs ⇒ every column is paired. |
-| `gibbs_step_radius`, `gibbs_num_bins` | Purifier settings used (provenance). |
+| `gibbs_step_delta_rel`, `gibbs_num_bins` | Purifier settings used (provenance). |
 | `gibbs_runtime_s` | Wall-clock seconds for the run — use it to size larger sweeps. |
 
 **Reading the `k` columns:** `k` is a sweep count, not a radius. Because the restriction
-window re-centres each sweep, `k` sweeps reach up to `k × gibbs_step_radius × range_size`
+window re-centres each sweep, `k` sweeps reach up to `k × gibbs_step_delta_rel × range_size`
 from the input, so the defense is parameterized without reference to the attacker's budget.
 Comparing `gibbs_purify_acc/{eps}/{k}` across `k` at fixed `eps` traces the
 purification-strength curve; comparing against `gibbs_clean_purify_acc/{k}` shows what that
@@ -157,7 +175,7 @@ strength costs on clean data.
 ### Companion file: `gibbs_summary.txt`
 
 Human-readable accuracy table (rows: no-defense + one per `k`; columns: `eps=0` and each
-`eps`), plus across-run std/stderr, recovery rates, and the resolved `N_EVAL` / `step_radius`
+`eps`), plus across-run std/stderr, recovery rates, and the resolved `N_EVAL` / `step_delta_rel`
 / `num_bins` in the header. Contains no data not derivable from `gibbs_data.csv`.
 
 ### Reconstructing aggregates

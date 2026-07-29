@@ -7,11 +7,14 @@ from src.utils.evasion import (
     ProjectedGradientDescent,
     RobustnessEvaluation,
 )
+from src.utils.embeddings import range_size_of, rel_to_abs
 
 BATCH = 16
-# Relative fraction of embedding range; fourier range_size=1.0, so abs_eps=0.3×1.0=0.3
+# Authored relative, as every budget is. The fixtures use fourier (width 1.0), so
+# here eps_abs happens to equal eps_rel — test_budget_conversion_is_embedding_aware
+# is the one that pins the cases where they differ.
 STRENGTH_FRACTION = 0.3
-STRENGTH = STRENGTH_FRACTION  # equals abs_eps for fourier (range_size=1.0)
+STRENGTH = STRENGTH_FRACTION  # == eps_abs on fourier only
 STEPS = 20
 
 
@@ -65,7 +68,7 @@ def test_joint_pgd_increases_wrong_class_log_joint(cbm_attack, naturals, labels)
         mask[torch.arange(BATCH), labels] = True
         max_wrong_before = log_joint_before.masked_fill(mask, float("-inf")).max(dim=-1).values.mean().item()
 
-    adversarials = attacker.generate(cbm_attack, naturals, labels, strength=STRENGTH)
+    adversarials = attacker.generate(cbm_attack, naturals, labels, eps_abs=STRENGTH)
 
     with torch.no_grad():
         amps_after = cbm_attack.amplitudes(adversarials)
@@ -89,7 +92,7 @@ def test_joint_pgd_reduces_accuracy(cbm_attack, naturals, labels):
     if clean_acc <= chance:
         pytest.skip(f"Clean accuracy ({clean_acc:.3f}) already at chance floor; attack cannot reduce it further.")
 
-    adversarials = attacker.generate(cbm_attack, naturals, labels, strength=STRENGTH)
+    adversarials = attacker.generate(cbm_attack, naturals, labels, eps_abs=STRENGTH)
 
     with torch.no_grad():
         adv_acc = (cbm_attack.class_probabilities(adversarials).argmax(1) == labels).float().mean().item()
@@ -101,7 +104,7 @@ def test_joint_pgd_reduces_accuracy(cbm_attack, naturals, labels):
 
 def test_joint_pgd_perturbation_within_linf_ball(cbm_attack, naturals, labels):
     attacker = JointProjectedGradientDescent(norm="inf", num_steps=STEPS, random_start=False)
-    adversarials = attacker.generate(cbm_attack, naturals, labels, strength=STRENGTH)
+    adversarials = attacker.generate(cbm_attack, naturals, labels, eps_abs=STRENGTH)
     assert (adversarials - naturals).abs().max().item() <= STRENGTH + 1e-5
 
 
@@ -115,7 +118,7 @@ def test_pgd_projects_onto_input_domain_and_linf_ball(cbm_attack, labels, attack
     strength = 0.3
     attack = attack_cls(norm="inf", num_steps=3, random_start=True)
 
-    adversarials = attack.generate(cbm_attack, naturals, labels, strength=strength)
+    adversarials = attack.generate(cbm_attack, naturals, labels, eps_abs=strength)
 
     assert adversarials.min().item() >= lo
     assert adversarials.max().item() <= hi
@@ -125,14 +128,19 @@ def test_pgd_projects_onto_input_domain_and_linf_ball(cbm_attack, labels, attack
 # ---- RobustnessEvaluation with JOINT_PGD ----
 
 def test_robustness_eval_joint_pgd_runs(cbm_attack, attack_loader):
-    """RobustnessEvaluation with JOINT_PGD should run without errors.
-    strengths=[STRENGTH_FRACTION] is a relative fraction; abs_eps = fraction × range_size.
-    For fourier embedding range_size=1.0, so abs_eps=STRENGTH_FRACTION.
+    """RobustnessEvaluation dispatches JOINT_PGD and respects the absolute budget.
+
+    ``eps_rel`` is carried for provenance; ``generate`` takes ``eps_abs``, which the
+    caller derives via ``rel_to_abs``. On fourier (width 1.0) the two coincide.
     """
     eval_ = RobustnessEvaluation(
-        method="JOINT_PGD", norm="inf", strengths=[STRENGTH_FRACTION],
+        method="JOINT_PGD", norm="inf", eps_rel=[STRENGTH_FRACTION],
         num_steps=5, random_start=False,
     )
-    accs = eval_.evaluate(cbm_attack, attack_loader)
-    assert len(accs) == 1
-    assert 0.0 <= accs[0] <= 1.0
+    eps_abs = rel_to_abs(STRENGTH_FRACTION, range_size_of(cbm_attack))
+
+    naturals, labels = next(iter(attack_loader))
+    adv = eval_.generate(cbm_attack, naturals, labels, eps_abs)
+
+    assert adv.shape == naturals.shape
+    assert (adv - naturals).abs().max().item() <= eps_abs + 1e-6

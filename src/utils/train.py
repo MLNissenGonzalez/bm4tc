@@ -347,7 +347,7 @@ def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, fl
 
 
 def eval_split(
-    cbm, loader, attack, abs_strength: float, device, *,
+    cbm, loader, attack, eps_abs: float, device, *,
     alpha: float, clean_weight: float, adv_indices, progress: bool = False,
 ) -> dict:
     """Combined clean + robust validation for split-objective adversarial training.
@@ -412,7 +412,7 @@ def eval_split(
         if bool(mask.any()):
             sub_data, sub_labels = data[mask], labels[mask]
             adv = attack.generate(born=cbm, naturals=sub_data, labels=sub_labels,
-                                  strength=abs_strength, device=device)
+                                  eps_abs=eps_abs, device=device)
             with torch.no_grad():
                 las_adv = cbm._log_amp_sq(adv)
                 n_sub = len(sub_labels)
@@ -455,8 +455,11 @@ def eval_split(
     return out
 
 
-def eval_rob(cbm, loader, attack, abs_strength: float, device, progress: bool = False) -> float:
-    """Evaluates robustness at a single perturbation strength; returns mean robust acc.
+def eval_rob(cbm, loader, attack, eps_abs: float, device, progress: bool = False) -> float:
+    """Evaluates robustness at a single absolute epsilon; returns mean robust acc.
+
+    ``eps_abs`` is a model-domain budget, not a fraction — callers convert via
+    ``rel_to_abs(eps_rel, range_size_of(cbm))``.
 
     Set ``progress=True`` to show a transient per-batch tqdm bar (used by post-hoc
     analysis); the default keeps training-time validation output clean.
@@ -464,12 +467,12 @@ def eval_rob(cbm, loader, attack, abs_strength: float, device, progress: bool = 
     cbm.eval()
     correct, total = 0, 0
     for data, labels in tqdm(
-        loader, desc=f"rob eps={abs_strength:.3g}", unit="batch", leave=False,
+        loader, desc=f"rob eps_abs={eps_abs:.3g}", unit="batch", leave=False,
         dynamic_ncols=True, disable=not progress,
     ):
         data, labels = data.to(device), labels.to(device)
         adv = attack.generate(born=cbm, naturals=data, labels=labels,
-                              strength=abs_strength, device=device)
+                              eps_abs=eps_abs, device=device)
         with torch.no_grad():
             probs = cbm.class_probabilities(adv)
         correct += (probs.argmax(dim=1) == labels).sum().item()

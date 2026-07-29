@@ -1,4 +1,14 @@
-# Likelihood-based purification for Born Machines
+"""Likelihood-based purification for Born Machines.
+
+Budget convention (see "Budget vocabulary" in CLAUDE.md):
+    ``delta_rel``  authored fraction of the embedding domain width ``hi - lo``.
+    ``delta_abs``  model-domain radius, ``delta_rel * (hi - lo)``. The purify methods
+                   take ``delta_abs`` — conversion happens in the caller via
+                   ``rel_to_abs``.
+
+``delta`` is the *defense* budget (how far purification may move an input), as opposed
+to ``eps``, the *attacker* budget in ``src/utils/evasion.py``.
+"""
 
 import torch
 from dataclasses import dataclass, field
@@ -13,7 +23,9 @@ class PurificationConfig:
     num_steps: int = 20
     step_size: Optional[float] = None
     random_start: bool = False
-    radii: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    # Relative: fractions of the input domain width. On legendre (width 2.0) these
+    # are absolute radii 0.1 / 0.2 / 0.3.
+    delta_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):
@@ -61,33 +73,33 @@ class LikelihoodPurification:
             norm: Lp norm for perturbation ball ("inf" or int >= 1).
             num_steps: Number of gradient descent iterations.
             step_size: Step size per iteration. If None, defaults to
-                2.5 * radius / num_steps.
+                2.5 * delta_abs / num_steps.
             random_start: Whether to start from random point within
-                the radius ball.
+                the ball.
         """
         self.norm = norm
         self.num_steps = num_steps
         self.step_size = step_size
         self.random_start = random_start
 
-    def _project(self, perturbation: torch.Tensor, radius: float) -> torch.Tensor:
+    def _project(self, perturbation: torch.Tensor, delta_abs: float) -> torch.Tensor:
         """Project perturbation back into the Lp ball."""
         if self.norm == "inf":
-            return perturbation.clamp(-radius, radius)
+            return perturbation.clamp(-delta_abs, delta_abs)
         elif isinstance(self.norm, int):
             norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / radius, min=1.0)
+            scale = torch.clamp(norms / delta_abs, min=1.0)
             return perturbation / scale
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
 
-    def _random_init(self, shape: torch.Size, radius: float, device: torch.device) -> torch.Tensor:
+    def _random_init(self, shape: torch.Size, delta_abs: float, device: torch.device) -> torch.Tensor:
         """Initialize random perturbation within the Lp ball."""
         if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * radius
+            return (2 * torch.rand(shape, device=device) - 1) * delta_abs
         elif isinstance(self.norm, int):
             delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * radius * torch.rand(shape[0], 1, device=device)
+            delta = normalizing(delta, self.norm) * delta_abs * torch.rand(shape[0], 1, device=device)
             return delta
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
@@ -96,19 +108,20 @@ class LikelihoodPurification:
             self,
             born,
             data: torch.Tensor,
-            radius: float,
+            delta_abs: float,
             device: torch.device | str = "cpu",
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Purify inputs by gradient descent on marginal NLL within an Lp ball.
 
         Moves the input towards higher likelihood regions of the learned
-        distribution, staying within a radius of the original input.
+        distribution, staying within ``delta_abs`` of the original input.
 
         Args:
             born: ConditionalBornMachine instance (must have marginal_log_probability).
             data: Input tensor of shape (batch_size, data_dim).
-            radius: Maximum perturbation radius.
+            delta_abs: Maximum perturbation radius, absolute in model-domain units
+                (not a fraction — convert with ``rel_to_abs`` in the caller).
             device: Torch device.
 
         Returns:
@@ -121,11 +134,11 @@ class LikelihoodPurification:
         data = data.to(device).detach()
         input_range = born.input_range
 
-        step_size = self.step_size if self.step_size is not None else 2.5 * radius / self.num_steps
+        step_size = self.step_size if self.step_size is not None else 2.5 * delta_abs / self.num_steps
 
         # Initialize perturbation
         if self.random_start:
-            delta = self._random_init(data.shape, radius, device)
+            delta = self._random_init(data.shape, delta_abs, device)
         else:
             delta = torch.zeros_like(data)
 
@@ -148,7 +161,7 @@ class LikelihoodPurification:
             # Gradient descent on NLL (subtract, not add)
             delta = delta.detach() - step_size * normalized_gradient
             # Project back into Lp ball
-            delta = self._project(delta, radius)
+            delta = self._project(delta, delta_abs)
 
         # Final purified samples, clamped to input range
         purified = (data + delta).clamp(input_range[0], input_range[1]).detach()
@@ -166,6 +179,7 @@ import torch
 from typing import Optional, Tuple
 
 from src.model import draw_from_grid_log
+from src.utils.embeddings import rel_to_abs
 
 
 class GibbsPurification:
@@ -176,29 +190,29 @@ class GibbsPurification:
     joint amplitudes over a discrete grid.  Multiple sweeps produce a sample
     more consistent with the model's learned distribution.
 
-    **Attack-radius agnostic.**  ``step_radius`` is a *per-sweep* L∞ step, not a
+    **Attack-radius agnostic.**  ``step_delta_rel`` is a *per-sweep* L∞ step, not a
     global perturbation budget: the restriction window is re-centred on the
     sweep-start snapshot at the beginning of every sweep, so after ``k`` sweeps a
-    coordinate can have travelled up to ``k · step_radius · (hi - lo)`` from where
+    coordinate can have travelled up to ``k · step_delta_rel · (hi - lo)`` from where
     it started.  Purification strength is therefore controlled by ``n_sweeps``
     alone, which means the defense never has to be told the attacker's budget.
-    Keep ``step_radius`` small (a local move) and vary ``n_sweeps``.
+    Keep ``step_delta_rel`` small (a local move) and vary ``n_sweeps``.
 
     Args:
         num_bins: Number of candidate values evaluated per feature.  With a
-            ``step_radius`` these all fall *inside* the window (see below), so
+            ``step_delta_rel`` these all fall *inside* the window (see below), so
             this is the resolution of the window, not of the full input range.
         gibbs_batch_size: Number of adversarial samples processed per batch.
             Controls memory: gibbs_batch_size × num_bins inputs per forward pass.
             At bs=8, bins=200: 1600 forward evals per feature per sweep.
-        step_radius: Per-sweep L∞ step as a fraction of the input range size
+        step_delta_rel: Per-sweep L∞ step as a fraction of the input range size
             (hi - lo).  Feature i is resampled on a grid spanning
             [x̄_i ± delta_abs] ∩ input_range, where delta_abs =
-            step_radius * (hi - lo) and x̄ is the sweep-start snapshot.
+            step_delta_rel * (hi - lo) and x̄ is the sweep-start snapshot.
             If None, samples from the full input range (unrestricted).
 
     Note:
-        With a ``step_radius`` the candidate grid is built *locally*, per sample:
+        With a ``step_delta_rel`` the candidate grid is built *locally*, per sample:
         ``linspace(x̄_i - delta, x̄_i + delta, num_bins)`` clamped to the input
         range.  This spends every candidate evaluation inside the window (a global
         grid masked down to a 10%-wide window would discard ~90% of them) and gives
@@ -206,18 +220,18 @@ class GibbsPurification:
         moves each sweep, so this is a local Metropolis-within-Gibbs-style move
         rather than exact Gibbs on one fixed discretization — the k→∞ limit is not
         the model's discretized marginal.  That is the intended behaviour for a
-        local purification walk; ``step_radius=None`` is the fixed-grid path.
+        local purification walk; ``step_delta_rel=None`` is the fixed-grid path.
     """
 
     def __init__(
         self,
         num_bins: int,
         gibbs_batch_size: int = 8,
-        step_radius: Optional[float] = 0.1,
+        step_delta_rel: Optional[float] = 0.1,
     ):
         self.num_bins = num_bins
         self.gibbs_batch_size = gibbs_batch_size
-        self.step_radius = step_radius
+        self.step_delta_rel = step_delta_rel
 
     def purify(
         self,
@@ -234,7 +248,7 @@ class GibbsPurification:
             born: ConditionalBornMachine instance.
             x_adv: Adversarial inputs, shape (n_samples, data_dim).
             n_sweeps: Number of full sweeps over all features.  This, not
-                ``step_radius``, is the purification-strength knob.
+                ``step_delta_rel``, is the purification-strength knob.
             device: Torch device.
 
         Returns:
@@ -283,19 +297,21 @@ class GibbsPurification:
         # every sample. Restricted path builds its grid per sample, per feature.
         input_space = (
             torch.linspace(lo, hi, self.num_bins, device=device)
-            if self.step_radius is None
+            if self.step_delta_rel is None
             else None
         )
         # Interpolation weights for the local windows, (num_bins,) in [0, 1].
         unit_grid = (
             torch.linspace(0.0, 1.0, self.num_bins, device=device)
-            if self.step_radius is not None
+            if self.step_delta_rel is not None
             else None
         )
 
-        # Convert the relative per-sweep step to an absolute one.
+        # The rel -> abs boundary for this defense: everything below is model-domain.
         delta_abs: Optional[float] = (
-            self.step_radius * (hi - lo) if self.step_radius is not None else None
+            rel_to_abs(self.step_delta_rel, hi - lo)
+            if self.step_delta_rel is not None
+            else None
         )
 
         # Per-snapshot accumulation of purified batches (concatenated after the loop).
@@ -409,6 +425,7 @@ if __name__ == "__main__":
     import torch
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from src.utils.embeddings import range_size_of
 
     device = torch.device("cpu")
     cbm = ConditionalBornMachine(
@@ -420,15 +437,18 @@ if __name__ == "__main__":
     cbm.cache_log_Z()
 
     x_adv = torch.zeros(4, 2)
-    radius = 0.1
+    # Authored relative; converted once, as every caller must.
+    delta_rel = 0.05
+    delta_abs = rel_to_abs(delta_rel, range_size_of(cbm))  # legendre: 0.05 * 2.0 = 0.1
 
     purifier = LikelihoodPurification(norm="inf", num_steps=5)
-    x_pur, log_px = purifier.purify(cbm, x_adv, radius=radius, device=device)
+    x_pur, log_px = purifier.purify(cbm, x_adv, delta_abs=delta_abs, device=device)
     assert x_pur.shape == x_adv.shape, "LikelihoodPurification: shape mismatch"
     assert log_px.isfinite().all(), "LikelihoodPurification: non-finite log_px"
+    assert (x_pur - x_adv).abs().max().item() <= delta_abs + 1e-6, "purify: left the ball"
     print(f"  LikelihoodPurification  shape={tuple(x_pur.shape)}  log_px_mean={log_px.mean().item():.4f}")
 
-    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, step_radius=0.1)
+    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, step_delta_rel=delta_rel)
     x_g, log_px_g = gibbs.purify(cbm, x_adv, n_sweeps=1, device=device)
     assert x_g.shape == x_adv.shape, "GibbsPurification: shape mismatch"
     print(f"  GibbsPurification       shape={tuple(x_g.shape)}  log_px_mean={log_px_g.mean().item():.4f}")

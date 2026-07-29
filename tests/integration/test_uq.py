@@ -20,7 +20,7 @@ def test_uq_config_defaults():
     cfg = UQConfig()
     assert cfg.norm == "inf"
     assert cfg.num_steps == 20
-    assert isinstance(cfg.radii, list)
+    assert isinstance(cfg.delta_rel, list)
     assert isinstance(cfg.percentiles, list)
 
 
@@ -113,8 +113,8 @@ def test_compute_thresholds_ordered(cbm, clean_loader):
 
 def test_uq_evaluate_completes(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -126,8 +126,8 @@ def test_uq_evaluate_completes(cbm, clean_loader):
 
 def test_uq_clean_accuracy_range(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -139,8 +139,8 @@ def test_uq_clean_accuracy_range(cbm, clean_loader):
 
 def test_uq_detection_rates_range(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -153,8 +153,8 @@ def test_uq_detection_rates_range(cbm, clean_loader):
 
 def test_uq_purification_results_present(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -166,8 +166,8 @@ def test_uq_purification_results_present(cbm, clean_loader):
 
 def test_uq_purification_acc_range(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -180,8 +180,8 @@ def test_uq_purification_acc_range(cbm, clean_loader):
 
 def test_uq_gibbs_empty_when_disabled(cbm, clean_loader):
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -195,8 +195,8 @@ def test_uq_gibbs_empty_when_disabled(cbm, clean_loader):
 def test_uq_err_rate_detected_range(cbm, clean_loader):
     import math
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -210,8 +210,8 @@ def test_uq_err_rate_detected_range(cbm, clean_loader):
 def test_uq_err_rate_passed_range(cbm, clean_loader):
     import math
     cfg = UQConfig(
-        attack_strengths=[0.1],
-        radii=[0.1],
+        eps_rel=[0.1],
+        delta_rel=[0.1],
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
@@ -242,7 +242,7 @@ def test_batched_forward_matches_single_pass(cbm, bs):
 def test_uq_eval_batch_size_completes(cbm, clean_loader):
     # Re-batching to a small eval_batch_size must not change that evaluation runs.
     cfg = UQConfig(
-        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2, eval_batch_size=4,
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
@@ -261,7 +261,7 @@ def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
 
     monkeypatch.setattr(purif_mod.GibbsPurification, "purify_snapshots", boom)
     cfg = UQConfig(
-        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2, run_gibbs=True, gibbs_n_sweeps=[1],
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
@@ -275,7 +275,7 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
     # snapshot sweeps [1,2] both produce valid metrics in a single max-sweep pass.
     import math
     cfg = UQConfig(
-        attack_strengths=[0.1], radii=[0.1], percentiles=[10],
+        eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,
         run_gibbs=True, gibbs_n_sweeps=[1, 2], gibbs_num_bins=8,
         gibbs_batch_size=3,          # forces multiple Gibbs batches on the subsample
@@ -301,7 +301,7 @@ def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
 
     monkeypatch.setattr(evasion_mod.RobustnessEvaluation, "generate", selective)
     cfg = UQConfig(
-        attack_strengths=[0.1, 0.2], radii=[0.1], percentiles=[10],
+        eps_rel=[0.1, 0.2], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")

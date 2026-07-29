@@ -530,7 +530,7 @@ def plot_accuracy_vs_strength(
     Args:
         runs: DataFrame where each row is a run to plot.
         acc_col: Column for clean accuracy (used as the eps=0 point).
-        rob_cols: Columns for robustness at different strengths.
+        rob_cols: Columns for robustness at different relative budgets.
             Strengths are parsed from column names like ``eval/test/rob/0.15``.
         run_labels: Optional labels for each run (defaults to run_name or index).
         title: Plot title.
@@ -577,7 +577,7 @@ def plot_accuracy_vs_strength(
         ax.plot(strengths, accs, "o-", color=color, label=f"Run {label}",
                 markersize=6, linewidth=1.5)
 
-    ax.set_xlabel("Perturbation Strength (epsilon)")
+    ax.set_xlabel("Attack budget  ε (fraction of input domain)")
     ax.set_ylabel("Accuracy")
     ax.set_title(title)
     ax.set_ylim(-0.05, 1.05)
@@ -596,12 +596,12 @@ def plot_accuracy_vs_strength_band(
     figsize: Tuple[int, int] = (8, 5),
     dpi: int = 100,
 ) -> Optional[plt.Figure]:
-    """Plot mean accuracy +/- n*std as a shaded band across perturbation strengths.
+    """Plot mean accuracy +/- n*std as a shaded band across attack budgets.
 
     Args:
         df: DataFrame where each row is a run.
         acc_col: Column for clean accuracy (used as eps=0 point).
-        rob_cols: Columns for robustness at different strengths.
+        rob_cols: Columns for robustness at different relative budgets.
         n_sigma: Number of standard deviations for the band.
         title: Plot title.
         figsize: Figure size.
@@ -648,7 +648,7 @@ def plot_accuracy_vs_strength_band(
         alpha=0.25, color="steelblue", label=f"\u00b1{n_sigma:.0f}\u03c3",
     )
 
-    ax.set_xlabel("Perturbation Strength (epsilon)")
+    ax.set_xlabel("Attack budget  ε (fraction of input domain)")
     ax.set_ylabel("Accuracy")
     ax.set_title(title)
     ax.set_ylim(-0.05, 1.05)

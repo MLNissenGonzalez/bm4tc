@@ -57,7 +57,7 @@ def test_project_l2_bounded(delta):
 def test_project_zero_unchanged():
     purif = LikelihoodPurification(norm="inf")
     zero = torch.zeros(BATCH, DIM)
-    projected = purif._project(zero, radius=0.5)
+    projected = purif._project(zero, delta_abs=0.5)
     assert torch.allclose(projected, zero)
 
 
@@ -65,14 +65,14 @@ def test_project_zero_unchanged():
 
 def test_random_init_shape():
     purif = LikelihoodPurification(norm="inf")
-    init = purif._random_init((BATCH, DIM), radius=0.2, device=torch.device("cpu"))
+    init = purif._random_init((BATCH, DIM), delta_abs=0.2, device=torch.device("cpu"))
     assert init.shape == (BATCH, DIM)
 
 
 def test_random_init_within_l2_ball():
     purif = LikelihoodPurification(norm=2)
     radius = 0.5
-    init = purif._random_init((BATCH, DIM), radius=radius, device=torch.device("cpu"))
+    init = purif._random_init((BATCH, DIM), delta_abs=radius, device=torch.device("cpu"))
     norms = init.norm(p=2, dim=1)
     assert (norms <= radius + 1e-5).all()
 
@@ -80,5 +80,5 @@ def test_random_init_within_l2_ball():
 def test_random_init_linf_bounded():
     purif = LikelihoodPurification(norm="inf")
     radius = 0.2
-    init = purif._random_init((BATCH, DIM), radius=radius, device=torch.device("cpu"))
+    init = purif._random_init((BATCH, DIM), delta_abs=radius, device=torch.device("cpu"))
     assert (init.abs() <= radius + 1e-6).all()

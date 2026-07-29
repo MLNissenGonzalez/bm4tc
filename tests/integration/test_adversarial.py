@@ -48,7 +48,7 @@ def _cfg(**overrides):
         max_epoch=6,
         batch_size=8,
         alpha=0.5,
-        evasion=EvasionConfig(method="PGD", num_steps=2, strengths=[0.05]),
+        evasion=EvasionConfig(method="PGD", num_steps=2, eps_rel=[0.05]),
         stop_crit="rob",
         eval_rob_freq=2,
         patience=250,
@@ -94,7 +94,7 @@ def test_split_and_unsplit_agree_at_alpha_zero(dh):
     that says nothing about the objective. random_start=False likewise keeps the
     attack itself deterministic.
     """
-    evasion = EvasionConfig(method="PGD", num_steps=2, strengths=[0.05],
+    evasion = EvasionConfig(method="PGD", num_steps=2, eps_rel=[0.05],
                             random_start=False)
     runs = {}
     for gen_on_clean in (False, True):

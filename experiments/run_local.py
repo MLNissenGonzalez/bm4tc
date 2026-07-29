@@ -83,7 +83,7 @@ NLL_CFG = NLLConfig(
 
 # --- Adversarial trainer (used when REGIME="adversarial") --------------------
 # method: "FGM" (fast, single-step) | "PGD" (multi-step, stronger)
-# strengths: list of relative ε values (fractions of the embedding range size)
+# eps_rel: list of relative ε values (fractions of the input domain width)
 # eval_rob_freq=0 disables robustness eval (faster epochs)
 ADV_CFG = AdversarialConfig(
     max_epoch=30,
@@ -92,7 +92,7 @@ ADV_CFG = AdversarialConfig(
     evasion=EvasionConfig(
         method="PGD",
         norm="inf",
-        strengths=[0.1],   # relative ε; multiply by range size for absolute budget
+        eps_rel=[0.1],   # fraction of the input domain; abs 0.2 on legendre
         num_steps=10,
         random_start=True,
     ),

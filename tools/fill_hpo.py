@@ -119,6 +119,15 @@ def get_metric_info(hpo_cfg: Dict, trainer: str) -> Tuple[str, bool]:
     elif stop_crit == "acc":
         return "acc/valid", False
     elif stop_crit == "rob":
+        # AT logs "rob/valid/{eps_rel}"; fall back to the bare key for runs that
+        # predate the rename. Lookups go through _lookup_metric, which accepts either.
+        eps_rel = (
+            _get_nested_value(hpo_cfg, f"trainer.{trainer_key}.evasion.eps_rel")
+            or _get_nested_value(hpo_cfg, f"trainer.{trainer_key}.evasion.strengths")
+            or []
+        )
+        if eps_rel:
+            return f"rob/valid/{float(eps_rel[0]):g}", False
         return "rob/valid", False
     else:
         return "acc/valid", False
@@ -154,6 +163,20 @@ def _extract_params(config: Dict, trainer: str) -> Dict[str, Any]:
 # =============================================================================
 # W&B query
 # =============================================================================
+
+def _lookup_metric(summary: Dict, metric_key: str) -> Optional[float]:
+    """Read ``metric_key`` from a run summary, tolerating the rob/valid rename.
+
+    An exact hit wins. Otherwise, if the key is a ``rob/valid`` variant, accept the
+    single other variant present so pre- and post-rename runs stay comparable.
+    """
+    if metric_key in summary:
+        return summary[metric_key]
+    if not metric_key.startswith("rob/valid"):
+        return None
+    candidates = [k for k in summary if k == "rob/valid" or k.startswith("rob/valid/")]
+    return summary[candidates[0]] if len(candidates) == 1 else None
+
 
 def _best_metric_from_history(run: Any, metric_key: str, minimize: bool) -> Optional[float]:
     """Best (min if ``minimize`` else max) value of ``metric_key`` over the run's
@@ -225,7 +248,7 @@ def query_wandb(
     for run in runs:
         metric_val = _best_metric_from_history(run, metric_key, minimize)
         if metric_val is None:
-            metric_val = run.summary.get(metric_key)
+            metric_val = _lookup_metric(run.summary, metric_key)
         if isinstance(metric_val, (int, float)):
             scored.append((metric_val, run))
 
@@ -309,7 +332,7 @@ def query_local(
             if summary is None:
                 continue
 
-            metric_val = summary.get(metric_key)
+            metric_val = _lookup_metric(summary, metric_key)
             if metric_val is None:
                 continue
 

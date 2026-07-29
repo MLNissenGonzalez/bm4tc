@@ -190,7 +190,7 @@ class MIAResults:
     test_features: np.ndarray
     feature_names: List[str] = field(default_factory=list)
     adversarial_worst_case_threshold: Optional[Dict[str, Dict[str, float]]] = None
-    adversarial_strength: Optional[float] = None
+    adv_eps_abs: Optional[float] = None
 
     def privacy_assessment(self) -> str:
         """Return a privacy assessment based on AUC-ROC.
@@ -224,7 +224,7 @@ class MIAEvaluation:
         feature_config: Optional[MIAFeatureConfig] = None,
         attack_model: str = "logistic",
         random_state: int = 42,
-        adversarial_strength: Optional[float] = None,
+        adv_eps_abs: Optional[float] = None,
         adversarial_num_steps: int = 20,
         adversarial_step_size: Optional[float] = None,
         adversarial_norm: Union[str, int] = "inf",
@@ -235,7 +235,8 @@ class MIAEvaluation:
             feature_config: Configuration for feature extraction. Uses defaults if None.
             attack_model: Type of attack classifier ("logistic" supported).
             random_state: Random seed for reproducibility.
-            adversarial_strength: Epsilon for PGD attack. None = skip adversarial MIA.
+            adv_eps_abs: Absolute (model-domain) epsilon for the PGD attack, not a
+                fraction. None = skip adversarial MIA.
             adversarial_num_steps: Number of PGD steps.
             adversarial_step_size: PGD step size. None = auto (2.5 * eps / steps).
             adversarial_norm: Lp norm for PGD perturbation ball ("inf" or int >= 1).
@@ -244,7 +245,7 @@ class MIAEvaluation:
         self.attack_model = attack_model
         self.random_state = random_state
         self.extractor = MIAFeatureExtractor(self.feature_config)
-        self.adversarial_strength = adversarial_strength
+        self.adv_eps_abs = adv_eps_abs
         self.adversarial_num_steps = adversarial_num_steps
         self.adversarial_step_size = adversarial_step_size
         self.adversarial_norm = adversarial_norm
@@ -292,7 +293,7 @@ class MIAEvaluation:
         data_loader: DataLoader,
         device: torch.device,
         pgd: ProjectedGradientDescent,
-        strength: float,
+        eps_abs: float,
     ) -> np.ndarray:
         """Extract MIA features from model outputs on adversarial examples.
 
@@ -305,7 +306,7 @@ class MIAEvaluation:
             data_loader: DataLoader yielding (data, labels) tuples.
             device: Device to run inference on.
             pgd: ProjectedGradientDescent instance for generating adversarial examples.
-            strength: Epsilon (attack radius) for PGD.
+            eps_abs: Absolute (model-domain) epsilon for PGD, not a fraction.
 
         Returns:
             Feature array of shape (num_samples, num_features).
@@ -323,7 +324,7 @@ class MIAEvaluation:
 
             # Generate adversarial examples (requires gradients)
             adv_examples = pgd.generate(
-                model, batch_data, batch_labels, strength, device
+                model, batch_data, batch_labels, eps_abs, device
             )
 
             # Extract features from model output on adversarial examples
@@ -639,9 +640,9 @@ class MIAEvaluation:
 
         # Adversarial MIA pipeline
         adversarial_worst_case_threshold = None
-        if self.adversarial_strength is not None:
+        if self.adv_eps_abs is not None:
             logger.info(
-                f"Running adversarial MIA (eps={self.adversarial_strength}, "
+                f"Running adversarial MIA (eps_abs={self.adv_eps_abs}, "
                 f"steps={self.adversarial_num_steps}, norm={self.adversarial_norm})..."
             )
             pgd = ProjectedGradientDescent(
@@ -654,12 +655,12 @@ class MIAEvaluation:
 
             logger.info("Extracting adversarial features from training samples...")
             adv_train_features = self._extract_all_features_adversarial(
-                model, train_loader, device, pgd, self.adversarial_strength
+                model, train_loader, device, pgd, self.adv_eps_abs
             )
 
             logger.info("Extracting adversarial features from test samples...")
             adv_test_features = self._extract_all_features_adversarial(
-                model, test_loader, device, pgd, self.adversarial_strength
+                model, test_loader, device, pgd, self.adv_eps_abs
             )
 
             # Apply the same finite-row masks as the clean path, then subsample.
@@ -687,5 +688,5 @@ class MIAEvaluation:
             test_features=test_features,
             feature_names=feature_names,
             adversarial_worst_case_threshold=adversarial_worst_case_threshold,
-            adversarial_strength=self.adversarial_strength,
+            adv_eps_abs=self.adv_eps_abs,
         )

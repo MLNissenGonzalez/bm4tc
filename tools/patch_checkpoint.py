@@ -45,11 +45,15 @@ def _detect_trainer_and_stop_crit(cfg: Dict) -> Tuple[str, str, List]:
     else:
         trainer = "nat"
         stop_crit = _get_nested_value(cfg, "trainer.nll.stop_crit") or "dis_loss"
-    strengths = _get_nested_value(cfg, "tracking.evasion.strengths") or []
-    return trainer, stop_crit, strengths
+    eps_rel = (
+        _get_nested_value(cfg, "tracking.evasion.eps_rel")
+        or _get_nested_value(cfg, "tracking.evasion.strengths")  # pre-rename runs
+        or []
+    )
+    return trainer, stop_crit, eps_rel
 
 
-def _metric_for_stop_crit(trainer: str, stop_crit: str, strengths: List) -> Tuple[str, bool]:
+def _metric_for_stop_crit(trainer: str, stop_crit: str, eps_rel: List) -> Tuple[str, bool]:
     if stop_crit == "dis_loss":
         return "dis_loss/valid", True
     if stop_crit == "gen_loss":
@@ -57,8 +61,26 @@ def _metric_for_stop_crit(trainer: str, stop_crit: str, strengths: List) -> Tupl
     if stop_crit == "acc":
         return "acc/valid", False
     if stop_crit == "rob":
+        # AT logs "rob/valid/{eps_rel}". Fall back to the bare key for runs that
+        # predate the rename; _lookup_metric resolves either form.
+        if eps_rel:
+            return f"rob/valid/{float(eps_rel[0]):g}", False
         return "rob/valid", False
     return "acc/valid", False
+
+
+def _lookup_metric(summary: Dict, metric_key: str):
+    """Read ``metric_key`` from a run summary, tolerating the rob/valid rename.
+
+    An exact hit wins. Otherwise, if the key is a ``rob/valid`` variant, accept the
+    single other variant present so pre- and post-rename runs stay comparable.
+    """
+    if metric_key in summary:
+        return summary[metric_key]
+    if not metric_key.startswith("rob/valid"):
+        return None
+    candidates = [k for k in summary if k == "rob/valid" or k.startswith("rob/valid/")]
+    return summary[candidates[0]] if len(candidates) == 1 else None
 
 
 def find_best_run(
@@ -78,8 +100,8 @@ def find_best_run(
         for rd in run_dirs:
             cfg = _load_hydra_config(rd)
             if cfg is not None:
-                trainer, stop_crit, strengths = _detect_trainer_and_stop_crit(cfg)
-                metric_key, minimize = _metric_for_stop_crit(trainer, stop_crit, strengths)
+                trainer, stop_crit, eps_rel = _detect_trainer_and_stop_crit(cfg)
+                metric_key, minimize = _metric_for_stop_crit(trainer, stop_crit, eps_rel)
                 print(f"Auto-detected: trainer={trainer!r}, stop_crit={stop_crit!r}")
                 print(f"  metric: {metric_key} ({'minimize' if minimize else 'maximize'})")
                 break
@@ -96,7 +118,7 @@ def find_best_run(
         summary = _load_wandb_summary(rd)
         if summary is None:
             continue
-        val = summary.get(metric_key)
+        val = _lookup_metric(summary, metric_key)
         if val is not None:
             scores[int(rd.name)] = float(val)
 

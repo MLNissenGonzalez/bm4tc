@@ -22,7 +22,7 @@ tracking:
     criterion:
       name: "negative log-likelihood"
       kwargs:
-    strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre (10% of domain width)
+    eps_rel: [0.1]   # 10% of the input domain; abs 0.2 on legendre (width 2.0)
     num_steps: 10
     step_size: null
     random_start: true
@@ -39,13 +39,13 @@ trainer:
       criterion:
         name: "negative log-likelihood"
         kwargs:
-      strengths: [0.1]   # relative fraction; abs_eps = 0.1 × range_size = 0.2 for legendre
+      eps_rel: [0.1]   # 10% of the input domain; abs 0.2 on legendre (width 2.0)
       num_steps: 10
       step_size: null
       random_start: true
 
     curriculum: false
-    curriculum_start: 0.0
+    curriculum_eps_start_rel: 0.0
     curriculum_end_epoch: null
     save: true
     auto_stack: true

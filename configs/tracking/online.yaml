@@ -7,4 +7,4 @@ evasion:
   norm: 2
   criterion:
     name: "negative log-likelihood"
-  strengths: [0.1]
+  eps_rel: [0.1]
