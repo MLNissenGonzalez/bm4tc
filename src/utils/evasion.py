@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from src.utils.train import CriterionConfig
 
 _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
@@ -139,6 +139,18 @@ class ProjectedGradientDescent:
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
 
+    def _bounded_delta(
+            self,
+            perturbation: torch.Tensor,
+            naturals: torch.Tensor,
+            strength: float,
+            input_range: Tuple[float, float],
+    ) -> torch.Tensor:
+        """Project onto both the valid input domain and the epsilon ball."""
+        lo, hi = input_range
+        in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
+        return self._project(in_domain, strength)
+
     def generate(
             self,
             born,
@@ -156,6 +168,7 @@ class ProjectedGradientDescent:
 
         if self.random_start:
             delta = self._random_init(naturals.shape, strength, device)
+            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
         else:
             delta = torch.zeros_like(naturals)
 
@@ -173,9 +186,10 @@ class ProjectedGradientDescent:
             normalized_gradient = normalizing(grad, norm=self.norm)
 
             delta = delta.detach() + step_size * normalized_gradient
-            delta = self._project(delta, strength)
+            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
 
-        return (naturals + delta).detach()
+        lo, hi = born.input_range
+        return (naturals + delta).clamp(lo, hi).detach()
 
 
 class JointProjectedGradientDescent:
@@ -217,6 +231,18 @@ class JointProjectedGradientDescent:
         else:
             raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
 
+    def _bounded_delta(
+            self,
+            perturbation: torch.Tensor,
+            naturals: torch.Tensor,
+            strength: float,
+            input_range: Tuple[float, float],
+    ) -> torch.Tensor:
+        """Project onto both the valid input domain and the epsilon ball."""
+        lo, hi = input_range
+        in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
+        return self._project(in_domain, strength)
+
     def generate(
             self,
             born,
@@ -235,6 +261,7 @@ class JointProjectedGradientDescent:
 
         delta = (self._random_init(naturals.shape, strength, device)
                  if self.random_start else torch.zeros_like(naturals))
+        delta = self._bounded_delta(delta, naturals, strength, born.input_range)
 
         batch = len(labels)
         K = born.out_dim
@@ -256,9 +283,10 @@ class JointProjectedGradientDescent:
 
             grad  = delta.grad.detach()
             delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
-            delta = self._project(delta, strength)
+            delta = self._bounded_delta(delta, naturals, strength, born.input_range)
 
-        return (naturals + delta).detach()
+        lo, hi = born.input_range
+        return (naturals + delta).clamp(lo, hi).detach()
 
 
 _METHOD_MAP = {

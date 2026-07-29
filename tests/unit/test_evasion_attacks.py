@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tests.conftest import DATA_DIM, NUM_CLASSES
 from src.utils.evasion import (
     JointProjectedGradientDescent,
+    ProjectedGradientDescent,
     RobustnessEvaluation,
 )
 
@@ -102,6 +103,23 @@ def test_joint_pgd_perturbation_within_linf_ball(cbm_attack, naturals, labels):
     attacker = JointProjectedGradientDescent(norm="inf", num_steps=STEPS, random_start=False)
     adversarials = attacker.generate(cbm_attack, naturals, labels, strength=STRENGTH)
     assert (adversarials - naturals).abs().max().item() <= STRENGTH + 1e-5
+
+
+@pytest.mark.parametrize(
+    "attack_cls", [ProjectedGradientDescent, JointProjectedGradientDescent]
+)
+def test_pgd_projects_onto_input_domain_and_linf_ball(cbm_attack, labels, attack_cls):
+    lo, hi = cbm_attack.input_range
+    naturals = torch.full((BATCH, DATA_DIM), lo)
+    naturals[BATCH // 2:] = hi
+    strength = 0.3
+    attack = attack_cls(norm="inf", num_steps=3, random_start=True)
+
+    adversarials = attack.generate(cbm_attack, naturals, labels, strength=strength)
+
+    assert adversarials.min().item() >= lo
+    assert adversarials.max().item() <= hi
+    assert (adversarials - naturals).abs().max().item() <= strength + 1e-6
 
 
 # ---- RobustnessEvaluation with JOINT_PGD ----

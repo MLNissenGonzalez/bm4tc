@@ -60,7 +60,7 @@ ATTACK_SOURCE_KEY = "at"
 DISPLAY_CLASSES = [0, 3, 5, 9]
 
 EPS = 0.2
-RADIUS = 0.3
+RADIUS = 0.2
 ATTACK_NUM_STEPS = 40
 PURIFY_NUM_STEPS = 20
 EVAL_BATCH_SIZE = 128
@@ -152,10 +152,10 @@ def _format_stats(stats: dict) -> str:
             f"  {'':<{width}} label={stats['model_labels'][key]}  run={stats['run_dirs'][key]}"
         )
     lines += [
-        f"  attack        PGD-inf eps={stats['eps']} (rel) = {stats['abs_eps']:.4f} (abs), "
+        f"  attack        PGD-inf eps={stats['eps']:.4f} (abs), "
         f"{stats['attack_num_steps']} steps",
-        f"  purification  score-ascent-inf radius={stats['radius']} (rel) = "
-        f"{stats['abs_radius']:.4f} (abs), {stats['purify_num_steps']} steps",
+        f"  purification  score-ascent-inf radius={stats['radius']:.4f} (abs), "
+        f"{stats['purify_num_steps']} steps",
         f"  input range   [{stats['lo']:.4f}, {stats['hi']:.4f}]",
         "",
         "--- population ---",
@@ -260,7 +260,7 @@ def transfer_purify_analysis(
     source = loaded[attack_source]
     loader = _test_loader(source_cfg, source, eval_batch_size)
     lo, hi = map(float, source.input_range)
-    absolute_eps, absolute_radius = eps * (hi - lo), radius * (hi - lo)
+    absolute_eps, absolute_radius = eps, radius
 
     clean_parts, adversarial_parts, label_parts = [], [], []
     attacked = 0

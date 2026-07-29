@@ -218,7 +218,7 @@ Other overrides: `--sweeps`, `--step-radius`, `--num-bins`, `--batch-size`, `--s
 
 ### Attack-radius agnostic — read the `k`, not a radius
 
-`step_radius` (default 0.05 of the feature domain) is a **per-sweep** L∞ move, not a global
+`step_radius` (default 0.1 of the feature domain) is a **per-sweep** L∞ move, not a global
 budget: the restriction window re-centres at the start of every sweep, so after `k` sweeps a
 coordinate can have travelled up to `k × step_radius × range_size`. Purification strength is
 therefore controlled by `--sweeps` alone, and the defense never has to be told the attacker's
