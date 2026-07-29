@@ -17,7 +17,7 @@ evasion:
   norm: "inf"
   criterion:
     name: "negative log-likelihood"
-  strengths: [0.15]
+  eps_rel: [0.15]
   num_steps: 5
   step_size: null
   random_start: true
@@ -31,7 +31,7 @@ clean_weight: 0.0
 gen_on_clean: false
 acc_floor: null
 curriculum: false
-curriculum_start: 0.0
+curriculum_eps_start_rel: 0.0
 curriculum_end_epoch: null
 
 norm_control:

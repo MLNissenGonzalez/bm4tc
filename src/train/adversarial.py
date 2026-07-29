@@ -6,6 +6,7 @@ from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
+from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
 from src.utils.train import (
     OptimizerConfig,
     NormControlConfig,
@@ -53,7 +54,7 @@ class AdversarialConfig:
     gen_on_clean: bool = False  # adversarial signal in the discriminative term only
     acc_floor: Optional[float] = None  # min clean valid-acc for a model to be selectable
     curriculum: bool = False
-    curriculum_start: float = 0.0
+    curriculum_eps_start_rel: float = 0.0
     curriculum_end_epoch: Optional[int] = None
     # Norm control is opt-in for AT (defaults off): hard_every=0 + soft_strength=0
     # is a complete no-op, preserving the small-lr / normalized-start regime.
@@ -163,10 +164,24 @@ class AdversarialTrainer:
         else:
             raise ValueError(f"Unknown attack method: {evasion.method}")
 
-        range_size = self.cbm.input_range[1] - self.cbm.input_range[0]
+        # The rel -> abs boundary for training: configs author eps_rel, the attack
+        # object below is driven entirely by absolute model-domain budgets.
+        range_size = range_size_of(self.cbm)
         self.range_size = range_size
-        self.base_epsilon = (evasion.strengths[0] if evasion.strengths else 0.1) * range_size
-        self._abs_curriculum_start = self.train_cfg.curriculum_start * range_size
+        self.base_eps_rel = float(evasion.eps_rel[0] if evasion.eps_rel else 0.1)
+        self.base_eps_abs = rel_to_abs(self.base_eps_rel, range_size)
+        self._curriculum_eps_start_abs = rel_to_abs(
+            self.train_cfg.curriculum_eps_start_rel, range_size
+        )
+        # Robustness is logged under its relative budget so the key states what was
+        # measured. The Optuna objective does NOT go through this key — it flows
+        # through trainer.best[stop_crit] <- valid_perf["rob"] <- eval_rob().
+        self.rob_metric_key = f"rob/valid/{fmt_budget(self.base_eps_rel)}"
+        logger.info(
+            f"Attack budget: eps_rel={self.base_eps_rel:g} "
+            f"-> eps_abs={self.base_eps_abs:g} (input range width {range_size:g}); "
+            f"robustness logged as '{self.rob_metric_key}'"
+        )
 
     def _init_best(self):
         self.best = {
@@ -182,19 +197,19 @@ class AdversarialTrainer:
                 f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
             )
 
-    def _get_epsilon(self, epoch: int) -> float:
+    def _get_eps_abs(self, epoch: int) -> float:
         if not self.train_cfg.curriculum:
-            return self.base_epsilon
+            return self.base_eps_abs
         end_epoch = self.train_cfg.curriculum_end_epoch or self.train_cfg.max_epoch
         progress = min(1.0, epoch / end_epoch)
-        return self._abs_curriculum_start + progress * (self.base_epsilon - self._abs_curriculum_start)
+        return self._curriculum_eps_start_abs + progress * (self.base_eps_abs - self._curriculum_eps_start_abs)
 
-    def _generate_adversarial(self, data, labels, epsilon):
+    def _generate_adversarial(self, data, labels, eps_abs):
         return self.attack.generate(
             born=self.cbm,
             naturals=data,
             labels=labels,
-            strength=epsilon,
+            eps_abs=eps_abs,
             device=self.device
         )
 
@@ -231,7 +246,7 @@ class AdversarialTrainer:
 
         return terms[0] if len(terms) == 1 else terms[0] + terms[1]
 
-    def _train_epoch(self, epsilon: float):
+    def _train_epoch(self, eps_abs: float):
         losses, nll_losses, reg_losses = [], [], []
         tracker = NormTracker()
         self.cbm.train()
@@ -241,7 +256,7 @@ class AdversarialTrainer:
             self.step += 1
 
             self.cbm.eval()
-            adv_data = self._generate_adversarial(data, labels, epsilon)
+            adv_data = self._generate_adversarial(data, labels, eps_abs)
             self.cbm.train()
 
             if self.train_cfg.gen_on_clean:
@@ -371,8 +386,8 @@ class AdversarialTrainer:
             epoch_start = time.perf_counter()
             self.epoch = epoch + 1
 
-            epsilon = self._get_epsilon(self.epoch)
-            self._train_epoch(epsilon)
+            eps_abs = self._get_eps_abs(self.epoch)
+            self._train_epoch(eps_abs)
 
             # Split mode runs one combined clean+robust pass every rob_freq epochs
             # and nothing in between, so patience is counted in valid events.
@@ -381,7 +396,7 @@ class AdversarialTrainer:
             if do_valid and split:
                 self.valid_perf = eval_split(
                     self.cbm, self.datahandler.classification["valid"],
-                    self.attack, self.base_epsilon, self.device,
+                    self.attack, self.base_eps_abs, self.device,
                     alpha=self.train_cfg.alpha,
                     clean_weight=self.train_cfg.clean_weight,
                     adv_indices=self.adv_indices,
@@ -402,7 +417,7 @@ class AdversarialTrainer:
                 if rob_freq and (self.epoch % rob_freq == 0):
                     rob = eval_rob(
                         self.cbm, self.datahandler.classification["valid"],
-                        self.attack, self.base_epsilon, self.device
+                        self.attack, self.base_eps_abs, self.device
                     )
                     self.valid_perf["rob"] = rob
 
@@ -418,7 +433,10 @@ class AdversarialTrainer:
                 metrics = {
                     "dis_loss/train":   self._train_nll,
                     "reg/train":        self._train_reg,
-                    "epsilon/train":    epsilon,
+                    # Both units, every epoch: under a curriculum these track the
+                    # ramp, so the resolved budget is always recoverable from the run.
+                    "eps_abs/train":    eps_abs,
+                    "eps_rel/train":    eps_abs / self.range_size,
                 }
                 metrics.update(self._norm_stats)
                 if do_valid:
@@ -429,7 +447,10 @@ class AdversarialTrainer:
                         "acc/valid":        self.valid_perf["acc"],
                     })
                     if "rob" in self.valid_perf:
-                        metrics["rob/valid"] = self.valid_perf["rob"]
+                        # Keyed by the run's relative budget. Robustness is always
+                        # evaluated at base_eps_abs (the curriculum's endpoint), so
+                        # this key is constant across epochs within a run.
+                        metrics[self.rob_metric_key] = self.valid_perf["rob"]
                     if self._n_rob_valid is not None:
                         # rob/valid is a (1-clean_weight) subset estimator in split
                         # mode; log its size so that stays recoverable from the run.
@@ -473,8 +494,8 @@ if __name__ == "__main__":
     dh.load()
     dh.split_and_rescale(cbm)
 
-    # epsilon=0.05 as fraction of legendre range (2.0) → 0.1 absolute
-    evasion_cfg = EvasionConfig(method="PGD", num_steps=3, strengths=[0.05])
+    # Authored relative: 0.05 of the legendre domain (width 2.0) → eps_abs 0.1
+    evasion_cfg = EvasionConfig(method="PGD", num_steps=3, eps_rel=[0.05])
     train_cfg = AdversarialConfig(
         max_epoch=10, batch_size=4, patience=250,
         evasion=evasion_cfg, eval_rob_freq=2,
@@ -485,9 +506,11 @@ if __name__ == "__main__":
     trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
 
     assert len(logged) == 10, f"Expected 10 epochs, got {len(logged)}"
-    rob_epochs = [m for _, m in logged if "rob/valid" in m]
+    assert trainer.base_eps_abs == 0.1, f"Expected eps_abs 0.1, got {trainer.base_eps_abs}"
+    rob_key = trainer.rob_metric_key  # "rob/valid/0.05"
+    rob_epochs = [m for _, m in logged if rob_key in m]
     assert len(rob_epochs) == 5, f"Expected 5 rob evals (every 2 epochs), got {len(rob_epochs)}"
     last_ep, last_m = logged[-1]
     print(f"  epoch={last_ep}  dis_loss/valid={last_m['dis_loss/valid']:.4f}  acc/valid={last_m['acc/valid']:.4f}")
-    print(f"  rob evals at epochs: {[ep for ep, m in logged if 'rob/valid' in m]}")
+    print(f"  rob evals at epochs: {[ep for ep, m in logged if rob_key in m]}  (key '{rob_key}')")
     print("adversarial.py smoke test passed.")

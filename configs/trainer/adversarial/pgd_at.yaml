@@ -17,9 +17,9 @@ evasion:
   norm: 2
   criterion:
     name: "negative log-likelihood"
-  strengths: [0.1]  # relative fraction; abs_eps = strength × range_size
+  eps_rel: [0.1]  # fraction of the input domain; abs 0.2 on legendre (width 2.0)
   num_steps: 10
-  step_size: null  # defaults to 2.5 * strength / num_steps
+  step_size: null  # defaults to 2.5 * eps_abs / num_steps
   random_start: true
 
 stop_crit: "rob"
@@ -34,7 +34,7 @@ clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)
 gen_on_clean: false
 acc_floor: null  # min clean valid-acc for model selection (null = no floor)
 curriculum: false
-curriculum_start: 0.0
+curriculum_eps_start_rel: 0.0
 curriculum_end_epoch: null
 
 # Norm control: hard renormalization off (hard_every=0), soft log_Z penalty on

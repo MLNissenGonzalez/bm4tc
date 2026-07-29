@@ -26,6 +26,29 @@ def _load(entries: list[str], family: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _check_budget_units(frames: list[pd.DataFrame]) -> None:
+    """Refuse to merge CSVs that disagree on the epsilon-column convention.
+
+    Budget columns (``rob/{eps}``, ``uq_purify_acc/{eps}/{delta}``) are joined by
+    name. MPS analysis writes them RELATIVE and tags the file with ``eps_unit``;
+    the JEM pipeline still writes them absolute and has no such column. Merging
+    the two silently yields disjoint, half-NaN columns — e.g. legendre ``rob/0.1``
+    (relative) and JEM ``rob/0.2`` (absolute) are the *same* budget under two
+    names. Fail loudly instead.
+    """
+    units = {
+        (f["eps_unit"].iloc[0] if "eps_unit" in f.columns and len(f) else "abs")
+        for f in frames
+    }
+    if len(units) > 1:
+        raise ValueError(
+            "Refusing to combine CSVs with mixed epsilon conventions: found "
+            f"{sorted(units)}. Relative-keyed files carry eps_unit='rel' (and a "
+            "range_size column); files without it are absolute-keyed. Re-run the "
+            "absolute-keyed analysis, or migrate it with tools/migrate_metric_keys.py."
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Combine existing JEM/MPS evaluation_data.csv files."
@@ -46,6 +69,8 @@ def main() -> None:
     frames = [f for f in frames if not f.empty]
     if not frames:
         raise ValueError("Provide at least one --jem, --mps or --at CSV.")
+
+    _check_budget_units(frames)
 
     df = pd.concat(frames, ignore_index=True, sort=False)
     out = Path(args.output)

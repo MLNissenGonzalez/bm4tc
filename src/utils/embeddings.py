@@ -297,7 +297,7 @@ def range_from_embedding(embedding: str):
 
 
 # Total input-range size per embedding, derived from _EMBEDDING_TO_RANGE.
-# Used by analysis to convert fraction-based attack strengths to absolute eps.
+# The conversion factor between relative and absolute budgets (see below).
 _EMBEDDING_RANGE_SIZE: dict[str, float] = {
     k: float(hi - lo) for k, (lo, hi) in _EMBEDDING_TO_RANGE.items()
 }
@@ -306,6 +306,37 @@ _EMBEDDING_RANGE_SIZE: dict[str, float] = {
 def embedding_range_size(embedding: str | None) -> float:
     """Return the total size of the input range for an embedding. Falls back to 1.0."""
     return _EMBEDDING_RANGE_SIZE.get((embedding or "").replace(" ", "").lower(), 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Budget conversion: the single rel -> abs boundary
+# ---------------------------------------------------------------------------
+# Adversarial and purification budgets are authored as *relative* fractions of the
+# embedding's input-domain width and converted to absolute model-domain values here.
+# See the "Budget vocabulary" section of CLAUDE.md for the full convention; in short:
+#   eps_rel / delta_rel  fraction of (hi - lo); also the budget in the data's own units
+#   eps_abs / delta_abs  value in model-domain units, = _rel * (hi - lo)
+
+
+def range_size_of(cbm) -> float:
+    """Return ``hi - lo`` for a model's input range — the rel->abs conversion factor."""
+    lo, hi = cbm.input_range
+    return float(hi - lo)
+
+
+def rel_to_abs(rel: float, range_size: float) -> float:
+    """Convert a relative budget (fraction of the input domain) to an absolute one."""
+    return float(rel) * float(range_size)
+
+
+def fmt_budget(value: float) -> str:
+    """Format a budget for use in a metric key.
+
+    ``:g`` keeps keys stable and free of float-repr noise (``0.1`` rather than
+    ``0.10000000000000001``). This is the only place metric-key budgets are stringified,
+    so keys emitted by different entry points always agree.
+    """
+    return f"{float(value):g}"
 
 
 if __name__ == "__main__":

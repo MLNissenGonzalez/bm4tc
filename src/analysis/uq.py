@@ -13,6 +13,12 @@ This module provides tools to evaluate both defenses by:
 - Computing log p(x) on clean and adversarial data
 - Calibrating detection thresholds from clean data percentiles
 - Purifying adversarial examples and measuring accuracy recovery
+
+Budget convention (see "Budget vocabulary" in CLAUDE.md): ``UQConfig`` is authored
+entirely in *relative* fractions of the input domain (``eps_rel`` for the attacker,
+``delta_rel`` for purification). :func:`evaluate_uq` converts them once, up front, and
+everything below that point is absolute (``eps_abs`` / ``delta_abs``). Result dicts and
+metric keys are keyed by the *relative* values.
 """
 
 from dataclasses import dataclass, field
@@ -30,15 +36,17 @@ logger = logging.getLogger(__name__)
 class UQConfig:
     """Configuration for UQ evaluation.
 
+    All budgets are RELATIVE — fractions of the input domain width ``hi - lo``.
+    :func:`evaluate_uq` converts them to absolute model-domain values once.
+
     Attributes:
         norm: Lp norm for purification perturbation ball.
         num_steps: Gradient descent iterations for purification.
         step_size: Step size per iteration (None = auto).
-        radii: List of purification radii to evaluate.
-        eps: Clamping floor for log p(x) stability.
+        delta_rel: Purification radii to evaluate, as fractions of the input domain.
         percentiles: Percentiles of clean log p(x) for threshold candidates.
         attack_method: Attack method for generating adversarial inputs.
-        attack_strengths: List of attack epsilons.
+        eps_rel: Attack budgets, as fractions of the input domain.
         attack_num_steps: PGD steps for attack generation.
         random_start: Random start for purification.
     """
@@ -46,7 +54,8 @@ class UQConfig:
     norm: int | str = "inf"
     num_steps: int = 20
     step_size: float | None = None
-    radii: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    # On legendre (width 2.0) these are absolute radii 0.1 / 0.2 / 0.3.
+    delta_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
     random_start: bool = False
 
     # Threshold params
@@ -54,7 +63,8 @@ class UQConfig:
 
     # Attack params
     attack_method: str = "PGD"
-    attack_strengths: List[float] = field(default_factory=lambda: [0.1, 0.2, 0.3])
+    # On legendre (width 2.0) these are absolute epsilons 0.1 / 0.2 / 0.3.
+    eps_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
     attack_num_steps: int = 20
 
     # Gibbs purification params
@@ -64,8 +74,8 @@ class UQConfig:
     gibbs_batch_size: int = 8
     # Per-sweep L∞ step, as a fraction of the input range; None = unrestricted.
     # NOT a global budget: the window re-centres each sweep, so after k sweeps the
-    # envelope is k*gibbs_step_radius*(hi-lo). Strength is set by gibbs_n_sweeps.
-    gibbs_step_radius: Optional[float] = 0.1
+    # envelope is k*gibbs_step_delta_rel*(hi-lo). Strength is set by gibbs_n_sweeps.
+    gibbs_step_delta_rel: Optional[float] = 0.1
     # Gibbs is ~99% of UQ cost and reduces to a mean over the test set, so it runs on a
     # fixed random subsample (cheap metrics keep the full set). None = full set.
     gibbs_subsample: Optional[int] = None
@@ -171,7 +181,7 @@ def compute_thresholds(
 
 @dataclass
 class PurificationMetrics:
-    """Metrics for a single (epsilon, radius) purification evaluation.
+    """Metrics for a single (eps_rel, delta_rel) purification evaluation.
 
     Attributes:
         accuracy_after_purify: Classification accuracy on purified samples.
@@ -192,14 +202,17 @@ class PurificationMetrics:
 class UQResults:
     """Complete UQ evaluation results.
 
+    All dicts are keyed by RELATIVE budgets (fractions of the input domain), matching
+    the emitted metric keys.
+
     Attributes:
         clean_log_px: Log p(x) values for clean test data.
         clean_accuracy: Clean classification accuracy.
         thresholds: Dict mapping percentile -> threshold value.
-        adv_log_px: Dict mapping epsilon -> log p(x) values for adversarial data.
-        adv_accuracies: Dict mapping epsilon -> adversarial accuracy.
-        detection_rates: Dict mapping (percentile, epsilon) -> detection rate.
-        purification_results: Dict mapping (epsilon, radius) -> PurificationMetrics.
+        adv_log_px: Dict mapping eps_rel -> log p(x) values for adversarial data.
+        adv_accuracies: Dict mapping eps_rel -> adversarial accuracy.
+        detection_rates: Dict mapping (percentile, eps_rel) -> detection rate.
+        purification_results: Dict mapping (eps_rel, delta_rel) -> PurificationMetrics.
     """
     clean_log_px: np.ndarray
     clean_accuracy: float
@@ -236,28 +249,28 @@ class UQResults:
             lines.append(f"  {pct}th percentile: tau = {tau:.4f}")
 
         lines.extend(["", "--- Adversarial Results ---"])
-        for eps in sorted(self.adv_accuracies.keys()):
-            adv_lp = self.adv_log_px[eps]
+        for eps_rel in sorted(self.adv_accuracies.keys()):
+            adv_lp = self.adv_log_px[eps_rel]
             lines.append(
-                f"  eps={eps}: acc={self.adv_accuracies[eps]:.4f}, "
+                f"  eps_rel={eps_rel}: acc={self.adv_accuracies[eps_rel]:.4f}, "
                 f"mean log p(x)={adv_lp.mean():.2f}"
             )
 
         lines.extend(["", "--- Detection Rates ---"])
-        for (pct, eps), rate in sorted(self.detection_rates.items()):
-            err_det = self.err_rate_detected.get((pct, eps), float("nan"))
-            err_pas = self.err_rate_passed.get((pct, eps), float("nan"))
+        for (pct, eps_rel), rate in sorted(self.detection_rates.items()):
+            err_det = self.err_rate_detected.get((pct, eps_rel), float("nan"))
+            err_pas = self.err_rate_passed.get((pct, eps_rel), float("nan"))
             err_det_s = f"{err_det:.2%}" if not np.isnan(err_det) else "nan"
             err_pas_s = f"{err_pas:.2%}" if not np.isnan(err_pas) else "nan"
             lines.append(
-                f"  tau={pct}th pct, eps={eps}: {rate:.2%} detected, "
+                f"  tau={pct}th pct, eps_rel={eps_rel}: {rate:.2%} detected, "
                 f"err_if_detected={err_det_s}, err_if_passed={err_pas_s}"
             )
 
         lines.extend(["", "--- Purification Results ---"])
-        for (eps, radius), metrics in sorted(self.purification_results.items()):
+        for (eps_rel, delta_rel), metrics in sorted(self.purification_results.items()):
             lines.append(
-                f"  eps={eps}, radius={radius}: "
+                f"  eps_rel={eps_rel}, delta_rel={delta_rel}: "
                 f"acc={metrics.accuracy_after_purify:.4f}, "
                 f"recovery={metrics.recovery_rate:.2%}, "
                 f"log p(x) {metrics.mean_log_px_before:.2f} -> {metrics.mean_log_px_after:.2f}"
@@ -296,13 +309,17 @@ class UQEvaluation:
         """Run the full UQ evaluation pipeline.
 
         Steps:
+        0. Convert every relative budget in the config to absolute, once
         1. Cache log Z on the Born Machine
         2. Compute clean log p(x) and derive detection thresholds
-        3. For each attack epsilon: generate adversarial examples,
+        3. For each attack eps_rel: generate adversarial examples,
            compute log p(x_adv), detection rate
-        4. For each (epsilon, radius): purify adversarial examples,
+        4. For each (eps_rel, delta_rel): purify adversarial examples,
            classify, compute metrics
         5. Package into UQResults
+
+        Results are keyed by the relative budgets; the absolute values exist only
+        inside this method.
 
         Args:
             born: ConditionalBornMachine instance.
@@ -315,9 +332,16 @@ class UQEvaluation:
         from src.utils.evasion import RobustnessEvaluation
         from src.utils.train import CriterionConfig
         from src.analysis.purification import LikelihoodPurification
+        from src.utils.embeddings import range_size_of, rel_to_abs
 
         cfg = self.config
         born.to(device)
+
+        # 0. The rel -> abs boundary. Below this point every budget is absolute;
+        #    the relative values survive only as dict/metric keys.
+        range_size = range_size_of(born)
+        eps_abs_of = {r: rel_to_abs(r, range_size) for r in cfg.eps_rel}
+        delta_abs_of = {r: rel_to_abs(r, range_size) for r in cfg.delta_rel}
 
         # Re-batch to a memory-safe chunk size so the gradient path (attack /
         # purification) and the per-batch forwards stay bounded on large inputs.
@@ -358,7 +382,7 @@ class UQEvaluation:
             method=cfg.attack_method,
             norm=cfg.norm,
             criterion=CriterionConfig(name="nll", kwargs=None),
-            strengths=cfg.attack_strengths,
+            eps_rel=cfg.eps_rel,
             num_steps=cfg.attack_num_steps,
             random_start=True,
         )
@@ -371,10 +395,13 @@ class UQEvaluation:
         # Store adversarial examples for purification
         adv_examples_cache: Dict[float, List[Tuple[torch.Tensor, torch.Tensor]]] = {}
 
-        for eps in tqdm(
-            cfg.attack_strengths, desc="UQ attack", unit="eps", dynamic_ncols=True
+        for eps_rel in tqdm(
+            cfg.eps_rel, desc="UQ attack", unit="eps", dynamic_ncols=True
         ):
-            logger.info(f"Generating adversarial examples (eps={eps})...")
+            eps_abs = eps_abs_of[eps_rel]
+            logger.info(
+                f"Generating adversarial examples (eps_rel={eps_rel}, eps_abs={eps_abs})..."
+            )
             try:
                 all_adv_log_px = []
                 all_adv_correct_list = []
@@ -383,7 +410,7 @@ class UQEvaluation:
                 adv_batches = []
 
                 for batch_data, batch_labels in tqdm(
-                    clean_loader, desc=f"attack eps={eps}", unit="batch",
+                    clean_loader, desc=f"attack eps_rel={eps_rel}", unit="batch",
                     leave=False, dynamic_ncols=True,
                 ):
                     batch_data = batch_data.to(device)
@@ -391,7 +418,7 @@ class UQEvaluation:
 
                     # Generate adversarial examples
                     adv_data = attack.generate(
-                        born, batch_data, batch_labels, eps, device
+                        born, batch_data, batch_labels, eps_abs, device
                     )
 
                     # Classify adversarial examples
@@ -410,13 +437,13 @@ class UQEvaluation:
                     adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
 
                 adv_log_px_arr = torch.cat(all_adv_log_px).numpy()
-                adv_log_px[eps] = adv_log_px_arr
-                adv_accuracies[eps] = all_adv_correct / all_adv_total
-                adv_examples_cache[eps] = adv_batches
+                adv_log_px[eps_rel] = adv_log_px_arr
+                adv_accuracies[eps_rel] = all_adv_correct / all_adv_total
+                adv_examples_cache[eps_rel] = adv_batches
                 misclf_arr = ~torch.cat(all_adv_correct_list).numpy()
 
                 logger.info(
-                    f"  eps={eps}: adv_acc={adv_accuracies[eps]:.4f}, "
+                    f"  eps_rel={eps_rel}: adv_acc={adv_accuracies[eps_rel]:.4f}, "
                     f"mean log p(x_adv)={adv_log_px_arr.mean():.2f}"
                 )
 
@@ -424,15 +451,15 @@ class UQEvaluation:
                 for pct, tau in thresholds.items():
                     det_mask = adv_log_px_arr < tau
                     pas_mask = ~det_mask
-                    detection_rates[(pct, eps)] = float(det_mask.mean())
-                    err_rate_detected[(pct, eps)] = (
+                    detection_rates[(pct, eps_rel)] = float(det_mask.mean())
+                    err_rate_detected[(pct, eps_rel)] = (
                         float(misclf_arr[det_mask].mean()) if det_mask.any() else float("nan")
                     )
-                    err_rate_passed[(pct, eps)] = (
+                    err_rate_passed[(pct, eps_rel)] = (
                         float(misclf_arr[pas_mask].mean()) if pas_mask.any() else float("nan")
                     )
             except Exception as e:
-                logger.warning(f"Detection/attack failed (eps={eps}): {e}; skipping")
+                logger.warning(f"Detection/attack failed (eps_rel={eps_rel}): {e}; skipping")
                 _recover_after_failure(born)
 
         # 4. Purification
@@ -445,11 +472,12 @@ class UQEvaluation:
 
         purification_results: Dict[Tuple[float, float], PurificationMetrics] = {}
 
-        for eps in tqdm(
-            cfg.attack_strengths, desc="UQ purify", unit="eps", dynamic_ncols=True
+        for eps_rel in tqdm(
+            cfg.eps_rel, desc="UQ purify", unit="eps", dynamic_ncols=True
         ):
-            for radius in cfg.radii:
-                logger.info(f"Purifying (eps={eps}, radius={radius})...")
+            for delta_rel in cfg.delta_rel:
+                delta_abs = delta_abs_of[delta_rel]
+                logger.info(f"Purifying (eps_rel={eps_rel}, delta_rel={delta_rel})...")
                 try:
                     all_purified_correct = 0
                     all_recovered = 0
@@ -464,8 +492,8 @@ class UQEvaluation:
                     tau = thresholds[median_pct]
 
                     for adv_data_cpu, labels_cpu in tqdm(
-                        adv_examples_cache[eps],
-                        desc=f"purify eps={eps} r={radius}", unit="batch",
+                        adv_examples_cache[eps_rel],
+                        desc=f"purify eps_rel={eps_rel} d={delta_rel}", unit="batch",
                         leave=False, dynamic_ncols=True,
                     ):
                         adv_data = adv_data_cpu.to(device)
@@ -481,7 +509,7 @@ class UQEvaluation:
 
                         # Purify
                         purified, log_px_after = purifier.purify(
-                            born, adv_data, radius, device
+                            born, adv_data, delta_abs, device
                         )
 
                         # Classify after purification
@@ -512,7 +540,7 @@ class UQEvaluation:
                     mean_after = torch.cat(all_log_px_after).mean().item()
                     rejection_rate = all_below_threshold / all_total
 
-                    purification_results[(eps, radius)] = PurificationMetrics(
+                    purification_results[(eps_rel, delta_rel)] = PurificationMetrics(
                         accuracy_after_purify=acc_after,
                         recovery_rate=recovery,
                         mean_log_px_before=mean_before,
@@ -521,22 +549,23 @@ class UQEvaluation:
                     )
 
                     logger.info(
-                        f"  eps={eps}, r={radius}: "
+                        f"  eps_rel={eps_rel}, d={delta_rel}: "
                         f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                     )
                 except Exception as e:
                     logger.warning(
-                        f"Gradient purification failed (eps={eps}, radius={radius}): "
-                        f"{e}; skipping"
+                        f"Gradient purification failed (eps_rel={eps_rel}, "
+                        f"delta_rel={delta_rel}): {e}; skipping"
                     )
                     _recover_after_failure(born)
 
         # 5. Clean purification (natural examples, no attack)
         clean_purification_results: Dict[float, PurificationMetrics] = {}
-        for radius in tqdm(
-            cfg.radii, desc="UQ clean purify", unit="radius", dynamic_ncols=True
+        for delta_rel in tqdm(
+            cfg.delta_rel, desc="UQ clean purify", unit="delta", dynamic_ncols=True
         ):
-            logger.info(f"Clean purification (radius={radius})...")
+            delta_abs = delta_abs_of[delta_rel]
+            logger.info(f"Clean purification (delta_rel={delta_rel})...")
             try:
                 all_correct = 0
                 all_total = 0
@@ -544,7 +573,7 @@ class UQEvaluation:
                 all_log_px_after = []
 
                 for batch_data, batch_labels in tqdm(
-                    clean_loader, desc=f"clean purify r={radius}", unit="batch",
+                    clean_loader, desc=f"clean purify d={delta_rel}", unit="batch",
                     leave=False, dynamic_ncols=True,
                 ):
                     batch_data = batch_data.to(device)
@@ -553,7 +582,7 @@ class UQEvaluation:
                     with torch.no_grad():
                         log_px_before = born.marginal_log_probability(batch_data)
 
-                    purified, log_px_after = purifier.purify(born, batch_data, radius, device)
+                    purified, log_px_after = purifier.purify(born, batch_data, delta_abs, device)
 
                     with torch.no_grad():
                         preds = born.class_probabilities(purified).argmax(dim=1)
@@ -564,16 +593,18 @@ class UQEvaluation:
                     all_log_px_after.append(log_px_after.cpu())
 
                 acc = all_correct / all_total
-                clean_purification_results[radius] = PurificationMetrics(
+                clean_purification_results[delta_rel] = PurificationMetrics(
                     accuracy_after_purify=acc,
                     recovery_rate=float("nan"),
                     mean_log_px_before=torch.cat(all_log_px_before).mean().item(),
                     mean_log_px_after=torch.cat(all_log_px_after).mean().item(),
                     rejection_rate=0.0,
                 )
-                logger.info(f"  radius={radius}: clean_purify_acc={acc:.4f}")
+                logger.info(f"  delta_rel={delta_rel}: clean_purify_acc={acc:.4f}")
             except Exception as e:
-                logger.warning(f"Clean purification failed (radius={radius}): {e}; skipping")
+                logger.warning(
+                    f"Clean purification failed (delta_rel={delta_rel}): {e}; skipping"
+                )
                 _recover_after_failure(born)
 
         # 6. Gibbs purification
@@ -586,7 +617,7 @@ class UQEvaluation:
             gibbs_purifier = GibbsPurification(
                 num_bins=cfg.gibbs_num_bins,
                 gibbs_batch_size=cfg.gibbs_batch_size,
-                step_radius=cfg.gibbs_step_radius,
+                step_delta_rel=cfg.gibbs_step_delta_rel,
             )
             sweep_points = sorted(set(cfg.gibbs_n_sweeps))
 
@@ -603,12 +634,12 @@ class UQEvaluation:
                 idx = torch.from_numpy(rng.permutation(n)[: cfg.gibbs_subsample])
                 return tuple(t[idx] for t in tensors)
 
-            for eps in tqdm(
-                cfg.attack_strengths, desc="Gibbs purify", unit="eps", dynamic_ncols=True
+            for eps_rel in tqdm(
+                cfg.eps_rel, desc="Gibbs purify", unit="eps", dynamic_ncols=True
             ):
                 try:
-                    all_adv = torch.cat([b[0] for b in adv_examples_cache[eps]])
-                    all_labels = torch.cat([b[1] for b in adv_examples_cache[eps]])
+                    all_adv = torch.cat([b[0] for b in adv_examples_cache[eps_rel]])
+                    all_labels = torch.cat([b[1] for b in adv_examples_cache[eps_rel]])
                     all_adv, all_labels = _gibbs_subsample(all_adv, all_labels)
 
                     # Recompute misclassification + mean log p(x) on the SAME subsample so
@@ -627,7 +658,7 @@ class UQEvaluation:
                         born, all_adv, sweep_points, device
                     )
                 except Exception as e:
-                    logger.warning(f"Gibbs failed (eps={eps}): {e}; skipping")
+                    logger.warning(f"Gibbs failed (eps_rel={eps_rel}): {e}; skipping")
                     _recover_after_failure(born)
                     continue
 
@@ -645,7 +676,7 @@ class UQEvaluation:
                             if misclassified_before > 0
                             else 1.0
                         )
-                        gibbs_purification_results[(eps, n_sw)] = PurificationMetrics(
+                        gibbs_purification_results[(eps_rel, n_sw)] = PurificationMetrics(
                             accuracy_after_purify=acc_after,
                             recovery_rate=recovery,
                             mean_log_px_before=mean_log_px_before,
@@ -653,12 +684,12 @@ class UQEvaluation:
                             rejection_rate=0.0,
                         )
                         logger.info(
-                            f"  eps={eps}, sweeps={n_sw}: "
+                            f"  eps_rel={eps_rel}, sweeps={n_sw}: "
                             f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                         )
                     except Exception as e:
                         logger.warning(
-                            f"Gibbs scoring failed (eps={eps}, n_sweeps={n_sw}): "
+                            f"Gibbs scoring failed (eps_rel={eps_rel}, n_sweeps={n_sw}): "
                             f"{e}; skipping"
                         )
                         _recover_after_failure(born)

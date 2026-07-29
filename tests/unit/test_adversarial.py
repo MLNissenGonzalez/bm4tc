@@ -140,7 +140,7 @@ def test_alpha_threads_into_training_objective():
     t._nc = t.train_cfg.norm_control  # off by default → no-op
     t.norm_regularizer = None
 
-    t._train_epoch(epsilon=0.1)
+    t._train_epoch(eps_abs=0.1)
 
     # adv term + clean term (clean_weight > 0), both at the configured alpha
     assert captured == [0.5, 0.5]
@@ -206,7 +206,7 @@ def test_norm_control_off_skips_renormalize():
     t = _bare_epoch_trainer(cbm, dh, cfg)
 
     with patch.object(cbm, "renormalize_", wraps=cbm.renormalize_) as m_renorm:
-        t._train_epoch(epsilon=0.1)
+        t._train_epoch(eps_abs=0.1)
 
     m_renorm.assert_not_called()
     assert t._train_reg == 0.0
@@ -222,7 +222,7 @@ def test_hard_renorm_called_every_step():
     t = _bare_epoch_trainer(cbm, dh, cfg, log_target=0.0)
 
     with patch.object(cbm, "renormalize_", wraps=cbm.renormalize_) as m_renorm:
-        t._train_epoch(epsilon=0.1)
+        t._train_epoch(eps_abs=0.1)
 
     assert m_renorm.call_count == 4
 
@@ -248,7 +248,7 @@ def test_soft_norm_control_multistep_backward():
     )
 
     # Must complete without "Trying to backward through the graph a second time".
-    t._train_epoch(epsilon=0.1)
+    t._train_epoch(eps_abs=0.1)
 
     assert t.step >= 2
     assert t._train_reg > 0.0
@@ -265,7 +265,7 @@ def test_norm_stats_populated_after_epoch():
     )
     t = _bare_epoch_trainer(cbm, dh, cfg)
 
-    t._train_epoch(epsilon=0.1)
+    t._train_epoch(eps_abs=0.1)
 
     # alpha=0 / no soft → log_Z via the end-of-epoch snapshot; amp from the adv forward.
     for key in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_amp_sq_mean"):
@@ -397,7 +397,7 @@ def test_split_train_epoch_routes_through_split_nll():
         norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
     ))
 
-    t._train_epoch(epsilon=0.1)
+    t._train_epoch(eps_abs=0.1)
 
     assert len(cbm.calls) == 2  # one training step in the stub loader
     assert cbm.calls[0][1] == 0.0
@@ -413,7 +413,7 @@ class _ShiftAttack:
         self.shift = shift
         self.seen = []
 
-    def generate(self, born, naturals, labels, strength, device):
+    def generate(self, born, naturals, labels, eps_abs, device):
         self.seen.append(naturals.detach().clone())
         return (naturals + self.shift).detach()
 
@@ -525,7 +525,7 @@ def _split_run_trainer(*, eval_rob_freq, clean_weight=0.5, max_epoch=9, patience
     t = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
                            device=torch.device("cpu"))
     t.attack = _ShiftAttack()          # cheap stand-in for PGD
-    t._generate_adversarial = lambda data, labels, eps: data + 0.05
+    t._generate_adversarial = lambda data, labels, eps_abs: data + 0.05
     return t
 
 
@@ -558,7 +558,9 @@ def test_split_validates_only_every_eval_rob_freq_epochs():
         # train-side metrics are still emitted every epoch
         assert "dis_loss/train" in m
         if ep in valid_epochs:
-            assert {"rob/valid", "mixed_loss/valid", "n_rob_valid"} <= set(m)
+            # Robustness is keyed by the run's relative budget (see AdversarialTrainer
+            # .rob_metric_key), so the key states what was measured.
+            assert {t.rob_metric_key, "mixed_loss/valid", "n_rob_valid"} <= set(m)
             assert m["n_rob_valid"] == len(t.adv_indices)
     # 3 valid events => patience can have ticked at most 3 times
     assert t.patience_counter <= 3
@@ -575,11 +577,11 @@ def test_unsplit_still_validates_every_epoch():
     t = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
                            device=torch.device("cpu"))
     t.attack = _ShiftAttack()
-    t._generate_adversarial = lambda data, labels, eps: data + 0.05
+    t._generate_adversarial = lambda data, labels, eps_abs: data + 0.05
 
     logged = []
     t.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
 
     assert [ep for ep, m in logged if "acc/valid" in m] == [1, 2, 3, 4]
-    assert [ep for ep, m in logged if "rob/valid" in m] == [2, 4]
+    assert [ep for ep, m in logged if t.rob_metric_key in m] == [2, 4]
     assert not any("n_rob_valid" in m for _, m in logged)

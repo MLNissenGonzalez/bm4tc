@@ -125,8 +125,11 @@ PARAM_ALIASES: Dict[str, str] = {
     "indim":          "in-dim",
     "clean_weight":   "clean-weight",
     "cleanweight":    "clean-weight",
-    "strength":       "epsilon",
-    "eps":            "epsilon",
+    "strength":       "eps-rel",
+    "strengths":      "eps-rel",
+    "eps":            "eps-rel",
+    "epsilon":        "eps-rel",
+    "eps_rel":        "eps-rel",
     "data_seed":      "data-seed",
     "dataseed":       "data-seed",
     "split_seed":     "split-seed",
@@ -153,7 +156,7 @@ _AT_PARAMS: Dict[str, str] = {
     "lr":           "trainer.adversarial.optimizer.kwargs.lr",
     "weight-decay": "trainer.adversarial.optimizer.kwargs.weight_decay",
     "batch-size":   "trainer.adversarial.batch_size",
-    "epsilon":      "trainer.adversarial.evasion.strengths",
+    "eps-rel":      "trainer.adversarial.evasion.eps_rel",
     "clean-weight": "trainer.adversarial.clean_weight",
     "bond-dim":     "born.init_kwargs.bond_dim",
     "in-dim":       "born.init_kwargs.in_dim",
@@ -197,11 +200,11 @@ REGIME_METRIC_PREFIX: Dict[str, str] = {
 
 REGIME_DEFAULT_PARAMS: Dict[str, List[str]] = {
     "nat": ["lr", "weight-decay", "batch-size"],
-    "at":  ["lr", "weight-decay", "epsilon", "clean-weight"],
+    "at":  ["lr", "weight-decay", "eps-rel", "clean-weight"],
     # legacy
     "dis": ["lr", "weight-decay", "batch-size"],
     "gen": ["lr", "weight-decay", "batch-size"],
-    "adv": ["lr", "weight-decay", "epsilon", "clean-weight"],
+    "adv": ["lr", "weight-decay", "eps-rel", "clean-weight"],
 }
 
 
@@ -301,8 +304,8 @@ def resolve_metrics(
 
     robustness = []
     if df is not None:
-        strengths = detect_robustness_strengths(df, prefix)
-        robustness = [f"summary/{prefix}/valid/rob/{s}" for s in strengths]
+        eps_rel = detect_robustness_eps_rel(df, prefix)
+        robustness = [f"summary/{prefix}/valid/rob/{s}" for s in eps_rel]
     else:
         robustness = [
             f"summary/{prefix}/valid/rob/0.1",
@@ -352,18 +355,18 @@ def resolve_primary_metric(
     return None, False
 
 
-def detect_robustness_strengths(df: pd.DataFrame, prefix: str) -> List[float]:
-    """Auto-detect robustness metric strengths from DataFrame columns."""
+def detect_robustness_eps_rel(df: pd.DataFrame, prefix: str) -> List[float]:
+    """Auto-detect relative robustness budgets from DataFrame columns."""
     pattern = re.compile(rf"summary/{prefix}/valid/rob/([0-9.]+)")
-    strengths = set()
+    eps_rel = set()
     for col in df.columns:
         match = pattern.match(col)
         if match:
             try:
-                strengths.add(float(match.group(1)))
+                eps_rel.add(float(match.group(1)))
             except ValueError:
                 pass
-    return sorted(strengths)
+    return sorted(eps_rel)
 
 
 def filter_varied_params(

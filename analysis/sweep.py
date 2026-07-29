@@ -5,7 +5,7 @@
 # **recomputes metrics post-hoc on the test set**, enabling:
 # - Computing metrics that weren't computed during training
 # - Ensuring data splits match each run's config (correct seeds)
-# - Consistent evaluation settings across all runs (e.g., same attack strengths)
+# - Consistent evaluation settings across all runs (e.g., same attack budgets)
 #
 # **Scope:** Seed sweeps (and alpha_curve sweeps) where all runs share the same
 # hyperparameters.  Best-model selection is not meaningful here — use a dedicated
@@ -97,15 +97,16 @@ COMPUTE_DISTRIBUTIONS = False  # Set True (or pass --viz) to generate best-run d
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
 # Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
 # Set to None to use each run's own evasion config.
-# Strengths are ABSOLUTE (pre-multiplied by _RANGE_SIZE):
-#   Fourier (range 1.0): same as fraction value
-#   Legendre (range 2.0): multiply fraction by 2.0
-_STRENGTH_FRACTIONS = [0.05, 0.1, 0.15]
+# Budgets are RELATIVE — fractions of the input domain width (see "Budget
+# vocabulary" in CLAUDE.md). Conversion to absolute happens per model, downstream.
+#   Legendre (width 2.0): 0.05/0.1/0.15 -> abs 0.1/0.2/0.3
+#   Fourier  (width 1.0): 0.05/0.1/0.15 -> abs 0.05/0.1/0.15
+EPS_REL = [0.05, 0.1, 0.15]
 EVASION_CONFIG = {
     "method": "PGD",
     "norm": "inf",
     "num_steps": 40,
-    "strengths": [s * _RANGE_SIZE for s in _STRENGTH_FRACTIONS],
+    "eps_rel": EPS_REL,
 }
 
 # --- MIA SETTINGS ---
@@ -123,12 +124,13 @@ MIA_FEATURES = {
 }
 
 # --- MIA ADVERSARIAL SETTINGS ---
-# Set MIA_ADV_STRENGTH to None to skip adversarial MIA entirely.
-MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE  # 10% of input range
+# Set MIA_ADV_EPS_REL to None to skip adversarial MIA entirely.
+MIA_ADV_EPS_REL = 0.10  # 10% of the input domain
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
-    "radii": [0.10 * _RANGE_SIZE],
+    # Purification radius, relative. 0.1 -> abs 0.2 on legendre.
+    "delta_rel": [0.10],
     "percentiles": [1, 5, 10, 20],
     # Chunk size for all UQ forwards (attack/purify + full-test class-prob/log-px).
     # Bounds peak GPU memory on large inputs (e.g. MNIST). None = use loader batch.
@@ -145,7 +147,7 @@ GIBBS_CONFIG = {
     "gibbs_batch_size": 24,
     # Per-sweep L∞ step (fraction of the input range), NOT a global budget: the
     # window re-centres each sweep, so after k sweeps the envelope is k×this.
-    "step_radius": 0.1,
+    "step_delta_rel": 0.1,
     # Gibbs is ~99% of analysis cost and only estimates a mean over the test set, so
     # run it on a fixed random subsample (cheap metrics keep the full set). ~±1.5%
     # stderr at 1000. None = full test set.
@@ -163,9 +165,9 @@ FIGSIZE = (10, 6)
 DPI = 100
 
 # --- PARETO SETTINGS ---
-# Robustness strength for Pareto frontier selection.
-# Set to None to auto-select the weakest non-zero strength.
-PARETO_ROB_STRENGTH = 0.10 * _RANGE_SIZE   # 10% of input range
+# Relative robustness budget for Pareto frontier selection.
+# Set to None to auto-select the weakest non-zero budget.
+PARETO_ROB_EPS_REL = 0.10   # 10% of the input domain
 
 # --- SANITY CHECK ---
 # Map eval column -> W&B summary column for comparison.
@@ -194,20 +196,24 @@ if _cli_args.no_mia:
 # ## 2. Per-Model Evaluation
 
 # %%
-# Add PARETO and MIA strengths to EVASION_CONFIG; sort. Build full UQ config.
+# Add PARETO and MIA budgets to EVASION_CONFIG; sort. Build full UQ config.
 if EVASION_CONFIG:
-    _strengths = [float(s) for s in EVASION_CONFIG.get("strengths", [])]
-    if COMPUTE_ROB and PARETO_ROB_STRENGTH is not None:
-        if float(PARETO_ROB_STRENGTH) not in _strengths:
-            _strengths.append(float(PARETO_ROB_STRENGTH))
-    if COMPUTE_MIA and MIA_ADV_STRENGTH is not None:
-        if float(MIA_ADV_STRENGTH) not in _strengths:
-            _strengths.append(float(MIA_ADV_STRENGTH))
-    EVASION_CONFIG["strengths"] = sorted(set(_strengths))
-    print(f"Final attack strengths: {EVASION_CONFIG['strengths']}")
-elif PARETO_ROB_STRENGTH is not None and COMPUTE_ROB:
+    _eps_rel = [float(s) for s in EVASION_CONFIG.get("eps_rel", [])]
+    if COMPUTE_ROB and PARETO_ROB_EPS_REL is not None:
+        if float(PARETO_ROB_EPS_REL) not in _eps_rel:
+            _eps_rel.append(float(PARETO_ROB_EPS_REL))
+    if COMPUTE_MIA and MIA_ADV_EPS_REL is not None:
+        if float(MIA_ADV_EPS_REL) not in _eps_rel:
+            _eps_rel.append(float(MIA_ADV_EPS_REL))
+    EVASION_CONFIG["eps_rel"] = sorted(set(_eps_rel))
+    print(
+        f"Final attack budgets: eps_rel={EVASION_CONFIG['eps_rel']}  "
+        f"(abs {[round(s * _RANGE_SIZE, 6) for s in EVASION_CONFIG['eps_rel']]} "
+        f"at range size {_RANGE_SIZE})"
+    )
+elif PARETO_ROB_EPS_REL is not None and COMPUTE_ROB:
     print(f"Note: EVASION_CONFIG is None; using per-run evasion configs. "
-          f"Ensure each run includes eps={PARETO_ROB_STRENGTH}.")
+          f"Ensure each run includes eps_rel={PARETO_ROB_EPS_REL}.")
 
 _full_uq_config = None
 if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
@@ -215,7 +221,7 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         "norm":             EVASION_CONFIG.get("norm", "inf"),
         "num_steps":        EVASION_CONFIG.get("num_steps", 20),
         "attack_method":    EVASION_CONFIG.get("method", "PGD"),
-        "attack_strengths": EVASION_CONFIG["strengths"],
+        "eps_rel":          EVASION_CONFIG["eps_rel"],
         "attack_num_steps": EVASION_CONFIG.get("num_steps", 20),
         **UQ_CONFIG,
     }
@@ -224,7 +230,7 @@ if COMPUTE_UQ and UQ_CONFIG is not None and EVASION_CONFIG:
         _full_uq_config["gibbs_n_sweeps"] = GIBBS_CONFIG["n_sweeps"]
         _full_uq_config["gibbs_num_bins"] = GIBBS_CONFIG["num_bins"]
         _full_uq_config["gibbs_batch_size"] = GIBBS_CONFIG["gibbs_batch_size"]
-        _full_uq_config["gibbs_step_radius"] = GIBBS_CONFIG.get("step_radius")
+        _full_uq_config["gibbs_step_delta_rel"] = GIBBS_CONFIG.get("step_delta_rel")
         _full_uq_config["gibbs_subsample"] = GIBBS_CONFIG.get("subsample")
 elif COMPUTE_GIBBS_PURIFICATION and not COMPUTE_UQ:
     print("WARNING: COMPUTE_GIBBS_PURIFICATION=True requires COMPUTE_UQ=True; skipping Gibbs.")
@@ -306,7 +312,7 @@ eval_cfg = AnalysisConfig(
     compute_uq=COMPUTE_UQ,
     evasion_override=EVASION_CONFIG,
     mia_features=MIA_FEATURES,
-    mia_adversarial_strength=MIA_ADV_STRENGTH,
+    mia_adv_eps_rel=MIA_ADV_EPS_REL,
     mia_adversarial_num_steps=EVASION_CONFIG.get("num_steps", 20) if EVASION_CONFIG else 20,
     mia_adversarial_step_size=None,
     mia_adversarial_norm=EVASION_CONFIG.get("norm", "inf") if EVASION_CONFIG else "inf",
@@ -366,7 +372,7 @@ MIA_COL = "mia_accuracy" if COMPUTE_MIA else None
 # Adversarial MIA: best worst-case threshold accuracy across all features
 ADV_MIA_COL = None
 ADV_MIA_FEATURE_COLS = []
-if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
+if COMPUTE_MIA and MIA_ADV_EPS_REL is not None and not df.empty:
     if "adv_mia_wc_best" in df.columns:
         ADV_MIA_COL = "adv_mia_wc_best"
     ADV_MIA_FEATURE_COLS = [c for c in df.columns if c.startswith("adv_mia_wc/")]
@@ -374,7 +380,7 @@ if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
 # Clean worst-case threshold (for apples-to-apples comparison with adversarial MIA)
 MIA_WC_COL = None
 MIA_WC_FEATURE_COLS = []
-if COMPUTE_MIA and MIA_ADV_STRENGTH is not None and not df.empty:
+if COMPUTE_MIA and MIA_ADV_EPS_REL is not None and not df.empty:
     if "mia_wc_best" in df.columns:
         MIA_WC_COL = "mia_wc_best"
     MIA_WC_FEATURE_COLS = [c for c in df.columns if c.startswith("mia_wc/")]
@@ -435,12 +441,12 @@ if ROB_COLS:
             continue
 
     if _strength_map:
-        if PARETO_ROB_STRENGTH is not None:
-            if PARETO_ROB_STRENGTH in _strength_map:
-                _chosen = PARETO_ROB_STRENGTH
+        if PARETO_ROB_EPS_REL is not None:
+            if PARETO_ROB_EPS_REL in _strength_map:
+                _chosen = PARETO_ROB_EPS_REL
             else:
-                print(f"WARNING: PARETO_ROB_STRENGTH={PARETO_ROB_STRENGTH} not in evaluated "
-                      f"strengths {sorted(_strength_map.keys())}. Falling back to weakest.")
+                print(f"WARNING: PARETO_ROB_EPS_REL={PARETO_ROB_EPS_REL} not in evaluated "
+                      f"budgets {sorted(_strength_map.keys())}. Falling back to weakest.")
                 _chosen = min(_strength_map.keys())
         else:
             _chosen = min(_strength_map.keys())
@@ -533,12 +539,12 @@ if not df.empty and ACC_COL:
             }
 
 if not df.empty and PARETO_ROB_COL:
-    _pareto_strength = PARETO_ROB_COL.split("/")[-1]
+    _pareto_eps_rel = PARETO_ROB_COL.split("/")[-1]
 
     if ACC_COL:
         pareto_df = get_pareto_runs(df, ACC_COL, PARETO_ROB_COL, True, True)
         if not pareto_df.empty:
-            print(f"\nPareto-optimal runs (test acc vs rob/{_pareto_strength}):")
+            print(f"\nPareto-optimal runs (test acc vs rob/{_pareto_eps_rel}, eps_rel):")
             display_cols = ["run_name", ACC_COL, PARETO_ROB_COL]
             display_cols = [c for c in display_cols if c in pareto_df.columns]
             print(pareto_df[display_cols].to_string(index=False))
@@ -568,7 +574,7 @@ if not df.empty and COMPUTE_MIA:
                   "(e.g. varying split sizes across seeds) — skipping sweep-mean.")
 
 if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
-    print(f"\nAdversarial MIA Worst-Case Threshold (eps={MIA_ADV_STRENGTH}):")
+    print(f"\nAdversarial MIA Worst-Case Threshold (eps_rel={MIA_ADV_EPS_REL}):")
     print("  Per-feature accuracy (oracle threshold, mean +/- std across runs):\n")
     if MIA_WC_COL and MIA_WC_COL in df.columns:
         vals_wc = df[MIA_WC_COL].dropna()
@@ -777,7 +783,7 @@ if not df.empty:
     # Column widths
     _label_w = max((len(r[0]) for r in _table_rows), default=12) + 2
     _col_w = 9
-    _eps_hdr = ["eps=0"] + [_eps_key[_e] for _e in _all_eps[1:]]
+    _eps_hdr = ["eps_rel=0"] + [_eps_key[_e] for _e in _all_eps[1:]]
 
     with open(summary_path, "w") as f:
         f.write("=" * 60 + "\n")
@@ -868,7 +874,7 @@ if not df.empty:
             if MIA_WC_COL and MIA_WC_COL in df.columns:
                 f.write(f"  WC threshold (clean): {_smean(MIA_WC_COL):.4f} ± {_sstd(MIA_WC_COL):.4f}\n")
             if ADV_MIA_COL and ADV_MIA_COL in df.columns:
-                f.write(f"  WC threshold (adv, eps={MIA_ADV_STRENGTH}): "
+                f.write(f"  WC threshold (adv, eps_rel={MIA_ADV_EPS_REL}): "
                         f"{_smean(ADV_MIA_COL):.4f} ± {_sstd(ADV_MIA_COL):.4f}\n")
                 for _col in sorted(ADV_MIA_FEATURE_COLS):
                     _feat = _col.split("/")[-1]
@@ -905,16 +911,24 @@ if not df.empty:
 #   acc                         — clean classification accuracy (test)
 #   dis_loss                    — discriminative NLL loss (test)
 #   gen_loss                    — generative (joint) NLL loss (test)
-#   rob/<eps>                   — robust accuracy at each epsilon (test)
+#   rob/<eps_rel>               — robust accuracy at each relative epsilon (test)
 #   mia_accuracy, mia_auc_roc   — LR attack accuracy and AUC-ROC
 #   mia_wc/<feat>, mia_wc_best  — per-feature worst-case threshold accuracy
 #   adv_mia_wc/<feat>, adv_mia_wc_best — adversarial MIA worst-case accuracy
 #   uq_clean_accuracy           — UQ clean accuracy on test
-#   uq_adv_acc/<eps>            — adversarial accuracy (no defense) at each eps
-#   uq_detection/<pct>pct/<eps> — detection rate at threshold percentile & eps
-#   uq_purify_acc/<eps>/<r>     — purification accuracy at (eps, radius)
-#   uq_purify_recovery/<eps>/<r> — recovery rate at (eps, radius)
+#   uq_adv_acc/<eps_rel>        — adversarial accuracy (no defense) at each eps_rel
+#   uq_detection/<pct>pct/<eps_rel> — detection rate at threshold percentile & eps_rel
+#   uq_purify_acc/<eps_rel>/<delta_rel>      — purification accuracy
+#   uq_purify_recovery/<eps_rel>/<delta_rel> — recovery rate
+#   range_size, eps_unit        — budget provenance (see below)
+#
+# All budgets in column names are RELATIVE (fractions of the input domain). The
+# `range_size` column records this model family's hi-lo, so absolute values are
+# always recoverable as eps_rel * range_size; `eps_unit` marks the convention so a
+# reader can tell these columns apart from pre-migration absolute-keyed CSVs.
 if not df.empty:
+    df["range_size"] = _RANGE_SIZE
+    df["eps_unit"] = "rel"
     _eval_export_cols = [c for c in df.columns if not c.startswith("_")]
     df[_eval_export_cols].to_csv(output_dir / "evaluation_data.csv", index=False)
     print(f"Saved evaluation_data.csv ({len(df)} runs, {len(_eval_export_cols)} columns)")

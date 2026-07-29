@@ -145,8 +145,9 @@ DPI = 100
 # --- EVAL-MODEL SETTINGS (only used with --eval-model flag) ---
 # Device for model evaluation.
 EVAL_MODEL_DEVICE = "cpu"
-# Optional evasion override (absolute strengths). None = use each run's own config.
-# Example: {"method": "PGD", "norm": "inf", "num_steps": 40, "strengths": [0.05, 0.10]}
+# Optional evasion override. Budgets are RELATIVE (fractions of the input domain
+# width); None = use each run's own config.
+# Example: {"method": "PGD", "norm": "inf", "num_steps": 40, "eps_rel": [0.05, 0.10]}
 EVAL_MODEL_EVASION = None
 
 # =============================================================================

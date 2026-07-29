@@ -8,15 +8,16 @@ Result dict key conventions (flat):
     acc                         clean classification accuracy
     dis_loss                    discriminative NLL loss
     gen_loss                    generative (joint) NLL loss
-    rob/<abs_eps>               robust accuracy at absolute epsilon
+    rob/<eps_rel>               robust accuracy at relative epsilon
     mia_accuracy, mia_auc_roc   membership inference attack
     uq_*                        uncertainty quantification
 
-Attack strength conventions:
-    AnalysisConfig.evasion_override["strengths"] — absolute epsilon values (callers
-        convert fraction × range_size before passing here).
-    Model's own evasion config strengths — fraction-based; converted internally via
-        cbm.input_range.
+Budget convention (see "Budget vocabulary" in CLAUDE.md):
+    Every budget entering this module is RELATIVE — a fraction of the input domain
+    width. That holds for AnalysisConfig.evasion_override["eps_rel"], for the model's
+    own evasion config, and for uq_config. Absolute values are derived per model via
+    rel_to_abs(eps_rel, range_size_of(cbm)) at the point of use, and metric keys are
+    written in relative units.
 
 CLI usage:
     python analysis/run.py <run_dir> [--no-acc] [--no-dis-loss] [--no-gen-loss]
@@ -44,6 +45,7 @@ import torch
 from omegaconf import OmegaConf
 
 from analysis.utils.mia_utils import load_run_config, find_model_checkpoint
+from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +66,11 @@ class AnalysisConfig:
         compute_mia: Run membership inference attack evaluation.
         compute_uq: Uncertainty quantification (detection + purification).
         evasion_override: Dict of evasion config fields to override, or None to
-            use each run's own config. Strengths are ABSOLUTE (pre-multiplied by
-            range size). Example: {"method": "PGD", "num_steps": 40,
-            "strengths": [0.05, 0.10, 0.15]}.
+            use each run's own config. Budgets are RELATIVE fractions of the input
+            domain. Example: {"method": "PGD", "num_steps": 40,
+            "eps_rel": [0.05, 0.10, 0.15]}.
         mia_features: Feature toggle dict for MIAFeatureConfig.
-        mia_adversarial_strength: Absolute epsilon for adversarial MIA.
+        mia_adv_eps_rel: Relative epsilon for adversarial MIA.
         mia_adversarial_num_steps: PGD steps for adversarial MIA.
         mia_adversarial_step_size: PGD step size. None = auto.
         mia_adversarial_norm: Lp norm for adversarial MIA.
@@ -84,7 +86,7 @@ class AnalysisConfig:
     compute_uq: bool = False
     evasion_override: Optional[Dict[str, Any]] = None
     mia_features: Optional[Dict[str, bool]] = None
-    mia_adversarial_strength: Optional[float] = None
+    mia_adv_eps_rel: Optional[float] = None
     mia_adversarial_num_steps: int = 20
     mia_adversarial_step_size: Optional[float] = None
     mia_adversarial_norm: Any = "inf"
@@ -97,7 +99,7 @@ class AnalysisConfig:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_DEFAULT_ROB_STRENGTHS_REL = [0.05, 0.1]
+_DEFAULT_ROB_EPS_REL = [0.05, 0.1]
 
 
 def _get_rob_params(
@@ -105,39 +107,36 @@ def _get_rob_params(
     cfg,
     evasion_override: Optional[Dict[str, Any]],
 ) -> Optional[Tuple[Any, List[float]]]:
-    """Build (attack_object, abs_strengths) for robustness evaluation.
+    """Build (attack_object, eps_rel_list) for robustness evaluation.
 
-    Strengths in evasion_override are absolute; strengths from the model config
-    are relative fractions converted via cbm.input_range. When no evasion config
-    is available, falls back to PGD at _DEFAULT_ROB_STRENGTHS_REL.
+    Budgets are relative everywhere — in the override, in the model's own evasion
+    config, and in the fallback. The caller converts to absolute once, per model.
     """
     from src.utils.evasion import EvasionConfig, build_attack
 
-    range_size = float(cbm.input_range[1] - cbm.input_range[0])
-
     if evasion_override is not None:
-        strengths_abs = [float(s) for s in evasion_override.get("strengths", [])]
+        eps_rel = [float(s) for s in evasion_override.get("eps_rel", [])]
         ec = EvasionConfig(
             method=evasion_override.get("method", "PGD"),
             norm=evasion_override.get("norm", "inf"),
             num_steps=evasion_override.get("num_steps", 10),
             step_size=evasion_override.get("step_size", None),
             random_start=evasion_override.get("random_start", True),
-            strengths=strengths_abs,
+            eps_rel=eps_rel,
         )
     else:
         try:
             raw = OmegaConf.to_container(cfg.trainer.adversarial.evasion, resolve=True)
             ec = EvasionConfig(**raw)
-            strengths_abs = [s * range_size for s in ec.strengths]
+            eps_rel = list(ec.eps_rel)
         except Exception:
             ec = EvasionConfig(method="PGD")
-            strengths_abs = [s * range_size for s in _DEFAULT_ROB_STRENGTHS_REL]
+            eps_rel = list(_DEFAULT_ROB_EPS_REL)
 
-    if not strengths_abs:
+    if not eps_rel:
         return None
 
-    return build_attack(ec), strengths_abs
+    return build_attack(ec), eps_rel
 
 
 # ---------------------------------------------------------------------------
@@ -205,14 +204,16 @@ def analyze_run(
     if cfg.compute_rob:
         rob_params = _get_rob_params(cbm, run_cfg, cfg.evasion_override)
         if rob_params is not None:
-            attack, strengths_abs = rob_params
-            for abs_eps in strengths_abs:
+            attack, eps_rel_list = rob_params
+            range_size = range_size_of(cbm)
+            for eps_rel in eps_rel_list:
+                eps_abs = rel_to_abs(eps_rel, range_size)
+                key = f"rob/{fmt_budget(eps_rel)}"
                 try:
-                    rob_acc = eval_rob(cbm, loader, attack, abs_eps, device, progress=True)
-                    results[f"rob/{abs_eps}"] = rob_acc
+                    results[key] = eval_rob(cbm, loader, attack, eps_abs, device, progress=True)
                 except Exception as e:
-                    logger.warning(f"eval_rob failed at eps={abs_eps}: {e}")
-                    results[f"rob/{abs_eps}"] = np.nan
+                    logger.warning(f"eval_rob failed at eps_rel={eps_rel}: {e}")
+                    results[key] = np.nan
 
     # 6. MIA
     if cfg.compute_mia:
@@ -220,9 +221,14 @@ def analyze_run(
             from src.analysis.mia import MIAEvaluation, MIAFeatureConfig
 
             feature_config = MIAFeatureConfig(**(cfg.mia_features or {}))
+            # MIA's attack takes an absolute epsilon; convert the authored fraction here.
+            mia_eps_abs = (
+                None if cfg.mia_adv_eps_rel is None
+                else rel_to_abs(cfg.mia_adv_eps_rel, range_size_of(cbm))
+            )
             mia_eval = MIAEvaluation(
                 feature_config=feature_config,
-                adversarial_strength=cfg.mia_adversarial_strength,
+                adv_eps_abs=mia_eps_abs,
                 adversarial_num_steps=cfg.mia_adversarial_num_steps,
                 adversarial_step_size=cfg.mia_adversarial_step_size,
                 adversarial_norm=cfg.mia_adversarial_norm,
@@ -269,22 +275,22 @@ def analyze_run(
             results["uq_clean_accuracy"] = uq_results.clean_accuracy
             results["uq_clean_log_px_mean"] = float(uq_results.clean_log_px.mean())
 
-            for eps, acc in uq_results.adv_accuracies.items():
-                results[f"uq_adv_acc/{eps}"] = acc
-            for (pct, eps), rate in uq_results.detection_rates.items():
-                results[f"uq_detection/{pct}pct/{eps}"] = rate
-            for (pct, eps), rate in uq_results.err_rate_detected.items():
-                results[f"uq_det_err_detected/{pct}pct/{eps}"] = rate
-            for (pct, eps), rate in uq_results.err_rate_passed.items():
-                results[f"uq_det_err_passed/{pct}pct/{eps}"] = rate
-            for (eps, radius), m in uq_results.purification_results.items():
-                results[f"uq_purify_acc/{eps}/{radius}"] = m.accuracy_after_purify
-                results[f"uq_purify_recovery/{eps}/{radius}"] = m.recovery_rate
-            for (eps, n_sweeps), m in uq_results.gibbs_purification_results.items():
-                results[f"gibbs_purify_acc/{eps}/{n_sweeps}"] = m.accuracy_after_purify
-                results[f"gibbs_purify_recovery/{eps}/{n_sweeps}"] = m.recovery_rate
-            for radius, m in uq_results.clean_purification_results.items():
-                results[f"uq_clean_purify_acc/{radius}"] = m.accuracy_after_purify
+            for eps_rel, acc in uq_results.adv_accuracies.items():
+                results[f"uq_adv_acc/{fmt_budget(eps_rel)}"] = acc
+            for (pct, eps_rel), rate in uq_results.detection_rates.items():
+                results[f"uq_detection/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (pct, eps_rel), rate in uq_results.err_rate_detected.items():
+                results[f"uq_det_err_detected/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (pct, eps_rel), rate in uq_results.err_rate_passed.items():
+                results[f"uq_det_err_passed/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (eps_rel, delta_rel), m in uq_results.purification_results.items():
+                results[f"uq_purify_acc/{fmt_budget(eps_rel)}/{fmt_budget(delta_rel)}"] = m.accuracy_after_purify
+                results[f"uq_purify_recovery/{fmt_budget(eps_rel)}/{fmt_budget(delta_rel)}"] = m.recovery_rate
+            for (eps_rel, n_sweeps), m in uq_results.gibbs_purification_results.items():
+                results[f"gibbs_purify_acc/{fmt_budget(eps_rel)}/{n_sweeps}"] = m.accuracy_after_purify
+                results[f"gibbs_purify_recovery/{fmt_budget(eps_rel)}/{n_sweeps}"] = m.recovery_rate
+            for delta_rel, m in uq_results.clean_purification_results.items():
+                results[f"uq_clean_purify_acc/{fmt_budget(delta_rel)}"] = m.accuracy_after_purify
             for n_sweeps, m in uq_results.clean_gibbs_purification_results.items():
                 results[f"gibbs_clean_purify_acc/{n_sweeps}"] = m.accuracy_after_purify
         except Exception as e:
@@ -300,20 +306,20 @@ def analyze_run(
             joint_uq_results = joint_uq_eval.evaluate(
                 cbm, datahandler.classification["test"], device
             )
-            for eps, acc in joint_uq_results.adv_accuracies.items():
-                results[f"uq_joint_adv_acc/{eps}"] = acc
-            for (pct, eps), rate in joint_uq_results.detection_rates.items():
-                results[f"uq_joint_detection/{pct}pct/{eps}"] = rate
-            for (pct, eps), rate in joint_uq_results.err_rate_detected.items():
-                results[f"uq_joint_det_err_detected/{pct}pct/{eps}"] = rate
-            for (pct, eps), rate in joint_uq_results.err_rate_passed.items():
-                results[f"uq_joint_det_err_passed/{pct}pct/{eps}"] = rate
-            for (eps, radius), m in joint_uq_results.purification_results.items():
-                results[f"uq_joint_purify_acc/{eps}/{radius}"] = m.accuracy_after_purify
-                results[f"uq_joint_purify_recovery/{eps}/{radius}"] = m.recovery_rate
-            for (eps, n_sweeps), m in joint_uq_results.gibbs_purification_results.items():
-                results[f"gibbs_joint_purify_acc/{eps}/{n_sweeps}"] = m.accuracy_after_purify
-                results[f"gibbs_joint_purify_recovery/{eps}/{n_sweeps}"] = m.recovery_rate
+            for eps_rel, acc in joint_uq_results.adv_accuracies.items():
+                results[f"uq_joint_adv_acc/{fmt_budget(eps_rel)}"] = acc
+            for (pct, eps_rel), rate in joint_uq_results.detection_rates.items():
+                results[f"uq_joint_detection/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (pct, eps_rel), rate in joint_uq_results.err_rate_detected.items():
+                results[f"uq_joint_det_err_detected/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (pct, eps_rel), rate in joint_uq_results.err_rate_passed.items():
+                results[f"uq_joint_det_err_passed/{pct}pct/{fmt_budget(eps_rel)}"] = rate
+            for (eps_rel, delta_rel), m in joint_uq_results.purification_results.items():
+                results[f"uq_joint_purify_acc/{fmt_budget(eps_rel)}/{fmt_budget(delta_rel)}"] = m.accuracy_after_purify
+                results[f"uq_joint_purify_recovery/{fmt_budget(eps_rel)}/{fmt_budget(delta_rel)}"] = m.recovery_rate
+            for (eps_rel, n_sweeps), m in joint_uq_results.gibbs_purification_results.items():
+                results[f"gibbs_joint_purify_acc/{fmt_budget(eps_rel)}/{n_sweeps}"] = m.accuracy_after_purify
+                results[f"gibbs_joint_purify_recovery/{fmt_budget(eps_rel)}/{n_sweeps}"] = m.recovery_rate
         except Exception as e:
             logger.warning(f"Joint-attack UQ evaluation failed: {e}")
 

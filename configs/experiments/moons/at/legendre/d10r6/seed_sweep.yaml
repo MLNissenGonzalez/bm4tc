@@ -21,7 +21,7 @@ tracking:
     norm: 2
     criterion:
       name: "negative log-likelihood"
-    strengths: [0.1]
+    eps_rel: [0.1]
     num_steps: 10
     step_size: null
     random_start: true
@@ -37,13 +37,13 @@ trainer:
       norm: 2
       criterion:
         name: "negative log-likelihood"
-      strengths: [0.1]
+      eps_rel: [0.1]
       num_steps: 10
       step_size: null
       random_start: true
 
     curriculum: true
-    curriculum_start: 0.01
+    curriculum_eps_start_rel: 0.01
     curriculum_end_epoch: 200
 
     save: true
