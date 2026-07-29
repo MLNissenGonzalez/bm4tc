@@ -1,6 +1,6 @@
 # @package _global_
 # ---------------------------------------------------------------------------
-# Adversarial-training seed sweep (5 seeds) for mnist_full_r12 at legendre/d3r10c64,
+# Adversarial-training seed sweep (3 seeds) for mnist_full_r12 at legendre/d3r10c64,
 # alpha=0. Fine-tunes from the best clean (alpha=0) NAT checkpoint.
 #
 # clean_weight=0.0, uniform across r10/r20/r40, from the cw_a0 grid HPO
@@ -10,6 +10,15 @@
 # everywhere for a clean bond-dim comparison. lr=3e-4 and soft_strength=1e-3
 # are the fixed values used throughout the AT/NAT grids.
 #
+# RADIUS: eps_rel=0.1 (abs 0.2 in [-1,1]), the corrected training radius. The
+# published a0_2507 sweep trained at eps_rel=0.3 (abs 0.6) -- the Madry 28x28
+# MNIST convention, which does not transfer to 12x12 downsampled data where a
+# given L-inf budget removes far more class information. The radius is the ONLY
+# difference from a0_2507: batch_size, lr, soft_strength, clean_weight, curriculum
+# and the selection rule are all unchanged, so this arm is a single-variable swap.
+#
+# 3 seeds, not 5: seed sd on the published AT sweeps is ~0.002-0.008 in rob/valid
+# against bond-dim effects of 0.05-0.08, so n=3 costs ~0.001 of standard error.
 # Runnable as-is (born, model_path, and all HPs are baked in):
 #   python -m experiments.train --multirun \
 #       +experiments=mnist_full_r12/at/legendre/d3r10c64/seed_sweep/a0
@@ -85,4 +94,4 @@ trainer:
 hydra:
   sweeper:
     params:
-      tracking.seed: range(1, 6)
+      tracking.seed: range(1, 4)
