@@ -79,9 +79,9 @@ MAX_ATTACK_SAMPLES: Optional[int] = 2000  # #clean inputs attacked (None = whole
 STATS_CAP: Optional[int] = 200            # #eligible examples purified for the statistics
 SEED = 0
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-SAVE_DIR = "figures/mnist/transfer_purify"
+SAVE_DIR = "figures/mnist_r12/transfer_purify"
 
-FIG_NAME = "transfer_purify_grid.png"
+FIG_NAME = "transfer_purify_grid.pdf"
 STATS_NAME = "transfer_purify_stats.txt"
 
 
