@@ -1,0 +1,64 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start alpha=1 seed sweep (5 seeds) for mnist_full_r12 at legendre/d3r40c64.
+#
+# Counterpart to seed_sweep/a1.yaml, which warm-starts from the a0 checkpoint and
+# reaches ~0.64 test accuracy. A single cold-start run from the accumulate grid
+# study (grid_sweep_accumulate_a1, lr=1e-3, soft_strength=0.1) reached ~0.78 valid
+# accuracy instead. This config pins that grid point and repeats it over 5 seeds to
+# check whether the gap is reproducible or a one-run fluke.
+#
+# Differences from seed_sweep/a1.yaml, all deliberate (they are the hypothesis):
+#   no model_path  cold start, vs warm start from a0_2506/0
+#   lr 1e-3        vs 1.5e-4, which the alpha=1 HPO picked by minimizing
+#                  mixed_loss/valid (= gen_loss at alpha=1), i.e. never for accuracy
+#   log_target 0.0 fixed target, vs null = pinned to the a0 model's log Z
+#   batch_size 256 vs 512
+# A positive result therefore identifies the pipeline, not which of the four factors.
+#
+# stop_crit is gen_loss, which at alpha=1 is identically mixed_loss
+# (mixed_loss = alpha*gen_loss + (1-alpha)*dis_loss), so selection matches
+# seed_sweep/a1.yaml exactly and is not part of the comparison.
+#
+# Runnable as-is:
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/nat/legendre/d3r40c64/seed_sweep/a1_cold
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: a1_cold
+descriptor: nll_cold
+
+defaults:
+  - override /born: legendre/d3r40c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+# No model_path: cold start from the born config's randn_eye init.
+
+tracking:
+  seed: 42
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 100
+    batch_size: 256
+    patience: 50
+    stop_crit: "gen_loss"   # == mixed_loss at alpha=1
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1
+      log_target: 0.0       # fixed target; no capture (cold start)
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-3
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
