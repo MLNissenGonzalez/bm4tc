@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--defense-subsample", type=int, default=None)
     parser.add_argument("--sampling-radius", type=float, default=0.2)
-    parser.add_argument("--sampling-sweeps", type=int, nargs="+", default=(1, 3, 5))
+    parser.add_argument("--sampling-sweeps", type=int, nargs="+", default=(1, 3, 6))
     parser.add_argument("--sampling-steps-per-sweep", type=int, default=20)
     parser.add_argument("--sampling-step-size", type=float, default=0.01)
     parser.add_argument("--sampling-noise-std", type=float, default=0.005)
