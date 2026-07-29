@@ -423,8 +423,10 @@ def transfer_purify_analysis(
         "row_index": row_index,
     }
 
-    fig = _plot_grid(models, classes, row_index, pos_of, clean_imgs, adv_imgs, pur_imgs,
-                     lo, hi)
+    fig = _plot_grid(
+        models, classes, row_index, pos_of, clean_imgs, adv_imgs, pur_imgs,
+        y_elig, adv_pred[attack_source], pur_pred, lo, hi,
+    )
 
     if save_dir is not None:
         out = Path(save_dir)
@@ -437,10 +439,13 @@ def transfer_purify_analysis(
 
 
 # --- Plotting ---------------------------------------------------------------------------
-def _plot_grid(models, classes, row_index, pos_of, clean, adv, pur_imgs, lo, hi):
+def _plot_grid(
+    models, classes, row_index, pos_of, clean, adv, pur_imgs,
+    true_labels, attack_predictions, purify_predictions, lo, hi,
+):
     """Grid: one row per class, columns [original | adversarial | one per model].
 
-    Images only -- the per-example predictions live in the statistics file, not the figure.
+    Each panel includes its model prediction as a small caption below the image.
     """
     import matplotlib.pyplot as plt
 
@@ -468,13 +473,23 @@ def _plot_grid(models, classes, row_index, pos_of, clean, adv, pur_imgs, lo, hi)
                 continue
             if j == 0:
                 img = _img(clean[i])
+                panel_prediction = int(true_labels[i])
             elif j == 1:
                 img = _img(adv[i])
+                panel_prediction = int(attack_predictions[i])
             else:
                 k, p = keys[j - 2], pos_of[int(i)]
                 img = _img(pur_imgs[k][p])
+                panel_prediction = int(purify_predictions[k][p])
             ax.imshow(img, cmap="gray", vmin=0, vmax=1)
-        axes[r, 0].set_ylabel(f"$y={int(c)}$", fontsize=11)
+            ax.set_xlabel(
+                f"Pred. {panel_prediction}", fontsize=8, color="0.35", labelpad=2
+            )
+        prediction = "n/a" if i is None else str(int(attack_predictions[i]))
+        axes[r, 0].set_ylabel(
+            f"Class {int(c)}\n(Pred. {prediction})",
+            fontsize=10, rotation=0, ha="right", va="center", labelpad=42,
+        )
 
     for j, t in enumerate(col_titles):
         axes[0, j].set_title(t, fontsize=10)
