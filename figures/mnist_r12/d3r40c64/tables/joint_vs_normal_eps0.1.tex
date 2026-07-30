@@ -1,13 +1,13 @@
 \begin{table}[htbp]
   \centering
-  \begin{tabular}{@{}lccccccc@{}}
+  \begin{tabular}{@{}lcccccccc@{}}
     \toprule
-    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.1$ & $\alpha{=}0.2$ & $\alpha{=}0.5$ & $\alpha{=}1$ & AT ($\alpha{=}0$) \\
+    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.1$ & $\alpha{=}0.2$ & $\alpha{=}0.5$ & $\alpha{=}1$ & AT ($\alpha{=}0$) & AT ($\alpha{=}0.01$) \\
     \midrule
-    Rob. & $+0.289 \pm 0.006$ & $+0.260 \pm 0.009$ & $+0.373 \pm 0.022$ & $+0.340 \pm 0.040$ & $+0.321 \pm 0.014$ & $+0.256 \pm 0.007$ & $+0.016 \pm 0.001$ \\
-    Purif.\ (lk.) & $+0.042 \pm 0.003$ & $+0.060 \pm 0.004$ & $+0.085 \pm 0.004$ & $+0.079 \pm 0.006$ & $+0.075 \pm 0.002$ & $+0.061 \pm 0.001$ & $+0.011 \pm 0.001$ \\
-    Det.\ rate ($q{=}10\%$) & $-0.432 \pm 0.017$ & $-0.072 \pm 0.007$ & $-0.056 \pm 0.003$ & $-0.054 \pm 0.007$ & $-0.047 \pm 0.007$ & $-0.063 \pm 0.004$ & $-0.115 \pm 0.006$ \\
-    Accept.\ err ($q{=}10\%$) & $-0.191 \pm 0.013$ & $-0.235 \pm 0.008$ & $-0.361 \pm 0.021$ & $-0.327 \pm 0.042$ & $-0.307 \pm 0.015$ & $-0.236 \pm 0.008$ & $-0.015 \pm 0.001$ \\
+    Rob. & $+0.661 \pm 0.012$ & $+0.637 \pm 0.016$ & $+0.624 \pm 0.025$ & $+0.564 \pm 0.048$ & $+0.508 \pm 0.019$ & $+0.399 \pm 0.009$ & $+0.040 \pm 0.002$ & $+0.068 \pm 0.001$ \\
+    Purif.\ (lk.) & $+0.177 \pm 0.006$ & $+0.147 \pm 0.009$ & $+0.181 \pm 0.005$ & $+0.171 \pm 0.006$ & $+0.159 \pm 0.002$ & $+0.138 \pm 0.005$ & $+0.033 \pm 0.001$ & $+0.064 \pm 0.003$ \\
+    Det.\ rate ($q{=}10\%$) & $-0.593 \pm 0.055$ & $-0.184 \pm 0.008$ & $-0.138 \pm 0.019$ & $-0.133 \pm 0.018$ & $-0.112 \pm 0.018$ & $-0.151 \pm 0.008$ & $-0.147 \pm 0.009$ & $-0.099 \pm 0.011$ \\
+    Accept.\ err ($q{=}10\%$) & $-0.658 \pm 0.012$ & $-0.608 \pm 0.021$ & $-0.608 \pm 0.026$ & $-0.542 \pm 0.053$ & $-0.485 \pm 0.021$ & $-0.363 \pm 0.008$ & $-0.038 \pm 0.003$ & $-0.072 \pm 0.003$ \\
     \bottomrule
   \end{tabular}
   \caption{Joint (detector-aware) minus standard attack at $\varepsilon=0.1$, $q{=}10\%$. Negative $\Rightarrow$ the joint attack is stronger. MNIST $12\times12$, Legendre $d{=}3$, $r{=}40$, 5 seeds (mean $\pm$ 1 std). Gibbs uses an $n_{\mathrm{eval}}=250$ subsample; all other columns use the full test split.}
