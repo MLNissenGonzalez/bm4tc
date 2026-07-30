@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{@{}lcccccccc@{}}
+    \toprule
+    Metric & $\alpha{=}0$ & $\alpha{=}0.01$ & $\alpha{=}0.1$ & $\alpha{=}0.2$ & $\alpha{=}0.5$ & $\alpha{=}1$ & AT ($\alpha{=}0$) & AT ($\alpha{=}0.01$) \\
+    \midrule
+    Rob. & $+0.421 \pm 0.006$ & $+0.872 \pm 0.005$ & $+0.681 \pm 0.007$ & $+0.599 \pm 0.052$ & $+0.571 \pm 0.016$ & $+0.385 \pm 0.009$ & $+0.079 \pm 0.003$ & $+0.116 \pm 0.002$ \\
+    Purif.\ (lk.) & $+0.242 \pm 0.011$ & $+0.234 \pm 0.003$ & $+0.228 \pm 0.005$ & $+0.212 \pm 0.003$ & $+0.203 \pm 0.006$ & $+0.160 \pm 0.004$ & $+0.066 \pm 0.002$ & $+0.109 \pm 0.002$ \\
+    Det.\ rate ($q{=}10\%$) & $-0.441 \pm 0.082$ & $-0.264 \pm 0.012$ & $-0.204 \pm 0.013$ & $-0.192 \pm 0.023$ & $-0.150 \pm 0.014$ & $-0.176 \pm 0.005$ & $-0.193 \pm 0.020$ & $-0.136 \pm 0.020$ \\
+    Accept.\ err ($q{=}10\%$) & $-0.421 \pm 0.006$ & $-0.868 \pm 0.005$ & $-0.659 \pm 0.010$ & $-0.578 \pm 0.056$ & $-0.541 \pm 0.017$ & $-0.357 \pm 0.010$ & $-0.078 \pm 0.004$ & $-0.116 \pm 0.002$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Joint (detector-aware) minus standard attack at $\varepsilon=0.3$, $q{=}10\%$. Negative $\Rightarrow$ the joint attack is stronger. MNIST $12\times12$, Legendre $d{=}3$, $r{=}20$, 5 seeds (mean $\pm$ 1 std). Gibbs uses an $n_{\mathrm{eval}}=250$ subsample; all other columns use the full test split.}
+  \label{tab:mnist_r12_joint_r20_eps0.3}
+\end{table}

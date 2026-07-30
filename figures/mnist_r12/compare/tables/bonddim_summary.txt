@@ -1,5 +1,5 @@
-MNIST 12x12 — summary at eps=0.1 (lk. radius 0.1, Gibbs k=6 on n_eval=250); * = best
-r    Model       Clean               Rob.                Purif. (lk., r=0.1) Purif. (Gibbs, k=6) Acc. passed (q=10%) 
+MNIST 12x12 — summary at eps=0.2 (lk. radius 0.2, Gibbs k=6 on n_eval=250); * = best
+r    Model       Clean               Rob.                Purif. (lk., r=0.2) Purif. (Gibbs, k=6) Acc. passed (q=10%) 
 ---------------------------------------------------------------------------------------------------------------------
 10   a=0         0.973±0.001         0.009±0.005         0.449±0.020         0.548±0.025         0.011±0.005         
      a=0.01      0.948±0.003         0.401±0.013         0.801±0.005         0.762±0.014         0.420±0.009         

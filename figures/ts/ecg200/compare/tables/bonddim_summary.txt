@@ -1,5 +1,5 @@
-ecg200 — summary at eps=0.1 (lk. radius 0.15), 10 seeds; * = best
-r    Model       Clean               Rob.                Purif. (lk., r=0.15)Acc. passed (q=10%) 
+ecg200 — summary at eps=0.2 (lk. radius 0.3), 10 seeds; * = best
+r    Model       Clean               Rob.                Purif. (lk., r=0.3) Acc. passed (q=10%) 
 -------------------------------------------------------------------------------------------------
 10   a=0         0.792±0.033         0.108±0.085         0.374±0.090         0.131±0.128         
      a=0.01      0.808±0.017         0.370±0.086         0.680±0.059         0.431±0.124         
