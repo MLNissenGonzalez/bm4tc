@@ -16,6 +16,14 @@ This script rewrites the headers of already-written CSVs in place:
 and appends the two provenance columns new runs already write: `range_size` and
 `eps_unit="rel"`.
 
+It also renames retired-vocabulary columns whose *value* semantics never changed:
+
+    gibbs_step_radius  ->  gibbs_step_delta_rel
+
+That pass runs on every file, including ones already carrying `eps_unit` — the budget
+migration and the vocabulary rename shipped separately, so a file can need one and not
+the other.
+
 The `range_size` is derived from the embedding in each file's path. Files whose
 embedding cannot be resolved are REPORTED AND SKIPPED, never guessed.
 
@@ -73,6 +81,12 @@ _PATTERNS: List[Tuple[re.Pattern, List[int]]] = [
     (re.compile(rf"^((?:eval/(?:test|valid)/)?(?:uq|uq_joint)_clean_purify_acc)/({_NUM})$"), [2]),
 ]
 
+# Plain column renames: retired vocabulary, identical value semantics. `step_radius`
+# was ALREADY a fraction of the input range when it was written (c769ecb renamed the
+# knob `step_radius: 0.1` -> `step_delta_rel: 0.1` without touching the number), so
+# this is a header rewrite only -- never scale these values.
+VOCAB_RENAMES = {"gibbs_step_radius": "gibbs_step_delta_rel"}
+
 # `gibbs_clean_purify_acc/{k}` and `gibbs_clean_log_px_mean/{k}` are keyed by sweep
 # count only — no budget to convert. Matched here so they are explicitly left alone
 # rather than silently falling through the single-budget patterns above.
@@ -112,7 +126,18 @@ def migrate_file(path: Path, apply: bool) -> Dict[str, object]:
     rel = path.relative_to(PROJECT_ROOT) if path.is_absolute() else path
 
     df = pd.read_csv(path)
+
+    vocab = {c: VOCAB_RENAMES[c] for c in df.columns if c in VOCAB_RENAMES}
+    clash = [v for v in vocab.values() if v in df.columns]
+    if clash:
+        return {"path": rel, "status": f"collision:{clash[0]}", "renames": vocab}
+
     if "eps_unit" in df.columns:
+        # Budget keys are already relative, but the vocabulary rename may still be due.
+        if vocab:
+            if apply:
+                df.rename(columns=vocab).to_csv(path, index=False)
+            return {"path": rel, "status": "vocab-renamed", "renames": vocab}
         return {"path": rel, "status": "already-relative", "renames": {}}
 
     embedding = resolve_embedding_from_path(str(path))
@@ -129,6 +154,8 @@ def migrate_file(path: Path, apply: bool) -> Dict[str, object]:
     collisions = [v for v in renames.values() if v in df.columns and v not in renames]
     if collisions:
         return {"path": rel, "status": f"collision:{collisions[0]}", "renames": renames}
+
+    renames.update(vocab)
 
     if apply:
         df = df.rename(columns=renames)
@@ -185,6 +212,10 @@ def main() -> None:
             if args.verbose:
                 for old, new in res["renames"].items():
                     print(f"        {old}  ->  {new}")
+        elif status == "vocab-renamed":
+            print(f"  {res['path']}")
+            print(f"      vocabulary only, {len(res['renames'])} columns: "
+                  + ", ".join(f"{o} -> {n}" for o, n in res["renames"].items()))
 
     print("\n" + "=" * 64)
     for status, n in sorted(counts.items()):
