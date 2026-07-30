@@ -319,10 +319,10 @@ The inner `eval/...` suffix follows exactly the same schema as Type 1 (acc, clsl
 cls/eval/test/acc
 cls/eval/test/clsloss
 cls/eval/test/genloss
-cls/eval/test/rob/0.2          # eps = 0.1 × range_size (legendre)
+cls/eval/test/rob/0.1          # eps_rel = 0.1 → abs 0.2 on legendre
 cls/eval/uq_clean_accuracy
-cls/eval/uq_adv_acc/0.2
-cls/eval/uq_purify_acc/0.2/0.2
+cls/eval/uq_adv_acc/0.1
+cls/eval/uq_purify_acc/0.1/0.1 # eps_rel / delta_rel
 gen/eval/test/acc
 gen/eval/test/clsloss
 ...
