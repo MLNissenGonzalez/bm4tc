@@ -195,12 +195,14 @@ The likelihood-aware adaptive attack also uses the MPS-compatible
 - `sgld_purify_acc/{eps}/{k}` and purification recovery rates
 - `sgld_joint_purify_acc/{eps}/{k}`
 
-Attack epsilons are absolute in `[-1,1]`; every purification method uses the
-fixed absolute local radius `delta=0.2`. This matches the MPS Gibbs setting
-`0.1 * input_range_size`. One SGLD sweep runs 20
+Attack epsilons are absolute in `[-1,1]` — JEM has no embedding, so its budgets are
+absolute by design and are *not* migrated to the relative convention. Every
+purification method uses the fixed absolute local radius `delta=0.2`, which matches
+the MPS Gibbs setting `step_delta_rel = 0.1` once converted
+(`0.1 * input_range_size = 0.2`). One SGLD sweep runs 20
 transitions inside the local L-infinity ball around its starting state; the
 next sweep is recentered on the previous output. The analysis records the same
-snapshots as MPS, `k=1,3,5`, under `Purif. (samp., k=...)`. Purification fixes
+snapshots as MPS, `k=1,3,6`, under `Purif. (samp., k=...)`. Purification fixes
 `step_size=0.01` and `noise_std=0.005` across every model instead of inheriting
 the model-specific training-SGLD hyperparameters.
 

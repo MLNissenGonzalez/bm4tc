@@ -38,15 +38,21 @@ self.input_range = bornmachine.input_range   # from get.range_from_embedding(cfg
 self.scaler = MinMaxScaler(feature_range=self.input_range, clip=True)
 ```
 
-**Attack epsilons must be expressed in these units.** A perturbation of epsilon=0.1 L∞ means each feature can shift by at most 0.1 in the rescaled space. For Fourier that is 10% of the range; for Hermite the same 0.1 is only 1.25% of the range — 8× weaker in relative terms.
+**Attack budgets are authored relative, never in these units.** An *absolute* L∞ epsilon of
+0.1 means something different on every embedding — 10% of the range on Fourier, but only
+1.25% on Hermite, 8× weaker. That is exactly why budgets are authored as fractions of the
+range instead, so `eps_rel = 0.1` is the same 10% everywhere. Absolute values are derived
+downstream, at one boundary per entry point. See "Budget vocabulary" in `CLAUDE.md`.
 
-`sweep.py` therefore uses **range-relative fractions** multiplied by `_RANGE_SIZE` (from `analysis/utils/resolve.py`):
+`sweep.py` therefore authors relative and converts with `_RANGE_SIZE` (from
+`analysis/utils/resolve.py`) only at the library leaves:
 
 ```python
-_STRENGTH_FRACTIONS = [0.05, 0.10, 0.2, 0.5, 0.8]
-strengths = [f * _RANGE_SIZE for f in _STRENGTH_FRACTIONS]
-# fourier:  [0.05, 0.10, 0.20, 0.50, 0.80]
-# hermite:  [0.40, 0.80, 1.60, 4.00, 6.40]
+EPS_REL = [0.05, 0.1, 0.15]
+# derived per embedding, downstream — never authored:
+# fourier  (1.0): abs [0.05, 0.10, 0.15]
+# legendre (2.0): abs [0.10, 0.20, 0.30]
+# hermite  (8.0): abs [0.40, 0.80, 1.20]
 ```
 
 ---
@@ -138,7 +144,7 @@ Note: gradient **descent** on NLL = ascent on log p(x). The final clamp ensures 
 
 > ✅ **Overflow-safe (was a known bug)**: the grid Gibbs sampler in `purification.py` computes its per-bin weights in log space — `logsumexp(log_amp_sq(x_cand))`, sampled by `draw_from_grid_log`. Previously it used raw `abs_square(amplitudes(x_cand))` → `draw_from_grid`, which overflowed to `inf` on overflow-prone models; `draw_from_grid` mapped `posinf → 0`, silently zeroing the highest-probability bins so sampling ran *backwards*. Like the gradient-ascent path (which uses `marginal_log_probability`), it is now always overflow-safe.
 
-> 🔎 **Local candidate grid**: when a `step_radius` is set, the restricted sweep discretizes *each sample's own* window `[x̄_k ± δ] ∩ input_range` with all `num_bins` points, instead of masking a global `linspace(lo, hi, num_bins)` down to it. At `step_radius = 0.1` the local radius is 10% of the domain width (absolute 0.2 on `[-1,1]`). The local grid gives full resolution inside that window. Trade-off: the proposal support moves each sweep, so this is a local Metropolis-within-Gibbs-style move rather than exact Gibbs on one fixed discretization — `step_radius=None` remains the fixed-grid path.
+> 🔎 **Local candidate grid**: when a `step_delta_rel` is set, the restricted sweep discretizes *each sample's own* window `[x̄_k ± δ] ∩ input_range` with all `num_bins` points, instead of masking a global `linspace(lo, hi, num_bins)` down to it. At `step_delta_rel = 0.1` the per-sweep move is 10% of the domain width (absolute 0.2 on `[-1,1]`). The local grid gives full resolution inside that window. Trade-off: the proposal support moves each sweep, so this is a local Metropolis-within-Gibbs-style move rather than exact Gibbs on one fixed discretization — `step_delta_rel=None` remains the fixed-grid path.
 
 Reported metrics:
 - `eval/uq_purify_acc/<eps>/<r>` — accuracy on purified samples
@@ -148,10 +154,10 @@ Reported metrics:
 
 ### Gibbs purification — no r to choose
 
-The Gibbs defense has no such knob, which is the point of it. `step_radius` is a *per-sweep*
-L∞ move (default 0.05 of the domain in `analysis/gibbs.py`), and the window re-centres at the
-start of every sweep, so after `k` sweeps a coordinate can have travelled up to
-`k × step_radius × range_size`. Strength is set by `n_sweeps` alone — no ε needs to be known
+The Gibbs defense has no such knob, which is the point of it. `step_delta_rel` is a *per-sweep*
+L∞ move (default 0.1 of the domain in `analysis/gibbs.py`, i.e. abs 0.2 on legendre), and the
+window re-centres at the start of every sweep, so after `k` sweeps a coordinate can have
+travelled up to `k × step_delta_rel × range_size`. Strength is set by `n_sweeps` alone — no ε needs to be known
 or guessed. Reported as `gibbs_purify_acc/<eps>/<k>`, keyed by sweep count, not radius. Run it
 with `analysis/gibbs.py` (see `analysis/GUIDE.md`); `sweep.py` can also produce these columns
 via `COMPUTE_GIBBS_PURIFICATION`, but it is expensive enough to usually want its own run.

@@ -78,23 +78,25 @@ python analysis/sweep.py outputs/seed_sweep/gen/fourier/d4r3/moons_2102 --no-viz
 
 Open `sweep.py` and edit the configuration block. The most important options:
 
-#### Attack strengths — range-relative convention
+#### Attack budgets — relative convention
 
-The attack epsilon is expressed as a **fraction of the embedding's input range**, then multiplied by `_RANGE_SIZE` (auto-detected from the sweep path):
+The attack epsilon is authored as a **fraction of the embedding's input range** and stays
+that way; conversion to absolute happens per model, downstream. See "Budget vocabulary" in
+`CLAUDE.md`.
 
 ```python
-_STRENGTH_FRACTIONS = [0.05, 0.10, 0.15]
-# _RANGE_SIZE is auto-detected:
-#   fourier    → 1.0   (range  0 to 1)
-#   legendre   → 2.0   (range -1 to 1)
-#   hermite    → 8.0   (range -4 to 4)
+EPS_REL = [0.05, 0.1, 0.15]
+# _RANGE_SIZE is auto-detected from the sweep path and used only downstream:
+#   fourier    → 1.0   (range  0 to 1)   0.05/0.1/0.15 → abs 0.05/0.1/0.15
+#   legendre   → 2.0   (range -1 to 1)   0.05/0.1/0.15 → abs 0.1/0.2/0.3
+#   hermite    → 8.0   (range -4 to 4)   0.05/0.1/0.15 → abs 0.4/0.8/1.2
 #   chebychev1 → 1.98  (range -0.99 to 0.99)
 #   chebychev2 → 2.0   (range -1 to 1)
 EVASION_CONFIG = {
     "method": "PGD",
     "norm": "inf",
     "num_steps": 40,
-    "strengths": [s * _RANGE_SIZE for s in _STRENGTH_FRACTIONS],
+    "eps_rel": EPS_REL,
 }
 ```
 
@@ -116,10 +118,12 @@ Turn off `COMPUTE_MIA` and `COMPUTE_UQ` for fast robustness-only runs.
 
 ```python
 UQ_CONFIG = {
-    "radii": [0.10 * _RANGE_SIZE],
+    # Purification radius, relative: 0.10 → abs 0.2 on legendre, abs 0.1 on fourier.
+    "delta_rel": [0.10],
     "percentiles": [1, 5, 10, 20],
+    "eval_batch_size": 256,
 }
-MIA_ADV_STRENGTH = 0.10 * _RANGE_SIZE   # set None to skip adversarial MIA
+MIA_ADV_EPS_REL = 0.10   # relative (abs 0.2 on legendre); None skips adversarial MIA
 ```
 
 ### Output files
@@ -213,16 +217,17 @@ The resolved count is printed up front with a projected contraction count, writt
 CSV row as `gibbs_n_samples`, and echoed in the summary header — a subsampled table can never
 be silently misread as a full-test-set one.
 
-Other overrides: `--sweeps`, `--step-radius`, `--num-bins`, `--batch-size`, `--strengths`
-(fractions), `--device`, `--limit-runs`, `--n-eval-seed`.
+Other overrides: `--sweeps`, `--step-delta-rel`, `--num-bins`, `--batch-size`, `--eps-rel`
+(relative), `--device`, `--limit-runs`, `--n-eval-seed`.
 
-### Attack-radius agnostic — read the `k`, not a radius
+### Attack-budget agnostic — read the `k`, not a radius
 
-`step_radius` (default 0.1 of the feature domain) is a **per-sweep** L∞ move, not a global
-budget: the restriction window re-centres at the start of every sweep, so after `k` sweeps a
-coordinate can have travelled up to `k × step_radius × range_size`. Purification strength is
-therefore controlled by `--sweeps` alone, and the defense never has to be told the attacker's
-epsilon. Keep `step_radius` small and vary `k`.
+`step_delta_rel` (default 0.1 of the feature domain, i.e. abs 0.2 on legendre) is a
+**per-sweep** L∞ move, not a global budget: the restriction window re-centres at the start of
+every sweep, so after `k` sweeps a coordinate can have travelled up to
+`k × step_delta_rel × range_size`. Purification strength is therefore controlled by `--sweeps`
+alone, and the defense never has to be told the attacker's epsilon. Keep `step_delta_rel`
+small and vary `k`.
 
 ### Output files
 
