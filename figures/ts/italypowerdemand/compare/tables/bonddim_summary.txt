@@ -1,5 +1,5 @@
-italypowerdemand — summary at eps=0.1 (lk. radius 0.15), 10 seeds; * = best
-r    Model       Clean               Rob.                Purif. (lk., r=0.15)Acc. passed (q=10%) 
+italypowerdemand — summary at eps=0.2 (lk. radius 0.3), 10 seeds; * = best
+r    Model       Clean               Rob.                Purif. (lk., r=0.3) Acc. passed (q=10%) 
 -------------------------------------------------------------------------------------------------
 10   a=0         0.953±0.003*        0.531±0.049*        0.580±0.063         0.573±0.050         
      a=0.01      0.943±0.009         0.527±0.068         0.607±0.052         0.576±0.070*        
