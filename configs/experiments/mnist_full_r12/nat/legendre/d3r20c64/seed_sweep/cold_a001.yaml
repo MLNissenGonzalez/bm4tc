@@ -1,0 +1,105 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start (NOT pretrained) seed sweep, alpha=0.01, for mnist_full_r12 at
+# legendre/d3r20c64. Part of the cold r20 alpha ladder
+# cold_a{0001,001,01,05,1} (a0 already exists cold as a0_2406).
+#
+# WHY COLD: the warm-start alpha>0 sweeps fine-tune from the a0 checkpoint, so
+# accuracy starts high and decays, and fill_hpo selects on mixed_loss/valid --
+# accuracy never enters selection. Cold start removes that asymmetry. See the
+# cold-vs-warm study (figures/coldvswarm/, commit 6cb04bc).
+#
+# lr/soft_strength ARE NOT FROM AN HPO AT THIS BOND DIM. No cold HPO was run at
+# r20 on MNIST; both are extrapolated from the r60/r100 cold HPO knees, selected
+# on the acc/gen_loss trade-off rather than on mixed_loss alone. Basis for this
+# alpha:
+#   STRONGEST VALUE IN THE LADDER: the r60 cold HPO knee, taken verbatim and
+#   already reproduced over 5 seeds at r60 (seed_sweep/cold_a001_1407: acc
+#   0.932-0.948, mean 0.939, sd 0.006, at gen -174..-180). That matches the
+#   WARM r40 a001 accuracy (0.940) with a density that is actually trained.
+#   soft_strength is the knee's own value; r100's knee chose 9.5e-4 instead,
+#   three decades away, so ss is unidentified and only lr is really being set.
+#
+# Measured MNIST cold knees the ladder is built from (valid acc @ gen_loss at each
+# run's selected epoch): a=0.01 r60 lr 4.54e-5 -> 0.949 @ -178, r100 lr 3.22e-5 ->
+# 0.943 @ -182; a=0.1 r60 lr 1.71e-4 -> 0.846 @ -190, r100 lr 3.63e-4 -> 0.860 @
+# -185; a=1 r40 lr 1e-3 ss 0.1 -> 0.773 @ -195. lr rises ~20x from a=0.01 to a=1
+# while bond dim moves it <2x, hence one lr per alpha and transfer across arch.
+# The TS cold ladders were deliberately NOT used: alpha's effective weight scales
+# with feature count (144 here vs 24 on italypowerdemand), so their knees trend
+# the opposite way and do not transfer.
+#
+# log_target=0.0 (not the flat-prior expression used by hpo/cold.yaml) to match the
+# r40 cold family. How much this choice matters depends entirely on ss, since the
+# penalty starts at ss*(logZ_init - 0)^2 and logZ_init ~= 78.9 at this cold init
+# (measured), i.e. ss*6230 against |nll| ~= 70 at epoch 1:
+#   ss 7.8e-7 (a001)          -> penalty ~0.005, genuinely inert
+#   ss 1e-3   (a0001/a01/a05) -> penalty ~6.3, about 9% of |nll|, small but real
+#   ss 0.1    (a1)            -> penalty ~628, DOMINATES the loss ~9x early on
+# So at alpha=1 the first epochs are spent pulling logZ from ~79 down toward 0
+# rather than fitting density. That is the regime the r40 pair was measured in and
+# it still reached 0.773, so it is expected behaviour here -- but it is the reason
+# alpha=1 must keep log_target=0.0 rather than inherit the flat-prior target.
+#
+# accumulate=true is LOAD-BEARING, not decoration: every accumulate=false run at
+# lr >= 1e-4 in the r40 cold grid produced no usable metrics at all (5 of 16 died).
+# It is already set in the born config; restated here so it is not lost in a copy.
+#
+# max_epoch=150 (vs 100 for the r40 cold runs): three of five r40 seeds selected at
+# epoch 83-96, pressed against the 100 ceiling. patience=50 means the headroom is
+# free if the runs converge earlier.
+#
+# batch_size=256 matches the r40/r60 cold family the HPs come from, NOT the warm r20
+# sweeps (bs 512). Deliberate: it keeps the lr transfer valid at the cost of adding
+# batch size to the cold-vs-warm differences at this bond dim.
+#
+# Selection is stop_crit=mixed_loss, as everywhere else in the paper. Note this is
+# the honest "at low generative loss, what accuracy do you get" reading and it is
+# NOT the peak accuracy: at alpha=1 on r40, selected acc spread 0.717-0.778 over 5
+# seeds while peak acc was 0.782 +/- 0.002. All of that spread is the selection rule.
+#
+# Runnable as-is (born and all HPs are baked in; no model_path = cold):
+#   python -m experiments.train --multirun \
+#       +experiments=mnist_full_r12/nat/legendre/d3r20c64/seed_sweep/cold_a001
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a001
+descriptor: nll_cold
+
+defaults:
+  - override /born: legendre/d3r20c64
+  - override /dataset: mnist/mnist_full_r12
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+# No model_path: cold start from the born config's randn_eye init.
+
+tracking:
+  seed: 42
+
+born:
+  accumulate: true          # overflow-safe amplitudes; mandatory here (see header)
+
+trainer:
+  nll:
+    alpha: 0.01
+    max_epoch: 150
+    batch_size: 256
+    patience: 50
+    stop_crit: "mixed_loss"
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 7.801786329523621e-07
+      log_target: 0.0       # fixed target; no capture (cold start)
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 4.541389925912718e-05
+        weight_decay: 0.0
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
