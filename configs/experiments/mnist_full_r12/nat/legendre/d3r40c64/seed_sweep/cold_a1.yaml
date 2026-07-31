@@ -2,13 +2,13 @@
 # ---------------------------------------------------------------------------
 # Cold-start alpha=1 seed sweep (5 seeds) for mnist_full_r12 at legendre/d3r40c64.
 #
-# Counterpart to seed_sweep/a1.yaml, which warm-starts from the a0 checkpoint and
+# Counterpart to seed_sweep/warm_a1.yaml, which warm-starts from the a0 checkpoint and
 # reaches ~0.64 test accuracy. A single cold-start run from the accumulate grid
 # study (grid_sweep_accumulate_a1, lr=1e-3, soft_strength=0.1) reached ~0.78 valid
 # accuracy instead. This config pins that grid point and repeats it over 5 seeds to
 # check whether the gap is reproducible or a one-run fluke.
 #
-# Differences from seed_sweep/a1.yaml, all deliberate (they are the hypothesis):
+# Differences from seed_sweep/warm_a1.yaml, all deliberate (they are the hypothesis):
 #   no model_path  cold start, vs warm start from a0_2506/0
 #   lr 1e-3        vs 1.5e-4, which the alpha=1 HPO picked by minimizing
 #                  mixed_loss/valid (= gen_loss at alpha=1), i.e. never for accuracy
@@ -18,14 +18,14 @@
 #
 # stop_crit is gen_loss, which at alpha=1 is identically mixed_loss
 # (mixed_loss = alpha*gen_loss + (1-alpha)*dis_loss), so selection matches
-# seed_sweep/a1.yaml exactly and is not part of the comparison.
+# seed_sweep/warm_a1.yaml exactly and is not part of the comparison.
 #
 # Runnable as-is:
 #   python -m experiments.train --multirun \
-#       +experiments=mnist_full_r12/nat/legendre/d3r40c64/seed_sweep/a1_cold
+#       +experiments=mnist_full_r12/nat/legendre/d3r40c64/seed_sweep/cold_a1
 # ---------------------------------------------------------------------------
 stage: seed_sweep
-experiment: a1_cold
+experiment: cold_a1
 descriptor: nll_cold
 
 defaults:

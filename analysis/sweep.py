@@ -186,6 +186,14 @@ CONFIG_KEYS = [
     # Alpha lives under the active trainer; the inactive one selects to None.
     "trainer.nll.alpha",
     "trainer.adversarial.alpha",
+    # Warm/cold start. `descriptor` is the discriminator: nll_pretrained (NAT alpha>0
+    # fine-tuned from the alpha=0 checkpoint) | nll_cold (from scratch) | nll (alpha=0,
+    # from scratch — the base both ladders share) | at_pretrained (AT; a different axis,
+    # AT always warm-starts from a NAT checkpoint). `model_path` is the evidence: which
+    # checkpoint a warm run started from. Do NOT use model_path alone to tell warm from
+    # cold — every AT config sets it too.
+    "descriptor",
+    "model_path",
 ]
 
 # --- CLI overrides (applied after config block so they take effect) ---

@@ -1,37 +1,37 @@
 # @package _global_
 stage: seed_sweep
-experiment: a1
+experiment: warm_a05
 descriptor: nll_pretrained
 
 defaults:
-  - override /born: legendre/d3r10c64
+  - override /born: legendre/d3r100c64
   - override /dataset: mnist/mnist_full_r12
   - override /trainer/adversarial: null
   - override /tracking: online
 
 # Warm start: fill in path to best norm-controlled a0 seed-sweep run before launching
-model_path: outputs/mnist_full_r12/nat/legendre/d3r10c64/seed_sweep/a0_2406/4/models/model
+model_path: outputs/mnist_full_r12/nat/legendre/d3r100c64/seed_sweep/a0_2506/0/models/model
 
 tracking:
   seed: 42
 
 trainer:
   nll:
-    alpha: 1.0
+    alpha: 0.5
     max_epoch: 100
-    batch_size: 512
+    batch_size: 128
     patience: 50
     stop_crit: "mixed_loss"
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: 0.06155564318973025   # FILL FROM HPO (hpo/pretrained_a1)
+      soft_strength: 0.001   # FILL FROM HPO (hpo/pretrained_a05)
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: 9.45430681953618e-05            # FILL FROM HPO (hpo/pretrained_a1)
+        lr: 0.0006            # FILL FROM HPO (hpo/pretrained_a05)
         weight_decay: 0.0
 
 hydra:
