@@ -162,8 +162,9 @@ def _stats_fixture(**overrides):
         "paths": {"a001": "outputs/x/nat/a001", "at": "outputs/x/at/seed_sweep"},
         "run_dirs": {"a001": "outputs/x/nat/a001/0", "at": "outputs/x/at/seed_sweep/2"},
         "attack_source": "at",
-        "eps": 0.3, "abs_eps": 0.6, "attack_num_steps": 40,
-        "radius": 0.3, "abs_radius": 0.6, "purify_num_steps": 20,
+        # Relative budgets with their legendre (width 2.0) absolute counterparts.
+        "eps_rel": 0.3, "abs_eps": 0.6, "attack_num_steps": 40,
+        "delta_rel": 0.3, "abs_delta": 0.6, "purify_num_steps": 20,
         "lo": -1.0, "hi": 1.0, "seed": 0, "device": "cpu", "eval_batch_size": 128,
         "n_attacked": 500,
         "n_eligible": 40,

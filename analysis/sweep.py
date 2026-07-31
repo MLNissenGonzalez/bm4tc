@@ -183,7 +183,9 @@ CONFIG_KEYS = [
     "dataset.name",
     "tracking.seed",
     "dataset.gen_dow_kwargs.seed",
-    "trainer.generative.criterion.kwargs.alpha",
+    # Alpha lives under the active trainer; the inactive one selects to None.
+    "trainer.nll.alpha",
+    "trainer.adversarial.alpha",
 ]
 
 # --- CLI overrides (applied after config block so they take effect) ---
@@ -364,6 +366,11 @@ print(f"Output directory: {output_dir}")
 # Resolve metric columns (test set only — all evaluation is on test).
 ACC_COL = "acc" if COMPUTE_ACC else None
 ROB_COLS = [c for c in df.columns if c.startswith("rob/")] if COMPUTE_ROB and not df.empty else []
+# Data-only upper bound on robust accuracy (two-class datasets only; see
+# src/analysis/margin.py). Reported as a reference row, never as a model metric.
+ROB_CEILING_COLS = (
+    [c for c in df.columns if c.startswith("rob_ceiling/")] if not df.empty else []
+)
 DIS_LOSS_COL = "dis_loss" if COMPUTE_DIS_LOSS else None
 
 # MIA is split-agnostic (always uses train vs test internally)
@@ -772,13 +779,19 @@ if not df.empty:
     for _r in _purify_radii:
         _clean_pur = _smean(f"uq_clean_purify_acc/{_r}")
         _purify = [_clean_pur] + [_smean(f"uq_purify_acc/{_eps_key[_e]}/{_r}") for _e in _all_eps[1:]]
-        _table_rows.append((f"Purify (r={_r})", _purify))
+        _table_rows.append((f"Purify (delta_rel={_r})", _purify))
 
     # Row(s) 4: Gibbs purification (one row per n_sweeps)
     for _n in _gibbs_ns:
         _clean_gibbs = _smean(f"gibbs_clean_purify_acc/{_n}")
         _gibbs = [_clean_gibbs] + [_smean(f"gibbs_purify_acc/{_eps_key[_e]}/{_n}") for _e in _all_eps[1:]]
         _table_rows.append((f"Gibbs (k={_n})", _gibbs))
+
+    # Reference row: data-only ceiling. Not a model result — no classifier, however
+    # trained, can exceed it, so any row above it means the attack under-searched.
+    if ROB_CEILING_COLS:
+        _ceiling = [1.0] + [_smean(f"rob_ceiling/{_eps_key[_e]}") for _e in _all_eps[1:]]
+        _table_rows.append(("Ceiling (any clf)", _ceiling))
 
     # Column widths
     _label_w = max((len(r[0]) for r in _table_rows), default=12) + 2
@@ -790,6 +803,12 @@ if not df.empty:
         f.write(f"Seed Sweep: {sweep_name}\n")
         f.write("=" * 60 + "\n\n")
         f.write(f"Regime: {REGIME}  |  Runs: {len(df)}  |  Device: {DEVICE}\n")
+        # State the budget convention: a summary must be readable without the CSV
+        # beside it, which carries the same fact as `range_size` + `eps_unit`.
+        f.write(
+            f"Budgets: RELATIVE (fraction of the input domain width).  "
+            f"range_size = {_RANGE_SIZE:g}  =>  abs = rel * {_RANGE_SIZE:g}\n"
+        )
         if EVASION_CONFIG:
             _norm = EVASION_CONFIG.get("norm", "?")
             _steps = EVASION_CONFIG.get("num_steps", "?")
@@ -813,7 +832,7 @@ if not df.empty:
             _det_eps = _nonzero[1] if len(_nonzero) >= 2 else _nonzero[0]
             _det_eps_s = _eps_key[_det_eps]
             f.write("-" * 60 + "\n")
-            f.write(f"Detection Rates at eps={_det_eps_s} (mean / std)\n")
+            f.write(f"Detection Rates at eps_rel={_det_eps_s} (mean / std)\n")
             f.write("-" * 60 + "\n\n")
             _pct_hdr = " " * 6 + "".join(f"τ={p}%".rjust(_col_w) for p in _det_pcts)
             f.write(_pct_hdr + "\n")
@@ -844,7 +863,7 @@ if not df.empty:
                     _smean(f"uq_joint_detection/{_min_pct}pct/{_joint_eps_keys[_e]}") for _e in _joint_all_eps
                 ]))
             for _r in _joint_purify_radii:
-                _joint_rows.append((f"Purify (r={_r})", [
+                _joint_rows.append((f"Purify (delta_rel={_r})", [
                     _smean(f"uq_joint_purify_acc/{_joint_eps_keys[_e]}/{_r}") for _e in _joint_all_eps
                 ]))
             for _n in _gibbs_joint_ns:

@@ -4,12 +4,12 @@ One qualitative figure: rows are digit classes, columns are
 ``original | adversarial | purified <model 1> | purified <model 2> | purified <model 3>``.
 
 1. Craft adversarial examples against the ATTACK SOURCE model (the adversarially-trained
-   one) with a standard discriminative PGD attack at absolute strength ``EPS``.
+   one) with a standard discriminative PGD attack at relative budget ``EPS_REL``.
 2. Keep only examples on which the attack **transfers to every model**: all models classify
    the clean input correctly and all misclassify the adversarial one. Every purification
    column therefore starts from an identical, genuinely adversarial input.
 3. Purify each transferring example with **each** model independently (likelihood
-   purification within radius ``RADIUS``) and classify the purified input with the same
+   purification within relative radius ``DELTA_REL``) and classify the purified input with the same
    model (self-purify, self-classify).
 4. Emit a ``len(classes) x (2 + n_models)`` grid figure plus a plain-text statistics file
    holding the transferability and purification-success numbers over the whole eligible
@@ -45,6 +45,7 @@ from analysis.utils import find_model_checkpoint, get_best_run, load_run_config
 from src.analysis.purification import LikelihoodPurification
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
+from src.utils.embeddings import range_size_of, rel_to_abs
 from src.utils.evasion import ProjectedGradientDescent
 
 logging.basicConfig(level=logging.INFO)
@@ -69,8 +70,10 @@ MODELS: List[Tuple[str, str, str]] = [
 ATTACK_SOURCE_KEY = "at"   # attack is crafted white-box on this model
 DISPLAY_CLASSES = [0, 3, 5, 9]  # one figure row per class
 
-EPS = 0.2                 # absolute attack budget in the model domain
-RADIUS = 0.2              # absolute purification radius in the model domain
+# Budgets are RELATIVE — fractions of the input domain width (see "Budget vocabulary"
+# in CLAUDE.md). On legendre (width 2.0) both are absolute 0.2 in the model domain.
+EPS_REL = 0.1             # attacker budget
+DELTA_REL = 0.1           # purification radius (defense budget)
 ATTACK_NUM_STEPS = 40
 PURIFY_NUM_STEPS = 20
 EVAL_BATCH_SIZE = 128
@@ -130,10 +133,10 @@ def _format_stats(stats: dict) -> str:
         mark = "  (attack source)" if k == src else ""
         L.append(f"  {k:<{w}} {stats['paths'][k]}{mark}")
         L.append(f"  {'':<{w}} label={labels[k]}  run={stats['run_dirs'][k]}")
-    L.append(f"  attack        PGD-inf  eps={stats['eps']:.4f} (abs), "
-             f"{stats['attack_num_steps']} steps")
-    L.append(f"  purification  likelihood-inf  radius={stats['radius']:.4f} (abs), "
-             f"{stats['purify_num_steps']} steps")
+    L.append(f"  attack        PGD-inf  eps_rel={stats['eps_rel']:.4g} "
+             f"(abs {stats['abs_eps']:.4f}), {stats['attack_num_steps']} steps")
+    L.append(f"  purification  likelihood-inf  delta_rel={stats['delta_rel']:.4g} "
+             f"(abs {stats['abs_delta']:.4f}), {stats['purify_num_steps']} steps")
     L.append(f"  input range   [{stats['lo']:.4f}, {stats['hi']:.4f}]")
     L.append(f"  seed={stats['seed']}  device={stats['device']}  "
              f"batch_size={stats['eval_batch_size']}")
@@ -251,8 +254,8 @@ def transfer_purify_analysis(
     models: Sequence[Tuple[str, str, str]] = MODELS,
     attack_source: str = ATTACK_SOURCE_KEY,
     classes: Sequence[int] = DISPLAY_CLASSES,
-    eps: float = EPS,
-    radius: float = RADIUS,
+    eps_rel: float = EPS_REL,
+    delta_rel: float = DELTA_REL,
     attack_num_steps: int = ATTACK_NUM_STEPS,
     purify_num_steps: int = PURIFY_NUM_STEPS,
     eval_batch_size: int = EVAL_BATCH_SIZE,
@@ -289,9 +292,13 @@ def transfer_purify_analysis(
     # All models share the legendre embedding => identical input_range; build data once.
     loader = _test_loader(src_cfg, src_cbm, eval_batch_size)
     lo, hi = float(src_cbm.input_range[0]), float(src_cbm.input_range[1])
-    abs_eps, abs_radius = eps, radius
-    logger.info(f"range=[{lo:.3f},{hi:.3f}] | "
-                f"abs_eps={abs_eps:.4f} abs_radius={abs_radius:.4f}")
+    # The single conversion boundary for this entry point.
+    _range_size = range_size_of(src_cbm)
+    abs_eps = rel_to_abs(eps_rel, _range_size)
+    abs_delta = rel_to_abs(delta_rel, _range_size)
+    logger.info(f"range=[{lo:.3f},{hi:.3f}] size={_range_size:.3f} | "
+                f"eps_rel={eps_rel} -> abs {abs_eps:.4f} | "
+                f"delta_rel={delta_rel} -> abs {abs_delta:.4f}")
 
     attack = ProjectedGradientDescent(norm="inf", num_steps=attack_num_steps, random_start=True)
 
@@ -377,7 +384,7 @@ def transfer_purify_analysis(
         preds, chunks = [], []
         for i in range(0, len(adv_sel), eval_batch_size):
             xb = adv_sel[i:i + eval_batch_size].to(device)
-            xp, _ = purifier.purify(cbm, xb, abs_radius, device)
+            xp, _ = purifier.purify(cbm, xb, abs_delta, device)
             preds.append(_classify(cbm, xp, device))
             chunks.append(xp.cpu())
             if torch.cuda.is_available():
@@ -401,8 +408,8 @@ def transfer_purify_analysis(
         "paths": paths,
         "run_dirs": run_dirs,
         "attack_source": attack_source,
-        "eps": eps, "abs_eps": abs_eps, "attack_num_steps": attack_num_steps,
-        "radius": radius, "abs_radius": abs_radius, "purify_num_steps": purify_num_steps,
+        "eps_rel": eps_rel, "abs_eps": abs_eps, "attack_num_steps": attack_num_steps,
+        "delta_rel": delta_rel, "abs_delta": abs_delta, "purify_num_steps": purify_num_steps,
         "lo": lo, "hi": hi, "seed": seed, "device": str(device),
         "eval_batch_size": eval_batch_size,
         "n_attacked": n_attacked,
@@ -530,8 +537,8 @@ if __name__ == "__main__":
                         "path = checkpoint file, run dir, or sweep root")
     p.add_argument("--attack-source", default=ATTACK_SOURCE_KEY)
     p.add_argument("--classes", default=",".join(str(c) for c in DISPLAY_CLASSES))
-    p.add_argument("--eps", type=float, default=EPS)
-    p.add_argument("--radius", type=float, default=RADIUS)
+    p.add_argument("--eps-rel", type=float, default=EPS_REL)
+    p.add_argument("--delta-rel", type=float, default=DELTA_REL)
     p.add_argument("--attack-num-steps", type=int, default=ATTACK_NUM_STEPS)
     p.add_argument("--purify-num-steps", type=int, default=PURIFY_NUM_STEPS)
     p.add_argument("--eval-batch-size", type=int, default=EVAL_BATCH_SIZE)
@@ -545,7 +552,7 @@ if __name__ == "__main__":
     transfer_purify_analysis(
         models=_parse_models(a.models), attack_source=a.attack_source,
         classes=[int(c) for c in a.classes.split(",")],
-        eps=a.eps, radius=a.radius, attack_num_steps=a.attack_num_steps,
+        eps_rel=a.eps_rel, delta_rel=a.delta_rel, attack_num_steps=a.attack_num_steps,
         purify_num_steps=a.purify_num_steps, eval_batch_size=a.eval_batch_size,
         max_attack_samples=a.max_attack_samples, stats_cap=a.stats_cap,
         seed=a.seed, device=a.device, save_dir=a.save_dir,

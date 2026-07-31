@@ -74,6 +74,8 @@ class AnalysisConfig:
         mia_adversarial_num_steps: PGD steps for adversarial MIA.
         mia_adversarial_step_size: PGD step size. None = auto.
         mia_adversarial_norm: Lp norm for adversarial MIA.
+        compute_rob_ceiling: Emit the data-only upper bound on robust accuracy alongside
+            `rob/`. Two-class datasets only; silently absent otherwise.
         uq_config: Dict of kwargs for UQConfig.
         joint_uq_config: Dict of kwargs for a second UQ pass with JOINT_PGD.
         device: Torch device string.
@@ -84,6 +86,7 @@ class AnalysisConfig:
     compute_rob: bool = True
     compute_mia: bool = True
     compute_uq: bool = False
+    compute_rob_ceiling: bool = True
     evasion_override: Optional[Dict[str, Any]] = None
     mia_features: Optional[Dict[str, bool]] = None
     mia_adv_eps_rel: Optional[float] = None
@@ -214,6 +217,29 @@ def analyze_run(
                 except Exception as e:
                     logger.warning(f"eval_rob failed at eps_rel={eps_rel}: {e}")
                     results[key] = np.nan
+
+    # 5b. Robust-accuracy ceiling — a property of the test data, not of the model.
+    # Computed on the same split and the same budgets as `rob/`, so `rob/{e}` above
+    # `rob_ceiling/{e}` means the attack failed, not that the model is that robust.
+    if cfg.compute_rob_ceiling:
+        ceiling_params = _get_rob_params(cbm, run_cfg, cfg.evasion_override)
+        if ceiling_params is not None:
+            from src.analysis.margin import robust_accuracy_ceiling
+
+            attack, eps_rel_list = ceiling_params
+            range_size = range_size_of(cbm)
+            X = datahandler.data["test"].detach().cpu().numpy()
+            y = datahandler.labels["test"].detach().cpu().numpy()
+            for eps_rel in eps_rel_list:
+                try:
+                    ceiling = robust_accuracy_ceiling(
+                        X, y, rel_to_abs(eps_rel, range_size), norm=attack.norm
+                    )
+                except Exception as e:
+                    logger.warning(f"robust_accuracy_ceiling failed at eps_rel={eps_rel}: {e}")
+                    continue
+                if not np.isnan(ceiling):
+                    results[f"rob_ceiling/{fmt_budget(eps_rel)}"] = ceiling
 
     # 6. MIA
     if cfg.compute_mia:
