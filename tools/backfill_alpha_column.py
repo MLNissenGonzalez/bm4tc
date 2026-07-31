@@ -1,53 +1,53 @@
 #!/usr/bin/env python3
 """
-One-off migration: repair the dead alpha column in the spirals `alpha_curve` CSVs.
+One-off migration: replace the dead alpha column in analysis CSVs with the live keys.
 
 `analysis/sweep.py` used to extract `trainer.generative.criterion.kwargs.alpha` into
 `config/trainer.generative.criterion.kwargs.alpha`. That path has not existed since the
 trainer refactor — alpha lives at `trainer.nll.alpha` (NAT) / `trainer.adversarial.alpha`
-(AT) — so the column is all-NaN in every CSV written since. `2dtoy.ipynb` groups the
-alpha curve by that column, which silently drops all 50 intermediate runs and leaves a
-straight line between the two endpoint sweeps.
+(AT) — so the column is all-NaN in every CSV written before 2026-07-31. `sweep.py` now
+extracts both live keys, which fixes future CSVs; this script repairs the existing ones.
 
-`sweep.py` now extracts the live keys, which fixes *future* CSVs. The run directories for
-these two sweeps live on mathqi, so the existing CSVs cannot be re-derived locally; this
-script backfills them from W&B instead.
+The run directories live on mathqi, so the configs cannot be re-read locally. W&B is the
+source of truth: each CSV's `run_path` column names the sweep, whose tail after `outputs/`
+is exactly the W&B group, and each row's `run_name` is the W&B run name within it.
 
-The mapping is cross-checked two independent ways before anything is written:
+Every row is cross-checked before anything is written, and any failure skips the WHOLE
+file (never a partial rewrite):
 
-  1. W&B: each run's own `trainer.nll.alpha` and `tracking.seed`, fetched per run
-     (`api.runs()` returns runs with an EMPTY `.config` — lazy load — so the config must
-     come from `api.run(<path>)`).
-  2. The sweep structure implied by
-     `configs/experiments/spirals/nat/legendre/d10r6/alpha_curve.yaml`:
-     `alpha: choice(...10 values...) x tracking.seed: range(1, 6)`. Hydra's basic sweeper
-     takes the cartesian product with the LAST param varying fastest, so job `n` has
-     `seed = n % 5 + 1` and a single alpha shared by the block `n // 5`.
+  * all rows agree on one sweep / W&B group;
+  * every CSV row has a matching W&B run. A relaunch leaves several runs sharing a name;
+    they are told apart by the seed the CSV also records, and only a genuine (name, seed)
+    collision is fatal;
+  * exactly one of `trainer.nll.alpha` / `trainer.adversarial.alpha` is set per run —
+    except for AT runs predating 27ac8c1 (2026-06-24), whose `adversarial` node has no
+    `alpha` field at all because that trainer hardcoded `mixed_nll(..., alpha=0.0)`;
+    those are alpha=0 by construction and are filled as such;
+  * the W&B seed equals the CSV's own `config/tracking.seed` where present;
+  * the dead column is entirely NaN, so nothing is overwritten.
 
-and against the CSV's own `config/tracking.seed`. Any mismatch aborts the whole migration.
+Both live columns are written, the inactive one empty — the same shape `sweep.py` now
+produces, so migrated and freshly written CSVs share one schema.
 
-The two sweeps share one W&B group and are told apart by creation date:
-2026-06-02 -> alpha_curve_0206, 2026-06-05 -> alpha_curve_0506.
+The two spirals `alpha_curve` CSVs were migrated first, by the single-purpose form of this
+script; those additionally cross-checked alpha against the Hydra product ordering of
+`configs/experiments/spirals/nat/legendre/d10r6/alpha_curve.yaml` (10 alphas x 5 seeds,
+seed varying fastest). They carry the live column already and are skipped here.
 
-**They do NOT share an alpha grid.** Only `alpha_curve_0506` matches the config as it stands
-today (`0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 1`); `alpha_curve_0206` is an older,
-log-spaced grid (`0, 1e-5, 1e-4, 1e-3, 0.01, 0.05, 0.1, 0.5, 0.8, 1`). So the grid itself is
-taken from W&B per sweep; what is checked against the config is the *structure* (10 alphas,
-5 seeds each, one alpha per block of 5 consecutive job indices, seeds 1..5 within a block)
-and, for 0506 only, that the recovered grid equals the config's.
-
-The new column replaces the dead one in place (same position); every other column is left
-byte-identical and that is asserted after the rewrite.
+`baselines/jem/` is excluded: JEM has its own `alpha` column and no hydra trainer node.
 
 Usage:
-    python tools/backfill_alpha_column.py                # dry run (default)
+    python tools/backfill_alpha_column.py                  # dry run over every CSV
     python tools/backfill_alpha_column.py --apply
+    python tools/backfill_alpha_column.py --root analysis/outputs/mnist_full_r12 --apply
 """
 
 import argparse
+import json
+import re
 import sys
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -56,151 +56,229 @@ import pandas as pd
 
 ENTITY = "martin-nissen-gonzalez-heidelberg-university"
 PROJECT = "bm4tc"
-EXPERIMENT = "alpha_curve"
 
 DEAD_COL = "config/trainer.generative.criterion.kwargs.alpha"
-LIVE_COL = "config/trainer.nll.alpha"
+NLL_COL = "config/trainer.nll.alpha"
+ADV_COL = "config/trainer.adversarial.alpha"
 SEED_COL = "config/tracking.seed"
 
-# hydra.sweeper.params in configs/experiments/spirals/nat/legendre/d10r6/alpha_curve.yaml
-CONFIG_ALPHAS = [0.0, 1e-2, 1e-1, 2e-1, 3e-1, 4e-1, 5e-1, 7e-1, 9e-1, 1.0]
-N_ALPHAS = 10
-N_SEEDS = 5
+EXCLUDE_PARTS = ("baselines",)
 
-# W&B creation date -> (analysis output directory, grid must equal CONFIG_ALPHAS)
-TARGETS: Dict[str, Tuple[str, bool]] = {
-    # older, log-spaced grid: 0, 1e-5, 1e-4, 1e-3, 0.01, 0.05, 0.1, 0.5, 0.8, 1
-    "2026-06-02": ("analysis/outputs/spirals/nat/legendre/d10r6/alpha_curve_0206", False),
-    "2026-06-05": ("analysis/outputs/spirals/nat/legendre/d10r6/alpha_curve_0506", True),
-}
+# 27ac8c1 "feat(at): adversarial alpha>0 support". Adversarial runs created before this
+# had no alpha field and a hardcoded alpha=0 objective.
+AT_ALPHA_COMMIT_DATE = "2026-06-24"
 
 
-def check_structure(wb: Dict[str, Tuple[float, int]], label: str,
-                    match_config: bool) -> None:
-    """Assert the W&B mapping has the shape Hydra's product sweep must produce."""
-    jobs = sorted(int(n) for n in wb)
-    if jobs != list(range(N_ALPHAS * N_SEEDS)):
-        raise SystemExit(f"{label}: job indices are not 0..{N_ALPHAS * N_SEEDS - 1}: {jobs}")
-
-    grid = []
-    for block in range(N_ALPHAS):
-        entries = [wb[str(block * N_SEEDS + k)] for k in range(N_SEEDS)]
-        alphas = {a for a, _ in entries}
-        if len(alphas) != 1:
-            raise SystemExit(f"{label}: block {block} spans several alphas {alphas}")
-        if [s for _, s in entries] != list(range(1, N_SEEDS + 1)):
-            raise SystemExit(
-                f"{label}: block {block} seeds are {[s for _, s in entries]}, expected 1..5")
-        grid.append(alphas.pop())
-
-    if len(set(grid)) != N_ALPHAS:
-        raise SystemExit(f"{label}: alpha grid has duplicates: {grid}")
-    if grid != sorted(grid):
-        raise SystemExit(f"{label}: alpha grid is not ascending in job order: {grid}")
-    if match_config and any(abs(g - c) > 1e-12 for g, c in zip(grid, CONFIG_ALPHAS)):
-        raise SystemExit(f"{label}: grid {grid} != config grid {CONFIG_ALPHAS}")
-    print(f"  {label}: structure OK — grid {grid}")
+class Unresolved(Exception):
+    """This file cannot be migrated safely; report it and leave it alone."""
 
 
-def fetch_wandb() -> Dict[str, Dict[str, Tuple[float, int]]]:
-    """{date: {run_name: (alpha, seed)}} for every `alpha_curve` run in the project."""
-    import wandb
-
-    api = wandb.Api()
-    runs = list(api.runs(f"{ENTITY}/{PROJECT}",
-                         filters={"config.experiment": EXPERIMENT},
-                         per_page=200))
-    print(f"W&B: {len(runs)} runs with experiment={EXPERIMENT!r}")
-
-    out: Dict[str, Dict[str, Tuple[float, int]]] = {}
-    for i, r in enumerate(runs, 1):
-        date = r.created_at[:10]
-        if date not in TARGETS:
+def find_targets(root: Path) -> List[Path]:
+    """Every `evaluation_data.csv` under `root` still carrying the dead column."""
+    out = []
+    for path in sorted(root.rglob("evaluation_data.csv")):
+        if any(part in EXCLUDE_PARTS for part in path.parts):
             continue
-        # .config is empty on listed runs; refetch the run to get it.
-        cfg = api.run(f"{ENTITY}/{PROJECT}/{r.id}").config
-        alpha = cfg["trainer"]["nll"]["alpha"]
-        seed = cfg["tracking"]["seed"]
-        out.setdefault(date, {})[r.name] = (float(alpha), int(seed))
-        if i % 20 == 0:
-            print(f"  fetched {i}/{len(runs)} configs")
+        header = pd.read_csv(path, nrows=0).columns
+        if DEAD_COL in header:
+            out.append(path)
     return out
 
 
-def check_and_build(csv_path: Path, wb: Dict[str, Tuple[float, int]]) -> pd.Series:
-    """Validate every row against W&B and the config-derived mapping; return the α column."""
-    df = pd.read_csv(csv_path)
+def group_of(df: pd.DataFrame, path: Path) -> str:
+    """The W&B group name implied by the CSV's run paths."""
+    if "run_path" not in df.columns:
+        raise Unresolved("no run_path column")
+    groups = set()
+    for rp in df["run_path"].dropna():
+        rp = str(rp).replace("\\", "/")
+        if "/outputs/" not in rp:
+            raise Unresolved(f"run_path {rp!r} has no /outputs/ segment")
+        # .../outputs/<group>/<run_name>
+        groups.add(rp.split("/outputs/", 1)[1].rsplit("/", 1)[0])
+    if len(groups) != 1:
+        raise Unresolved(f"rows span several sweeps: {sorted(groups)}")
+    return groups.pop()
 
-    if LIVE_COL in df.columns:
-        raise SystemExit(f"{csv_path}: already carries {LIVE_COL}; refusing to touch it")
+
+def fetch_group(api, group: str, cache: Dict[str, dict]) -> Dict[str, Dict[int, Tuple[str, float]]]:
+    """{run_name: {seed: (column, alpha)}} for one W&B group.
+
+    `api.runs()` returns runs with an empty `.config` (lazy load), so each run's config
+    has to be fetched individually via `api.run()`.
+    """
+    if group in cache:
+        return {name: {int(s): tuple(v) for s, v in seeds.items()}
+                for name, seeds in cache[group].items()}
+
+    listed = list(api.runs(f"{ENTITY}/{PROJECT}", filters={"group": group}, per_page=200))
+    if not listed:
+        # Older sweeps log a group with an extra _HHMM launch-time suffix that the output
+        # directory name drops (dir `alpha_curve_0506` <-> group `alpha_curve_0506_1501`).
+        pattern = f"^{re.escape(group)}_[0-9]{{4}}$"
+        listed = list(api.runs(f"{ENTITY}/{PROJECT}",
+                               filters={"group": {"$regex": pattern}}, per_page=200))
+        found = sorted({r.group for r in listed})
+        if len(found) > 1:
+            raise Unresolved(f"group {group!r} matches several W&B groups: {found}")
+        if not listed:
+            raise Unresolved(f"no W&B runs in group {group!r} (nor {group}_HHMM)")
+        print(f"    (matched W&B group {found[0]!r})")
+
+    out: Dict[str, Dict[int, Tuple[str, float]]] = {}
+    for r in listed:
+        cfg = api.run(f"{ENTITY}/{PROJECT}/{r.id}").config
+        trainer = cfg.get("trainer") or {}
+        nll_alpha = (trainer.get("nll") or {}).get("alpha")
+        adv_alpha = (trainer.get("adversarial") or {}).get("alpha")
+
+        # AT sweeps older than 27ac8c1 (2026-06-24, "feat(at): alpha>0 support") have an
+        # `adversarial` node with no `alpha` field, because that trainer called
+        # `mixed_nll(..., alpha=0.0)` unconditionally. Their alpha is 0 by construction,
+        # not by inference. The date guard keeps a *future* config that loses its alpha
+        # field from silently becoming 0.
+        if (nll_alpha is None and adv_alpha is None
+                and "adversarial" in trainer and "alpha" not in trainer["adversarial"]
+                and r.created_at < AT_ALPHA_COMMIT_DATE):
+            adv_alpha = 0.0
+
+        if (nll_alpha is None) == (adv_alpha is None):
+            raise Unresolved(
+                f"run {r.name}: expected exactly one of nll/adversarial alpha, got "
+                f"nll={nll_alpha!r} adversarial={adv_alpha!r}"
+            )
+        column = NLL_COL if nll_alpha is not None else ADV_COL
+        seed = int((cfg.get("tracking") or {}).get("seed", -1))
+        entry = (column, float(nll_alpha if nll_alpha is not None else adv_alpha))
+        # A relaunch leaves several runs sharing a name; they are told apart by seed,
+        # which the CSV also records. Only a genuine (name, seed) collision is fatal.
+        by_seed = out.setdefault(r.name, {})
+        if seed in by_seed and by_seed[seed] != entry:
+            raise Unresolved(f"W&B runs named {r.name!r} at seed {seed} disagree: "
+                             f"{by_seed[seed]} vs {entry}")
+        by_seed[seed] = entry
+
+    cache[group] = {name: {str(s): list(v) for s, v in seeds.items()}
+                    for name, seeds in out.items()}
+    return out
+
+
+def build_columns(df: pd.DataFrame, wb: Dict[str, Dict[int, Tuple[str, float]]]
+                  ) -> Tuple[pd.Series, pd.Series, str]:
+    """Validate every row and return (nll_column, adv_column, regime_label)."""
     if DEAD_COL not in df.columns:
-        raise SystemExit(f"{csv_path}: no {DEAD_COL} column to replace")
+        raise Unresolved("dead column already gone")
     if df[DEAD_COL].notna().any():
-        raise SystemExit(f"{csv_path}: {DEAD_COL} is NOT all-NaN; refusing to overwrite data")
+        raise Unresolved("dead column is NOT all-NaN; refusing to overwrite data")
 
-    alphas = []
+    nll_vals: List[Optional[float]] = []
+    adv_vals: List[Optional[float]] = []
+    columns_seen = set()
+
     for _, row in df.iterrows():
         name = str(row["run_name"])
-
         if name not in wb:
-            raise SystemExit(f"{csv_path}: run {name!r} not found in W&B group")
-        w_alpha, w_seed = wb[name]
+            raise Unresolved(f"run {name!r} has no W&B counterpart in the group")
+        by_seed = wb[name]
+        csv_seed = row.get(SEED_COL)
 
-        if w_seed != int(name) % N_SEEDS + 1:
-            raise SystemExit(
-                f"{csv_path} run {name}: W&B seed {w_seed} != product-order seed "
-                f"{int(name) % N_SEEDS + 1}")
-        if int(row[SEED_COL]) != w_seed:
-            raise SystemExit(
-                f"{csv_path} run {name}: CSV seed {row[SEED_COL]} != W&B seed {w_seed}")
-        alphas.append(w_alpha)
+        if len(by_seed) == 1:
+            (seed, (column, alpha)), = by_seed.items()
+            if pd.notna(csv_seed) and int(csv_seed) != seed:
+                raise Unresolved(f"run {name}: CSV seed {int(csv_seed)} != W&B seed {seed}")
+        else:
+            # Relaunched run name: the CSV's own seed says which attempt this row is.
+            if pd.isna(csv_seed):
+                raise Unresolved(f"run {name}: {len(by_seed)} W&B runs and no CSV seed "
+                                 f"to disambiguate (seeds {sorted(by_seed)})")
+            if int(csv_seed) not in by_seed:
+                raise Unresolved(f"run {name}: CSV seed {int(csv_seed)} matches none of "
+                                 f"the W&B seeds {sorted(by_seed)}")
+            column, alpha = by_seed[int(csv_seed)]
+        columns_seen.add(column)
 
-    return pd.Series(alphas, index=df.index, name=LIVE_COL)
+        nll_vals.append(alpha if column == NLL_COL else None)
+        adv_vals.append(alpha if column == ADV_COL else None)
+
+    if len(columns_seen) != 1:
+        raise Unresolved(f"sweep mixes NAT and AT runs: {sorted(columns_seen)}")
+
+    regime = "nat" if columns_seen == {NLL_COL} else "at"
+    return (pd.Series(nll_vals, index=df.index, dtype="float64"),
+            pd.Series(adv_vals, index=df.index, dtype="float64"), regime)
 
 
-def migrate(csv_path: Path, wb: Dict[str, Tuple[float, int]], apply: bool) -> None:
-    print(f"\n--- {csv_path.relative_to(PROJECT_ROOT)}")
-    df = pd.read_csv(csv_path)
-    alpha = check_and_build(csv_path, wb)
+def migrate(path: Path, api, cache: Dict[str, dict], apply: bool) -> Optional[str]:
+    """Migrate one CSV. Returns a one-line report, or None when skipped."""
+    rel = path.relative_to(PROJECT_ROOT)
+    df = pd.read_csv(path)
+    group = group_of(df, path)
+    wb = fetch_group(api, group, cache)
+    nll_col, adv_col, regime = build_columns(df, wb)
 
-    counts = alpha.value_counts().sort_index()
-    print(f"  {len(df)} rows validated against W&B + sweep config")
-    print(f"  alpha grid: {[float(a) for a in counts.index.tolist()]}")
-    print(f"  runs per alpha: {sorted(set(counts.tolist()))}")
-    print(f"  {DEAD_COL}  ->  {LIVE_COL}")
+    alphas = (nll_col if regime == "nat" else adv_col).dropna().unique()
+    report = (f"{rel}\n    group={group}  regime={regime}  rows={len(df)}  "
+              f"alpha={sorted(float(a) for a in alphas)}")
 
     if not apply:
-        print("  DRY RUN — nothing written")
-        return
+        return report + "  [dry run]"
 
     pos = df.columns.get_loc(DEAD_COL)
     out = df.drop(columns=[DEAD_COL])
-    out.insert(pos, LIVE_COL, alpha)
-    out.to_csv(csv_path, index=False)
+    out.insert(pos, ADV_COL, adv_col)
+    out.insert(pos, NLL_COL, nll_col)
+    out.to_csv(path, index=False)
 
-    # Re-read and assert nothing but the alpha column moved.
-    back = pd.read_csv(csv_path)
+    back = pd.read_csv(path)
     pd.testing.assert_frame_equal(
-        back.drop(columns=[LIVE_COL]), df.drop(columns=[DEAD_COL]), check_exact=False
+        back.drop(columns=[NLL_COL, ADV_COL]), df.drop(columns=[DEAD_COL]), check_exact=False
     )
-    assert back[LIVE_COL].notna().all() and len(back[LIVE_COL].unique()) == N_ALPHAS
-    print(f"  WROTE — other columns verified unchanged")
+    active = back[NLL_COL] if regime == "nat" else back[ADV_COL]
+    inactive = back[ADV_COL] if regime == "nat" else back[NLL_COL]
+    assert active.notna().all() and inactive.isna().all()
+    return report + "  [written]"
 
 
 def main() -> None:
+    import wandb
+
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--apply", action="store_true", help="write the CSVs (default: dry run)")
+    ap.add_argument("--root", default="analysis/outputs", help="subtree to scan")
+    ap.add_argument("--cache", default=None,
+                    help="JSON file of fetched W&B configs, reused across invocations")
     args = ap.parse_args()
 
-    wb = fetch_wandb()
-    for date, (rel, match_config) in TARGETS.items():
-        runs = wb.get(date, {})
-        if len(runs) != N_ALPHAS * N_SEEDS:
-            raise SystemExit(
-                f"{date}: expected {N_ALPHAS * N_SEEDS} W&B runs, found {len(runs)}")
-        check_structure(runs, date, match_config)
-        migrate(PROJECT_ROOT / rel / "evaluation_data.csv", runs, args.apply)
+    root = (PROJECT_ROOT / args.root).resolve()
+    targets = find_targets(root)
+    print(f"{len(targets)} CSV(s) under {root.relative_to(PROJECT_ROOT)} carry {DEAD_COL}\n")
+    if not targets:
+        return
 
+    cache_path = Path(args.cache) if args.cache else None
+    cache: Dict[str, dict] = {}
+    if cache_path and cache_path.exists():
+        cache = json.loads(cache_path.read_text())
+        print(f"loaded {len(cache)} cached group(s) from {cache_path}\n")
+
+    api = wandb.Api()
+    done, skipped = [], []
+    try:
+        for i, path in enumerate(targets, 1):
+            try:
+                report = migrate(path, api, cache, args.apply)
+                print(f"[{i}/{len(targets)}] {report}")
+                done.append(path)
+            except Unresolved as e:
+                print(f"[{i}/{len(targets)}] {path.relative_to(PROJECT_ROOT)}\n    SKIP: {e}")
+                skipped.append((path, str(e)))
+    finally:
+        if cache_path:
+            cache_path.write_text(json.dumps(cache))
+
+    print(f"\n{len(done)} migrated, {len(skipped)} skipped")
+    for path, why in skipped:
+        print(f"  SKIP {path.relative_to(PROJECT_ROOT)}: {why}")
     if not args.apply:
         print("\nRe-run with --apply to write.")
 

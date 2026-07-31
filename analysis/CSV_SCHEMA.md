@@ -67,11 +67,13 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 
 > **Alpha column.** α lives under the *active* trainer: `config/trainer.nll.alpha` on NAT runs,
 > `config/trainer.adversarial.alpha` on AT runs. Both keys are extracted; the inactive one is
-> empty. CSVs written before 2026-07-31 carry a dead
-> `config/trainer.generative.criterion.kwargs.alpha` column that is all-NaN — the path has not
-> existed since the trainer refactor. The two spirals `alpha_curve` CSVs were migrated to the
-> live key by `tools/backfill_alpha_column.py`; other pre-fix CSVs still carry the dead column
-> and must not be grouped by it.
+> empty. CSVs written before 2026-07-31 instead carried a dead
+> `config/trainer.generative.criterion.kwargs.alpha` column, all-NaN because the path has not
+> existed since the trainer refactor. **All 65 were migrated to the live keys** on 2026-07-31 by
+> `tools/backfill_alpha_column.py` (source of truth: W&B, matched on group + run name + seed);
+> no CSV carries the dead column any more. The archived pre-refactor layout under
+> `analysis/outputs/seed_sweep/{cls,gen,adv,comb,cls_reg}/…/d10D6/` has no α column at all — its
+> regime is encoded in the path.
 
 ### Metric columns
 
