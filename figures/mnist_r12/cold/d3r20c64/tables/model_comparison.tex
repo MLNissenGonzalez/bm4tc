@@ -1,0 +1,60 @@
+\begin{table}[htbp]
+  \centering
+  \small
+  \begin{tabular}{@{}llrrr@{}}
+    \toprule
+    Model & Metric & $\varepsilon=0.1$ & $\varepsilon=0.2$ & $\varepsilon=0.3$ \\
+    \midrule
+    \multirow{6}{*}{$\alpha{=}0$} & Clean & $\mathbf{0.979 \pm 0.001}$ & $\mathbf{0.979 \pm 0.001}$ & $\mathbf{0.979 \pm 0.001}$ \\
+     & Rob. & $0.485 \pm 0.012$ & $0.021 \pm 0.005$ & $0.000 \pm 0.000$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.857 \pm 0.015$ & $0.650 \pm 0.026$ & $0.521 \pm 0.024$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.873 \pm 0.009$ & $0.715 \pm 0.022$ & $0.583 \pm 0.022$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.400 \pm 0.066$ & $0.511 \pm 0.098$ & $0.441 \pm 0.092$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.545 \pm 0.016$ & $0.020 \pm 0.007$ & $0.000$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{$\alpha{=}0.001$} & Clean & $0.974 \pm 0.001$ & $0.974 \pm 0.001$ & $0.974 \pm 0.001$ \\
+     & Rob. & $0.855 \pm 0.003$ & $0.422 \pm 0.005$ & $0.074 \pm 0.004$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.916 \pm 0.001$ & $0.781 \pm 0.012$ & $0.523 \pm 0.017$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.929 \pm 0.009$ & $0.696 \pm 0.007$ & $0.325 \pm 0.029$ \\
+     & Det.\ rate ($q{=}10\%$) & $\mathbf{0.683 \pm 0.012}$ & $\mathbf{0.991 \pm 0.002}$ & $\mathbf{1.000 \pm 0.000}$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.882 \pm 0.004$ & $0.244 \pm 0.116$ & $0.000$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{$\alpha{=}0.01$} & Clean & $0.955 \pm 0.001$ & $0.955 \pm 0.001$ & $0.955 \pm 0.001$ \\
+     & Rob. & $0.835 \pm 0.005$ & $0.551 \pm 0.006$ & $0.170 \pm 0.004$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.883 \pm 0.003$ & $0.803 \pm 0.004$ & $0.661 \pm 0.012$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.891 \pm 0.014$ & $0.767 \pm 0.010$ & $0.481 \pm 0.044$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.548 \pm 0.002$ & $0.941 \pm 0.003$ & $0.997 \pm 0.001$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.863 \pm 0.006$ & $0.650 \pm 0.031$ & $0.130 \pm 0.091$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{$\alpha{=}0.1$} & Clean & $0.815 \pm 0.018$ & $0.815 \pm 0.018$ & $0.815 \pm 0.018$ \\
+     & Rob. & $0.532 \pm 0.017$ & $0.312 \pm 0.028$ & $0.153 \pm 0.015$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.687 \pm 0.017$ & $0.609 \pm 0.017$ & $0.529 \pm 0.021$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.687 \pm 0.054$ & $0.569 \pm 0.035$ & $0.493 \pm 0.038$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.544 \pm 0.008$ & $0.880 \pm 0.029$ & $0.976 \pm 0.017$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.595 \pm 0.004$ & $0.572 \pm 0.040$ & $0.493 \pm 0.060$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{$\alpha{=}1$} & Clean & $0.715 \pm 0.025$ & $0.715 \pm 0.025$ & $0.715 \pm 0.025$ \\
+     & Rob. & $0.424 \pm 0.011$ & $0.255 \pm 0.004$ & $0.163 \pm 0.009$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.597 \pm 0.021$ & $0.534 \pm 0.022$ & $0.486 \pm 0.025$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.595 \pm 0.027$ & $0.520 \pm 0.004$ & $0.475 \pm 0.016$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.556 \pm 0.004$ & $0.909 \pm 0.009$ & $0.991 \pm 0.006$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.539 \pm 0.012$ & $0.688 \pm 0.013$ & $0.755 \pm 0.053$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{AT ($\alpha{=}0$)} & Clean & $0.977 \pm 0.000$ & $0.977 \pm 0.000$ & $0.977 \pm 0.000$ \\
+     & Rob. & $\mathbf{0.959 \pm 0.001}$ & $\mathbf{0.917 \pm 0.003}$ & $\mathbf{0.839 \pm 0.002}$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $\mathbf{0.957 \pm 0.001}$ & $\mathbf{0.926 \pm 0.001}$ & $\mathbf{0.871 \pm 0.002}$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $\mathbf{0.971 \pm 0.005}$ & $\mathbf{0.933 \pm 0.006}$ & $\mathbf{0.849 \pm 0.009}$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.613 \pm 0.013$ & $0.964 \pm 0.006$ & $0.999 \pm 0.000$ \\
+     & Acc.\ passed ($q{=}10\%$) & $\mathbf{0.985 \pm 0.001}$ & $\mathbf{0.991 \pm 0.005}$ & $\mathbf{1.000}$ \\
+    \cmidrule(lr){1-5}
+    \multirow{6}{*}{AT ($\alpha{=}0.01$)} & Clean & $0.966 \pm 0.000$ & $0.966 \pm 0.000$ & $0.966 \pm 0.000$ \\
+     & Rob. & $0.939 \pm 0.000$ & $0.886 \pm 0.002$ & $0.802 \pm 0.006$ \\
+     & Purif.\ (lk., $r{=}0.2$) & $0.932 \pm 0.001$ & $0.888 \pm 0.001$ & $0.836 \pm 0.002$ \\
+     & Purif.\ (Gibbs, $k{=}6$) & $0.952 \pm 0.008$ & $0.907 \pm 0.008$ & $0.825 \pm 0.016$ \\
+     & Det.\ rate ($q{=}10\%$) & $0.472 \pm 0.006$ & $0.867 \pm 0.004$ & $0.991 \pm 0.001$ \\
+     & Acc.\ passed ($q{=}10\%$) & $0.948 \pm 0.002$ & $0.951 \pm 0.007$ & $0.957 \pm 0.027$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Defenses across attack budgets, $q{=}10\%$, likelihood-purification radii as labelled. MNIST $12\times12$, Legendre $d{=}3$, $r{=}20$, 5 seeds (mean $\pm$ 1 std). Gibbs uses an $n_{\mathrm{eval}}=250$ subsample; all other columns use the full test split.}
+  \label{tab:mnist_r12_models_r20}
+\end{table}
