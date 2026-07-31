@@ -172,6 +172,10 @@ def write_summary(
         handle.write(f"JEM Seed Sweep: {sweep_name}\n")
         handle.write("=" * 76 + "\n\n")
         handle.write(f"Runs: {len(df)}  |  Device: {device}\n")
+        # JEM has no embedding, so its budgets are absolute (pixel space) by design —
+        # the MPS summaries state "relative". Neither convention is guessable from the
+        # numbers alone, so each file says which one it is.
+        handle.write("Budgets: ABSOLUTE (pixel space; JEM has no embedding rescaling)\n")
         alpha_mean = mean("alpha")
         if not np.isnan(alpha_mean):
             handle.write(f"Alpha: {alpha_mean:.4g}\n")

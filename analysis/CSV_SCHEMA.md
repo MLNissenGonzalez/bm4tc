@@ -63,7 +63,15 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 |--------|------|-------------|
 | `run_name` | str | Numbered sub-directory name (e.g. `"3"`) |
 | `run_path` | str | Absolute path to the run directory |
-| `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.generative.criterion.kwargs.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep.py`. |
+| `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.nll.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep.py`. |
+
+> **Alpha column.** α lives under the *active* trainer: `config/trainer.nll.alpha` on NAT runs,
+> `config/trainer.adversarial.alpha` on AT runs. Both keys are extracted; the inactive one is
+> empty. CSVs written before 2026-07-31 carry a dead
+> `config/trainer.generative.criterion.kwargs.alpha` column that is all-NaN — the path has not
+> existed since the trainer refactor. The two spirals `alpha_curve` CSVs were migrated to the
+> live key by `tools/backfill_alpha_column.py`; other pre-fix CSVs still carry the dead column
+> and must not be grouped by it.
 
 ### Metric columns
 
