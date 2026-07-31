@@ -65,6 +65,21 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 | `run_path` | str | Absolute path to the run directory |
 | `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.nll.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep.py`. |
 
+> **Warm vs cold start.** `config/descriptor` is the discriminator, and it is authoritative —
+> it records what the run actually did:
+>
+> | `config/descriptor` | initialisation |
+> |---|---|
+> | `nll_pretrained` | **warm** — NAT α>0 fine-tuned from the α=0 checkpoint |
+> | `nll_cold` | **cold** — NAT α>0 trained from scratch, own HPO |
+> | `nll` | **base** — α=0, from scratch; shared by both ladders |
+> | `at_pretrained` | AT; a different axis (AT always warm-starts from a NAT checkpoint) |
+>
+> `config/model_path` is the corroborating evidence (which checkpoint a warm run resumed from),
+> **not** a discriminator on its own: every AT config sets it too. Do not infer initialisation
+> from the directory name either — new dirs carry a `cold_`/`warm_` prefix, but historical warm
+> dirs carry none, so absence of `cold_` does not mean warm. α=0 is deliberately unprefixed.
+
 > **Alpha column.** α lives under the *active* trainer: `config/trainer.nll.alpha` on NAT runs,
 > `config/trainer.adversarial.alpha` on AT runs. Both keys are extracted; the inactive one is
 > empty. CSVs written before 2026-07-31 instead carried a dead

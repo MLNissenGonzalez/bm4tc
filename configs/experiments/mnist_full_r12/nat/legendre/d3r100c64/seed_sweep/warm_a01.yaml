@@ -1,6 +1,6 @@
 # @package _global_
 stage: seed_sweep
-experiment: a05
+experiment: warm_a01
 descriptor: nll_pretrained
 
 defaults:
@@ -17,7 +17,7 @@ tracking:
 
 trainer:
   nll:
-    alpha: 0.5
+    alpha: 0.1
     max_epoch: 100
     batch_size: 128
     patience: 50
@@ -25,13 +25,13 @@ trainer:
     save: true
     norm_control:
       hard_every: 0
-      soft_strength: 0.001   # FILL FROM HPO (hpo/pretrained_a05)
+      soft_strength: 0.001   # FILL FROM HPO (hpo/pretrained_a01)
       log_target: null
       debug: false
     optimizer:
       name: "adam"
       kwargs:
-        lr: 0.0006            # FILL FROM HPO (hpo/pretrained_a05)
+        lr: 0.00015            # FILL FROM HPO (hpo/pretrained_a01)
         weight_decay: 0.0
 
 hydra:
