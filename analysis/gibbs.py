@@ -45,6 +45,7 @@ import pandas as pd
 import torch
 
 from src.utils.paths import data_root as _data_root
+from src.utils.embeddings import fmt_budget, rel_to_abs
 from analysis.utils.resolve import (
     resolve_embedding_from_path as _resolve_embedding,
     resolve_regime_from_path as _resolve_regime_from_path,
@@ -237,7 +238,6 @@ def gibbs_analyze_run(run_dir: Path) -> dict:
     readers need no special-casing; separation from sweep.py is by filename.
     """
     from src.model import ConditionalBornMachine
-    from src.utils.embeddings import fmt_budget, rel_to_abs
     from src.datahandler import DataHandler
     from src.utils.evasion import RobustnessEvaluation
     from src.utils.train import CriterionConfig
@@ -423,6 +423,15 @@ if not df.empty:
     print(f"Output directory: {output_dir}")
 
 # %%
+# Write the raw data BEFORE formatting the summary. The summary is cheap to
+# regenerate and the runs are not: a formatting bug here must never be able to
+# discard hours of Gibbs compute (it did once, on cold_a0001_3007).
+if not df.empty:
+    _export_cols = [c for c in df.columns if not c.startswith("_")]
+    df[_export_cols].to_csv(output_dir / "gibbs_data.csv", index=False)
+    print(f"Saved gibbs_data.csv ({len(df)} runs, {len(_export_cols)} columns)")
+
+# %%
 if not df.empty:
     def _smean(col):
         return df[col].dropna().mean() if col in df.columns and df[col].notna().any() else float("nan")
@@ -441,17 +450,22 @@ if not df.empty:
             return "—".rjust(w)
         return f"{v:.4f}".rjust(w)
 
-    _eps_list = [fmt_budget(e) for e in ATTACK["eps_rel"]]
-    _cols = ["eps=0"] + [f"{e:.4g}" for e in _eps_list]
+    # Two distinct things: `_eps_keys` are metric-key strings (must match what
+    # gibbs_analyze_run emitted), `_eps_labels` are display text. Budgets are
+    # labelled RELATIVE here, matching the columns; the header prints the
+    # absolute equivalents once.
+    _eps_keys = [fmt_budget(e) for e in ATTACK["eps_rel"]]
+    _eps_labels = [f"{e:.4g}" for e in ATTACK["eps_rel"]]
+    _cols = ["eps=0"] + _eps_labels
 
     # Rows: undefended, then one per sweep count.
     _table = [("No defense", [_smean("gibbs_clean_acc")]
-                             + [_smean(f"gibbs_adv_acc/{e}") for e in _eps_list])]
+                             + [_smean(f"gibbs_adv_acc/{e}") for e in _eps_keys])]
     for k in SWEEP_POINTS:
         _table.append((
             f"Gibbs (k={k})",
             [_smean(f"gibbs_clean_purify_acc/{k}")]
-            + [_smean(f"gibbs_purify_acc/{e}/{k}") for e in _eps_list],
+            + [_smean(f"gibbs_purify_acc/{e}/{k}") for e in _eps_keys],
         ))
 
     _label_w = max(len(r[0]) for r in _table) + 2
@@ -490,12 +504,12 @@ if not df.empty:
             f.write(f"{_stat}:\n")
             f.write(" " * _label_w + "".join(c.rjust(_col_w) for c in _cols) + "\n")
             _rows_stat = [("No defense", [_fn("gibbs_clean_acc")]
-                                         + [_fn(f"gibbs_adv_acc/{e}") for e in _eps_list])]
+                                         + [_fn(f"gibbs_adv_acc/{e}") for e in _eps_keys])]
             for k in SWEEP_POINTS:
                 _rows_stat.append((
                     f"Gibbs (k={k})",
                     [_fn(f"gibbs_clean_purify_acc/{k}")]
-                    + [_fn(f"gibbs_purify_acc/{e}/{k}") for e in _eps_list],
+                    + [_fn(f"gibbs_purify_acc/{e}/{k}") for e in _eps_keys],
                 ))
             for _lbl, _vals in _rows_stat:
                 f.write(f"{_lbl:<{_label_w}}" + "".join(_fmt(v) for v in _vals) + "\n")
@@ -508,10 +522,10 @@ if not df.empty:
         f.write("-" * 68 + "\n")
         f.write("Recovery rate (fraction of misclassified adv examples fixed)\n")
         f.write("-" * 68 + "\n\n")
-        f.write(" " * _label_w + "".join(f"{e:.4g}".rjust(_col_w) for e in _eps_list) + "\n")
+        f.write(" " * _label_w + "".join(c.rjust(_col_w) for c in _eps_labels) + "\n")
         for k in SWEEP_POINTS:
             f.write(f"{f'Gibbs (k={k})':<{_label_w}}"
-                    + "".join(_fmt(_smean(f"gibbs_purify_recovery/{e}/{k}")) for e in _eps_list)
+                    + "".join(_fmt(_smean(f"gibbs_purify_recovery/{e}/{k}")) for e in _eps_keys)
                     + "\n")
         f.write("\n")
 
@@ -524,12 +538,6 @@ if not df.empty:
     print(f"\nExported summary to: {summary_path}")
     with open(summary_path) as f:
         print(f.read())
-
-# %%
-if not df.empty:
-    _export_cols = [c for c in df.columns if not c.startswith("_")]
-    df[_export_cols].to_csv(output_dir / "gibbs_data.csv", index=False)
-    print(f"Saved gibbs_data.csv ({len(df)} runs, {len(_export_cols)} columns)")
 
 # %%
 print("\n" + "=" * 68)
