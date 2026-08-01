@@ -166,6 +166,13 @@ class ChebyshevT1Embedding:
 class ChebyshevT2Embedding:
     """Chebyshev functions of the second kind, orthonormal on L²[-1,1].
     ψ_n(x) = U_n(x) · sqrt(2/π · √(1−x²)).
+
+    IMPORTANT — domain is restricted to (-0.99, 0.99), NOT the full (-1, 1).
+    The weight (1−x²)^{1/4} vanishes at x = ±1, so φ(±1) is the *zero vector*:
+    the Born Machine gives those points |ψ|² = 0 for every parameter setting.
+    That is a hard zero in the density, not a small number — see
+    reference/chebyshev_boundary_born_machines.md. T1 has the reciprocal weight
+    and the reciprocal failure (divergence, not extinction).
     """
     def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
@@ -269,15 +276,19 @@ _EMBEDDING_TO_RANGE = {
     "fourier":    (0., 1.),
     "legendre":   (-1., 1.),
     "hermite":    (-4., 4.),
-    # (-0.99, 0.99) rather than (-1, 1): the T1 weight (1-x²)^{-1/4} diverges
-    # at ±1 (w → ∞), creating a strong implicit boundary prior in the Born
-    # Machine.  Restricting to ±0.99 caps w ≈ 2.24 vs ~31.6 at the raw
-    # boundary.  T2 has the opposite weight (1-x²)^{+1/4} → 0 at ±1, so the
-    # full (-1,1) range is safe for T2 (boundary = zero embedding, not ∞).
+    # Both Chebyshev families are restricted to ±0.99 rather than ±1, for
+    # opposite reasons — see reference/chebyshev_boundary_born_machines.md.
+    # T1: the weight (1-x²)^{-1/4} diverges at ±1 (w → ∞), creating a strong
+    # implicit boundary prior. ±0.99 caps w ≈ 2.24 vs ~31.6 at the raw boundary.
+    # T2: the weight (1-x²)^{+1/4} *vanishes* at ±1, so φ(±1) is the zero vector
+    # and the model assigns those points probability exactly zero — unreachable
+    # by any parameters. Since minmax rescaling maps each feature's extremes
+    # onto the range endpoints, the full (-1,1) range guaranteed two zero-density
+    # samples per batch. ±0.99 floors ‖φ‖ at ~0.36.
     "chebychev1": (-0.99, 0.99),
     "chebyshev1": (-0.99, 0.99),
-    "chebychev2": (-1., 1.),
-    "chebyshev2": (-1., 1.),
+    "chebychev2": (-0.99, 0.99),
+    "chebyshev2": (-0.99, 0.99),
     "simp":       (0., 1.),
 }
 

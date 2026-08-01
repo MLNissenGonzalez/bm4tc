@@ -108,7 +108,8 @@ def test_initialize_invalidates_log_Z_cache():
 
 # ── amp-diag cache populated by mixed_nll ──────────────────────────────────
 
-_AMP_KEYS = {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max", "amp_nonfinite_count"}
+_AMP_KEYS = {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
+             "amp_nonfinite_count", "amp_nan_count"}
 
 
 @pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
@@ -496,6 +497,36 @@ def test_log_amp_sq_matches_amplitudes(dtype):
     got = cbm.log_amp_sq(x)
     assert got.shape == ref.shape == (5, cbm.out_dim)
     assert torch.allclose(got, ref, atol=1e-4)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+def test_log_amp_sq_finite_when_embedding_vanishes(dtype):
+    """A zero embedding vector must floor, not NaN, on the accumulate path.
+
+    Regression: Chebyshev T2 vanishes at x = ±1, so the running contraction hit
+    exactly zero and the unguarded renormalization did 0/0 → NaN in both
+    psi_renorm and log_norm, killing training at step 2. T2's range is now
+    restricted so data cannot land there, but the contraction itself must be
+    safe for any future embedding with a node — hence x = ±1 is passed here
+    deliberately, outside the declared domain.
+    """
+    cfg = CBMConfig(
+        embedding="chebychev2",
+        init_kwargs=MPSInitConfig(in_dim=6, bond_dim=3, dtype=dtype, std=0.3),
+        accumulate=True,
+    )
+    cbm = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
+
+    x = torch.tensor([[0.3, -0.2], [1.0, 0.5], [-1.0, -1.0]])
+    psi, log_norm = cbm.amplitudes_accumulate(x)
+    assert torch.isfinite(psi.abs()).all()
+    assert torch.isfinite(log_norm).all()
+
+    las = cbm.log_amp_sq(x)
+    assert torch.isfinite(las).all()
+    # The vanishing rows floor far below the interior row rather than NaN-ing.
+    assert las[0].max() > las[1].max()
+    assert las[0].max() > las[2].max()
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])

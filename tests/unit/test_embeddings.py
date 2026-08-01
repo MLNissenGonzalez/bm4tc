@@ -134,6 +134,40 @@ def test_range_from_embedding_chebychev1():
     assert lo == pytest.approx(-0.99) and hi == pytest.approx(0.99)
 
 
+def test_range_from_embedding_chebychev2():
+    """T2 is restricted to ±0.99 like T1, for the opposite reason: its weight
+    (1-x²)^{1/4} vanishes at ±1, so φ(±1) is the zero vector. See
+    reference/chebyshev_boundary_born_machines.md."""
+    lo, hi = range_from_embedding("chebychev2")
+    assert lo == pytest.approx(-0.99) and hi == pytest.approx(0.99)
+
+
+# ---- no embedding may vanish inside its own declared domain ----
+
+@pytest.mark.parametrize(
+    "name", ["fourier", "legendre", "hermite", "chebychev1", "chebychev2"]
+)
+def test_embedding_never_vanishes_in_its_own_range(name):
+    """‖φ(x)‖ > 0 for every x in the declared domain.
+
+    A zero basis vector means |ψ(x,c)|² = 0 for *every* parameter setting — a
+    hard zero in the density that no training can move — and it drove the
+    accumulate-path contraction into 0/0. Chebyshev T2 declared (-1, 1) and
+    vanished exactly at the endpoints, which minmax rescaling maps data onto by
+    construction. Guard the whole family, not just T2.
+    """
+    lo, hi = range_from_embedding(name)
+    emb = embedding(name, IN_DIM)
+    x = torch.linspace(lo, hi, 2001)
+    norms = emb(x).norm(dim=-1)
+    assert torch.isfinite(norms).all(), f"{name}: non-finite ‖φ‖ inside its range"
+    assert norms.min() > 1e-3, (
+        f"{name}: ‖φ‖ drops to {norms.min().item():.3g} at "
+        f"x={x[norms.argmin()].item():+.4f}, inside its declared range "
+        f"({lo}, {hi})"
+    )
+
+
 # ---- batch independence ----
 
 def test_embedding_batch_independence():
