@@ -1,0 +1,9 @@
+init_kwargs:
+  in_dim: 4 # physical dimension
+  bond_dim: 3
+  boundary: "obc"
+  init_method: "randn_eye"
+  std: 1e-9
+  dtype: "complex64"
+embedding: "legendre"
+accumulate: true   # complex64 -> overflow-safe path on (see CLAUDE.md, Key invariants)

@@ -1,0 +1,114 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training seed sweep, alpha=0.0, spirals, legendre/d10r6c64.
+# Part of the Phase 2 AT arm {a0, a0001} x {d4r3, d6r4, d10r6}c64.
+#
+# Pure adversarial training, no generative term -- the AT baseline the
+# alpha ladder is compared against.
+#
+# SPLIT OBJECTIVE ON (gen_on_clean=true) for both alphas. At alpha=0 it is
+# algebraically identical to the non-split path, but it still routes validation
+# through eval_split, so setting it on both arms keeps them selected identically.
+# patience counts VALIDATION EVENTS, not epochs: 20 x eval_rob_freq 5 = 100.
+#
+# Attack: PGD-L infinity at eps_rel 0.1 (= abs 0.2 on legendre), 10 steps at
+# train time, curriculum from rel 0.01 to full by epoch 130 of 200. Analysis
+# attacks the result at 40 steps.
+#
+# WATCH THE CEILING. On spirals a data-only bound caps ANY classifier at 0.676
+# robust accuracy at abs 0.2 and 0.630 at abs 0.3 (max-matching over the L-inf
+# conflict graph). The previous spirals AT sweep reported 0.929 and 0.829, which
+# is impossible and means its attack was failing, not that it was that robust
+# (issue D1). analysis/run.py now emits rob_ceiling/{eps_rel} beside rob/, and
+# sweep.py prints it as a reference row -- check it before quoting any number
+# from this sweep.
+#
+# lr and clean_weight come from this arch's own study:
+#   outputs/spirals/at/legendre/d10r6c64/hpo/a0_{DDMM}/
+# clean_weight is swept on [0, 0.5]; the old spirals AT config's 0.906 is not
+# carried forward.
+#
+# model_path: AT always warm-starts from a NAT alpha=0 checkpoint (hence
+# descriptor at_warm). Fill from the finished NAT a0 sweep at this arch --
+# tools/patch_checkpoint.py does it.
+#
+# Runnable once model_path, lr and clean_weight are filled:
+#   python -m experiments.train --multirun \
+#       +experiments=spirals/at/legendre/d10r6c64/seed_sweep/a0
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: a0
+descriptor: at_warm
+
+defaults:
+  - override /born: legendre/d10r6c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+
+model_path: ???   # FILL from outputs/spirals/nat/legendre/d10r6c64/seed_sweep/a0_{DDMM}/{job}/models/model
+
+tracking:
+  seed: 42
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+    eps_rel: [0.1]     # relative; abs 0.2 in [-1,1]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  adversarial:
+    alpha: 0.0
+    gen_on_clean: true
+    max_epoch: 200
+    batch_size: 256
+    patience: 20                  # validation events, NOT epochs (= 100 epochs)
+    eval_rob_freq: 5
+    stop_crit: "rob"
+    acc_floor: null
+    save: true
+
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      eps_rel: [0.1]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_eps_start_rel: 0.01
+    curriculum_end_epoch: 130
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1
+      log_target: 0.0
+      debug: false
+
+    clean_weight: ???             # FILL FROM HPO (a0, d10r6c64)
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???                   # FILL FROM HPO (a0, d10r6c64)
+        weight_decay: 0.0         # FIXED at 0 for every arm
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)

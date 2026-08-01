@@ -1,0 +1,70 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start seed sweep, alpha=1.0, spirals, legendre/d10r6c64.
+# Part of the Phase 2 alpha ladder {a0, cold_a0001, cold_a001, cold_a01,
+# cold_a05, cold_a1} x {d4r3, d6r4, d10r6}c64.
+#
+# Purely generative. stop_crit=mixed_loss reduces exactly to gen_loss here.
+# The old spirals a1 sweep ran with alpha=0.5's stale lr/weight_decay pair
+# (issue C3, commit 2441d3b); this ladder refills every arm from its own
+# study, so that cannot recur.
+#
+# EVERY ARM OF THIS LADDER IS SELECTED THE SAME WAY (stop_crit=mixed_loss) AND
+# TUNED IN THE SAME SEARCH SPACE (lr log-uniform 1e-6..1e-1, 30 trials, wd fixed
+# at 0). That uniformity is the deliverable -- the previous spirals sweeps used
+# three different stop_crits and five different lr intervals, which is a
+# sufficient mechanism for "interpolation stopped looking beneficial" on its own.
+# Do not tune this arm individually.
+#
+# Cold start (no model_path): trained from scratch, like every other alpha here.
+#
+# lr comes from this arch's own study:
+#   outputs/spirals/nat/legendre/d10r6c64/hpo/cold_a1_{DDMM}/
+#
+# Runnable once lr is filled:
+#   python -m experiments.train --multirun \
+#       +experiments=spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a1
+descriptor: nat_cold
+
+defaults:
+  - override /born: legendre/d10r6c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+# No model_path: cold start from the born config's randn_eye init.
+
+tracking:
+  seed: 42
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 300
+    batch_size: 256
+    patience: 100
+    stop_crit: "mixed_loss"
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1
+      log_target: 0.0
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???             # FILL FROM HPO (cold_a1, d10r6c64)
+        weight_decay: 0.0   # FIXED at 0 for every arm
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)
