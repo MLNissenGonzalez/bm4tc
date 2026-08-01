@@ -1,0 +1,130 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Adversarial-training HPO for spirals, legendre, complex64.
+#
+# Two alphas only: 0 and 0.001, mirroring the MNIST AT arm, where the split
+# objective at a small generative weight was where the gain appeared.
+#
+# SPLIT OBJECTIVE ON (gen_on_clean=true): the adversarial signal enters the
+# discriminative half only, the generative half sees clean data. Two consequences
+# that are easy to trip over:
+#   * at alpha=0 the objective is algebraically identical to the non-split path,
+#     but validation still switches to eval_split (every eval_rob_freq epochs,
+#     none in between), so patience counts VALIDATION EVENTS, not epochs:
+#     patience 20 x eval_rob_freq 5 = 100 epochs. It is set on both alphas
+#     deliberately, so the two arms are selected identically.
+#   * gen_on_clean=true RAISES at alpha=1 (the discriminative term vanishes and
+#     there is nothing for the adversarial signal to enter). This config must
+#     never be pointed at the full alpha ladder.
+#
+# SEARCH SPACE: lr log-uniform (1e-6, 1e-1) -- the same interval as the NAT
+# studies -- crossed with clean_weight uniform on [0, 0.5]. clean_weight is
+# linear, not log, because it includes 0 (= pure adversarial). It is swept rather
+# than fixed because the old spirals AT config carried clean_weight 0.906, i.e.
+# 90.6% of the loss on the clean term, which is a prime suspect for D1 (that
+# sweep reports robust accuracy ABOVE the data-only ceiling, so its attack is
+# failing). Do not carry 0.906 forward.
+#
+# WARM START IS STRUCTURAL: AT always fine-tunes from a NAT alpha=0 checkpoint,
+# hence descriptor at_warm. model_path must be filled per arch from the finished
+# NAT a0 seed sweep before this runs -- tools/patch_checkpoint.py does it.
+#
+# Attack: PGD-L infinity, eps_rel 0.1 (= abs 0.2 on legendre, width 2.0), 10
+# steps at train time; analysis attacks at 40. Curriculum ramps eps from rel 0.01
+# to full by epoch 130 of 200.
+#
+# Usage (loop alpha x arch, AFTER patch_checkpoint.py has filled model_path):
+#   for a in 0.0 0.001; do for r in 4r3 6r4 10r6; do
+#     python -m experiments.train --multirun \
+#       +experiments=spirals/at/legendre/hpo/at \
+#       trainer.adversarial.alpha=$a born=legendre/d${r}c64
+#   done; done
+#
+# Output: outputs/spirals/at/legendre/d{A}c64/hpo/{a0|a0001}_{DDMM}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "${alpha_suffix:}"
+descriptor: at_warm
+
+defaults:
+  - override /born: legendre/d10r6c64        # CLI-overridden: born=legendre/d{4r3,6r4,10r6}c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/nll: null
+  - override /trainer/adversarial: pgd_at
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+model_path: ???   # FILL PER ARCH from the finished NAT a0 seed sweep
+
+tracking:
+  seed: 42
+  evasion:
+    method: "PGD"
+    norm: "inf"
+    criterion:
+      name: "negative log-likelihood"
+    eps_rel: [0.1]     # relative; abs 0.2 in [-1,1]
+    num_steps: 10
+    step_size: null
+    random_start: true
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  adversarial:
+    alpha: 0.0                    # CLI-overridden: trainer.adversarial.alpha={0.0,0.001}
+    gen_on_clean: true            # split objective; see header
+    max_epoch: 200
+    batch_size: 256
+    patience: 20                  # validation events, NOT epochs (= 100 epochs)
+    eval_rob_freq: 5
+    stop_crit: "rob"
+    acc_floor: null               # no clean-accuracy floor on the 2-D toys
+    save: false
+
+    evasion:
+      method: "PGD"
+      norm: "inf"
+      criterion:
+        name: "negative log-likelihood"
+      eps_rel: [0.1]
+      num_steps: 10
+      step_size: null
+      random_start: true
+
+    curriculum: true
+    curriculum_eps_start_rel: 0.01
+    curriculum_end_epoch: 130
+
+    auto_stack: true
+    auto_unbind: false
+
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1
+      log_target: 0.0
+      debug: false
+
+    clean_weight: 0.0             # swept below
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4                  # swept below
+        weight_decay: 0.0         # FIXED at 0 for every arm
+
+hydra:
+  sweeper:
+    study_name: "at_${experiment}_${dataset.name}_d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 8
+    direction: maximize           # rob
+    n_trials: 20
+    n_jobs: 1
+    params:
+      trainer.adversarial.optimizer.kwargs.lr: tag(log, interval(1e-6, 1e-1))
+      trainer.adversarial.clean_weight: interval(0.0, 0.5)

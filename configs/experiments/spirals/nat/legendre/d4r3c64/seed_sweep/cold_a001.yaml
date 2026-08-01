@@ -1,0 +1,67 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start seed sweep, alpha=0.01, spirals, legendre/d4r3c64.
+# Part of the Phase 2 alpha ladder {a0, cold_a0001, cold_a001, cold_a01,
+# cold_a05, cold_a1} x {d4r3, d6r4, d10r6}c64.
+#
+# One decade up from the ladder's smallest generative weight.
+#
+# EVERY ARM OF THIS LADDER IS SELECTED THE SAME WAY (stop_crit=mixed_loss) AND
+# TUNED IN THE SAME SEARCH SPACE (lr log-uniform 1e-6..1e-1, 30 trials, wd fixed
+# at 0). That uniformity is the deliverable -- the previous spirals sweeps used
+# three different stop_crits and five different lr intervals, which is a
+# sufficient mechanism for "interpolation stopped looking beneficial" on its own.
+# Do not tune this arm individually.
+#
+# Cold start (no model_path): trained from scratch, like every other alpha here.
+#
+# lr comes from this arch's own study:
+#   outputs/spirals/nat/legendre/d4r3c64/hpo/cold_a001_{DDMM}/
+#
+# Runnable once lr is filled:
+#   python -m experiments.train --multirun \
+#       +experiments=spirals/nat/legendre/d4r3c64/seed_sweep/cold_a001
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a001
+descriptor: nat_cold
+
+defaults:
+  - override /born: legendre/d4r3c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+# No model_path: cold start from the born config's randn_eye init.
+
+tracking:
+  seed: 42
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 0.01
+    max_epoch: 300
+    batch_size: 256
+    patience: 100
+    stop_crit: "mixed_loss"
+    save: true
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1
+      log_target: 0.0
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: ???             # FILL FROM HPO (cold_a001, d4r3c64)
+        weight_decay: 0.0   # FIXED at 0 for every arm
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1, 6)

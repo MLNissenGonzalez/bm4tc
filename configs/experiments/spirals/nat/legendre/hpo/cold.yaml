@@ -1,0 +1,80 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# Cold-start alpha>0 NAT HPO for spirals, legendre, complex64.
+#
+# Every alpha>0 arm is trained FROM SCRATCH (no model_path), not fine-tuned from
+# the alpha=0 checkpoint. Warm starting is what made mixed_loss selection unfair
+# on MNIST -- accuracy starts high and decays, so the rule never sees it -- and
+# spirals is cheap enough that the warm shortcut buys nothing. One ladder, one
+# init, one selection rule.
+#
+# stop_crit=mixed_loss for every alpha: it reduces to dis_loss at alpha=0 and to
+# gen_loss at alpha=1, so a single rule spans the ladder (issue B, Phase 2).
+#
+# SEARCH SPACE IS DELIBERATELY IDENTICAL across every alpha and every arch --
+# see the note in hpo/a0.yaml. Do not narrow it per alpha.
+#
+# Alpha grid: 0.001, 0.01, 0.1, 0.5, 1.0 (log-spaced decades plus 0.5).
+# alpha=0 has its own config (hpo/a0.yaml) because it is unprefixed.
+#
+# Usage (loop alpha x arch):
+#   for a in 0.001 0.01 0.1 0.5 1.0; do for r in 4r3 6r4 10r6; do
+#     python -m experiments.train --multirun \
+#       +experiments=spirals/nat/legendre/hpo/cold \
+#       trainer.nll.alpha=$a born=legendre/d${r}c64
+#   done; done
+#
+# Output: outputs/spirals/nat/legendre/d{A}c64/hpo/cold_a{X}_{DDMM}/
+# ---------------------------------------------------------------------------
+stage: hpo
+experiment: "cold_${alpha_suffix:}"
+descriptor: nat_cold
+
+defaults:
+  - override /born: legendre/d10r6c64        # CLI-overridden: born=legendre/d{4r3,6r4,10r6}c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/adversarial: null
+  - override /tracking: online
+  - override /hydra/sweeper: optuna
+
+# No model_path: cold start from the born config's randn_eye init.
+
+tracking:
+  seed: 42
+
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 0.01                   # CLI-overridden: trainer.nll.alpha=...
+    max_epoch: 300
+    batch_size: 256
+    patience: 100
+    stop_crit: "mixed_loss"
+    save: false
+    norm_control:
+      hard_every: 0
+      soft_strength: 0.1          # FIXED; not swept (uniform 1-D search space)
+      log_target: 0.0
+      debug: false
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 1e-4                  # swept below
+        weight_decay: 0.0         # FIXED at 0 for every arm
+
+hydra:
+  sweeper:
+    study_name: "${experiment}_${dataset.name}_d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}"
+    sampler:
+      _target_: optuna.samplers.TPESampler
+      seed: 42
+      n_startup_trials: 10
+    direction: minimize
+    n_trials: 30
+    n_jobs: 1
+    params:
+      trainer.nll.optimizer.kwargs.lr: tag(log, interval(1e-6, 1e-1))
