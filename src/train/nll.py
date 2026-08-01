@@ -120,11 +120,13 @@ class NLLTrainer:
                     result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
                     result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
                     result["amp_nonfinite_count"] = int((~finite_mask).sum().item())
+                    result["amp_nan_count"] = int(torch.isnan(log_abs_sq).sum().item())
                 except Exception:
                     result["log_amp_sq_mean"] = float("nan")
                     result["log_amp_sq_min"] = float("nan")
                     result["log_amp_sq_max"] = float("nan")
                     result["amp_nonfinite_count"] = -1
+                    result["amp_nan_count"] = -1
         return result
 
 
@@ -151,10 +153,18 @@ class NLLTrainer:
             s = f"log|amp|² mean={mean_:.4g} min={min_:.4g} max={max_:.4g}"
             if nf_count > 0:
                 # The count comes from non-finite 2·log(|amp|.clamp(min=tiny))
-                # (model._cache_amp_diag / the recompute fallback below). The clamp
-                # floors amplitude underflow to a finite value, so a non-finite
-                # entry can only be an amplitude that overflowed float32.
-                s += f" ({nf_count} non-finite → overflow)"
+                # (model._cache_amp_diag / the recompute fallback above). The clamp
+                # floors amplitude underflow, so a non-finite entry is either an
+                # amplitude that overflowed float32 (+inf) or a degenerate
+                # contraction (NaN) — do not report the second as the first.
+                nan_count = int(d.get("amp_nan_count", 0) or 0)
+                if nan_count > 0 and nan_count >= nf_count:
+                    cause = "NaN, degenerate contraction (zero amplitude?)"
+                elif nan_count > 0:
+                    cause = f"{nf_count - nan_count} overflow + {nan_count} NaN"
+                else:
+                    cause = "overflow"
+                s += f" ({nf_count} non-finite → {cause})"
             parts.append(s)
         return "; ".join(parts)
 

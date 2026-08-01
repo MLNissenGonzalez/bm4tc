@@ -338,7 +338,7 @@ class ConditionalBornMachine(tk.models.MPS):
                 if renormalize:
                     axes = [ax for ax in result_node.axes_names if 'right' in ax]
                     if axes:
-                        n = result_node.norm(axis=axes, keepdim=True)
+                        n = self._safe_bond_norm(result_node, axes)
                         self._accumulate_log_norm(n, result_node)
                         result_node = result_node / n
             return result_node
@@ -349,10 +349,30 @@ class ConditionalBornMachine(tk.models.MPS):
                 if renormalize:
                     axes = [ax for ax in result_node.axes_names if 'left' in ax]
                     if axes:
-                        n = result_node.norm(axis=axes, keepdim=True)
+                        n = self._safe_bond_norm(result_node, axes)
                         self._accumulate_log_norm(n, result_node)
                         result_node = result_node / n
             return result_node
+
+    @staticmethod
+    def _safe_bond_norm(result_node, axes) -> torch.Tensor:
+        """Bond-axis norm, floored so a vanishing partial contraction cannot NaN.
+
+        An embedding whose basis vector is the zero vector somewhere in its own
+        domain (Chebyshev T2 at x = ±1, before its range was restricted) makes
+        the running node exactly zero for that sample. The unguarded form then
+        did ``0 / 0`` into ``psi`` and ``log(0)`` into ``log_norm``, so both came
+        back NaN and poisoned the loss — while the traced path, which clamps the
+        *final* amplitude, returned a finite floor. Flooring the divisor keeps
+        ``psi`` at 0 and ``log_norm`` finite, so a zero amplitude now floors on
+        this path too instead of producing NaN.
+
+        The norm/phase split is invariant to the divisor's exact value
+        (``psi/n`` scaled up by ``exp(log n)`` reconstructs the same amplitude),
+        so this changes nothing wherever the norm is a normal float.
+        """
+        n = result_node.norm(axis=axes, keepdim=True)
+        return n.clamp(min=_LOG_PROB_EPS)
 
     def _accumulate_log_norm(self, n: torch.Tensor, node) -> None:
         """Fold a keepdim bond-norm tensor into ``self._log_norm_acc`` at
@@ -429,6 +449,13 @@ class ConditionalBornMachine(tk.models.MPS):
 
         Drop-in replacement for ``2·log|amplitudes(data)|`` that never
         materializes an overflowing amplitude.
+
+        Where ψ = 0 exactly (an embedding that vanishes in its own domain) the
+        true value is −inf and both paths return a finite floor, but *different*
+        floors: this one is the more negative, because ``_safe_bond_norm``
+        contributes a floored log per vanishing step. Agreement between the two
+        paths holds wherever ψ ≠ 0, which is the case the equivalence is claimed
+        for.
         """
         psi, log_norm = self.amplitudes_accumulate(data)
         log_abs = torch.log(psi.abs().clamp(min=_LOG_PROB_EPS))
@@ -592,6 +619,9 @@ class ConditionalBornMachine(tk.models.MPS):
             "log_amp_sq_min": finite.min().item() if finite.numel() else float("nan"),
             "log_amp_sq_max": finite.max().item() if finite.numel() else float("nan"),
             "amp_nonfinite_count": int((~finite_mask).sum().item()),
+            # Split so the reporter can name the cause: +inf is a genuine
+            # amplitude overflow, NaN is a degenerate contraction (0/0).
+            "amp_nan_count": int(torch.isnan(log_abs_sq).sum().item()),
         }
 
     def cache_log_Z(self) -> float:
