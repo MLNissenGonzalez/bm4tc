@@ -45,7 +45,7 @@ trainer:
   adversarial:
     max_epoch: 1            # placeholder; swept via hydra sweeper
     batch_size: 256
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     patience: 100           # >= max max_epoch -> no early stopping during sweep
 
     evasion:

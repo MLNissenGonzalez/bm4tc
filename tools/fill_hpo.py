@@ -116,6 +116,10 @@ def get_metric_info(hpo_cfg: Dict, trainer: str) -> Tuple[str, bool]:
         return "gen_loss/valid", True
     elif stop_crit == "mixed_loss":
         return "mixed_loss/valid", True
+    elif stop_crit == "at_loss":
+        # AT only: the training objective mirrored on valid. Logged every
+        # eval_rob_freq epochs, unlike the clean losses above.
+        return "at_loss/valid", True
     elif stop_crit == "acc":
         return "acc/valid", False
     elif stop_crit == "rob":
