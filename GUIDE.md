@@ -30,9 +30,9 @@ Examples: `d4r3`, `d10r6`, `d30r18`.
 
 Run as a Python module from the project root:
 ```bash
-python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0
-python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
-python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
+python -m experiments.train +experiments=spirals/nat/legendre/hpo/a0 born=legendre/d4r3c64
+python -m experiments.train --multirun +experiments=spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1
+python -m experiments.train --multirun +experiments=spirals/at/legendre/d10r6c64/seed_sweep/a0
 ```
 
 ---
@@ -113,7 +113,7 @@ Post-training analysis lives in `analysis/`. See [`analysis/GUIDE.md`](analysis/
 Quick start:
 ```bash
 # Analyse a completed seed sweep
-python -m analysis.sweep outputs/circles/nat/legendre/d10r6/seed_sweep_a1_1802
+python -m analysis.sweep outputs/spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1_0208
 
 # Analyse all unanalysed sweeps in batch
 python -m analysis.batch
