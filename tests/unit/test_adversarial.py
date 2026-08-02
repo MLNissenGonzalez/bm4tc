@@ -13,7 +13,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.train.adversarial import AdversarialTrainer, AdversarialConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.utils.train import (
-    NormControlConfig, NormRegularizer, NormTracker, eval_metrics, eval_split,
+    NormControlConfig, NormRegularizer, NormTracker, eval_at, eval_metrics,
+    eval_rob, eval_split,
 )
 
 
@@ -475,8 +476,8 @@ def test_eval_split_rob_absent_when_no_samples_attacked():
     assert out["n_rob"] == 0
 
 
-def test_eval_split_mixed_loss_matches_hand_computed_reference():
-    """mixed_loss reproduces the training objective, sample by sample."""
+def test_eval_split_at_loss_matches_hand_computed_reference():
+    """at_loss reproduces the split training objective, sample by sample."""
     device = torch.device("cpu")
     cbm = _tiny_cbm()
     cbm.prepare(device=device)
@@ -508,7 +509,148 @@ def test_eval_split_mixed_loss_matches_hand_computed_reference():
         (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)
     ) + alpha * gen_all
 
-    assert abs(out["mixed_loss"] - ref) < 1e-4
+    assert abs(out["at_loss"] - ref) < 1e-4
+    # mixed_loss is the CLEAN alpha-mix, not the objective: it never sees x_adv,
+    # so it stays comparable to a NAT run's mixed_loss/valid.
+    clean_ref = (1 - alpha) * out["dis_loss"] + alpha * out["gen_loss"]
+    assert abs(out["mixed_loss"] - clean_ref) < 1e-9
+    assert abs(out["mixed_loss"] - out["at_loss"]) > 1e-6
+
+
+# ── default objective: combined validation (eval_at) ────────────────────────
+
+def test_eval_at_clean_metrics_match_eval_metrics():
+    """acc/dis_loss/gen_loss are clean and over the full set, as in eval_metrics."""
+    cbm = _tiny_cbm()
+    cbm.prepare(device=torch.device("cpu"))
+    # Evenly-dividing batches: eval_metrics averages per-batch means while eval_at
+    # averages per sample, so the two coincide exactly only at equal batch sizes.
+    loader = _valid_loader(n=20, batch_size=5)
+
+    out = eval_at(cbm, loader, _ShiftAttack(), 0.1, torch.device("cpu"),
+                  alpha=0.5, clean_weight=0.3)
+    dis_loss, acc, gen_loss = eval_metrics(cbm, loader, torch.device("cpu"))
+
+    assert abs(out["acc"] - acc) < 1e-9
+    assert abs(out["dis_loss"] - dis_loss) < 1e-5
+    assert abs(out["gen_loss"] - gen_loss) < 1e-5
+
+
+def test_eval_at_rob_matches_eval_rob_over_the_full_set():
+    """rob keeps eval_rob's meaning: every sample attacked, no subset estimator."""
+    device = torch.device("cpu")
+    cbm = _tiny_cbm()
+    cbm.prepare(device=device)
+    loader = _valid_loader(n=20, batch_size=6)
+    attack = _ShiftAttack()
+
+    out = eval_at(cbm, loader, attack, 0.1, device, alpha=0.5, clean_weight=0.3)
+    ref = eval_rob(cbm, loader, _ShiftAttack(), 0.1, device)
+
+    assert abs(out["rob"] - ref) < 1e-9
+    assert torch.cat(attack.seen).shape[0] == 20   # whole set, once each
+
+
+def test_eval_at_at_loss_matches_hand_computed_reference():
+    """at_loss reproduces (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x), sample by sample."""
+    device = torch.device("cpu")
+    cbm = _tiny_cbm()
+    cbm.prepare(device=device)
+    loader = _valid_loader(n=20, batch_size=6)
+    alpha, cw, shift = 0.5, 0.3, 0.05
+
+    out = eval_at(cbm, loader, _ShiftAttack(shift), 0.1, device,
+                  alpha=alpha, clean_weight=cw)
+
+    # Reference: one sample at a time, no batching.
+    xs = torch.cat([x for x, _ in loader])
+    ys = torch.cat([y for _, y in loader])
+    with torch.no_grad():
+        log_Z = cbm.log_partition_function()
+
+    def _terms(x, y):
+        with torch.no_grad():
+            las = cbm._log_amp_sq(x.unsqueeze(0))
+        return ((torch.logsumexp(las, dim=1) - las[0, y]).item(),
+                (log_Z - las[0, y]).item())
+
+    def _mixed(shifted):
+        pairs = [_terms(xs[i] + shifted, ys[i]) for i in range(len(ys))]
+        dis = sum(d for d, _ in pairs) / len(pairs)
+        gen = sum(g for _, g in pairs) / len(pairs)
+        return (1 - alpha) * dis + alpha * gen
+
+    # The generative half of the adversarial term is L_gen(x_adv), not L_gen(x):
+    # this mirrors the objective, which puts the whole mixed NLL on x_adv.
+    ref = (1 - cw) * _mixed(shift) + cw * _mixed(0.0)
+
+    assert abs(out["at_loss"] - ref) < 1e-4
+
+
+def test_eval_at_reduces_to_adversarial_dis_loss_at_alpha0_cw0():
+    """The anchor case: pure PGD-AT selects on the discriminative loss on x_adv."""
+    device = torch.device("cpu")
+    cbm = _tiny_cbm()
+    cbm.prepare(device=device)
+    loader = _valid_loader(n=20, batch_size=5)
+    shift = 0.05
+
+    out = eval_at(cbm, loader, _ShiftAttack(shift), 0.1, device,
+                  alpha=0.0, clean_weight=0.0)
+
+    # Same loader, shifted once up front: eval_at's adversarial dis term.
+    xs = torch.cat([x for x, _ in loader]) + shift
+    ys = torch.cat([y for _, y in loader])
+    shifted = DataLoader(TensorDataset(xs, ys), batch_size=5, shuffle=False)
+    ref_dis, _, _ = eval_metrics(cbm, shifted, device)
+
+    assert abs(out["at_loss"] - ref_dis) < 1e-5
+
+
+def test_eval_at_reduces_to_clean_mixed_loss_at_cw1():
+    """clean_weight=1 => no adversarial signal in the criterion."""
+    device = torch.device("cpu")
+    cbm = _tiny_cbm()
+    cbm.prepare(device=device)
+
+    out = eval_at(cbm, _valid_loader(), _ShiftAttack(), 0.1, device,
+                  alpha=0.5, clean_weight=1.0)
+
+    assert abs(out["at_loss"] - out["mixed_loss"]) < 1e-9
+    # rob is still measured and reported at cw=1 -- selection stops using the
+    # attack, evaluation does not.
+    assert math.isfinite(out["rob"])
+
+
+# ── at_loss as a stopping criterion ─────────────────────────────────────────
+
+def test_at_loss_is_minimized_not_maximized(cbm):
+    """at_loss is a loss: lower wins. Guards against an acc-style comparison."""
+    t = _make_trainer(cbm, stop_crit="at_loss")
+    t.best["at_loss"] = 0.5
+
+    t.valid_perf = {"acc": 0.9, "at_loss": 0.7}
+    t._update()
+    assert t.best["at_loss"] == 0.5          # worse (higher) => rejected
+    assert t.patience_counter == 1
+
+    t.valid_perf = {"acc": 0.9, "at_loss": 0.3}
+    t._update()
+    assert t.best["at_loss"] == 0.3          # better (lower) => selected
+    assert t.patience_counter == 0
+
+
+def test_at_loss_requires_positive_eval_rob_freq():
+    """at_loss comes from the attack pass, so eval_rob_freq=0 never produces it."""
+    import pytest
+    cfg = AdversarialConfig(
+        stop_crit="at_loss", eval_rob_freq=0,
+        norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
+    )
+    with pytest.raises(ValueError, match="eval_rob_freq >= 1"):
+        AdversarialTrainer(cbm=_tiny_cbm(), train_cfg=cfg,
+                           datahandler=_FakeDataHandler(n=20, batch_size=5),
+                           device=torch.device("cpu"))
 
 
 # ── gen_on_clean: validation cadence and patience accounting ────────────────
@@ -585,3 +727,7 @@ def test_unsplit_still_validates_every_epoch():
     assert [ep for ep, m in logged if "acc/valid" in m] == [1, 2, 3, 4]
     assert [ep for ep, m in logged if t.rob_metric_key in m] == [2, 4]
     assert not any("n_rob_valid" in m for _, m in logged)
+    # at_loss needs the attack, so it appears on rob epochs only; mixed_loss is
+    # clean and therefore emitted every epoch.
+    assert [ep for ep, m in logged if "at_loss/valid" in m] == [2, 4]
+    assert [ep for ep, m in logged if "mixed_loss/valid" in m] == [1, 2, 3, 4]
