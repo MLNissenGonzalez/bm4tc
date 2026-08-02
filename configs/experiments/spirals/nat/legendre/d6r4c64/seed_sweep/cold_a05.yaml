@@ -61,7 +61,7 @@ trainer:
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???             # FILL FROM HPO (cold_a05, d6r4c64)
+        lr: 0.007102017846630484             # FILL FROM HPO (cold_a05, d6r4c64)
         weight_decay: 0.0   # FIXED at 0 for every arm
 
 hydra:
