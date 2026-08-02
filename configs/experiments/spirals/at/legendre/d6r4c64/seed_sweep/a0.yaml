@@ -74,7 +74,7 @@ trainer:
     batch_size: 256
     patience: 20                  # validation events, NOT epochs (= 100 epochs)
     eval_rob_freq: 5
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     acc_floor: null
     save: true
 

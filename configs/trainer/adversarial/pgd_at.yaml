@@ -22,7 +22,11 @@ evasion:
   step_size: null  # defaults to 2.5 * eps_abs / num_steps
   random_start: true
 
-stop_crit: "rob"
+# Select on the objective mirrored on valid: (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x)
+# under the default objective, or the split formula under gen_on_clean. Unlike "rob"
+# it sees the generative half of the loss at alpha>0. Produced by the attack pass
+# only, so it requires eval_rob_freq >= 1; robustness is still evaluated and logged.
+stop_crit: "at_loss"
 patience: 30
 
 eval_rob_freq: 5

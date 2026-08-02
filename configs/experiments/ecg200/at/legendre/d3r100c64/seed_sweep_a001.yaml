@@ -37,7 +37,7 @@ trainer:
     max_epoch: 800
     batch_size: 64
     patience: 200
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     eval_rob_freq: 5
     save: true
     norm_control:

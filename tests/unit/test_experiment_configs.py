@@ -101,7 +101,11 @@ def test_phase2_seed_sweep_is_uniform(name):
     if is_at:
         t = adv
         assert nll is None, f"{name}: AT config must not carry an nll node"
-        assert t.stop_crit == "rob", f"{name}: AT selects on rob"
+        assert t.stop_crit == "at_loss", (
+            f"{name}: every AT arm selects on at_loss (Phase 2, issue B) -- the "
+            f"training objective mirrored on valid, so the generative half of the "
+            f"loss enters selection at alpha>0 as robust accuracy never did"
+        )
         assert t.gen_on_clean is True, f"{name}: split objective is on for both AT alphas"
         # gen_on_clean raises at alpha=1; the AT arm must stay away from it.
         assert t.alpha < 1.0, f"{name}: gen_on_clean=True is invalid at alpha=1"
@@ -139,11 +143,14 @@ def test_phase2_hpo_search_space_is_identical(name):
     assert params[lr_key] == "tag(log, interval(1e-6, 1e-1))", (
         f"{name}: the lr search space must be the same for every alpha and arch"
     )
+    # Both arms now select on a loss, and experiments/train.py only negates the
+    # objective for acc/rob -- so "minimize" is the correct direction everywhere.
+    # This previously read "maximize" on the AT arm alongside stop_crit="rob",
+    # which maximized -rob, i.e. selected the LEAST robust trial.
+    assert cfg.hydra.sweeper.direction == "minimize"
     if "/at/" in name:
-        assert cfg.hydra.sweeper.direction == "maximize"   # rob
         assert params["trainer.adversarial.clean_weight"] == "interval(0.0, 0.5)"
     else:
-        assert cfg.hydra.sweeper.direction == "minimize"   # mixed_loss
         assert len(params) == 1, f"{name}: NAT HPO sweeps lr only"
 
 
