@@ -29,7 +29,7 @@ trainer:
   adversarial:
     max_epoch: 100
     batch_size: 512
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     patience: 10
     eval_rob_freq: 5
     acc_floor: 0.90   # only select epochs whose clean valid-acc stays >= 90%

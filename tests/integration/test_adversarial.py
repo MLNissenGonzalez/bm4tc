@@ -4,6 +4,8 @@ Covers the `gen_on_clean` split objective against a real ConditionalBornMachine,
 real PGD attacks and a real DataHandler — the unit tests stub all three.
 """
 
+import math
+
 import pytest
 import torch
 
@@ -84,12 +86,34 @@ def test_split_run_completes_and_selects_a_model(dh):
     assert all(torch.isfinite(t).all() for t in cbm.tensors)
 
 
+@pytest.mark.parametrize("gen_on_clean", [False, True])
+def test_at_loss_selection_runs_end_to_end(dh, gen_on_clean):
+    """stop_crit='at_loss' selects a checkpoint under both objectives."""
+    cbm = _cbm()
+    cfg = _cfg(stop_crit="at_loss", gen_on_clean=gen_on_clean, alpha=0.5,
+               clean_weight=0.3, max_epoch=6, eval_rob_freq=2)
+    trainer = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
+                                 device=torch.device("cpu"))
+
+    logged = []
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+
+    # at_loss needs the attack pass, so it lands on eval_rob_freq epochs only.
+    assert [ep for ep, m in logged if "at_loss/valid" in m] == [2, 4, 6]
+    assert math.isfinite(trainer.best["at_loss"])
+    assert trainer.best["at_loss"] < float("inf")   # a model was actually selected
+    assert trainer.best_epoch in (2, 4, 6)
+    # Robustness is still evaluated and logged, it just no longer drives selection.
+    assert [ep for ep, m in logged if trainer.rob_metric_key in m] == [2, 4, 6]
+    assert all(torch.isfinite(t).all() for t in cbm.tensors)
+
+
 def test_split_and_unsplit_agree_at_alpha_zero(dh):
     """At alpha=0 the split is a no-op: same loss, bit-identical model after an epoch.
 
     Compared over a single epoch on purpose. The two modes run different
-    validation code (eval_split over a (1-cw) subset vs. eval_metrics + eval_rob
-    over the full set), which consumes different amounts of global RNG and so
+    validation code (eval_split over a (1-cw) subset vs. eval_at over the full
+    set), which consumes different amounts of global RNG and so
     reshuffles the *next* epoch's training batches differently — a divergence
     that says nothing about the objective. random_start=False likewise keeps the
     attack itself deterministic.

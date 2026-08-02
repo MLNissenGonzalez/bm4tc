@@ -55,7 +55,7 @@ trainer:
     max_epoch: 100
     batch_size: 512
     patience: 10
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     eval_rob_freq: 5
     acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
     save: true

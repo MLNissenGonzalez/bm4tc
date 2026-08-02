@@ -30,8 +30,8 @@
 # eval_rob_freq=5 is now the cadence of the WHOLE validation pass (gen_on_clean
 # routes validation through eval_split), not just of the robustness eval; there
 # is no clean-only eval in between. patience=10 is unchanged and still means 10
-# validation events (~50 epochs): with stop_crit="rob" the default path already
-# skipped non-rob epochs without counting them.
+# validation events (~50 epochs): the default path likewise only ever counted
+# attack epochs, since stop_crit="at_loss" is produced by the attack pass alone.
 #
 # Robustness is measured on a fixed (1-cw) fraction of the valid set, drawn once
 # from a constant seed. Its size is logged as n_rob_valid; note this makes
@@ -77,7 +77,7 @@ trainer:
     max_epoch: 100
     batch_size: 512
     patience: 10             # validation events, i.e. ~50 epochs at eval_rob_freq=5
-    stop_crit: "rob"
+    stop_crit: "at_loss"
     eval_rob_freq: 5         # cadence of the whole validation pass under the split
     acc_floor: 0.90          # only select epochs whose clean valid-acc stays >= 90%
     save: false

@@ -22,7 +22,7 @@ evasion:
   step_size: null
   random_start: true
 
-stop_crit: "rob"
+stop_crit: "at_loss"
 patience: 5
 
 eval_rob_freq: 1
