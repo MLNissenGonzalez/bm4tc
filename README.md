@@ -127,13 +127,13 @@ All experiments are run as Python modules from the project root. Configurations 
 
 ```bash
 # Single run (NLL discriminative, alpha=0)
-python -m experiments.train +experiments=moons/nat/fourier/d4r3/hpo_a0
+python -m experiments.train +experiments=spirals/nat/legendre/hpo/a0 born=legendre/d4r3c64
 
 # Multirun / seed sweep (NLL generative, alpha=1)
-python -m experiments.train --multirun +experiments=circles/nat/legendre/d10r6/seed_sweep_a1
+python -m experiments.train --multirun +experiments=spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1
 
 # Adversarial training seed sweep
-python -m experiments.train --multirun +experiments=circles/at/legendre/d10r6/seed_sweep
+python -m experiments.train --multirun +experiments=spirals/at/legendre/d10r6c64/seed_sweep/a0
 
 # Batch-run all unrun configs in a filter set
 python -m experiments.batch --trainer nat --embedding legendre --dry-run
@@ -146,7 +146,7 @@ python -m experiments.train +experiments=tests/nll tracking.mode=disabled
 
 ```bash
 # Analyse a specific sweep
-python -m analysis.sweep outputs/circles/nat/legendre/d10r6/seed_sweep_a1_1802
+python -m analysis.sweep outputs/spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1_0208
 
 # Analyse all completed but unanalysed sweeps in batch
 python -m analysis.batch

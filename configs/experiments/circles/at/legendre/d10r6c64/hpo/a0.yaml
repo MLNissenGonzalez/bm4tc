@@ -23,8 +23,9 @@ defaults:
   - override /tracking: online
   - override /hydra/sweeper: optuna
 
-model_path: outputs/circles/nat/legendre/d10r6/seed_sweep_a0_1203/0/models/model
-
+model_path: ???   # WAS a real-dtype checkpoint (outputs/circles/nat/legendre/d10r6/seed_sweep_a0_1203/0/models/model);
+# invalid for this complex64 config. Refill from a c64 alpha=0 sweep
+# with tools/patch_checkpoint.py before running.
 dataset:
   split_seed: 11
   gen_dow_kwargs:
