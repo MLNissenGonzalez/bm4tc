@@ -1,0 +1,49 @@
+# @package _global_
+# ---------------------------------------------------------------------------
+# spirals / nat / chebychev1 / d30r18c64 -- cold_a1
+#
+# MIGRATED, NOT RUN. Repointed onto the complex64 born configs when the 2-D toys
+# moved off real dtype; no sweep has been launched from this file since. The
+# lr/weight_decay below were tuned against the REAL-DTYPE model of the same
+# shape, so treat them as a starting point, not as this config's HPO winner.
+#
+# Selection rule is as it was before the migration and is NOT the unified
+# mixed_loss rule the spirals ladder uses (Phase 2, issue B). If this dataset is
+# ever run for the paper, unify it first.
+# ---------------------------------------------------------------------------
+stage: seed_sweep
+experiment: cold_a1
+descriptor: nat_cold
+
+defaults:
+  - override /born: chebychev1/d30r18c64
+  - override /dataset: 2Dtoy/spirals
+  - override /trainer/nll: test
+  - override /trainer/adversarial: null
+  - override /tracking: online
+
+tracking:
+  seed: 42
+dataset:
+  split_seed: 11
+  gen_dow_kwargs:
+    seed: 25
+
+trainer:
+  nll:
+    alpha: 1.0
+    max_epoch: 150
+    batch_size: 256
+    patience: 150
+    stop_crit: "gen_loss"
+    save: true
+    optimizer:
+      name: "adam"
+      kwargs:
+        lr: 0.0008747616469163509    # FILL FROM HPO
+        weight_decay: 7.813648003448602e-09  # FILL FROM HPO
+
+hydra:
+  sweeper:
+    params:
+      tracking.seed: range(1,21)
