@@ -385,9 +385,38 @@ def patch_yaml(content: str, params: Dict[str, Any], overwrite: bool = False) ->
 # Discovery
 # =============================================================================
 
-def discover_combos(configs_root: Path) -> List[Dict]:
+def _match_fanned_hpo(kind: str, fanned: List[Path]) -> Optional[Path]:
+    """Pick the embedding-level HPO config that produced seed sweep ``kind``.
+
+    A *fanned* HPO config lives at ``{embedding}/hpo/*.yaml`` and covers several
+    alphas (and several arches) through CLI overrides, so its filename need not
+    contain the alpha at all -- ``hpo/cold.yaml`` run at alpha=0.5 writes to
+    ``hpo/cold_a05_{DDMM}/``. The seed sweep ``seed_sweep/cold_a05.yaml`` must
+    therefore pair with it even though the stems differ. Resolution order:
+
+    1. exact stem match (``hpo/a0.yaml`` <-> ``seed_sweep/a0.yaml``);
+    2. longest stem that is a prefix of the kind (``cold`` <-> ``cold_a05``);
+    3. the sole candidate, if there is exactly one (covers ``at/hpo/at.yaml``,
+       whose name relates to neither ``a0`` nor ``a0001``).
+
+    Returns None when it is genuinely ambiguous, so the caller can report it
+    rather than guess -- silent skipping is the defect this replaces.
+    """
+    by_stem = {p.stem: p for p in fanned}
+    if kind in by_stem:
+        return by_stem[kind]
+    prefixes = [p for p in fanned if kind.startswith(p.stem)]
+    if prefixes:
+        return max(prefixes, key=lambda p: len(p.stem))
+    if len(fanned) == 1:
+        return fanned[0]
+    return None
+
+
+def discover_combos(configs_root: Path, verbose: bool = True) -> List[Dict]:
     """Discover all (hpo_kind, seed_kind) pairs under the new config structure."""
     combos = []
+    skipped: List[str] = []
 
     experiments_root = configs_root / "experiments"
     for dataset_dir in sorted(experiments_root.iterdir()):
@@ -405,8 +434,40 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                     continue
                 embedding = embedding_dir.name
 
+                # Consolidated layout: one {embedding}/hpo/*.yaml fans out over
+                # alpha and arch via CLI overrides. Its output dir carries the
+                # alpha token, so hpo_kind == seed_kind even though the config
+                # stems differ.
+                fanned = sorted((embedding_dir / "hpo").glob("*.yaml"))
                 for arch_dir in sorted(embedding_dir.iterdir()):
-                    if not arch_dir.is_dir():
+                    if not arch_dir.is_dir() or arch_dir.name == "hpo":
+                        continue
+                    if (arch_dir / "hpo").is_dir() or not fanned:
+                        continue    # per-arch HPO wins; handled in the loop below
+                    for seed_path in sorted((arch_dir / "seed_sweep").glob("*.yaml")):
+                        kind = seed_path.stem
+                        hpo_path = _match_fanned_hpo(kind, fanned)
+                        if hpo_path is None:
+                            skipped.append(
+                                f"{dataset}/{trainer}/{embedding}/{arch_dir.name}/"
+                                f"seed_sweep/{kind}: ambiguous among "
+                                f"{[p.stem for p in fanned]}"
+                            )
+                            continue
+                        combos.append({
+                            "dataset":   dataset,
+                            "trainer":   trainer,
+                            "embedding": embedding,
+                            "arch":      arch_dir.name,
+                            "hpo_stage": "hpo",
+                            "hpo_kind":  kind,
+                            "seed_kind": kind,
+                            "hpo_path":  hpo_path,
+                            "seed_path": seed_path,
+                        })
+
+                for arch_dir in sorted(embedding_dir.iterdir()):
+                    if not arch_dir.is_dir() or arch_dir.name == "hpo":
                         continue
                     arch = arch_dir.name
 
@@ -419,6 +480,10 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                             seed_kind = _seed_kind_for_hpo_staged(hpo_kind)
                             seed_path = seed_stage_dir / f"{seed_kind}.yaml"
                             if not seed_path.exists():
+                                skipped.append(
+                                    f"{dataset}/{trainer}/{embedding}/{arch}/hpo/"
+                                    f"{hpo_kind}: no seed sweep at {seed_kind}.yaml"
+                                )
                                 continue
                             combos.append({
                                 "dataset":    dataset,
@@ -440,6 +505,10 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                         seed_path = arch_dir / f"{seed_kind}.yaml"
 
                         if not seed_path.exists():
+                            skipped.append(
+                                f"{dataset}/{trainer}/{embedding}/{arch}/{hpo_kind}: "
+                                f"no seed sweep at {seed_kind}.yaml"
+                            )
                             continue
 
                         combos.append({
@@ -453,6 +522,13 @@ def discover_combos(configs_root: Path) -> List[Dict]:
                             "hpo_path":  hpo_path,
                             "seed_path": seed_path,
                         })
+
+    if skipped and verbose:
+        # These used to vanish silently, so a combo that never got filled looked
+        # identical to one that does not exist (issue C4).
+        print(f"NOTE: {len(skipped)} HPO config(s) had no matching seed sweep:")
+        for s in skipped:
+            print(f"  - {s}")
 
     return combos
 

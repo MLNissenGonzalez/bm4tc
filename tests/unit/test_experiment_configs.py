@@ -1,12 +1,14 @@
-"""Every spirals experiment config must compose, and the Phase 2 tree must be uniform.
+"""Every 2-D toy experiment config must compose, and the Phase 2 tree must be uniform.
 
 Two levels of check:
 
-* **composition** — every config under ``configs/experiments/spirals`` composes
-  and resolves. Catches dead ``override`` targets, missing resolvers, and typos
-  in a group name, none of which surface until a run is launched. Mandatory
-  (``???``) values are allowed: they are how an unfilled HPO slot is meant to
-  fail, loudly, at launch rather than silently with a stale number.
+* **composition** — every config under ``configs/experiments/{spirals,circles,
+  moons}`` composes and resolves. Catches dead ``override`` targets, missing
+  resolvers, and typos in a group name, none of which surface until a run is
+  launched — and in particular catches a config left pointing at a born config
+  that no longer exists, which is exactly what the move to complex64 risked.
+  Mandatory (``???``) values are allowed: they are how an unfilled HPO slot is
+  meant to fail, loudly, at launch rather than silently with a stale number.
 
 * **uniformity** — the Phase 2 ladder (``{nat,at}/legendre/d*c64``) must use one
   selection rule and one search space across every alpha and every arch. That
@@ -15,6 +17,7 @@ Two levels of check:
   intervals, which is a sufficient mechanism for "interpolation stopped looking
   beneficial"). A future edit that tunes one arm individually should fail here.
 """
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -29,6 +32,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CONFIG_DIR = _PROJECT_ROOT / "configs"
 _EXPERIMENTS = _CONFIG_DIR / "experiments"
 _SPIRALS = _EXPERIMENTS / "spirals"
+_TOYS = [_EXPERIMENTS / d for d in ("spirals", "circles", "moons")]
 
 
 def _experiment_names(root: Path):
@@ -38,7 +42,10 @@ def _experiment_names(root: Path):
     )
 
 
+@lru_cache(maxsize=None)
 def _compose(name: str, with_hydra: bool = False):
+    """Compose one experiment config. Cached: initialize_config_dir dominates the
+    runtime and several checks read the same config. Callers must not mutate."""
     GlobalHydra.instance().clear()
     register()
     register_resolvers()
@@ -61,11 +68,25 @@ _PHASE2_HPO = sorted(
 )
 
 
-@pytest.mark.parametrize("name", _experiment_names(_SPIRALS))
-def test_spirals_experiment_config_composes(name):
+_ALL_TOY = sorted(n for root in _TOYS for n in _experiment_names(root))
+
+
+@pytest.mark.parametrize("name", _ALL_TOY)
+def test_toy_experiment_config_composes(name):
     cfg = _compose(name)
     # resolve everything; ??? is legitimate (unfilled HPO slot), unresolvable is not
     OmegaConf.to_container(cfg, resolve=True, throw_on_missing=False)
+
+
+@pytest.mark.parametrize("name", _ALL_TOY)
+def test_toy_configs_are_all_complex64(name):
+    """The 2-D toys moved to complex64 wholesale; no real-dtype born config
+    survives for them, so a config still pointing at one would fail to compose
+    above. This pins the intent rather than the accident: every toy arch is c64,
+    and c64 implies the overflow-safe contraction."""
+    cfg = _compose(name)
+    assert cfg.born.init_kwargs.dtype == "complex64", f"{name}: toys are complex64"
+    assert cfg.born.accumulate is True, f"{name}: complex64 implies accumulate"
 
 
 @pytest.mark.parametrize("name", _PHASE2)

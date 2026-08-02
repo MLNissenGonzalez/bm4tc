@@ -12,8 +12,8 @@ Usage:
 
 Example:
     python tools/patch_checkpoint.py \\
-        outputs/spirals/nat/legendre/d10r6/seed_sweep_a0_0601 \\
-        --config configs/experiments/spirals/at/legendre/d10r6/seed_sweep.yaml \\
+        outputs/spirals/nat/legendre/d10r6c64/seed_sweep/a0_0108 \\
+        --config configs/experiments/spirals/at/legendre/d10r6c64/seed_sweep/a0.yaml \\
         --dry-run
 """
 
@@ -32,10 +32,31 @@ from analysis.utils.wandb_fetcher import (
     _load_wandb_summary,
 )
 
-DEFAULT_CONFIGS = [
-    "configs/experiments/spirals/at/legendre/d10r6/hpo.yaml",
-    "configs/experiments/spirals/at/legendre/d10r6/seed_sweep.yaml",
-]
+
+def default_configs_for(sweep_dir: Path) -> List[str]:
+    """AT configs that should warm-start from this NAT sweep, derived from its path.
+
+    A static default cannot stay correct now that the AT arm is per-arch: an
+    alpha=0 sweep at d4r3c64 must not patch the d10r6c64 AT configs. Given
+    ``outputs/{dataset}/nat/{emb}/{arch}/[stage/]{name}_{DDMM}`` this returns the
+    AT seed sweeps at the *same* dataset/embedding/arch, plus that embedding's
+    shared AT hpo configs. Returns [] when nothing matches, so the caller can say
+    so rather than patch the wrong file.
+    """
+    parts = sweep_dir.resolve().parts
+    if "outputs" not in parts:
+        return []
+    i = len(parts) - 1 - parts[::-1].index("outputs")
+    try:
+        dataset, _regime, emb, arch = parts[i + 1: i + 5]
+    except ValueError:
+        return []
+
+    at_root = PROJECT_ROOT / "configs" / "experiments" / dataset / "at" / emb
+    found = sorted((at_root / arch / "seed_sweep").glob("*.yaml"))
+    found += sorted((at_root / "hpo").glob("*.yaml"))
+    found += sorted((at_root / arch / "hpo").glob("*.yaml"))
+    return [str(p.relative_to(PROJECT_ROOT)) for p in found]
 
 
 def _detect_trainer_and_stop_crit(cfg: Dict) -> Tuple[str, str, List]:
@@ -169,8 +190,8 @@ def main() -> None:
         default=None,
         metavar="CONFIG",
         help=(
-            "YAML config to patch (repeatable). "
-            f"Defaults to: {', '.join(DEFAULT_CONFIGS)}"
+            "YAML config to patch (repeatable). Defaults to the AT configs at the "
+            "same dataset/embedding/arch as SWEEP_DIR."
         ),
     )
     parser.add_argument("--metric", default=None,
@@ -188,7 +209,12 @@ def main() -> None:
         print(f"ERROR: Sweep dir not found: {sweep_dir}")
         sys.exit(1)
 
-    config_paths_raw = args.configs if args.configs is not None else DEFAULT_CONFIGS
+    config_paths_raw = (
+        args.configs if args.configs is not None else default_configs_for(sweep_dir)
+    )
+    if not config_paths_raw:
+        print(f"ERROR: No AT configs found for {sweep_dir}. Pass --config explicitly.")
+        sys.exit(1)
     config_paths = []
     for raw in config_paths_raw:
         p = Path(raw)
