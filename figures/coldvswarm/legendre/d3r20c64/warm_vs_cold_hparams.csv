@@ -1,0 +1,11 @@
+alpha,start,run_dir,config,lr,batch_size,max_epoch,patience,stop_crit,soft_strength,log_target,model_path
+0.0,base,a0_2406,a0.yaml,0.00023531,512,300,60,acc,0.012749,n_features * log(in_dim) / 2,no
+0.001,cold,cold_a0001_3007,cold_a0001.yaml,0.0001,256,150,50,mixed_loss,0.001,0.0,no
+0.01,cold,cold_a001_3007,cold_a001.yaml,4.541389925912718e-05,256,150,50,mixed_loss,7.801786329523621e-07,0.0,no
+0.01,warm,a001_2007,warm_a001.yaml,0.00045237963495965065,512,100,50,mixed_loss,2.0408054231989243e-06,,yes
+0.1,cold,cold_a01_3007,cold_a01.yaml,0.00025,256,150,50,mixed_loss,0.001,0.0,no
+0.1,warm,a01_2107,warm_a01.yaml,0.00020630581507938392,512,100,50,mixed_loss,8.327845608488553e-05,,yes
+0.2,warm,a02_2107,warm_a02.yaml,0.0004157082163009855,512,100,50,mixed_loss,0.002477763101770804,,yes
+0.5,warm,a05_2107,warm_a05.yaml,0.0004157082163009855,512,100,50,mixed_loss,0.002477763101770804,,yes
+1.0,cold,cold_a1_3007,cold_a1.yaml,0.001,256,150,50,mixed_loss,0.1,0.0,no
+1.0,warm,a1_2107,warm_a1.yaml,9.45430681953618e-05,512,100,50,mixed_loss,0.06155564318973025,,yes
