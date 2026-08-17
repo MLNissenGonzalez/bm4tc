@@ -45,7 +45,7 @@ from analysis.utils import find_model_checkpoint, get_best_run, load_run_config
 from src.analysis.purification import LikelihoodPurification
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
-from src.utils.embeddings import range_size_of, rel_to_abs
+from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
 from src.utils.evasion import ProjectedGradientDescent
 
 logging.basicConfig(level=logging.INFO)
@@ -85,6 +85,19 @@ SAVE_DIR = "figures/mnist_r12/transfer_purify"
 
 FIG_NAME = "transfer_purify_grid.pdf"
 STATS_NAME = "transfer_purify_stats.txt"
+
+
+def _out_names(eps_rel: float, delta_rel: float) -> Tuple[str, str]:
+    """Output filenames stamped with the two budgets, so a sweep over ``--eps-rel`` /
+    ``--delta-rel`` into one ``--save-dir`` does not overwrite itself.
+
+    Budgets are **relative** (the authoring unit, see "Budget vocabulary" in CLAUDE.md);
+    the ``rel`` in the stem says so, since the same number absolute means a different
+    figure. ``fmt_budget`` keeps the stems free of float-repr noise.
+    """
+    suffix = f"epsrel{fmt_budget(eps_rel)}_deltarel{fmt_budget(delta_rel)}"
+    return (f"{Path(FIG_NAME).stem}_{suffix}{Path(FIG_NAME).suffix}",
+            f"{Path(STATS_NAME).stem}_{suffix}{Path(STATS_NAME).suffix}")
 
 
 # --- Pure helpers (unit-tested; no model / no torch state) ------------------------------
@@ -438,9 +451,10 @@ def transfer_purify_analysis(
     if save_dir is not None:
         out = Path(save_dir)
         out.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out / FIG_NAME, dpi=300, bbox_inches="tight")
-        (out / STATS_NAME).write_text(_format_stats(stats))
-        logger.info(f"Saved {out / FIG_NAME} and {out / STATS_NAME}")
+        fig_name, stats_name = _out_names(eps_rel, delta_rel)
+        fig.savefig(out / fig_name, dpi=300, bbox_inches="tight")
+        (out / stats_name).write_text(_format_stats(stats))
+        logger.info(f"Saved {out / fig_name} and {out / stats_name}")
 
     return fig, stats
 
