@@ -86,6 +86,11 @@ SAVE_DIR = "figures/mnist_r12/transfer_purify"
 FIG_NAME = "transfer_purify_grid.pdf"
 STATS_NAME = "transfer_purify_stats.txt"
 
+# Reversed grayscale: `_img` rescales input_range -> [0, 1], so 0 is MNIST background and
+# 1 is full stroke. `gray_r` prints that as black ink on white paper (poster/paper figure);
+# plain `gray` gives the dark-mode screen look.
+CMAP = "gray_r"
+
 
 def _out_names(eps_rel: float, delta_rel: float) -> Tuple[str, str]:
     """Output filenames stamped with the two budgets, so a sweep over ``--eps-rel`` /
@@ -502,7 +507,7 @@ def _plot_grid(
                 k, p = keys[j - 2], pos_of[int(i)]
                 img = _img(pur_imgs[k][p])
                 panel_prediction = int(purify_predictions[k][p])
-            ax.imshow(img, cmap="gray", vmin=0, vmax=1)
+            ax.imshow(img, cmap=CMAP, vmin=0, vmax=1)
             ax.set_xlabel(
                 f"Pred. {panel_prediction}", fontsize=8, color="0.35", labelpad=2
             )
