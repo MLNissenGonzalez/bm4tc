@@ -11,12 +11,32 @@ import pytest
 
 from analysis.visualize.mnist_transfer_purify import (
     _format_stats,
+    _out_names,
     _parse_models,
     _resolve_run_dir,
     _select_rows,
     _transfer_mask,
 )
 from analysis.utils import load_run_config
+
+
+def test_out_names_are_distinct_per_budget_pair_and_keep_extensions():
+    """A sweep over eps/delta into one --save-dir must not overwrite itself."""
+    pairs = [(0.05, 0.1), (0.1, 0.05), (0.1, 0.1), (0.15, 0.1)]
+    figs = {_out_names(e, d)[0] for e, d in pairs}
+    stats = {_out_names(e, d)[1] for e, d in pairs}
+    assert len(figs) == len(pairs)
+    assert len(stats) == len(pairs)
+    assert all(f.endswith(".pdf") for f in figs)
+    assert all(s.endswith(".txt") for s in stats)
+
+
+def test_out_names_label_the_relative_unit_without_float_noise():
+    fig, stats = _out_names(0.1, 0.05)
+    assert fig == "transfer_purify_grid_epsrel0.1_deltarel0.05.pdf"
+    assert stats == "transfer_purify_stats_epsrel0.1_deltarel0.05.txt"
+    # 3 * 0.05 is 0.15000000000000002 in binary floating point.
+    assert _out_names(3 * 0.05, 0.1)[0] == "transfer_purify_grid_epsrel0.15_deltarel0.1.pdf"
 
 
 def test_transfer_mask_requires_all_models_fooled():
