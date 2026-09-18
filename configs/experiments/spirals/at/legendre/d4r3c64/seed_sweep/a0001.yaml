@@ -106,11 +106,11 @@ trainer:
       log_target: 0.0
       debug: false
 
-    clean_weight: ???             # FILL FROM HPO (a0001, d4r3c64)
+    clean_weight: 0.49882368152162             # FILL FROM HPO (a0001, d4r3c64)
     optimizer:
       name: "adam"
       kwargs:
-        lr: ???                   # FILL FROM HPO (a0001, d4r3c64)
+        lr: 0.0007124252843547839                   # FILL FROM HPO (a0001, d4r3c64)
         weight_decay: 0.0         # FIXED at 0 for every arm
 
 hydra:
