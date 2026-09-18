@@ -29,10 +29,14 @@
 # carried forward.
 #
 # model_path: AT always warm-starts from a NAT alpha=0 checkpoint (hence
-# descriptor at_warm). Fill from the finished NAT a0 sweep at this arch --
-# tools/patch_checkpoint.py does it.
+# descriptor at_warm). Filled 2026-09-18 from the NAT a0 sweep at this arch
+# (a0_0208, job 4), selected on MIN mixed_loss/valid -- the ladder's own
+# rule, which at alpha=0 reduces to dis_loss. Note patch_checkpoint.py does
+# NOT do this by default: it has no mixed_loss branch and silently falls
+# through to max acc/valid, so it was run with an explicit
+# --metric mixed_loss/valid --minimize.
 #
-# Runnable once model_path, lr and clean_weight are filled:
+# Runnable once lr and clean_weight are filled from the HPO:
 #   python -m experiments.train --multirun \
 #       +experiments=spirals/at/legendre/d4r3c64/seed_sweep/a0
 # ---------------------------------------------------------------------------
@@ -47,7 +51,7 @@ defaults:
   - override /trainer/adversarial: pgd_at
   - override /tracking: online
 
-model_path: ???   # FILL from outputs/spirals/nat/legendre/d4r3c64/seed_sweep/a0_{DDMM}/{job}/models/model
+model_path: outputs/spirals/nat/legendre/d4r3c64/seed_sweep/a0_0208/4/models/model
 
 tracking:
   seed: 42
