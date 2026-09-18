@@ -180,6 +180,89 @@ def compute_thresholds(
 
 
 @dataclass
+class DetectionMetrics:
+    """Detection outcome at a single threshold percentile.
+
+    Attributes:
+        detection_rate: Fraction of adversarial inputs flagged. ``nan`` when any
+            score is non-finite -- see :func:`detection_metrics`.
+        err_rate_detected: Misclassification rate among flagged inputs; ``nan`` if
+            nothing was flagged.
+        err_rate_passed: Misclassification rate among passed inputs; ``nan`` if
+            nothing passed.
+        chance: The rate a signal-free detector produces, ``percentile / 100``. Exact
+            only while the threshold is calibrated on the evaluated set itself, in
+            which case the clean false-positive rate is that value by construction.
+        lift: ``detection_rate - chance``. The quantity that actually says whether the
+            detector did anything.
+        n_nonfinite: Count of non-finite scores in ``adv_log_px``.
+        degenerate: True when every finite score is identical, so the threshold cannot
+            separate anything.
+    """
+    detection_rate: float
+    err_rate_detected: float
+    err_rate_passed: float
+    chance: float
+    lift: float
+    n_nonfinite: int
+    degenerate: bool
+
+
+def detection_metrics(
+    adv_log_px: np.ndarray,
+    misclassified: np.ndarray,
+    thresholds: Dict[float, float],
+) -> Dict[float, DetectionMetrics]:
+    """Score adversarial log-densities against calibrated thresholds.
+
+    An input is flagged when ``log p(x_adv) < tau``. The comparison is deliberately
+    **strict**: a score exactly equal to the threshold is *not* flagged. That choice
+    is what turns a degenerate (constant) score into a detection rate of exactly 0.0
+    at every percentile, which is why ``degenerate`` is reported alongside.
+
+    Non-finite scores are not silently treated as "not detected" (``nan < tau`` is
+    ``False``, which would read as a confident 0.0). They are counted, and the rate
+    is returned as ``nan`` so the failure is visible rather than plausible.
+
+    Args:
+        adv_log_px: log p(x) of the adversarial inputs, shape (N,).
+        misclassified: Boolean array, True where the model got the adversarial input
+            wrong, shape (N,).
+        thresholds: Mapping percentile -> tau, as returned by :func:`compute_thresholds`.
+
+    Returns:
+        Dict mapping percentile -> :class:`DetectionMetrics`.
+    """
+    adv_log_px = np.asarray(adv_log_px)
+    misclassified = np.asarray(misclassified, dtype=bool)
+
+    finite = np.isfinite(adv_log_px)
+    n_nonfinite = int((~finite).sum())
+    degenerate = bool(finite.any() and np.ptp(adv_log_px[finite]) == 0.0)
+
+    out: Dict[float, DetectionMetrics] = {}
+    for pct, tau in thresholds.items():
+        det_mask = adv_log_px < tau
+        pas_mask = ~det_mask
+        chance = float(pct) / 100.0
+        rate = float("nan") if n_nonfinite else float(det_mask.mean())
+        out[pct] = DetectionMetrics(
+            detection_rate=rate,
+            err_rate_detected=(
+                float(misclassified[det_mask].mean()) if det_mask.any() else float("nan")
+            ),
+            err_rate_passed=(
+                float(misclassified[pas_mask].mean()) if pas_mask.any() else float("nan")
+            ),
+            chance=chance,
+            lift=rate - chance,
+            n_nonfinite=n_nonfinite,
+            degenerate=degenerate,
+        )
+    return out
+
+
+@dataclass
 class PurificationMetrics:
     """Metrics for a single (eps_rel, delta_rel) purification evaluation.
 
@@ -448,15 +531,27 @@ class UQEvaluation:
                 )
 
                 # Detection rates and conditional error rates at each threshold
-                for pct, tau in thresholds.items():
-                    det_mask = adv_log_px_arr < tau
-                    pas_mask = ~det_mask
-                    detection_rates[(pct, eps_rel)] = float(det_mask.mean())
-                    err_rate_detected[(pct, eps_rel)] = (
-                        float(misclf_arr[det_mask].mean()) if det_mask.any() else float("nan")
+                det = detection_metrics(adv_log_px_arr, misclf_arr, thresholds)
+                for pct, m in det.items():
+                    detection_rates[(pct, eps_rel)] = m.detection_rate
+                    err_rate_detected[(pct, eps_rel)] = m.err_rate_detected
+                    err_rate_passed[(pct, eps_rel)] = m.err_rate_passed
+
+                first = next(iter(det.values()))
+                if first.n_nonfinite:
+                    logger.warning(
+                        f"  eps_rel={eps_rel}: {first.n_nonfinite}/{len(adv_log_px_arr)} "
+                        "non-finite log p(x_adv); detection reported as nan"
                     )
-                    err_rate_passed[(pct, eps_rel)] = (
-                        float(misclf_arr[pas_mask].mean()) if pas_mask.any() else float("nan")
+                if first.degenerate:
+                    logger.warning(
+                        f"  eps_rel={eps_rel}: log p(x_adv) is constant; detection is "
+                        "0.0 at every threshold by the strict < convention, not by signal"
+                    )
+                for pct, m in sorted(det.items()):
+                    logger.info(
+                        f"    tau={pct}pct: det={m.detection_rate:.4f} "
+                        f"(chance {m.chance:.2f}, lift {m.lift:+.4f})"
                     )
             except Exception as e:
                 logger.warning(f"Detection/attack failed (eps_rel={eps_rel}): {e}; skipping")
