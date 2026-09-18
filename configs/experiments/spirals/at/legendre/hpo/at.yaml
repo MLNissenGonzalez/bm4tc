@@ -26,18 +26,28 @@
 # failing). Do not carry 0.906 forward.
 #
 # WARM START IS STRUCTURAL: AT always fine-tunes from a NAT alpha=0 checkpoint,
-# hence descriptor at_warm. model_path must be filled per arch from the finished
-# NAT a0 seed sweep before this runs -- tools/patch_checkpoint.py does it.
+# hence descriptor at_warm. This one config covers all three arches, so the
+# checkpoint CANNOT be baked in -- it is per arch and must come in on the CLI,
+# exactly like mnist_full_r12/at/legendre/hpo/grid.yaml. (Do not point
+# tools/patch_checkpoint.py at this file: it globs at/{emb}/hpo/*.yaml and would
+# bake ONE arch's path into the config all three share.)
+#
+# The three checkpoints below are the a0_0208 NAT sweep's best run per arch,
+# selected on MIN mixed_loss/valid -- the ladder's own rule, which at alpha=0
+# reduces to dis_loss. They match what the seed_sweep configs carry.
 #
 # Attack: PGD-L infinity, eps_rel 0.1 (= abs 0.2 on legendre, width 2.0), 10
 # steps at train time; analysis attacks at 40. Curriculum ramps eps from rel 0.01
 # to full by epoch 130 of 200.
 #
-# Usage (loop alpha x arch, AFTER patch_checkpoint.py has filled model_path):
+# Usage (loop alpha x arch; model_path is REQUIRED on the CLI):
+#   declare -A CKPT=( [4r3]=4 [6r4]=0 [10r6]=1 )   # a0_0208 best job per arch
 #   for a in 0.0 0.001; do for r in 4r3 6r4 10r6; do
 #     python -m experiments.train --multirun \
 #       +experiments=spirals/at/legendre/hpo/at \
-#       trainer.adversarial.alpha=$a born=legendre/d${r}c64
+#       trainer.adversarial.alpha=$a born=legendre/d${r}c64 \
+#       model_path=outputs/spirals/nat/legendre/d${r}c64/seed_sweep/a0_0208/${CKPT[$r]}/models/model \
+#       || exit 1
 #   done; done
 #
 # Output: outputs/spirals/at/legendre/d{A}c64/hpo/{a0|a0001}_{DDMM}/
@@ -54,7 +64,7 @@ defaults:
   - override /tracking: online
   - override /hydra/sweeper: optuna
 
-model_path: ???   # FILL PER ARCH from the finished NAT a0 seed sweep
+model_path: ???   # REQUIRED ON THE CLI, per arch -- see the usage block above
 
 tracking:
   seed: 42
