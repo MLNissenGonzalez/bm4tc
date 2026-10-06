@@ -159,20 +159,12 @@ def test_resolve_run_dir_from_sweep_root_uses_best_run_csv(tmp_path):
     assert ckpt is None
 
 
-def test_load_run_config_reconstructs_a_final_mps_seed_sweep_without_hydra(tmp_path):
-    run = (
-        tmp_path
-        / "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_1206/3"
-    )
+def test_load_run_config_requires_the_hydra_config(tmp_path):
+    """No path-based reconstruction (D49): a run without .hydra/config.yaml fails loudly."""
+    run = tmp_path / "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_1206/3"
     run.mkdir(parents=True)
-
-    cfg = load_run_config(run)
-
-    assert cfg.dataset.name == "mnist_full_r12"
-    assert cfg.born.embedding == "legendre"
-    assert cfg.born.init_kwargs.in_dim == 3
-    assert cfg.trainer.nll.alpha == 0.0
-    assert cfg.tracking.seed == 4
+    with pytest.raises(FileNotFoundError):
+        load_run_config(run)
 
 
 def _stats_fixture(**overrides):
