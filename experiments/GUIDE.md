@@ -15,19 +15,19 @@ everything as a Python module from the project root.
 
 ## `train.py`
 
-The regime follows from the trainer group that is set: `trainer/at` → AT
-(`AdversarialTrainer`), `trainer/nat` → NAT (`NLLTrainer`). The best epoch is the one
+One `Trainer` for both regimes: AT is a run with an attack (`trainer.evasion` set,
+as in the `at/*` presets), NAT a run without (`evasion: null`). The best epoch is the one
 with the lowest `objective/valid` (D8); `train.py` returns that value, so an Optuna
 sweep always uses `direction: minimize`.
 
 ```bash
 # NAT, cold start
 python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer/nat=default trainer.nat.alpha=0.0
+    trainer=nat/default trainer.alpha=0.0
 
 # AT, warm-started from a NAT checkpoint
 python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    '~trainer/nat' trainer/at=pgd_at trainer.at.alpha=0.01 model_path=<run>/models/model
+    trainer=at/pgd_at trainer.alpha=0.01 model_path=<run>/models/model
 
 # Quick checks, no W&B
 python -m experiments.train +experiments=tests/nat tracking.mode=disabled

@@ -7,8 +7,7 @@ defaults:
   - _self_ # has to be here such that overrides work
   - dataset: 2Dtoy/circles
   - born: fourier/test
-  - trainer/nat: test
-  - trainer/at: null
+  - trainer: nat/test
   - tracking: test
   - override hydra/job_logging: stream_only
   - override hydra/hydra_logging: none

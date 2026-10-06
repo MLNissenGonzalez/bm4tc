@@ -5,6 +5,5 @@ experiment: test
 defaults:
   - override /born: fourier/test
   - override /dataset: test
-  - override /trainer/nat: null
-  - override /trainer/at: test
+  - override /trainer: at/test
   - override /tracking: test

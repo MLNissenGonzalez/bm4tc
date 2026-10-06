@@ -63,7 +63,7 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 |--------|------|-------------|
 | `run_name` | str | Numbered sub-directory name (e.g. `"3"`) |
 | `run_path` | str | Absolute path to the run directory |
-| `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.nat.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep.py`. |
+| `config/{key}` | varies | Hydra config values extracted during analysis. The column name is `config/` followed by the full dotted Hydra key (e.g. `config/tracking.seed`, `config/dataset.name`, `config/trainer.alpha`). Which keys are present depends on `CONFIG_KEYS` in `sweep.py`. |
 
 > **Warm vs cold start.** `config/descriptor` is the discriminator, and it is authoritative —
 > it records what the run actually did:
@@ -80,9 +80,8 @@ When UQ is enabled, the test-split rob columns are *copied from* the UQ adversar
 > from the directory name either — new dirs carry a `cold_`/`warm_` prefix, but historical warm
 > dirs carry none, so absence of `cold_` does not mean warm. α=0 is deliberately unprefixed.
 
-> **Alpha column.** α lives under the *active* trainer: `config/trainer.nat.alpha` on NAT runs,
-> `config/trainer.at.alpha` on AT runs. Both keys are extracted; the inactive one is
-> empty. CSVs written before 2026-07-31 instead carried a dead
+> **Alpha column.** `config/trainer.alpha` (one trainer config since Phase 3 of `ousterhout`;
+> before, `config/trainer.nat.alpha` / `config/trainer.at.alpha`). CSVs written before 2026-07-31 instead carried a dead
 > `config/trainer.generative.criterion.kwargs.alpha` column, all-NaN because the path has not
 > existed since the trainer refactor. **All 65 were migrated to the live keys** on 2026-07-31 by
 > `tools/backfill_alpha_column.py` (source of truth: W&B, matched on group + run name + seed);

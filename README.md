@@ -128,11 +128,11 @@ All experiments are run as Python modules from the project root. Configurations 
 ```bash
 # NAT (alpha=0), cold start; every knob is a group option or a key override
 python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer/nat=default trainer.nat.alpha=0.0 tracking=online
+    trainer=nat/default trainer.alpha=0.0 tracking=online
 
 # AT, warm-started from a NAT checkpoint
 python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    '~trainer/nat' trainer/at=pgd_at trainer.at.alpha=0.01 model_path=<run>/models/model
+    trainer=at/pgd_at trainer.alpha=0.01 model_path=<run>/models/model
 
 # Quick local check, no W&B
 python -m experiments.train +experiments=tests/nat tracking.mode=disabled
@@ -186,7 +186,7 @@ bm4tc/
 ├── src/
 │   ├── model.py        # ConditionalBornMachine
 │   ├── datahandler.py  # DataHandler, dataset generation and loading
-│   ├── train/          # NLLTrainer, AdversarialTrainer
+│   ├── train/          # Trainer (NAT and AT)
 │   ├── analysis/       # viz.py, purification.py, uq.py (no W&B dependency)
 │   └── utils/          # Embeddings, PGD attacks, optimizer config, train utilities
 ├── analysis/

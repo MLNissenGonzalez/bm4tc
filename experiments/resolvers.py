@@ -5,12 +5,8 @@ from omegaconf import OmegaConf
 
 
 def _training_regime(*, _root_):
-    parts = []
-    if OmegaConf.select(_root_, "trainer.nat") is not None:
-        parts.append("nat")
-    if OmegaConf.select(_root_, "trainer.at") is not None:
-        parts.append("at")
-    return "_".join(parts) or "none"
+    """``at`` when the trainer has an attack, else ``nat`` (D10)."""
+    return "nat" if OmegaConf.select(_root_, "trainer.evasion") is None else "at"
 
 
 _DTYPE_SUFFIX = {
@@ -34,12 +30,9 @@ def _alpha_suffix(*, _root_) -> str:
 
     Matches the manual naming convention (a0, a001, a01, a02, a05, a1) so that
     HPO sweeps over a CLI-supplied alpha land in distinct ``{experiment}`` output
-    folders (and analysis mirrors) per alpha. Reads ``trainer.nat.alpha`` for NAT
-    runs, falling back to ``trainer.at.alpha`` for adversarial training.
+    folders (and analysis mirrors) per alpha.
     """
-    alpha = OmegaConf.select(_root_, "trainer.nat.alpha")
-    if alpha is None:
-        alpha = OmegaConf.select(_root_, "trainer.at.alpha")
+    alpha = OmegaConf.select(_root_, "trainer.alpha")
     digits = str(float(alpha)).replace(".", "").rstrip("0")
     return "a" + (digits if digits else "0")
 

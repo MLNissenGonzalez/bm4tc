@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.train.adversarial import AdversarialTrainer, AdversarialConfig
+from src.train.trainer import Trainer, TrainConfig
 from experiments.metrics import key
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent
 from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
@@ -68,35 +68,35 @@ def test_budget_conversion_is_embedding_aware(embedding, range_size, expected_ab
     "embedding, expected_abs", [("legendre", 0.2), ("fourier", 0.1)]
 )
 def test_trainer_resolves_eps_rel_per_embedding(embedding, expected_abs):
-    """AdversarialTrainer converts the config's eps_rel once, using its own model."""
+    """The Trainer converts the config's eps_rel once, using its own model."""
     cbm = _cbm(embedding)
-    cfg = AdversarialConfig(evasion=EvasionConfig(method="PGD", eps_rel=[EPS_REL]))
-    t = AdversarialTrainer(
-        cbm=cbm, train_cfg=cfg, datahandler=_FakeDataHandler(),
+    cfg = TrainConfig(evasion=EvasionConfig(method="PGD", eps_rel=[EPS_REL]))
+    t = Trainer(
+        cbm=cbm, cfg=cfg, datahandler=_FakeDataHandler(),
         device=torch.device("cpu"),
     )
 
-    assert t.base_eps_rel == pytest.approx(EPS_REL)
-    assert t.base_eps_abs == pytest.approx(expected_abs)
+    assert t.eps_rel == pytest.approx(EPS_REL)
+    assert t.eps_abs == pytest.approx(expected_abs)
     # The logged key states the relative budget, not the absolute one.
-    assert key("rob", "valid", t.base_eps_rel) == f"rob/valid/{fmt_budget(EPS_REL)}"
+    assert key("rob", "valid", t.eps_rel) == f"rob/valid/{fmt_budget(EPS_REL)}"
 
 
 def test_curriculum_start_is_relative_too():
-    """curriculum_eps_start_rel is a fraction and ramps to base_eps_abs."""
+    """curriculum_eps_start_rel is a fraction and ramps to eps_abs."""
     cbm = _cbm("legendre")
-    cfg = AdversarialConfig(
+    cfg = TrainConfig(
         evasion=EvasionConfig(method="PGD", eps_rel=[EPS_REL]),
-        curriculum=True, curriculum_eps_start_rel=0.01, curriculum_end_epoch=10,
+        curriculum=True, curriculum_eps_start_rel=0.01, max_epoch=10,
     )
-    t = AdversarialTrainer(
-        cbm=cbm, train_cfg=cfg, datahandler=_FakeDataHandler(),
+    t = Trainer(
+        cbm=cbm, cfg=cfg, datahandler=_FakeDataHandler(),
         device=torch.device("cpu"),
     )
 
-    assert t._curriculum_eps_start_abs == pytest.approx(0.02)  # 0.01 * 2.0
-    assert t._get_eps_abs(0) == pytest.approx(0.02)
-    assert t._get_eps_abs(10) == pytest.approx(t.base_eps_abs)
+    assert t._curriculum_start_abs == pytest.approx(0.02)  # 0.01 * 2.0
+    assert t._eps_abs(0) == pytest.approx(0.02)
+    assert t._eps_abs(10) == pytest.approx(t.eps_abs)
 
 
 # ---- the budget is actually respected downstream ----

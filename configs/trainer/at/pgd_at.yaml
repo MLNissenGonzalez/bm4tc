@@ -1,5 +1,5 @@
 # PGD Adversarial Training (Madry et al.)
-# Trains on adversarial examples: Loss = L(x_adv, y)
+# Loss = (1-a)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + a·L_gen(x)
 max_epoch: 100
 batch_size: 256
 
@@ -22,17 +22,12 @@ evasion:
 
 patience: 30
 
-eval_rob_freq: 5
+eval_every: 5  # validation (with the attack) every 5 epochs; patience counts these
 
 clean_weight: 0.0  # pure adversarial (set > 0 to mix with clean examples)
-# true: adversarial signal in the discriminative term only, generative term on
-# clean data. Switches validation to eval_split (every eval_rob_freq epochs, none
-# in between), so patience is then counted in valid events, not epochs.
-gen_on_clean: false
-acc_floor: null  # min clean valid-acc for model selection (null = no floor)
 curriculum: false
 curriculum_eps_start_rel: 0.0
-curriculum_end_epoch: null
+curriculum_end: 1.0  # fraction of max_epoch
 
 # Norm control: hard renormalization off (hard_every=0), soft log_Z penalty on
 # (soft_strength=0.1 toward log_target). Set soft_strength=0 to disable, or

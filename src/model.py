@@ -911,9 +911,8 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         Reset state, move to device, and trace for efficient contraction.
 
-        train_cfg is accepted for API forward-compatibility with NLLConfig
-        (Phase 3) but ignored in Phase 1. auto_stack/auto_unbind are
-        hardcoded and never modified via train_cfg.
+        train_cfg is ignored. auto_stack/auto_unbind are hardcoded and never
+        modified via train_cfg.
         """
         self.unset_data_nodes()
         self.reset()

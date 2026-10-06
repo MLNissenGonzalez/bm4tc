@@ -155,9 +155,7 @@ CONFIG_KEYS = [
     "dataset.name",
     "tracking.seed",
     "dataset.gen_dow_kwargs.seed",
-    # Alpha lives under the active trainer; the inactive one selects to None.
-    "trainer.nat.alpha",
-    "trainer.at.alpha",
+    "trainer.alpha",
     # Warm/cold start. `descriptor` is the discriminator: nll_pretrained (NAT alpha>0
     # fine-tuned from the alpha=0 checkpoint) | nll_cold (from scratch) | nll (alpha=0,
     # from scratch — the base both ladders share) | at_pretrained (AT; a different axis,

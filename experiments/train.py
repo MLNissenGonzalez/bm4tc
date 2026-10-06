@@ -1,9 +1,6 @@
 """
-Unified training entry point (NLL discriminative/generative, adversarial).
-
-Regime is inferred from which trainer config is set:
-  cfg.trainer.at is not None   →  at  (AdversarialTrainer)
-  cfg.trainer.nat is not None  →  nat (NLLTrainer)
+Training entry point for NAT and AT (one Trainer; AT is the run with an attack,
+``trainer.evasion`` set).
 
 Returns the best validation objective (D8), which Optuna minimises.
 
@@ -27,7 +24,7 @@ from experiments.config import Config, register
 from src.utils import set_seed
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
-from src.train import NLLTrainer, AdversarialTrainer
+from src.train import Trainer
 import torch
 from omegaconf import OmegaConf
 
@@ -70,12 +67,7 @@ def main(cfg: Config) -> float:
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    if cfg.trainer.get("at") is not None:
-        trainer = AdversarialTrainer(cbm, cfg.trainer.at, datahandler, device)
-    elif cfg.trainer.get("nat") is not None:
-        trainer = NLLTrainer(cbm, cfg.trainer.nat, datahandler, device)
-    else:
-        raise ValueError("No trainer config: set trainer.nat or trainer.at")
+    trainer = Trainer(cbm, cfg.trainer, datahandler, device)
     trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
 
     run.finish()
