@@ -567,4 +567,23 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D27 | **Docs:** README (what and how to run), one GUIDE.md (concepts, vocabulary, pipeline, where each decision lives), and a committed agent file. The other guides are deleted; CSV columns are documented in the metrics module. DEFERRED.md content goes to GitHub issues or a GUIDE section. **Agent file naming:** Martin wants the vendor-neutral name. The established cross-tool convention is `AGENTS.md` (plural). Claude Code is guaranteed to read `CLAUDE.md`, so add a one-line `CLAUDE.md` containing `@AGENTS.md` until native support is confirmed. | Un-ignore both in `.gitignore`. |
 | D28 | **Figures via a paper manifest:** `paper.yaml` maps each figure/table to its studies; `bm4tc figures paper` regenerates all figures and `.tex` tables from study CSVs. Notebooks are for exploration only, with outputs stripped. | Core of the "one command reproduces the paper" goal. |
 | D29 | **5 seeds everywhere**, set in `defaults.yaml`; a study may override upward. | |
+| D30 | **tensorkrowch first.** The core stays a `tk.models.MPS` subclass (`ConditionalBornMachine`). Tensor-network operations use tensorkrowch nodes, edges and contractions, not plain-PyTorch reimplementations. Where the project had to go around tk, the workaround is isolated in the model class and recorded as an **upstream candidate** (§12), so it can later become a tk patch. The first refactor phase leaves the numerical core untouched; changes there need their own design pass. | New code outside `src/model.py` must not do tensor-network maths in plain torch. |
+| D31 | **Model caches stay; only their ownership changes.** The four caches (`_log_Z`, `_log_Z_cache`, `_amp_diag_cache`, `_log_norm_acc`) remain, so performance is unchanged. The leak is that trainers *read and invalidate* them (`cbm._log_Z_cache`, `cbm._invalidate_log_Z_cache()` after `optimizer.step()`). Target: the model invalidates its own caches, e.g. keyed on the parameters' version counters, or via one public `cbm.on_parameters_changed()` called by the single trainer. To be designed twice and benchmarked, not assumed. | No trainer touches a private model attribute. |
+
+---
+
+## 12. tensorkrowch upstream candidates (tensorkrowch 1.1.6)
+
+Places where `src/model.py` / `src/utils/embeddings.py` extend or work around
+tensorkrowch. These are candidates for patches to the library. Each needs verifying
+against the current tk source before proposing it.
+
+| Area | In bm4tc | tk today | Candidate patch |
+|---|---|---|---|
+| Log-domain norm | `log_partition_function`: zip-up (ladder) contraction with per-site `log(norm)` accumulation and renormalisation; peak memory O(D²·d) instead of O(L·D⁴) | `MPS.norm(log_scale=…)` | zip-up order plus log accumulation as the `norm` implementation |
+| Complex norm | conjugates the bra on *every* call (the reuse path previously computed Σψ² instead of Σ\|ψ\|²) | check whether `MPS.norm` has the same reuse-path issue | bug fix if so |
+| Overflow-safe amplitudes | `_inline_contraction` override with per-site bond-norm accumulation (`_log_norm_acc`, `accumulate=True`) | `_inline_contraction(mats_env, renormalize, from_left)` | expose the accumulated log-scale from `renormalize=True` contractions |
+| Orthonormal polynomial embeddings | Legendre, Hermite, Chebyshev I/II (`src/utils/embeddings.py`) | `poly`, `basis`, `fourier`, `unit`, `discretize` | add orthonormal polynomial families |
+| Born-machine API | class-conditioned amplitudes, `marginal_log_probability`, `condition_on_class`, sequential sampling, Gibbs conditionals | `MPS` / `MPSLayer` (no Born-rule layer) | a Born-machine model class, the long-term goal |
+| Shared-parameter auxiliary net | `norm_net = self.copy(share_tensors=True)` plus re-casting boundary nodes' dtype/device after `copy()` | `copy()` creates boundary nodes as float32 on CPU | `copy()` should preserve dtype and device |
 
