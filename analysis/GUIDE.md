@@ -2,7 +2,7 @@
 
 Post-experiment analysis for Born Machine seed sweeps.
 
-For the math behind attacks, purification, MIA, and UQ, see [`analysis/utils/GUIDE.md`](utils/GUIDE.md).  
+For the math behind attacks, purification and UQ, see [`analysis/utils/GUIDE.md`](utils/GUIDE.md).  
 For the full CSV column schema, see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
 
 ---
@@ -11,7 +11,7 @@ For the full CSV column schema, see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
 
 | Script | When to use |
 |--------|-------------|
-| `run.py` | Single-model deep analysis (acc, rob, MIA, UQ) — callable API |
+| `run.py` | Single-model deep analysis (acc, rob, UQ) — callable API |
 | `sweep.py` | Post-hoc evaluation of a full seed sweep; primary analysis tool |
 | `gibbs.py` | Gibbs-purification defense on a seed sweep — split out because it costs orders of magnitude more than everything in `sweep.py` |
 | `batch.py` | Batch-queue runner: processes all unanalyzed sweeps via `sweep.py` |
@@ -26,7 +26,7 @@ Loads one saved model from a Hydra run directory and recomputes metrics on the t
 
 ```bash
 python analysis/run.py <run_dir> [--no-acc] [--no-dis-loss] [--no-gen-loss]
-                                  [--no-rob] [--no-mia] [--no-uq]
+                                  [--no-rob] [--no-uq]
                                   [--device DEVICE]
 ```
 
@@ -36,7 +36,6 @@ python analysis/run.py <run_dir> [--no-acc] [--no-dis-loss] [--no-gen-loss]
 from analysis.run import AnalysisConfig, analyze_run
 
 cfg = AnalysisConfig(
-    compute_mia=False,
     evasion_override={"method": "PGD", "norm": "inf", "num_steps": 40,
                       "strengths": [0.05, 0.10, 0.15]},
 )
@@ -52,7 +51,6 @@ results = analyze_run("outputs/seed_sweep/gen/fourier/d4r3/moons_2102/3", cfg)
 | `compute_dis_loss` | `True` | Discriminative NLL loss |
 | `compute_gen_loss` | `True` | Generative (joint) NLL loss |
 | `compute_rob` | `True` | Adversarial robustness |
-| `compute_mia` | `True` | Membership inference attack |
 | `compute_uq` | `True` | Likelihood-based detection + purification |
 | `evasion_override` | `None` | Dict of evasion config overrides; strengths are **absolute** (pre-multiplied by range size) |
 | `device` | `"cpu"` | Torch device |
@@ -104,16 +102,15 @@ EVASION_CONFIG = {
 ```python
 COMPUTE_ACC           = True   # Clean accuracy
 COMPUTE_ROB           = True   # Robustness under attack
-COMPUTE_MIA           = False  # Membership inference attack
 COMPUTE_DIS_LOSS      = True   # NLL discriminative loss
 COMPUTE_GEN_LOSS      = True   # NLL generative loss
 COMPUTE_UQ            = True   # Likelihood-based detection + purification
 COMPUTE_DISTRIBUTIONS = False  # Best-run distribution plots (or pass --no-viz)
 ```
 
-Turn off `COMPUTE_MIA` and `COMPUTE_UQ` for fast robustness-only runs.
+Turn off `COMPUTE_UQ` for fast robustness-only runs.
 
-#### UQ and MIA settings
+#### UQ settings
 
 ```python
 UQ_CONFIG = {
@@ -122,7 +119,6 @@ UQ_CONFIG = {
     "percentiles": [1, 5, 10, 20],
     "eval_batch_size": 256,
 }
-MIA_ADV_EPS_REL = 0.10   # relative (abs 0.2 on legendre); None skips adversarial MIA
 ```
 
 ### Output files
@@ -147,10 +143,6 @@ All outputs go to `analysis/outputs/<sweep_path>/`:
 | `eval/<split>/rob/<eps>` | `eval/test/rob/0.15` | Robust accuracy at epsilon |
 | `eval/<split>/dis_loss` | `eval/valid/dis_loss` | NLL discriminative loss |
 | `eval/<split>/gen_loss` | `eval/valid/gen_loss` | NLL generative loss |
-| `eval/mia_accuracy` | — | LR-based MIA attack accuracy |
-| `eval/mia_auc_roc` | — | MIA AUC-ROC |
-| `eval/mia_wc_best` | — | Best worst-case threshold MIA accuracy (clean) |
-| `eval/adv_mia_wc_best` | — | Best worst-case threshold MIA accuracy (adversarial) |
 | `eval/uq_clean_accuracy` | — | UQ clean accuracy (cross-check) |
 | `eval/uq_adv_acc/<eps>` | — | Adversarial accuracy before any defense |
 | `eval/uq_detection/<pct>pct/<eps>` | — | Detection rate at threshold/epsilon pair |
@@ -266,7 +258,7 @@ outputs/{seed_sweep|alpha_curve}/{type}/{emb}/{arch}/{dataset}_{date}/
     1. load config (.hydra/config.yaml)  →  extract CONFIG_KEYS into config/* columns
     2. ConditionalBornMachine.load(models/model.pt)
     3. rebuild DataHandler → split_and_rescale(cbm)
-    4. compute: acc, rob, MIA, UQ
+    4. compute: acc, rob, UQ
     5. return flat dict of metrics
 
         ↓

@@ -1,9 +1,4 @@
-"""
-Utility functions for MIA (Membership Inference Attack) analysis.
-
-Provides functions for loading run configurations from local Hydra outputs
-or wandb, and locating model checkpoints.
-"""
+"""Load a finished training run: its config and its model checkpoint."""
 
 from pathlib import Path
 from typing import Any, Optional, Union

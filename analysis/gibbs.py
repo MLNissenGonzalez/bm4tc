@@ -191,7 +191,7 @@ print(f"N_EVAL: {N_EVAL if N_EVAL is not None else 'full test split'} "
 # ## Per-run evaluation
 
 # %%
-from analysis.utils.mia_utils import load_run_config, find_model_checkpoint
+from analysis.utils.runs import load_run_config, find_model_checkpoint
 from src.analysis.uq import _batched_forward, _recover_after_failure
 
 

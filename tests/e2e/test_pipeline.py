@@ -48,7 +48,7 @@ from analysis.run import AnalysisConfig, analyze_run
 torch.manual_seed(0)
 cfg = AnalysisConfig(
     compute_acc=True, compute_dis_loss=True, compute_rob=True,
-    compute_mia=False, compute_uq=True, compute_rob_ceiling=False, device="cpu",
+    compute_uq=True, compute_rob_ceiling=False, device="cpu",
     evasion_override={"method": "PGD", "norm": "inf", "num_steps": 10,
                       "random_start": False, "eps_rel": [0.1]},
     uq_config={"eps_rel": [0.1], "delta_rel": [0.1], "percentiles": [5],

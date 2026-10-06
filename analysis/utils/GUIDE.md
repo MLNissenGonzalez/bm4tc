@@ -10,8 +10,7 @@ This guide explains **what is being computed** in the analysis pipeline and **ho
 |------|---------|
 | `../run.py` | Top-level `analyze_run()` — orchestrates all metrics for a single model |
 | `src/analysis/uq.py` | Uncertainty quantification: detection + likelihood purification |
-| `src/analysis/mia.py` | Membership inference attack evaluation |
-| `mia_utils.py` | Config loading (`load_run_config`) and checkpoint finding |
+| `runs.py` | Config loading (`load_run_config`) and checkpoint finding |
 | `wandb_fetcher.py` | W&B API + local summary loading |
 | `resolve.py` | Path-to-regime/embedding detection, range-size table, param shorthands |
 | `statistics.py` | Summary tables, Pareto frontiers, correlation heatmaps |
@@ -155,47 +154,7 @@ via `COMPUTE_GIBBS_PURIFICATION`, but it is expensive enough to usually want its
 
 ## Membership Inference Attack (MIA)
 
-Asks: can an attacker tell whether a sample was in the training set, using only the model's outputs?
-
-**Data splits used**:
-- members = training set
-- non-members = test set
-- validation set is excluded entirely
-
-### Features
-
-All features are derived from `p(c|x)`:
-
-| Feature | Formula | Intuition |
-|---------|---------|-----------|
-| `max_prob` | `max_c p(c|x)` | Higher confidence on training data |
-| `entropy` | `-Σ p(c) log p(c)` | Lower entropy = more confident |
-| `correct_prob` | `p(y|x)` at true label | Higher on training data |
-| `loss` | `-log p(y|x)` | Lower loss on training data |
-| `margin` | `p_1 - p_2` (top two) | Larger margin = more confident |
-| `modified_entropy` | `1 - H / log(C)` | Normalized confidence |
-
-`use_true_labels=True` (default): uses ground-truth y for `correct_prob`/`loss` — worst-case risk, assumes attacker knows labels.
-`use_true_labels=False`: uses predicted label — realistic attacker who only queries the model.
-
-### Attack modes
-
-**Logistic regression** (LR attack): train LR on 70% of (member, non-member) feature vectors, evaluate on 30%. Simulates a shadow-model attacker. Reported as `eval/mia_accuracy` and `eval/mia_auc_roc`.
-
-**Worst-case (oracle) threshold**: for each feature, sweep all thresholds on the full dataset and pick the one maximizing accuracy. This is an upper bound — a real attacker cannot do this without ground-truth membership labels. Reported as `eval/mia_wc/<feat>` and `eval/mia_wc_best`.
-
-**Adversarial MIA**: same features, but extracted from `p(c|x_adv)` where `x_adv` is a PGD adversarial example. Adversarial transferability differs between members and non-members, providing a stronger membership signal. Only uses worst-case threshold evaluation. Reported as `eval/adv_mia_wc/<feat>` and `eval/adv_mia_wc_best`.
-
-### Interpreting results
-
-| AUC-ROC | Privacy |
-|---------|---------|
-| < 0.55 | Excellent |
-| 0.55 – 0.60 | Good |
-| 0.60 – 0.70 | Moderate leakage |
-| ≥ 0.70 | Significant leakage |
-
-Random chance = 0.50. Accuracy 0.50 = attacker cannot distinguish members from non-members.
+Standalone, not part of `analyze_run`: see the docstring of `analysis/privacy.py`.
 
 ---
 
@@ -211,12 +170,11 @@ Random chance = 0.50. Accuracy 0.50 = attacker cannot distinguish members from n
 5. DataHandler.split_and_rescale(cbm)      → rescale to cbm.input_range
 6. For each split: acc, clsloss, genloss, fid
 7. For non-test splits: rob (via MetricFactory/RobustnessEvaluation)
-8. MIA (train vs test, uses classification["train"] and classification["test"])
-9. UQ (test only: detection + purification)
-10. Test rob: reuse UQ's adv examples where eps overlaps; generate separately for missing eps
+8. UQ (test only: detection + purification)
+9. Test rob: reuse UQ's adv examples where eps overlaps; generate separately for missing eps
 ```
 
-Step 10 avoids generating adversarial examples twice when UQ and rob use the same epsilons — UQ already generates them, so `analyze_run` reuses the `adv_accuracies` dict from `UQResults`.
+Step 9 avoids generating adversarial examples twice when UQ and rob use the same epsilons — UQ already generates them, so `analyze_run` reuses the `adv_accuracies` dict from `UQResults`.
 
 `dataset.overwrite = True` forces the dataset to be regenerated with the correct seed from the run's config, ensuring the data split matches exactly what was used during training.
 
@@ -259,6 +217,4 @@ Both functions tokenize the path on `/` and `_` and match against known strings.
 
 3. **FID disabled for data_dim > 100**: FID is meaningless in high-dimensional spaces where covariance estimation is unreliable.
 
-4. **MIA uses train vs test only** — the validation split plays no role. This is by design (no ambiguity about membership).
-
-5. **UQ recovery_rate can be 1.0 when all adversarial examples were already correct before purification** (adv_acc ≈ clean_acc). This is a sign the attack at that epsilon is too weak, not that purification works perfectly.
+4. **UQ recovery_rate can be 1.0 when all adversarial examples were already correct before purification** (adv_acc ≈ clean_acc). This is a sign the attack at that epsilon is too weak, not that purification works perfectly.

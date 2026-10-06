@@ -9,7 +9,6 @@ Result dict key conventions (flat):
     dis_loss                    discriminative NLL loss
     gen_loss                    generative (joint) NLL loss
     rob/<eps_rel>               robust accuracy at relative epsilon
-    mia_accuracy, mia_auc_roc   membership inference attack
     uq_*                        uncertainty quantification
 
 Budget convention (see "Budget vocabulary" in CLAUDE.md):
@@ -21,7 +20,7 @@ Budget convention (see "Budget vocabulary" in CLAUDE.md):
 
 CLI usage:
     python analysis/run.py <run_dir> [--no-acc] [--no-dis-loss] [--no-gen-loss]
-                                      [--no-rob] [--no-mia] [--no-uq]
+                                      [--no-rob] [--no-uq]
                                       [--device DEVICE]
 """
 
@@ -44,7 +43,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from analysis.utils.mia_utils import load_run_config, find_model_checkpoint
+from analysis.utils.runs import load_run_config, find_model_checkpoint
 from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
 
 logger = logging.getLogger(__name__)
@@ -63,17 +62,11 @@ class AnalysisConfig:
         compute_dis_loss: Evaluate discriminative NLL loss.
         compute_gen_loss: Evaluate generative (joint) NLL loss.
         compute_rob: Evaluate adversarial robustness.
-        compute_mia: Run membership inference attack evaluation.
         compute_uq: Uncertainty quantification (detection + purification).
         evasion_override: Dict of evasion config fields to override, or None to
             use each run's own config. Budgets are RELATIVE fractions of the input
             domain. Example: {"method": "PGD", "num_steps": 40,
             "eps_rel": [0.05, 0.10, 0.15]}.
-        mia_features: Feature toggle dict for MIAFeatureConfig.
-        mia_adv_eps_rel: Relative epsilon for adversarial MIA.
-        mia_adversarial_num_steps: PGD steps for adversarial MIA.
-        mia_adversarial_step_size: PGD step size. None = auto.
-        mia_adversarial_norm: Lp norm for adversarial MIA.
         compute_rob_ceiling: Emit the data-only upper bound on robust accuracy alongside
             `rob/`. Two-class datasets only; silently absent otherwise.
         uq_config: Dict of kwargs for UQConfig.
@@ -84,15 +77,9 @@ class AnalysisConfig:
     compute_dis_loss: bool = False
     compute_gen_loss: bool = False
     compute_rob: bool = True
-    compute_mia: bool = True
     compute_uq: bool = False
     compute_rob_ceiling: bool = True
     evasion_override: Optional[Dict[str, Any]] = None
-    mia_features: Optional[Dict[str, bool]] = None
-    mia_adv_eps_rel: Optional[float] = None
-    mia_adversarial_num_steps: int = 20
-    mia_adversarial_step_size: Optional[float] = None
-    mia_adversarial_norm: Any = "inf"
     uq_config: Optional[Dict[str, Any]] = None
     joint_uq_config: Optional[Dict[str, Any]] = None
     device: str = "cuda"
@@ -158,7 +145,7 @@ def analyze_run(
 
     Returns:
         Flat dict with keys like ``acc``, ``dis_loss``, ``rob/0.1``,
-        ``mia_accuracy``, ``uq_clean_accuracy``, etc.
+        ``uq_clean_accuracy``, etc.
     """
     from src.model import ConditionalBornMachine
     from src.datahandler import DataHandler
@@ -241,56 +228,7 @@ def analyze_run(
                 if not np.isnan(ceiling):
                     results[f"rob_ceiling/{fmt_budget(eps_rel)}"] = ceiling
 
-    # 6. MIA
-    if cfg.compute_mia:
-        try:
-            from src.analysis.mia import MIAEvaluation, MIAFeatureConfig
-
-            feature_config = MIAFeatureConfig(**(cfg.mia_features or {}))
-            # MIA's attack takes an absolute epsilon; convert the authored fraction here.
-            mia_eps_abs = (
-                None if cfg.mia_adv_eps_rel is None
-                else rel_to_abs(cfg.mia_adv_eps_rel, range_size_of(cbm))
-            )
-            mia_eval = MIAEvaluation(
-                feature_config=feature_config,
-                adv_eps_abs=mia_eps_abs,
-                adversarial_num_steps=cfg.mia_adversarial_num_steps,
-                adversarial_step_size=cfg.mia_adversarial_step_size,
-                adversarial_norm=cfg.mia_adversarial_norm,
-            )
-            mia_results = mia_eval.evaluate(
-                cbm,
-                datahandler.classification["train"],
-                datahandler.classification["test"],
-                device,
-            )
-            results["mia_accuracy"] = mia_results.attack_accuracy
-            results["mia_auc_roc"] = mia_results.auc_roc
-
-            if "correct_prob" in mia_results.feature_names:
-                cp_idx = mia_results.feature_names.index("correct_prob")
-                results["mia_train_correct_probs"] = mia_results.train_features[:, cp_idx].tolist()
-                results["mia_test_correct_probs"] = mia_results.test_features[:, cp_idx].tolist()
-
-            if mia_results.adversarial_worst_case_threshold is not None:
-                for feat_name, metrics in mia_results.adversarial_worst_case_threshold.items():
-                    results[f"adv_mia_wc/{feat_name}"] = metrics["accuracy"]
-                results["adv_mia_wc_best"] = max(
-                    m["accuracy"] for m in mia_results.adversarial_worst_case_threshold.values()
-                )
-                if mia_results.worst_case_threshold:
-                    for feat_name, metrics in mia_results.worst_case_threshold.items():
-                        results[f"mia_wc/{feat_name}"] = metrics["accuracy"]
-                    results["mia_wc_best"] = max(
-                        m["accuracy"] for m in mia_results.worst_case_threshold.values()
-                    )
-        except Exception as e:
-            logger.warning(f"MIA evaluation failed: {e}")
-            results["mia_accuracy"] = np.nan
-            results["mia_auc_roc"] = np.nan
-
-    # 7. UQ
+    # 6. UQ
     if cfg.compute_uq:
         try:
             from src.analysis.uq import UQEvaluation, UQConfig
@@ -323,7 +261,7 @@ def analyze_run(
             logger.warning(f"UQ evaluation failed: {e}")
             results["uq_clean_accuracy"] = np.nan
 
-    # 7b. Joint-attack UQ
+    # 6b. Joint-attack UQ
     if cfg.compute_uq and cfg.joint_uq_config is not None:
         try:
             from src.analysis.uq import UQEvaluation, UQConfig
@@ -349,7 +287,7 @@ def analyze_run(
         except Exception as e:
             logger.warning(f"Joint-attack UQ evaluation failed: {e}")
 
-    # 8. Cleanup
+    # 7. Cleanup
     del cbm
     torch.cuda.empty_cache()
 
@@ -374,7 +312,6 @@ if __name__ == "__main__":
     parser.add_argument("--no-dis-loss", action="store_true", help="Skip discriminative NLL loss.")
     parser.add_argument("--no-gen-loss", action="store_true", help="Skip generative NLL loss.")
     parser.add_argument("--no-rob", action="store_true", help="Skip robustness evaluation.")
-    parser.add_argument("--no-mia", action="store_true", help="Skip MIA evaluation.")
     parser.add_argument("--no-uq", action="store_true", help="Skip UQ evaluation.")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Torch device (default: cuda if available, else cpu).")
@@ -385,7 +322,6 @@ if __name__ == "__main__":
         compute_dis_loss=not args.no_dis_loss,
         compute_gen_loss=not args.no_gen_loss,
         compute_rob=not args.no_rob,
-        compute_mia=not args.no_mia,
         compute_uq=not args.no_uq,
         device=args.device,
     )
