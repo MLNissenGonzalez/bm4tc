@@ -184,18 +184,10 @@ def test_condition_on_class_last_position():
     # out_position at the last site uses the left-merge path
     cbm = _tiny_cbm(data_dim=2, num_classes=2)
     # out_position defaults to n_features // 2 = 1; test with forced last position
-    from omegaconf import OmegaConf
-    cfg = OmegaConf.structured(
-        {"embedding": "fourier", "model_path": None,
-         "init_kwargs": {"in_dim": 2, "bond_dim": 2, "out_position": 2,
-                         "boundary": "obc", "init_method": "randn",
-                         "dtype": "float32", "n_features": None,
-                         "out_dim": None, "std": 1e-3}}
-    )
     from src.model import CBMConfig
     cfg_dc = CBMConfig(embedding="fourier",
-                       init_kwargs={"in_dim": 2, "bond_dim": 2, "out_position": 2,
-                                    "std": 1e-3, "dtype": "float32"})
+                       init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, out_position=2,
+                                                 std=1e-3, dtype="float32"))
     cbm2 = ConditionalBornMachine(cfg=cfg_dc, data_dim=2, num_classes=2)
     tensors = cbm2.condition_on_class(0)
     assert len(tensors) == 2

@@ -88,7 +88,7 @@ def _analyse(run_dir: Path, root: Path) -> dict:
 def run_pipeline(root: Path) -> dict:
     """The harness: returns {"nat": metrics, "at": metrics} with the pinned names."""
     nat = _train(root, "nat", DATA + NAT)
-    at = _train(root, "at", DATA + AT + [f"+model_path={nat / 'models' / 'model'}"])
+    at = _train(root, "at", DATA + AT + [f"model_path={nat / 'models' / 'model'}"])
     out = {}
     for name, run_dir in [("nat", nat), ("at", at)]:
         r = _analyse(run_dir, root)

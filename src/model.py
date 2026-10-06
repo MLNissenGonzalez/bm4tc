@@ -3,7 +3,7 @@ import torch
 import tensorkrowch as tk
 from dataclasses import dataclass, field
 from typing import List, Optional, Text
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf
 from src.utils.embeddings import embedding, range_from_embedding
 import logging
 
@@ -131,19 +131,18 @@ class ConditionalBornMachine(tk.models.MPS):
         tensors: List[torch.Tensor] | None = None,
     ):
         # ── Config normalisation ──────────────────────────────────────────
-        if not isinstance(cfg, DictConfig):
-            import dataclasses
-            cfg = OmegaConf.create(dataclasses.asdict(cfg))
-        OmegaConf.set_struct(cfg, False)
-        if getattr(cfg.init_kwargs, "n_features", None) is None:
+        # One typed copy of whatever came in (dataclass, plain or typed config, a
+        # checkpoint's dict): every field exists, unknown keys fail (D25), and the
+        # caller's config is never mutated.
+        cfg = OmegaConf.merge(OmegaConf.structured(CBMConfig), cfg)
+        if cfg.init_kwargs.n_features is None:
             if data_dim is None:
                 raise ValueError("Provide data_dim or set cfg.init_kwargs.n_features.")
             cfg.init_kwargs.n_features = data_dim + 1
-        if getattr(cfg.init_kwargs, "out_dim", None) is None:
+        if cfg.init_kwargs.out_dim is None:
             if num_classes is None:
                 raise ValueError("Provide num_classes or set cfg.init_kwargs.out_dim.")
             cfg.init_kwargs.out_dim = num_classes
-        OmegaConf.set_struct(cfg, True)
 
         n_features = cfg.init_kwargs.n_features
         _data_dim = n_features - 1
@@ -159,8 +158,7 @@ class ConditionalBornMachine(tk.models.MPS):
         if tensors is not None:
             _dtype = tensors[0].dtype
         else:
-            _raw = OmegaConf.to_object(cfg.init_kwargs).get("dtype")
-            _dtype = _DTYPE_MAP.get(_raw, torch.float32)
+            _dtype = _DTYPE_MAP.get(cfg.init_kwargs.dtype, torch.float32)
 
         # ── Embedding ─────────────────────────────────────────────────────
         self.embedding_name = cfg.embedding
@@ -170,20 +168,19 @@ class ConditionalBornMachine(tk.models.MPS):
 
         # Opt-in overflow-safe amplitude path (getattr so checkpoints whose saved
         # config predates the flag default to off). See _log_amp_sq.
-        self.accumulate = bool(getattr(cfg, "accumulate", False))
+        self.accumulate = cfg.accumulate
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────
-        _cls_pos = getattr(cfg.init_kwargs, "out_position", None)
+        _cls_pos = cfg.init_kwargs.out_position
         if _cls_pos is None:
             _cls_pos = n_features // 2
         _phys_dim = [_in_dim] * n_features
         _phys_dim[_cls_pos] = _num_classes
 
         # ── MPS super().__init__ ──────────────────────────────────────────
-        _init_cfg = OmegaConf.to_object(cfg.init_kwargs)
-        _init_method = _init_cfg.get("init_method", "randn")
-        _std = _init_cfg.get("std", 1e-9)
-        _boundary = _init_cfg.get("boundary", "obc")
+        _init_method = cfg.init_kwargs.init_method
+        _std = cfg.init_kwargs.std
+        _boundary = cfg.init_kwargs.boundary
 
         super().__init__(
             n_features=n_features,
@@ -256,9 +253,7 @@ class ConditionalBornMachine(tk.models.MPS):
         self._h_node['bond'] ^ self._u_node['left']
 
         # ── Saved attributes ──────────────────────────────────────────────
-        OmegaConf.set_struct(cfg, False)
         cfg.init_kwargs.out_position = _cls_pos
-        OmegaConf.set_struct(cfg, True)
         self.cfg = cfg
         self._data_dim = _data_dim
         self.in_dim = _in_dim           # physical dim per input site
