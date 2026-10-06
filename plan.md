@@ -1,6 +1,6 @@
 # Simplification plan
 
-Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D31 in
+Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D36 in
 `status.md` §11. The principles come from `ousterhout.md`. This plan covers the
 *how* and the *order*. Where it has to choose something the decisions leave open,
 it says so; see §6.
@@ -24,38 +24,51 @@ it says so; see §6.
 What the repository should look like at the end of phase 7.
 
 ```
-bm4tc/                      # the package (was src/ + experiments/ + analysis/)
-  __main__.py               # CLI: python -m bm4tc <verb> <study>
-  model.py                  # ConditionalBornMachine (tk.models.MPS subclass), numerical core unchanged
-  embeddings.py             # fourier, legendre, hermite, chebychev1/2
-  data.py                   # datasets, splits, rescaling (takes an input range, not a model)
-  attacks.py                # PGD, joint PGD (one shared projection/init core)
-  defenses.py               # likelihood purification, Gibbs purification, detection
-  train.py                  # one Trainer: objective, validation, selection, saving
-  metrics.py                # metric keys, objective, the selection rule; documents CSV columns
-  config.py                 # schema dataclasses, enforced by Hydra (D25)
-  runs.py                   # run.json manifest, run dirs, study resolution, warm-start lookup
-  select.py                 # HPO trial -> hparams.yaml
-  analyse.py                # per-run analysis (cached) + study aggregation -> CSV
-  figures/                  # one module per paper figure/table, driven by paper.yaml
-  jem/                      # JEM model + SGLD training/purification (D24)
-  privacy/mia.py            # standalone MIA attack, not wired into the pipeline (D1)
+bm4tc/
+  core/                 # the maths; no files, no configs (D32)
+    model.py            # ConditionalBornMachine (tensorkrowch); numerical core unchanged
+    embeddings.py       # fourier, legendre, hermite, chebychev1/2
+    objective.py        # L_alpha, split AT objective, norm penalty, mix()
+    train.py            # Trainer (MPS): fit, validate, select on objective/valid
+    attacks.py          # PGD, joint PGD (one shared projection/init core)
+    jem/                # JEM model + SGLD trainer + SGLD purifier (D35)
+  analysis/             # evaluate any trained model -> metric dicts; imports only core
+    robustness.py  detection.py  purification.py  gibbs.py
+    ceiling.py     privacy.py   # MIA, standalone (D1)
+  pipeline/             # weaving: knows configs, files, runs
+    config.py           # schema dataclasses, enforced by Hydra (D25)
+    data.py             # datasets, splits, rescaling (takes an input range, not a model)
+    runs.py             # names (D14), run.json (D17), study resolution, warm-start lookup (D19)
+    metrics.py          # metric keys, objective/{split}, selection rule; documents CSV columns
+    stages.py           # hpo, select, train, analyse, prune
+    figures/            # one function per paper figure/table, driven by paper.yaml
+  __main__.py           # CLI: python -m bm4tc <verb> <study>
 configs/
-  config.yaml               # Hydra entry; inherits the schema
-  defaults.yaml             # every constant, once (optimizer, patience, radii grid, 5 seeds, ...)
-  datasets/*.yaml           # spirals, mnist12, mnist, ecg200, italypowerdemand, ...
-  studies/*.yaml            # grids: arch x alpha x seed (+ init, regime, model)
-  hparams.yaml              # written by `select`, never by hand
-paper.yaml                  # figure/table -> studies
-tests/
+  config.yaml           # Hydra entry; inherits the schema
+  defaults.yaml         # every constant, once (optimizer, patience, budgets grid, 5 seeds, analysis block)
+  datasets/*.yaml       # spirals, mnist12, mnist, ecg200, italypowerdemand, ...
+  studies/*.yaml        # one per dataset x regime (x model): grid arch x alpha (x embedding) (D36)
+  hparams/<study>.yaml  # written by `select <study>`, never by hand (D34)
+paper.yaml              # figure/table -> studies
+tests/                  # + test_import_rule.py: core -/-> analysis, pipeline; analysis -/-> pipeline
 README.md  GUIDE.md  AGENTS.md  CLAUDE.md (-> @AGENTS.md)
 ```
+
+**Import rule (D32), enforced by a test:** `core` imports neither `analysis` nor
+`pipeline`; `analysis` imports only `core`; `pipeline` and `__main__` may import
+everything. The Trainer returns plain names (`objective`, `loss_dis`, …), and
+`pipeline/metrics.py` adds the `/{split}` keys and logs them.
+
+**JEM (D35):** its own trainer in `core/jem/`. After training it is analysed by the
+same `analysis/` code through a narrow model interface: `log_p_c_given_x`,
+`log_p_x` (unnormalised allowed), `save` / `load`. The MPS implements the same
+interface.
 
 **The pipeline as the user sees it** (D23):
 
 ```
 python -m bm4tc hpo      studies/mnist12_nat     # Optuna trials, no checkpoints (D22)
-python -m bm4tc select   studies/mnist12_nat     # -> hparams.yaml (D21)
+python -m bm4tc select   studies/mnist12_nat     # -> configs/hparams/mnist12_nat.yaml (D21, D34)
 python -m bm4tc train    studies/mnist12_nat     # seed runs, one checkpoint each, run.json
 python -m bm4tc analyse  studies/mnist12_nat     # per-run analysis.json (cached by settings hash) -> study CSV
 python -m bm4tc run      studies/mnist12_nat     # all of the above, skipping finished steps
@@ -71,7 +84,7 @@ python -m bm4tc prune    studies/mnist12_nat --keep-one | --all | --old
 | What a run *is* (D17) | `runs.py` (`run.json`) | path regexes, `descriptor`, `stage` |
 | Metric keys, `objective/{split}`, selection rule (D8, D11) | `metrics.py` | 6–7 stop_crit mappings, `CSV_SCHEMA.md` |
 | Every knob and its default (D25) | `config.py` + `defaults.yaml` | 506 YAMLs restating constants, `getattr(..., default)` |
-| Tuned hyperparameters (D16, D21) | `hparams.yaml` via `select.py` | `fill_hpo.py`, `patch_checkpoint.py`, `???` placeholders |
+| Tuned hyperparameters (D16, D21, D34) | `configs/hparams/<study>.yaml` via `select` | `fill_hpo.py`, `patch_checkpoint.py`, `???` placeholders |
 | Warm-start source (D19) | `runs.py` lookup | hand-patched `model_path` |
 | Attack/purification radii, one grid (D3, D20) | `defaults.yaml` `budgets:` | YAML evasion blocks ×2, `sweep.py` globals |
 | Model caches (D31) | `model.py` only | trainer-side `_log_Z_cache` access |
@@ -112,9 +125,9 @@ python -m bm4tc prune    studies/mnist12_nat --keep-one | --all | --old
 - **MIA (D1):**
   - move `load_run_config` / `find_model_checkpoint` out of
     `analysis/utils/mia_utils.py` into `analysis/utils/runs.py` (later
-    `bm4tc/runs.py`);
+    `pipeline/runs.py`);
   - strip MIA from `run.py`, `sweep.py`, `CSV_SCHEMA.md` and the integration tests;
-  - move `src/analysis/mia.py` to `privacy/mia.py`, keeping only what the attack
+  - move `src/analysis/mia.py` to `analysis/privacy.py`, keeping only what the attack
     needs, with its own unit test.
 - `analysis/outputs/seed_sweep/{adv,cls,cls_reg,comb,gen}` (old layout, preserved by
   the tag)
@@ -183,7 +196,7 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
    | `ts_{dataset}_nat`, `ts_{dataset}_at` | TBD (D6) |
    | `jem_*` | after phase 6 |
 
-4. **`hparams.yaml`:** keyed by `(dataset, regime, embedding, arch, α)`; consumed via a
+4. **`configs/hparams/<study>.yaml`:** keyed by the study's grid cell `(arch, α[, embedding])`; consumed via a
    resolver at launch. Missing entries fail loudly; only `hpo` runs without them.
 5. **`runs.py`:**
    - writes `run.json` (identity axes, study, init source, git sha, resolved
@@ -205,8 +218,8 @@ no code outside `runs.py` builds or parses a run path.
 
 ### Phase 5: Pipeline verbs and analysis (D2, D3, D20–D23)
 
-1. **Package move** `src/` + `experiments/` + `analysis/` → `bm4tc/` (see §6, Q1),
-   with `__main__.py` exposing the verbs.
+1. **Package move** `src/` + `experiments/` + `analysis/` → `bm4tc/{core,analysis,pipeline}` (D32),
+   with `__main__.py` exposing the verbs and `test_import_rule.py` guarding the boundaries.
 2. **`select`** (D21) and **`train`**: Hydra multirun over the study grid; the launcher
    is pluggable (local: basic/joblib; mathqi: see §6, Q2).
 3. **`analyse`:**
@@ -232,9 +245,10 @@ detection numbers, which change by design (D2).
 
 ### Phase 6: JEM into the pipeline (D24)
 
-- `jem/` provides a model and its SGLD training/purification behind the same
-  `Trainer` / defence interfaces where they fit. Where they don't (SGLD replay
-  buffer), the module stays deep and private.
+- `core/jem/` keeps its own SGLD trainer and SGLD purifier (D35). After training,
+  JEM goes through the same `analysis/` code via the narrow model interface
+  (`log_p_c_given_x`, `log_p_x`, `save`/`load`); `baselines/jem/attacks.py` and
+  `purification.py` are deleted.
 - Studies `jem_mnist12_nat`, `jem_mnist12_at` use the same vocabulary, manifests and
   metrics.
 - Delete `baselines/jem/{configs,sweep,report,compare,tables,hpo_export}` once
@@ -295,7 +309,7 @@ Rough, to be checked after each phase:
 
 - **Hydra limits:**
   - per-cell hparams lookup inside a multirun grid → solved with a resolver reading
-    `hparams.yaml`;
+    `configs/hparams/<study>.yaml`;
   - Optuna sweeps per grid cell → one `hpo` launch per cell, driven by the CLI.
   - Prototype both in phase 4 before deleting the old tree.
 - **Schema enforcement** may expose keys that are actually read somewhere through
@@ -308,9 +322,7 @@ Rough, to be checked after each phase:
 
 ## 6. Open questions
 
-1. **Package name and timing.** Move to a `bm4tc/` package in phase 5 (needed for
-   `python -m bm4tc`), or keep `src/` and add a thin `bm4tc/__main__.py`?
-   Recommended: move.
+1. ~~Package layout~~ → three areas (D32).
 2. **mathqi.** What scheduler does it run (SLURM, or plain SSH/GPU)? That decides the
    Hydra launcher (submitit vs. joblib) for phases 5 and 8. Where does
    `BM4TC_DATA_ROOT` point there?
@@ -320,4 +332,4 @@ Rough, to be checked after each phase:
    α values, MNIST12 AT arches, and the TS dataset list.
 5. **`acc_floor` and `curriculum`:** keep as Trainer options only if the journal
    studies use them. Do they?
-6. **CLI (D23)** was marked tentative. Confirm.
+6. ~~CLI~~ → confirmed (D33).
