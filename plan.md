@@ -201,9 +201,9 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
    | `spirals_nat` | legendre d10r6, default α ladder, cold |
    | `spirals_at` | legendre d10r6, α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43) |
    | `spirals_capacity` | legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)}, α ∈ {0, 1}, NAT, cold, **own HPO per arch**. The (10,6) cells are *re-run on purpose* as a consistency check against `spirals_nat`: same best HPs (within the search's resolution) and the same test metrics (within seed spread) (D42) |
-   | `spirals_embedding` | 5 embeddings, d10r6, α ∈ {0, 1}?, NAT (D5) |
+   | `spirals_embedding` | 5 embeddings, d10r6, α ∈ {0, 1}, NAT (D5, D59) |
    | `mnist12_nat` | d3r{10,20,40}, default α ladder, cold |
-   | `mnist12_at` | d3r40 (+ r20?), α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43) |
+   | `mnist12_at` | d3r20 and d3r40, α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43, D59) |
    | `mnist_capacity` | legendre d3, r ∈ {10, 20, 40, 80, …} up to the 8 GB/cluster memory limit, α ∈ {0, 1}, cold, NAT. Two pass criteria (D44): **(i) α=0:** smallest r whose clean test acc is within 0.5 points of the best r; **(ii) α=1:** smallest r after which doubling r gains < 2 points of clean acc (a plateau rule, not an absolute bar, since α=1 may never get near 0.9 on images). Report both; `mnist_nat` uses the larger. Must finish before `mnist_nat` / `mnist_at` |
    | `mnist_nat` | r from `mnist_capacity`, legendre, default α ladder, cold |
    | `mnist_at` | r from `mnist_capacity`, α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43, D46) |
