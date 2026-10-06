@@ -192,13 +192,14 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
    |---|---|
    | `spirals_nat` | legendre d10r6, α ∈ {0, 0.01, 0.1, 0.5, 1}, cold |
    | `spirals_at` | legendre d10r6, α ∈ {0, 0.01}, warm |
-   | `spirals_capacity` | legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)}, α ∈ {0, 1}, NAT (D5) |
+   | `spirals_capacity` | legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)}, α ∈ {0, 1}, NAT, compare HPs with `spirals_nat` (D5) |
    | `spirals_embedding` | 5 embeddings, d10r6, α ∈ {0, 1}?, NAT (D5) |
-   | `mnist12_nat` | d3r{10,20,40}, α ∈ {0, 0.01, 0.1, 0.2, 0.5, 1}, warm |
-   | `mnist12_at` | d3r40 (+ r20?), α ∈ {0, 0.01}, warm |
-   | `mnist_nat`, `mnist_at` | capacity sweep TBD (D7) |
+   | `mnist12_nat` | d3r{10,20,40}, α ∈ {0, 0.01, 0.1, 0.2, 0.5, 1}, cold |
+   | `mnist12_at` | d3r40 (+ r20?), α ∈ {0, 0.01}, warm, expensive (how cheaper?)|
+   | `mnist_capacity` | legendre, quantative test which capacity is needed to have first high accs, and second reasonable generative capability (D7) |
+   | `mnist_nat` | using good capacity, legendre α ∈ {0, 0.01, 0.1, 0.5, 1}, cold |
    | `ts_{dataset}_nat`, `ts_{dataset}_at` | TBD (D6) |
-   | `jem_*` | after phase 6 |
+   | `jem_*` | after phase 6, has to mirror ts and mnist for born. it is the baseline to compare against |
 
 4. **`configs/hparams/<study>.yaml`:** keyed by the study's grid cell `(arch, α[, embedding])`; consumed via a
    resolver at launch. Missing entries fail loudly; only `hpo` runs without them.
