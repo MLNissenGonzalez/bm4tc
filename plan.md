@@ -1,6 +1,6 @@
 # Simplification plan
 
-Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D47 in
+Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D50 in
 `status.md` §11. The principles come from `ousterhout.md`. This plan covers the
 *how* and the *order*. Where it has to choose something the decisions leave open,
 it says so; see §6.
@@ -152,8 +152,12 @@ python -m bm4tc run studies/mnist12_nat --gpus 0,1,2,3 --per-gpu 2
    stale key it reports (`criterion`, `auto_stack`, `auto_unbind`,
    `tracking.evasion`, …), and remove the defensive `getattr(cfg, …, default)`.
 4. **Vocabulary rename** (D10): config groups `trainer/nll` → `trainer/nat`,
-   `trainer/adversarial` → `trainer/at`, class and variable names, and the `REGIME`
-   values in analysis.
+   `trainer/adversarial` → `trainer/at`, variable names, and the `REGIME`
+   values in analysis. Class names wait for Phase 3 (D50).
+5. **Delete `configs/experiments/`** except `tests/`, plus `tools/fill_hpo.py`,
+   `tools/patch_checkpoint.py`, `experiments/batch.py`, `test_experiment_configs.py`
+   and the config-rebuild fallback in `analysis/utils/runs.py` (D49). Metric keys follow
+   D48.
 
 *Exit:* the seam test's selection keys are renamed; numbers unchanged. Composing every
 remaining config passes the schema.
@@ -227,9 +231,8 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
 6. **dtype default `complex64`** in the schema and the model's fallback. Drop the
    `c64` suffix everywhere. Real dtype stays a schema value; it's no longer the
    default and isn't in any study.
-7. **Delete:** the 506 experiment YAMLs, `configs/born/*` (arch becomes `d`/`r` in
-   the study grid), `experiments/resolvers.py`, `tools/fill_hpo.py`,
-   `tools/patch_checkpoint.py` (superseded by phase 5's `select`), `descriptor`,
+7. **Delete:** `configs/born/*` (arch becomes `d`/`r` in
+   the study grid), `experiments/resolvers.py`, `descriptor`,
    `stage`.
 
 *Exit:* every study composes under the schema; the seam test runs from a study file;
@@ -265,7 +268,7 @@ no code outside `runs.py` builds or parses a run path.
 4. **`prune`** with `--keep-one`, `--all`, `--old` (D22), replacing
    `tools/delete_runs.py`. Destructive, so it prints the plan and asks for
    confirmation unless `--yes`.
-5. **Delete:** `analysis/run.py`, `sweep.py`, `gibbs.py`, all three `batch.py`,
+5. **Delete:** `analysis/run.py`, `sweep.py`, `gibbs.py`, both remaining `batch.py`,
    `analysis/utils/resolve.py`, `wandb_fetcher.py` (if `select` reads manifests only),
    `tools/`.
 6. **`datahandler`** takes the embedding's input range instead of the model.

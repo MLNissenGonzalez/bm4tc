@@ -585,6 +585,9 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D45 | **Default α ladder {0, 1e-3, 1e-2, 1e-1, 0.5, 1}** for all NAT studies (0.2 dropped, 1e-3 added). | One ladder in `defaults.yaml`. |
 | D46 | **`mnist_at` added:** r from `mnist_capacity`, α ∈ {0, 1e-2}, warm, D43 budget. | |
 | D47 | **W&B grouping by grid cell:** group = study + grid cell, run name = seed, `job_type` = `hpo` \| `train`. W&B averages a group, so each cell shows its seeds as a mean with a spread band. Derived from `run.json` identity, not from the run path. | Replaces `_derive_group_key` (and its `outputs/` ancestor requirement) in Phase 4. |
+| D48 | **Metric keys are `quantity/split[/budget]`:** `objective/{train,valid}`, `penalty/train`, `loss_dis`, `loss_gen`, `loss_adv` (split AT: L_dis on x_adv), `acc`, `rob/{split}/{eps_rel}`, `n_rob/valid`, `eps_rel/train`, `norm/*`. `objective/train` excludes the norm penalty so it compares to `objective/valid`. Selection = argmin `objective/valid`; Optuna minimises `best["objective"]`. | Settles the names left open in D8/D11. Analysis keys follow the same rule in Phase 5 (`rob/test/0.1`). |
+| D49 | **Delete `configs/experiments/` (except `tests/`) in Phase 2,** not Phase 4. With it go the tools that only operate on it: `tools/fill_hpo.py`, `tools/patch_checkpoint.py`, `experiments/batch.py`, `test_experiment_configs.py`, and the config-rebuild fallback in `analysis/utils/runs.py`. | No migration of ~500 files that Phase 4 deletes. Until Phase 4 studies exist, no production sweep launches from this branch; old HPs stay in the `pre-ousterhout` tag and the §3 census. |
+| D50 | **Trainer class renames wait for Phase 3:** Phase 2 renames config groups (`trainer/nat`, `trainer/at`), YAML keys, `REGIME` values and log keys; `NLLTrainer`/`AdversarialTrainer` keep their names until Phase 3 replaces them with `Trainer`/`TrainConfig`. | Avoids a rename that lives for one phase. |
 
 ---
 
