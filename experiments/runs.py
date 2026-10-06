@@ -62,6 +62,29 @@ class HPOConfig:
 
 
 @dataclass
+class GibbsConfig:
+    enabled: bool = MISSING
+    sweeps: List[int] = MISSING
+    num_bins: int = MISSING
+    step: float = MISSING
+    batch_size: int = MISSING
+    subsample: Optional[int] = MISSING
+
+
+@dataclass
+class AnalysisConfig:
+    """What `analyse` computes per run; values in configs/defaults.yaml (D20)."""
+    attack_steps: int = MISSING
+    joint_attack: bool = MISSING
+    rob_ceiling: bool = MISSING
+    percentiles: List[float] = MISSING
+    purify_delta: List[float] = MISSING
+    purify_steps: int = MISSING
+    batch_size: int = MISSING
+    gibbs: GibbsConfig = field(default_factory=GibbsConfig)
+
+
+@dataclass
 class StudyConfig:
     dataset: str = MISSING             # an option of configs/dataset/
     regime: str = MISSING              # nat | at
@@ -73,6 +96,7 @@ class StudyConfig:
     config: Dict[str, Any] = field(default_factory=dict)   # fixed run-config values
     hpo: Optional[HPOConfig] = None    # None: no HPO, the study fixes every hparam
     budgets: List[float] = MISSING
+    analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
 
 # ── Names ───────────────────────────────────────────────────────────────────
