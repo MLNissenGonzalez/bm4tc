@@ -54,118 +54,38 @@ def normalizing(x: torch.FloatTensor, norm: int | str):
 
     else:
         raise ValueError(f"{norm=}, but expected to be int or 'inf'.")
-    
+
     return normalized
 
-class ProjectedGradientDescent:
-    """
-    Projected Gradient Descent (PGD) adversarial attack.
 
-    Iterative attack that performs multiple gradient ascent steps with projection
-    back onto the epsilon ball.
-    """
-
-    def __init__(
-            self,
-            norm: int | str = "inf",
-            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
-            num_steps: int = 10,
-            step_size: float | None = None,
-            random_start: bool = True
-    ):
-        self.norm = norm
-        # criterion parameter retained for API compatibility; loss is computed
-        # via born.mixed_nll(alpha=0) in generate().
-        self.num_steps = num_steps if num_steps is not None else 10
-        self.step_size = step_size
-        self.random_start = random_start
-
-    def _project(self, perturbation: torch.Tensor, eps_abs: float) -> torch.Tensor:
-        """Project perturbation back into the epsilon ball."""
-        if self.norm == "inf":
-            return perturbation.clamp(-eps_abs, eps_abs)
-        elif isinstance(self.norm, int):
-            # Project onto Lp ball
-            norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / eps_abs, min=1.0)
-            return perturbation / scale
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
-
-    def _random_init(self, shape: torch.Size, eps_abs: float, device: torch.device) -> torch.Tensor:
-        """Initialize random perturbation within epsilon ball."""
-        if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * eps_abs
-        elif isinstance(self.norm, int):
-            # Sample uniformly from Lp ball (approximate via normalize + scale)
-            delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * eps_abs * torch.rand(shape[0], 1, device=device)
-            return delta
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
-
-    def _bounded_delta(
-            self,
-            perturbation: torch.Tensor,
-            naturals: torch.Tensor,
-            eps_abs: float,
-            input_range: Tuple[float, float],
-    ) -> torch.Tensor:
-        """Project onto both the valid input domain and the epsilon ball."""
-        lo, hi = input_range
-        in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
-        return self._project(in_domain, eps_abs)
-
-    def generate(
-            self,
-            born,
-            naturals: torch.Tensor,
-            labels: torch.LongTensor,
-            eps_abs: float = 0.1,
-            device: torch.device | str = "cpu"
-    ):
-        """Generate adversarial examples using iterative PGD.
-
-        ``eps_abs`` is an absolute model-domain budget, not a fraction.
-        """
-        born.to(device)
-        naturals = naturals.to(device).detach()
-        labels = labels.to(device)
-
-        step_size = self.step_size if self.step_size is not None else 2.5 * eps_abs / self.num_steps
-
-        if self.random_start:
-            delta = self._random_init(naturals.shape, eps_abs, device)
-            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
-        else:
-            delta = torch.zeros_like(naturals)
-
-        for _ in range(self.num_steps):
-            delta.requires_grad_(True)
-            loss = _dis_loss(born, naturals + delta, labels)
-
-            _zero_grad(born)
-            if delta.grad is not None:
-                delta.grad.zero_()
-
-            loss.backward()
-
-            grad = delta.grad.detach()
-            normalized_gradient = normalizing(grad, norm=self.norm)
-
-            delta = delta.detach() + step_size * normalized_gradient
-            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
-
-        lo, hi = born.input_range
-        return (naturals + delta).clamp(lo, hi).detach()
+def project(perturbation: torch.Tensor, norm: int | str, radius: float) -> torch.Tensor:
+    """Project a (batch, dim) perturbation onto the Lp ball of ``radius``."""
+    if norm == "inf":
+        return perturbation.clamp(-radius, radius)
+    elif isinstance(norm, int):
+        norms = perturbation.norm(p=norm, dim=1, keepdim=True)
+        scale = torch.clamp(norms / radius, min=1.0)
+        return perturbation / scale
+    else:
+        raise ValueError(f"{norm=}, but expected int or 'inf'.")
 
 
-class JointProjectedGradientDescent:
-    """PGD maximising max_{c'≠c} ln|ψ(x̃, c')|²  (joint generative attack).
+def random_in_ball(shape: torch.Size, norm: int | str, radius: float,
+                   device: torch.device) -> torch.Tensor:
+    """A random perturbation inside the Lp ball of ``radius`` (uniform for L∞;
+    for Lp a random direction times a uniform radius, not uniform in volume)."""
+    if norm == "inf":
+        return (2 * torch.rand(shape, device=device) - 1) * radius
+    elif isinstance(norm, int):
+        delta = torch.randn(shape, device=device)
+        return normalizing(delta, norm) * radius * torch.rand(shape[0], 1, device=device)
+    else:
+        raise ValueError(f"{norm=}, but expected int or 'inf'.")
 
-    Loss per step: +mean( max_{c'≠c}  2·log|ψ(x̃, c')| )  — gradient ascent.
-    The worst-case wrong class is re-selected dynamically at every gradient step.
-    """
+
+class _PGD:
+    """Projected gradient ascent on ``_loss`` within the eps ball and the input
+    domain. Subclasses define only the loss."""
 
     def __init__(
             self,
@@ -179,25 +99,8 @@ class JointProjectedGradientDescent:
         self.step_size = step_size
         self.random_start = random_start
 
-    def _project(self, perturbation: torch.Tensor, eps_abs: float) -> torch.Tensor:
-        if self.norm == "inf":
-            return perturbation.clamp(-eps_abs, eps_abs)
-        elif isinstance(self.norm, int):
-            norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / eps_abs, min=1.0)
-            return perturbation / scale
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
-
-    def _random_init(self, shape: torch.Size, eps_abs: float, device: torch.device) -> torch.Tensor:
-        if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * eps_abs
-        elif isinstance(self.norm, int):
-            delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * eps_abs * torch.rand(shape[0], 1, device=device)
-            return delta
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
+    def _loss(self, born, x: torch.Tensor, labels: torch.LongTensor) -> torch.Tensor:
+        raise NotImplementedError
 
     def _bounded_delta(
             self,
@@ -209,7 +112,7 @@ class JointProjectedGradientDescent:
         """Project onto both the valid input domain and the epsilon ball."""
         lo, hi = input_range
         in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
-        return self._project(in_domain, eps_abs)
+        return project(in_domain, self.norm, eps_abs)
 
     def generate(
             self,
@@ -219,45 +122,74 @@ class JointProjectedGradientDescent:
             eps_abs: float = 0.1,
             device: torch.device | str = "cpu"
     ):
-        """Generate adversarial examples using the joint generative attack.
+        """Generate adversarial examples.
 
         ``eps_abs`` is an absolute model-domain budget, not a fraction.
         """
         born.to(device)
         naturals = naturals.to(device).detach()
-        labels   = labels.to(device)
+        labels = labels.to(device)
 
-        step_size = self.step_size if self.step_size is not None \
-                    else 2.5 * eps_abs / self.num_steps
+        step_size = self.step_size if self.step_size is not None else 2.5 * eps_abs / self.num_steps
 
-        delta = (self._random_init(naturals.shape, eps_abs, device)
-                 if self.random_start else torch.zeros_like(naturals))
-        delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
-
-        batch = len(labels)
-        K = born.out_dim
-        true_class_mask = torch.zeros(batch, K, dtype=torch.bool, device=device)
-        true_class_mask[torch.arange(batch), labels] = True
+        if self.random_start:
+            delta = random_in_ball(naturals.shape, self.norm, eps_abs, device)
+            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
+        else:
+            delta = torch.zeros_like(naturals)
 
         for _ in range(self.num_steps):
             delta.requires_grad_(True)
-            _amps = born.amplitudes if hasattr(born, "amplitudes") else born.classifier.amplitudes
-            amplitudes  = _amps(naturals + delta)                                # (B, K)
-            log_joint   = 2 * torch.log(amplitudes.abs().clamp(min=_LOG_PROB_EPS))  # (B, K)
-            log_joint_w = log_joint.masked_fill(true_class_mask, float('-inf'))
-            loss        = log_joint_w.max(dim=-1).values.mean()
+            loss = self._loss(born, naturals + delta, labels)
 
             _zero_grad(born)
             if delta.grad is not None:
                 delta.grad.zero_()
+
             loss.backward()
 
-            grad  = delta.grad.detach()
+            grad = delta.grad.detach()
             delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
             delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
 
         lo, hi = born.input_range
         return (naturals + delta).clamp(lo, hi).detach()
+
+
+class ProjectedGradientDescent(_PGD):
+    """PGD maximising the discriminative NLL -log p(c|x)."""
+
+    def __init__(
+            self,
+            norm: int | str = "inf",
+            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
+            num_steps: int = 10,
+            step_size: float | None = None,
+            random_start: bool = True
+    ):
+        # criterion is accepted for API compatibility and ignored: the loss is
+        # always born.mixed_nll(alpha=0).
+        super().__init__(norm=norm, num_steps=num_steps, step_size=step_size,
+                         random_start=random_start)
+
+    def _loss(self, born, x, labels):
+        return _dis_loss(born, x, labels)
+
+
+class JointProjectedGradientDescent(_PGD):
+    """PGD maximising max_{c'≠c} ln|ψ(x̃, c')|²  (joint generative attack).
+
+    Loss per step: +mean( max_{c'≠c}  2·log|ψ(x̃, c')| )  — gradient ascent.
+    The worst-case wrong class is re-selected dynamically at every gradient step.
+    """
+
+    def _loss(self, born, x, labels):
+        true_class = torch.zeros(len(labels), born.out_dim, dtype=torch.bool, device=x.device)
+        true_class[torch.arange(len(labels)), labels] = True
+        _amps = born.amplitudes if hasattr(born, "amplitudes") else born.classifier.amplitudes
+        amplitudes = _amps(x)                                                # (B, K)
+        log_joint = 2 * torch.log(amplitudes.abs().clamp(min=_LOG_PROB_EPS))  # (B, K)
+        return log_joint.masked_fill(true_class, float('-inf')).max(dim=-1).values.mean()
 
 
 _METHOD_MAP = {
@@ -270,23 +202,15 @@ def build_attack(
     evasion_cfg: EvasionConfig,
 ) -> ProjectedGradientDescent | JointProjectedGradientDescent:
     """Construct an attack object from an EvasionConfig."""
-    method = evasion_cfg.method
-    if method == "PGD":
-        return ProjectedGradientDescent(
-            norm=evasion_cfg.norm,
-            criterion=evasion_cfg.criterion,
-            num_steps=evasion_cfg.num_steps,
-            step_size=evasion_cfg.step_size,
-            random_start=evasion_cfg.random_start,
-        )
-    if method == "JOINT_PGD":
-        return JointProjectedGradientDescent(
-            norm=evasion_cfg.norm,
-            num_steps=evasion_cfg.num_steps,
-            step_size=evasion_cfg.step_size,
-            random_start=evasion_cfg.random_start,
-        )
-    raise ValueError(f"Unknown attack method: {method!r}. Expected 'PGD' or 'JOINT_PGD'.")
+    if evasion_cfg.method not in _METHOD_MAP:
+        raise ValueError(f"Unknown attack method: {evasion_cfg.method!r}. "
+                         "Expected 'PGD' or 'JOINT_PGD'.")
+    return _METHOD_MAP[evasion_cfg.method](
+        norm=evasion_cfg.norm,
+        num_steps=evasion_cfg.num_steps,
+        step_size=evasion_cfg.step_size,
+        random_start=evasion_cfg.random_start,
+    )
 
 
 class RobustnessEvaluation:
@@ -322,22 +246,9 @@ class RobustnessEvaluation:
             random_start: PGD random initialization.
         """
         self.eps_rel = eps_rel
-        method_cls = _METHOD_MAP[method]
-        if method == "PGD":
-            self.method = method_cls(
-                norm=norm,
-                criterion=criterion,
-                num_steps=num_steps,
-                step_size=step_size,
-                random_start=random_start
-            )
-        else:
-            self.method = method_cls(
-                norm=norm,
-                num_steps=num_steps,
-                step_size=step_size,
-                random_start=random_start
-            )
+        self.method = _METHOD_MAP[method](
+            norm=norm, num_steps=num_steps, step_size=step_size, random_start=random_start,
+        )
 
     def generate(
             self,

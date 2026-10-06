@@ -27,7 +27,7 @@ from tqdm import tqdm
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 from src.utils.embeddings import range_size_of, rel_to_abs
-from src.utils.evasion import EvasionConfig, ProjectedGradientDescent
+from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, build_attack
 from src.utils.train import (
     NormControlConfig,
     NormRegularizer,
@@ -116,14 +116,8 @@ class Trainer:
         cfg = self.cfg
         evasion = evasion_config(cfg.evasion)
         if evasion.method != "PGD":
-            raise ValueError(f"Unknown attack method: {evasion.method}")
-        self.attack = ProjectedGradientDescent(
-            norm=evasion.norm,
-            criterion=evasion.criterion,
-            num_steps=evasion.num_steps,
-            step_size=evasion.step_size,
-            random_start=evasion.random_start,
-        )
+            raise ValueError(f"Training supports the PGD attack only, got {evasion.method!r}")
+        self.attack = build_attack(evasion)
         self.clean_weight = cfg.clean_weight
 
         # The rel -> abs boundary for training: configs author eps_rel, the attack
