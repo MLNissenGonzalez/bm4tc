@@ -13,7 +13,7 @@ has changed yet; so far the branch holds only documents:
 | File | What | Status |
 |---|---|---|
 | `ousterhout.md` | compact summary of the book + general implications | done |
-| `status.md` | survey of the codebase (§0–§10); **§11 = decisions D1–D41**; §12 = tensorkrowch upstream candidates | done; §11 is the source of truth for decisions |
+| `status.md` | survey of the codebase (§0–§10); **§11 = decisions D1–D46**; §12 = tensorkrowch upstream candidates | done; §11 is the source of truth for decisions |
 | `plan.md` | target shape (§1), phases 0–9 (§2), untouched core (§3), sizes (§4), risks (§5), open questions (§6) | draft, Martin-approved apart from the open items below |
 | `_paper/` (untracked, keep it untracked) | TPM 2026 paper (`main.tex`, outdated), NeurIPS rebuttal drafts | reference only |
 
