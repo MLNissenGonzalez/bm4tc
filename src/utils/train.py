@@ -310,6 +310,9 @@ class NormTracker:
 def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, float, float]:
     """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss).
 
+    Losses are means over samples, not over batches, so a short last batch is not
+    over-weighted (same convention as :func:`eval_split`).
+
     Set ``progress=True`` to show a transient per-batch tqdm bar (used by post-hoc
     analysis); the default keeps training-time validation output clean.
     """
@@ -319,7 +322,8 @@ def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, fl
     gen_finite = math.isfinite(log_Z.item())
     if not gen_finite:
         logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
-    losses_dis, losses_gen, correct, total = [], [], 0, 0
+    dis_sum = gen_sum = 0.0
+    correct = total = gen_total = 0
     with torch.no_grad():
         for data, labels in tqdm(
             loader, desc="eval", unit="batch", leave=False,
@@ -331,18 +335,19 @@ def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, fl
             las = cbm._log_amp_sq(data)                       # (B, C) = log|ψ|²
             log_sq_obs     = las[range(len(labels)), labels]
             log_class_marg = torch.logsumexp(las, dim=1)
-            losses_dis.append((log_class_marg - log_sq_obs).mean().item())
+            dis_sum += (log_class_marg - log_sq_obs).sum().item()
             correct += (las.argmax(dim=1) == labels).sum().item()
             total += len(labels)
             if gen_finite:
-                gen_batch = (log_Z - log_sq_obs).mean().item()
+                gen_batch = (log_Z - log_sq_obs).sum().item()
                 if math.isfinite(gen_batch):
-                    losses_gen.append(gen_batch)
+                    gen_sum += gen_batch
+                    gen_total += len(labels)
                 else:
                     logger.warning(f"Non-finite gen_loss ({gen_batch}), skipping batch.")
-    dis_loss = sum(losses_dis) / len(losses_dis) if losses_dis else float("nan")
+    dis_loss = dis_sum / total if total > 0 else float("nan")
     acc = correct / total if total > 0 else float("nan")
-    gen_loss = sum(losses_gen) / len(losses_gen) if losses_gen else float("nan")
+    gen_loss = gen_sum / gen_total if gen_total > 0 else float("nan")
     return dis_loss, acc, gen_loss
 
 

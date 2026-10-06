@@ -113,9 +113,9 @@ RATE_TOL = 0.02
 # Expected to change on purpose:
 # - `detection`: tau is calibrated on the test split today; D2 moves it to valid.
 EXPECTED = {
-    "nat": {"objective": 0.094781, "acc": 1.00, "dis_loss": 0.061173,
+    "nat": {"objective": 0.093104, "acc": 1.00, "dis_loss": 0.058333,
             "rob": 0.56, "detection": 0.08, "purified_acc": 0.57},
-    "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.339687,
+    "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.321820,
            "rob": 0.66, "detection": 0.11, "purified_acc": 0.65},
 }
 
