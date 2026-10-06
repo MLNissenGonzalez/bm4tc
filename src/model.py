@@ -103,7 +103,7 @@ class CBMConfig:
     # Opt-in overflow-safe amplitudes: route mixed_nll + class_probabilities
     # through the norm-accumulating contraction (log_amp_sq) instead of the raw
     # amplitudes() path. Off by default; enable per-run for overflow-prone
-    # configs (high bond dim, alpha=1). See _log_amp_sq.
+    # configs (high bond dim, alpha=1). See log_amp_sq.
     accumulate: bool = False
 
 
@@ -167,7 +167,7 @@ class ConditionalBornMachine(tk.models.MPS):
         self.dtype = _dtype
 
         # Opt-in overflow-safe amplitude path (getattr so checkpoints whose saved
-        # config predates the flag default to off). See _log_amp_sq.
+        # config predates the flag default to off). See log_amp_sq.
         self.accumulate = cfg.accumulate
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────
@@ -266,11 +266,12 @@ class ConditionalBornMachine(tk.models.MPS):
         # by cache_log_Z(), read by marginal_log_probability.
         self._log_Z: float | None = None
         # Per-forward with-gradient log Z + detached log|amp|² stats, populated
-        # by mixed_nll each training forward. The norm regularizer and failure
-        # diagnostics read these instead of contracting the norm a second time.
+        # by mixed_nll each training forward, each stamped with _params_key() so
+        # it is never served for other parameter values (no caller invalidates).
+        # Read through log_Z() and forward_stats(), not a second contraction.
         # DISTINCT from _log_Z above (that one is detached/param-constant).
-        self._log_Z_cache: torch.Tensor | None = None
-        self._amp_diag_cache: dict | None = None
+        self._log_Z_cache: tuple | None = None      # ((params key, grad mode), log Z)
+        self._amp_diag_cache: tuple | None = None   # (params key, stats dict)
         # Per-forward accumulator for the norm-accumulating (overflow-safe)
         # contraction; reset/read inside forward(renormalize=True). None between
         # accumulate forwards. See _inline_contraction / amplitudes_accumulate.
@@ -439,7 +440,7 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         return self(self.embed(data), renormalize=True)
 
-    def log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
+    def log_amp_sq_accumulate(self, data: torch.Tensor) -> torch.Tensor:
         """Overflow-safe ``log|ψ(x,c)|²`` (B, C) = 2·log|psi_renorm| + 2·log_norm.
 
         Drop-in replacement for ``2·log|amplitudes(data)|`` that never
@@ -456,7 +457,7 @@ class ConditionalBornMachine(tk.models.MPS):
         log_abs = torch.log(psi.abs().clamp(min=_LOG_PROB_EPS))
         return 2.0 * log_abs + 2.0 * log_norm
 
-    def _log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
+    def log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
         """log|ψ(x,c)|² (B, C) — the shared entry point for the loss and eval.
 
         Routes through the overflow-safe accumulate path (:meth:`log_amp_sq`)
@@ -465,13 +466,13 @@ class ConditionalBornMachine(tk.models.MPS):
         amplitude does not overflow (see ``test_log_amp_sq_matches_amplitudes``).
         """
         if self.accumulate:
-            return self.log_amp_sq(data)
+            return self.log_amp_sq_accumulate(data)
         log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
         return 2.0 * log_abs
 
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """Born-rule normalized class probabilities → (B, num_classes)."""
-        las = self._log_amp_sq(data)
+        las = self.log_amp_sq(data)
         log_probs = las - torch.logsumexp(las, dim=-1, keepdim=True)
         return log_probs.exp()
 
@@ -585,14 +586,39 @@ class ConditionalBornMachine(tk.models.MPS):
         instead of contracting a second time. If nothing is cached yet it
         computes (and caches) once.
 
-        The cache reflects the LAST forward only; recompute=False assumes the
-        tensors are unchanged since (i.e. you are within the same step). It is
-        invalidated by the in-place value mutators renormalize_() / initialize().
+        The cache is served only for the parameter values (and grad mode) it was
+        computed under: after ``optimizer.step()`` recompute=False contracts again.
         Distinct from the detached _log_Z used by marginal_log_probability.
         """
-        if recompute or self._log_Z_cache is None:
-            self._log_Z_cache = self.log_partition_function()
-        return self._log_Z_cache
+        key = (self._params_key(), torch.is_grad_enabled())
+        if recompute or self._log_Z_cache is None or self._log_Z_cache[0] != key:
+            self._log_Z_cache = (key, self.log_partition_function())
+        return self._log_Z_cache[1]
+
+    def _params_key(self) -> tuple:
+        """Identity of the current parameter values. ``optimizer.step()`` bumps each
+        tensor's version counter and ``initialize()`` replaces the tensors, so a
+        cache stamped with this key cannot outlive the values it came from.
+        (``renormalize_`` writes through ``.data``, which bumps nothing, so it
+        invalidates explicitly.)"""
+        return tuple((id(p), p._version) for p in self.parameters())
+
+    def forward_stats(self) -> dict:
+        """Stats of the most recent forward on the current parameters, at no
+        contraction cost; empty once the parameters change.
+
+        ``log_Z`` when that forward formed it (``mixed_nll`` at alpha > 0, or the
+        norm penalty), and the log|ψ|² summary of the last ``mixed_nll`` batch:
+        ``log_amp_sq_mean``/``_min``/``_max``, ``amp_nonfinite_count``,
+        ``amp_nan_count``.
+        """
+        key = self._params_key()
+        out = {}
+        if self._amp_diag_cache is not None and self._amp_diag_cache[0] == key:
+            out.update(self._amp_diag_cache[1])
+        if self._log_Z_cache is not None and self._log_Z_cache[0][0] == key:
+            out["log_Z"] = self._log_Z_cache[1].detach().item()
+        return out
 
     def _invalidate_log_Z_cache(self) -> None:
         """Drop the per-forward norm/amplitude caches after a tensor mutation."""
@@ -609,7 +635,7 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         finite_mask = torch.isfinite(log_abs_sq)
         finite = log_abs_sq[finite_mask]
-        self._amp_diag_cache = {
+        self._amp_diag_cache = (self._params_key(), {
             "log_amp_sq_mean": finite.mean().item() if finite.numel() else float("nan"),
             "log_amp_sq_min": finite.min().item() if finite.numel() else float("nan"),
             "log_amp_sq_max": finite.max().item() if finite.numel() else float("nan"),
@@ -617,7 +643,7 @@ class ConditionalBornMachine(tk.models.MPS):
             # Split so the reporter can name the cause: +inf is a genuine
             # amplitude overflow, NaN is a degenerate contraction (0/0).
             "amp_nan_count": int(torch.isnan(log_abs_sq).sum().item()),
-        }
+        })
 
     def cache_log_Z(self) -> float:
         """Compute and cache log Z as a detached float."""
@@ -643,7 +669,7 @@ class ConditionalBornMachine(tk.models.MPS):
         """
         if self._log_Z is None:
             self.cache_log_Z()
-        return torch.logsumexp(self.log_amp_sq(data), dim=-1) - self._log_Z
+        return torch.logsumexp(self.log_amp_sq_accumulate(data), dim=-1) - self._log_Z
 
     # ======================================================================
     # Training
@@ -674,7 +700,7 @@ class ConditionalBornMachine(tk.models.MPS):
             return f"mean={m:.4g} nonfinite={nf}"
 
         B = data.shape[0]
-        las = self._log_amp_sq(data)                                      # (B, C) = log|ψ|²
+        las = self.log_amp_sq(data)                                      # (B, C) = log|ψ|²
         self._cache_amp_diag(las)                                         # detached, for diagnostics
 
         if debug:
@@ -960,17 +986,18 @@ class ConditionalBornMachine(tk.models.MPS):
         """Restore a model from a checkpoint.
 
         ``accumulate`` overrides the overflow-safe amplitude flag on the loaded
-        model: ``None`` (default) keeps the saved-config value — used by training
-        entry points; the analysis pipeline passes ``True`` so eval/analysis
-        always uses the overflow-safe path regardless of the checkpoint's flag
-        (numerically identical where nothing overflows).
+        model (an inference-path toggle, not part of the weights): ``None`` keeps
+        the saved value; a warm start passes the current run's ``born.accumulate``;
+        the analysis pipeline passes ``True`` so analysis always uses the
+        overflow-safe path (numerically identical where nothing overflows). The
+        override is written into the model's config too, so a later ``save()``
+        records the flag actually used.
         """
         ckpt = torch.load(path, weights_only=False)
         cfg = OmegaConf.create(ckpt["config"])
-        inst = cls(cfg=cfg, tensors=ckpt["tensors"])
         if accumulate is not None:
-            inst.accumulate = bool(accumulate)
-        return inst
+            OmegaConf.update(cfg, "accumulate", bool(accumulate), force_add=True)
+        return cls(cfg=cfg, tensors=ckpt["tensors"])
 
 
 # ==============================================================================
@@ -1030,7 +1057,7 @@ if __name__ == "__main__":
 
     # norm-accumulating (overflow-safe) contraction
     psi_r, log_norm = cbm.amplitudes_accumulate(x)
-    las = cbm.log_amp_sq(x)
+    las = cbm.log_amp_sq_accumulate(x)
     ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
     assert psi_r.shape == log_norm.shape == (8, 2)
     assert torch.allclose(las, ref, atol=1e-4), "log_amp_sq mismatch vs amplitudes()"

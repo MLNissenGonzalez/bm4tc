@@ -220,11 +220,11 @@ class NormTracker:
     """Accumulate per-step training-side norm (log Z) and mean-amplitude
     (log|ψ|²) statistics over one epoch, then emit one ``norm/*`` metric dict.
 
-    Reads the caches ``mixed_nll`` (``_amp_diag_cache``, always) and the forward
-    / ``NormRegularizer`` (``_log_Z_cache``, when ``alpha>0`` or
-    ``soft_strength>0``) already populate, so it adds no contraction in the
-    common cases. Call :meth:`record_amp` / :meth:`record_logZ` per step *before*
-    ``optimizer.step()`` invalidates the caches, then :meth:`finalize` once.
+    Reads ``cbm.forward_stats()``: the amplitude stats ``mixed_nll`` always
+    forms, and the log Z the forward or the ``NormRegularizer`` forms when
+    ``alpha>0`` or ``soft_strength>0``, so it adds no contraction in the common
+    cases. Call :meth:`record_amp` / :meth:`record_logZ` per step *before*
+    ``optimizer.step()`` changes the parameters, then :meth:`finalize` once.
 
     Running max/min are kept alongside the mean so an intra-epoch explosion (a
     spike) survives aggregation instead of being smeared by the mean. ``log Z``
@@ -240,9 +240,9 @@ class NormTracker:
         self._amp_max, self._amp_min = -math.inf, math.inf
 
     def record_amp(self, cbm) -> None:
-        """Fold in this step's log|ψ|² batch stats (cached by ``mixed_nll``)."""
-        d = getattr(cbm, "_amp_diag_cache", None)
-        if not d:
+        """Fold in the log|ψ|² stats of the last ``mixed_nll`` batch."""
+        d = cbm.forward_stats()
+        if "log_amp_sq_mean" not in d:
             return
         mean = d.get("log_amp_sq_mean", float("nan"))
         if math.isfinite(mean):
@@ -256,11 +256,10 @@ class NormTracker:
             self._amp_min = min(self._amp_min, mn)
 
     def record_logZ(self, cbm) -> None:
-        """Fold in this step's log Z if it is cached and finite."""
-        cached = getattr(cbm, "_log_Z_cache", None)
-        if cached is None:
+        """Fold in this step's log Z if a forward formed it and it is finite."""
+        v = cbm.forward_stats().get("log_Z")
+        if v is None:
             return
-        v = cached.detach().item()
         if math.isfinite(v):
             self._logZ_sum += v
             self._logZ_n += 1
@@ -370,7 +369,7 @@ def evaluate(
         with torch.no_grad():
             # Same log|ψ|² entry point as the loss: dispatches on cbm.accumulate,
             # so evaluation matches training's numerics.
-            las = cbm._log_amp_sq(data)                       # (B, C)
+            las = cbm.log_amp_sq(data)                       # (B, C)
             log_sq_obs = las[range(B), labels]
             dis = torch.logsumexp(las, dim=1) - log_sq_obs    # (B,)
             correct += (las.argmax(dim=1) == labels).sum().item()
@@ -385,7 +384,7 @@ def evaluate(
             adv = attack.generate(born=cbm, naturals=sub_data, labels=sub_labels,
                                   eps_abs=eps_abs, device=device)
             with torch.no_grad():
-                las_adv = cbm._log_amp_sq(adv)
+                las_adv = cbm.log_amp_sq(adv)
                 n_sub = len(sub_labels)
                 log_sq_adv = las_adv[range(n_sub), sub_labels]
                 dis_adv_sum += (torch.logsumexp(las_adv, dim=1) - log_sq_adv).sum().item()
