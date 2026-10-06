@@ -11,7 +11,8 @@ mechanisms against adversarial examples:
 
 This module provides tools to evaluate both defenses by:
 - Computing log p(x) on clean and adversarial data
-- Calibrating detection thresholds from clean data percentiles
+- Calibrating detection thresholds from percentiles of clean log p(x) on a held-out
+  calibration split (validation), never on the evaluated split (D2)
 - Purifying adversarial examples and measuring accuracy recovery
 
 Budget convention (see "Budget vocabulary" in CLAUDE.md): ``UQConfig`` is authored
@@ -190,9 +191,9 @@ class DetectionMetrics:
             nothing was flagged.
         err_rate_passed: Misclassification rate among passed inputs; ``nan`` if
             nothing passed.
-        chance: The rate a signal-free detector produces, ``percentile / 100``. Exact
-            only while the threshold is calibrated on the evaluated set itself, in
-            which case the clean false-positive rate is that value by construction.
+        chance: The rate a signal-free detector produces, ``percentile / 100``: the
+            clean flag rate on the calibration split by construction. On the evaluated
+            split the clean flag rate is measured (``UQResults.clean_flagged``).
         lift: ``detection_rate - chance``. The quantity that actually says whether the
             detector did anything.
         n_nonfinite: Count of non-finite scores in ``adv_log_px``.
@@ -290,6 +291,8 @@ class UQResults:
 
     Attributes:
         clean_log_px: Log p(x) values for clean test data.
+        clean_flagged: Dict mapping percentile -> fraction of clean test data flagged
+            (the false-positive rate of the threshold calibrated on validation).
         clean_accuracy: Clean classification accuracy.
         thresholds: Dict mapping percentile -> threshold value.
         adv_log_px: Dict mapping eps_rel -> log p(x) values for adversarial data.
@@ -300,6 +303,7 @@ class UQResults:
     clean_log_px: np.ndarray
     clean_accuracy: float
     thresholds: Dict[float, float]
+    clean_flagged: Dict[float, float]
     adv_log_px: Dict[float, np.ndarray]
     adv_accuracies: Dict[float, float]
     detection_rates: Dict[Tuple[float, float], float]
@@ -388,13 +392,16 @@ class UQEvaluation:
         born,
         clean_loader: DataLoader,
         device: torch.device,
+        *,
+        calib_loader: DataLoader,
     ) -> UQResults:
         """Run the full UQ evaluation pipeline.
 
         Steps:
         0. Convert every relative budget in the config to absolute, once
         1. Cache log Z on the Born Machine
-        2. Compute clean log p(x) and derive detection thresholds
+        2. Derive detection thresholds from clean log p(x) on ``calib_loader``;
+           compute clean log p(x) on ``clean_loader``
         3. For each attack eps_rel: generate adversarial examples,
            compute log p(x_adv), detection rate
         4. For each (eps_rel, delta_rel): purify adversarial examples,
@@ -408,6 +415,8 @@ class UQEvaluation:
             born: ConditionalBornMachine instance.
             clean_loader: DataLoader for clean test data.
             device: Torch device.
+            calib_loader: DataLoader for the clean calibration split (validation),
+                which sets the detection thresholds (D2).
 
         Returns:
             UQResults with all evaluation metrics.
@@ -437,12 +446,15 @@ class UQEvaluation:
         logger.info("Computing partition function...")
         born.cache_log_Z()
 
-        # 2. Compute clean log p(x) and thresholds
-        logger.info("Computing clean log p(x) and thresholds...")
-        thresholds, clean_log_px_tensor = compute_thresholds(
-            born, clean_loader, cfg.percentiles, device
-        )
-        clean_log_px = clean_log_px_tensor.numpy()
+        # 2. Thresholds from the calibration split; clean log p(x) on the test split
+        logger.info("Calibrating thresholds and computing clean log p(x)...")
+        if cfg.eval_batch_size is not None:
+            calib_loader = DataLoader(
+                calib_loader.dataset, batch_size=cfg.eval_batch_size, shuffle=False
+            )
+        thresholds, _ = compute_thresholds(born, calib_loader, cfg.percentiles, device)
+        clean_log_px = compute_log_px(born, clean_loader, device)[0].numpy()
+        clean_flagged = {p: float((clean_log_px < tau).mean()) for p, tau in thresholds.items()}
 
         # Compute clean accuracy
         clean_correct = 0
@@ -832,6 +844,7 @@ class UQEvaluation:
             clean_log_px=clean_log_px,
             clean_accuracy=clean_accuracy,
             thresholds=thresholds,
+            clean_flagged=clean_flagged,
             adv_log_px=adv_log_px,
             adv_accuracies=adv_accuracies,
             detection_rates=detection_rates,

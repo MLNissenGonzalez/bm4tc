@@ -48,6 +48,7 @@ def test_uq_results_gibbs_default_empty():
         clean_log_px=np.array([-1.0, -2.0]),
         clean_accuracy=0.9,
         thresholds={5: -3.0},
+        clean_flagged={5: 0.05},
         adv_log_px={},
         adv_accuracies={},
         detection_rates={},
@@ -61,6 +62,7 @@ def test_uq_results_new_det_fields_default_empty():
         clean_log_px=np.array([-1.0]),
         clean_accuracy=0.9,
         thresholds={},
+        clean_flagged={},
         adv_log_px={},
         adv_accuracies={},
         detection_rates={},
@@ -75,6 +77,7 @@ def test_uq_results_summary_returns_string():
         clean_log_px=np.array([-1.0, -2.0]),
         clean_accuracy=0.9,
         thresholds={5: -3.0},
+        clean_flagged={5: 0.05},
         adv_log_px={0.1: np.array([-5.0, -6.0])},
         adv_accuracies={0.1: 0.5},
         detection_rates={(5, 0.1): 0.8},
@@ -120,7 +123,7 @@ def test_uq_evaluate_completes(cbm, clean_loader):
         num_steps=2,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert isinstance(results, UQResults)
 
 
@@ -133,7 +136,7 @@ def test_uq_clean_accuracy_range(cbm, clean_loader):
         num_steps=2,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert 0.0 <= results.clean_accuracy <= 1.0
 
 
@@ -146,7 +149,7 @@ def test_uq_detection_rates_range(cbm, clean_loader):
         num_steps=2,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     for rate in results.detection_rates.values():
         assert 0.0 <= rate <= 1.0
 
@@ -160,7 +163,7 @@ def test_uq_purification_results_present(cbm, clean_loader):
         num_steps=2,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert len(results.purification_results) > 0
 
 
@@ -173,7 +176,7 @@ def test_uq_purification_acc_range(cbm, clean_loader):
         num_steps=2,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     for metrics in results.purification_results.values():
         assert 0.0 <= metrics.accuracy_after_purify <= 1.0
 
@@ -188,7 +191,7 @@ def test_uq_gibbs_empty_when_disabled(cbm, clean_loader):
         run_gibbs=False,
     )
     evaluator = UQEvaluation(cfg)
-    results = evaluator.evaluate(cbm, clean_loader, device="cpu")
+    results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert results.gibbs_purification_results == {}
 
 
@@ -201,7 +204,7 @@ def test_uq_err_rate_detected_range(cbm, clean_loader):
         attack_num_steps=2,
         num_steps=2,
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert len(results.err_rate_detected) > 0
     for v in results.err_rate_detected.values():
         assert math.isnan(v) or 0.0 <= v <= 1.0
@@ -216,7 +219,7 @@ def test_uq_err_rate_passed_range(cbm, clean_loader):
         attack_num_steps=2,
         num_steps=2,
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert len(results.err_rate_passed) > 0
     for v in results.err_rate_passed.values():
         assert math.isnan(v) or 0.0 <= v <= 1.0
@@ -245,7 +248,7 @@ def test_uq_eval_batch_size_completes(cbm, clean_loader):
         eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2, eval_batch_size=4,
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert isinstance(results, UQResults)
     assert len(results.detection_rates) > 0
     assert len(results.purification_results) > 0
@@ -264,7 +267,7 @@ def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
         eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2, run_gibbs=True, gibbs_n_sweeps=[1],
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert len(results.detection_rates) > 0          # detection survived
     assert len(results.purification_results) > 0     # gradient purify survived
     assert results.gibbs_purification_results == {}  # gibbs skipped, not fatal
@@ -281,7 +284,7 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
         gibbs_batch_size=3,          # forces multiple Gibbs batches on the subsample
         gibbs_subsample=8, gibbs_subsample_seed=0,
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert {(0.1, 1), (0.1, 2)} <= set(results.gibbs_purification_results.keys())
     for m in results.gibbs_purification_results.values():
         assert 0.0 <= m.accuracy_after_purify <= 1.0
@@ -304,6 +307,20 @@ def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
         eps_rel=[0.1, 0.2], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,
     )
-    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu")
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert 0.1 in results.adv_accuracies        # good eps survived
     assert 0.2 not in results.adv_accuracies     # failed eps skipped
+
+
+def test_thresholds_come_from_the_calibration_split(cbm, clean_loader):
+    """D2: tau is a percentile of clean log p(x) on calib_loader, not on the evaluated
+    split; the clean flag rate on the evaluated split is measured."""
+    from torch.utils.data import DataLoader, TensorDataset
+    x, y = next(iter(clean_loader))
+    calib = DataLoader(TensorDataset(x[: len(x) // 2], y[: len(y) // 2]), batch_size=8)
+    cfg = UQConfig(eps_rel=[], delta_rel=[], percentiles=[10, 50])
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=calib)
+    want, _ = compute_thresholds(cbm, calib, [10, 50], device="cpu")
+    assert results.thresholds == pytest.approx(want)
+    flagged = {p: float((results.clean_log_px < tau).mean()) for p, tau in want.items()}
+    assert results.clean_flagged == pytest.approx(flagged)

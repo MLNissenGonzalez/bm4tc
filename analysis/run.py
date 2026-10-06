@@ -235,7 +235,9 @@ def analyze_run(
             from src.analysis.uq import UQEvaluation, UQConfig
 
             uq_eval = UQEvaluation(config=UQConfig(**(cfg.uq_config or {})))
-            uq_results = uq_eval.evaluate(cbm, datahandler.classification["test"], device)
+            uq_results = uq_eval.evaluate(
+                cbm, datahandler.classification["test"], device,
+                calib_loader=datahandler.classification["valid"])
 
             results["uq_clean_accuracy"] = uq_results.clean_accuracy
             results["uq_clean_log_px_mean"] = float(uq_results.clean_log_px.mean())
@@ -269,8 +271,8 @@ def analyze_run(
 
             joint_uq_eval = UQEvaluation(config=UQConfig(**cfg.joint_uq_config))
             joint_uq_results = joint_uq_eval.evaluate(
-                cbm, datahandler.classification["test"], device
-            )
+                cbm, datahandler.classification["test"], device,
+                calib_loader=datahandler.classification["valid"])
             for eps_rel, acc in joint_uq_results.adv_accuracies.items():
                 results[f"uq_joint_adv_acc/{fmt_budget(eps_rel)}"] = acc
             for (pct, eps_rel), rate in joint_uq_results.detection_rates.items():

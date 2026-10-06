@@ -106,13 +106,14 @@ def run_pipeline(root: Path) -> dict:
 LOSS_TOL = 1e-3
 RATE_TOL = 0.02
 
-# Expected to change on purpose:
-# - `detection`: tau is calibrated on the test split today; D2 moves it to valid.
+# `detection`: tau calibrated on valid (D2); was 0.08 / 0.11 calibrated on test.
+# NAT `purified_acc` moved 0.57 -> 0.63 with it: the calibration pass iterates one
+# more DataLoader, which shifts the RNG behind the attack's random start.
 EXPECTED = {
     "nat": {"objective": 0.093104, "acc": 1.00, "dis_loss": 0.058333,
-            "rob": 0.56, "detection": 0.08, "purified_acc": 0.57},
+            "rob": 0.56, "detection": 0.13, "purified_acc": 0.63},
     "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.321820,
-           "rob": 0.66, "detection": 0.11, "purified_acc": 0.65},
+           "rob": 0.66, "detection": 0.09, "purified_acc": 0.65},
 }
 
 # Training curves, pinned tightly (runs are bit-for-bit deterministic on CPU). They
