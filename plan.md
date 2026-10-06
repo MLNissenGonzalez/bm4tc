@@ -342,7 +342,8 @@ Rough, to be checked after each phase:
 ## 6. Open questions
 
 1. ~~Package layout~~ → three areas (D32).
-2. ~~Scheduler~~ → lab HPC, plain SSH, own executor (D37, D38). Still to fill in: `BM4TC_DATA_ROOT` on the cluster.
+2. ~~Scheduler~~ → lab HPC, plain SSH, own executor (D37, D38). Outputs and datasets live on ceph:
+   `export BM4TC_DATA_ROOT=/ceph/chercheurs/nisseng261/bm4tc` (not local `/data`).
 3. ~~W&B~~ → live curves only (D39).
 4. **Study grids:** Martin edits the Phase 4 table (D41).
 5. ~~`acc_floor` / `curriculum`~~ → keep curriculum, drop acc_floor (D40).
