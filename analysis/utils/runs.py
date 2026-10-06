@@ -1,5 +1,6 @@
 """Load a finished training run: its config and its model checkpoint."""
 
+import json
 from pathlib import Path
 from typing import Optional, Union
 from omegaconf import OmegaConf, DictConfig
@@ -9,22 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 def load_run_config(run_dir: Union[str, Path]) -> DictConfig:
-    """Load the Hydra config a training run was launched with (``.hydra/config.yaml``).
-
-    Example:
-        >>> cfg = load_run_config("outputs/classification_2024_01_15")
-        >>> print(cfg.dataset.name)
-        'spirals_4k'
-    """
-    run_dir = Path(run_dir)
-    config_path = run_dir / ".hydra" / "config.yaml"
-
-    if not config_path.exists():
-        raise FileNotFoundError(f"No Hydra config at {config_path}")
-
-    logger.info(f"Loading config from {config_path}")
-    cfg = OmegaConf.load(config_path)
-    return cfg
+    """The resolved config a finished training run was trained with (its ``run.json``)."""
+    manifest = Path(run_dir) / "run.json"
+    if not manifest.exists():
+        raise FileNotFoundError(f"No run.json at {manifest} (not a finished run)")
+    return OmegaConf.create(json.loads(manifest.read_text())["config"])
 
 
 def find_model_checkpoint(

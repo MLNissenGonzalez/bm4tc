@@ -1,7 +1,7 @@
 # %% [markdown]
 # # Visualize Configured 2D Toy Datasets
 #
-# Reads every YAML config in `configs/dataset/2Dtoy/`, generates the datasets
+# Reads the 2D toy configs in `configs/dataset/` (moons, circles, spirals), generates the datasets
 # using the exact parameters configured there, and plots them in a grid.
 #
 # Sorted by type (moons → circles → spirals) then by sample size, so each
@@ -42,7 +42,7 @@ from src.analysis.viz import create_2d_scatter
 # Config loading
 # =============================================================================
 
-CONFIG_DIR = project_root / "configs" / "dataset" / "2Dtoy"
+CONFIG_DIR = project_root / "configs" / "dataset"
 
 _TYPE_ORDER = {"moons": 0, "circles": 1, "spirals": 2}
 
@@ -75,9 +75,9 @@ def _make_label(spec: DatasetSpec) -> str:
 
 
 def load_specs(config_dir: Path) -> list[DatasetSpec]:
-    """Load DatasetSpecs from all YAML configs in config_dir."""
+    """Load DatasetSpecs from the 2D toy configs in config_dir."""
     specs = []
-    for path in sorted(config_dir.glob("*.yaml")):
+    for path in sorted(config_dir / f"{name}.yaml" for name in _TYPE_ORDER):
         with open(path) as f:
             cfg = yaml.safe_load(f)
         g = cfg["gen_dow_kwargs"]

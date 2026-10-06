@@ -1,0 +1,9 @@
+# Spirals, NAT, the default alpha ladder, cold.
+dataset: spirals
+regime: nat
+grid:
+  arch: [d10r6]
+config:
+  trainer.max_epoch: 300
+  trainer.batch_size: 256
+  trainer.patience: 100

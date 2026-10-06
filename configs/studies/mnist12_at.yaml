@@ -1,0 +1,17 @@
+# MNIST 12x12, PGD-AT (D43), warm from mnist12_nat's alpha=0 runs.
+dataset: mnist12
+regime: at
+init: warm
+grid:
+  arch: [d3r20, d3r40]
+  alpha: [0, 1e-2]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 10         # validations (eval_every 5): 50 epochs
+  trainer.norm_control.soft_strength: 1e-3
+  trainer.norm_control.log_target: null    # the warm start's own log Z
+hpo:
+  n_trials: 20
+  space:
+    trainer.clean_weight: [0.2, 1.0]

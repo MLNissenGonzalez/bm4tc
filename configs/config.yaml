@@ -1,25 +1,11 @@
-experiment: default
-descriptor: ""
-stage: ""
-
+# The config of one training run. experiments/runs.py composes it per job (Hydra
+# compose API) on the schema in experiments/config.py, whose dataclass defaults
+# hold every model and trainer constant (D25). This file only picks group options;
+# a study (configs/studies/) picks the dataset and the regime, and its grid cell,
+# hparams and seed fill in the rest.
 defaults:
-  - base_config  # the schema (experiments/config.py): unknown keys fail (D25)
-  - _self_ # has to be here such that overrides work
-  - dataset: 2Dtoy/circles
-  - born: fourier/test
-  - trainer: nat/test
-  - tracking: test
-  - override hydra/job_logging: stream_only
-  - override hydra/hydra_logging: none
-
-hydra:
-  run:
-    # For single runs: outputs/{dataset}/{nat|at}/{embedding}/{arch}/[{stage}/]{kind}_{date}/
-    dir: ${outputs_root:}/${dataset.name}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}${dtype_suffix:}/${stage_path:}${experiment}_${now:%d%m_%H%M}
-
-  sweep:
-    # For multiruns: outputs/{dataset}/{nat|at}/{embedding}/{arch}/[{stage}/]{kind}_{date}/{job}/
-    dir: ${outputs_root:}/${dataset.name}/${training_regime:}/${born.embedding}/d${born.init_kwargs.in_dim}r${born.init_kwargs.bond_dim}${dtype_suffix:}/${stage_path:}${experiment}_${now:%d%m}
-    subdir: ${hydra.job.num}
-
-  output_subdir: .hydra
+  - base_config
+  - _self_
+  - dataset: spirals
+  - trainer: nat
+  - tracking: online

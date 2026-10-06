@@ -1,0 +1,11 @@
+# Spirals, the five embeddings at d10r6, NAT (D5).
+dataset: spirals
+regime: nat
+grid:
+  embedding: [legendre, fourier, hermite, chebychev1, chebychev2]
+  arch: [d10r6]
+  alpha: [0, 1]
+config:
+  trainer.max_epoch: 300
+  trainer.batch_size: 256
+  trainer.patience: 100

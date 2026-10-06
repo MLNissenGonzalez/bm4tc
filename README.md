@@ -126,21 +126,26 @@ To run without W&B logging: `tracking.mode=disabled`.
 All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/).
 
 ```bash
-# NAT (alpha=0), cold start; every knob is a group option or a key override
-python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer=nat/default trainer.alpha=0.0 tracking=online
+# Train every (cell, seed) of a study; finished runs are skipped, so relaunching resumes
+python -m experiments.train spirals_nat
 
-# AT, warm-started from a NAT checkpoint
-python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer=at/pgd_at trainer.alpha=0.01 model_path=<run>/models/model
+# AT studies are warm: their alpha=0 NAT study (warm_from, default {dataset}_nat) first
+python -m experiments.train spirals_at
 
-# Quick local check, no W&B
-python -m experiments.train +experiments=tests/nat tracking.mode=disabled
+# One cell / one seed; --replace archives a finished run whose config changed
+python -m experiments.train spirals_nat --cell legendre/d10r6/a0.01 --seed 3
+
+# The seam study, as a quick local check (no W&B)
+python -m experiments.train tests/seam_nat
 ```
 
-The per-experiment YAML tree (`configs/experiments/{dataset}/...`) was deleted in the
-`ousterhout` refactor (D49); study files replace it in Phase 4. Until then, launch
-with group options and overrides as above.
+A study (`configs/studies/<name>.yaml`) is merged onto `configs/defaults.yaml`: the
+dataset, the regime (`nat` | `at`), `init` (cold | warm), a grid (embedding x arch x
+alpha [x eps for AT]), fixed run-config values (`config:`) and the HPO space. Studies
+with an HPO space need their selected hparams in `configs/hparams/<study>.yaml`
+(written by `select`, Phase 5) and fail loudly without them. Runs land in
+`outputs/{study}/{embedding}/{arch}/a{alpha}[/eps{eps}]/s{seed}/` with a `run.json`
+(identity, warm start, git sha, resolved config and its hash).
 
 ## Post-Hoc Analysis
 

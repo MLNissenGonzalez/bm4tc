@@ -19,7 +19,7 @@ import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.model import ConditionalBornMachine
+from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from src.train import Trainer, TrainConfig
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
@@ -48,13 +48,13 @@ def _datahandler(cbm, steps: int) -> SimpleNamespace:
 def bench(regime: str, steps: int, epochs: int, device: torch.device) -> list[float]:
     """Seconds per training step, one value per timed epoch."""
     torch.manual_seed(0)
-    born = OmegaConf.load(CONFIGS / "born/legendre/d3r20c64.yaml")  # as Hydra passes it
+    born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=20))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, N_FEATURES, N_CLASSES, device)
     dh = _datahandler(cbm, steps)
     if regime == "nat":
-        cfg = _config(CONFIGS / "trainer/nat/default.yaml", alpha=0.0, max_epoch=epochs, save=False)
+        cfg = _config(CONFIGS / "trainer/nat.yaml", alpha=0.0, max_epoch=epochs, save=False)
     else:
-        cfg = _config(CONFIGS / "trainer/at/pgd_at.yaml",
+        cfg = _config(CONFIGS / "trainer/at.yaml",
                       alpha=0.0, max_epoch=epochs, eval_every=1, save=False)
     trainer = Trainer(cbm, cfg, dh, device)
 

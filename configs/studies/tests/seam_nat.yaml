@@ -1,0 +1,15 @@
+# The seam test's NAT run (tests/e2e/test_pipeline.py): tiny spirals, fixed hparams.
+dataset: spirals
+regime: nat
+seeds: [42]
+grid:
+  arch: [d4r3]
+  alpha: [0]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  trainer.max_epoch: 40
+  trainer.batch_size: 64
+  trainer.patience: 50
+  trainer.optimizer.kwargs.lr: 1e-2
+  tracking.mode: disabled
+hpo: null

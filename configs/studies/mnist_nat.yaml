@@ -1,0 +1,9 @@
+# MNIST 28x28, NAT, the default alpha ladder, cold.
+dataset: mnist
+regime: nat
+grid:
+  arch: ???                    # the rank mnist_capacity selects (D44)
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 50

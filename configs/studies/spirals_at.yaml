@@ -1,0 +1,15 @@
+# Spirals, PGD-AT at the reduced budget (D43), warm from spirals_nat's alpha=0 runs.
+dataset: spirals
+regime: at
+init: warm
+grid:
+  arch: [d10r6]
+  alpha: [0, 1e-2]
+config:
+  trainer.max_epoch: 200
+  trainer.batch_size: 256
+  trainer.patience: 20         # validations (eval_every 5): 100 epochs
+hpo:
+  n_trials: 20
+  space:
+    trainer.clean_weight: [0.2, 1.0]

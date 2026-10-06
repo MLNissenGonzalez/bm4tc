@@ -18,28 +18,11 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-DATA = [
-    "dataset=2Dtoy/spirals",
-    "dataset.gen_dow_kwargs.size=200",  # 400 points: 200 train, 100 valid, 100 test
-    "born=legendre/d4r3c64",
-]
-NAT = [
-    "trainer=nat/test",
-    "trainer.alpha=0.0",
-    "trainer.max_epoch=40",
-    "trainer.batch_size=64",
-    "trainer.optimizer.kwargs.lr=1e-2",
-    "trainer.save=true",
-]
-AT = [
-    "trainer=at/test",  # PGD-5, Linf, eps_rel 0.15
-    "trainer.alpha=0.01",
-    "trainer.clean_weight=0.5",  # exercises every term of the AT objective
-    "trainer.max_epoch=5",
-    "trainer.batch_size=64",
-    "trainer.optimizer.kwargs.lr=1e-2",
-    "trainer.save=true",
-]
+# The two runs are the studies configs/studies/tests/seam_{nat,at}.yaml: tiny
+# spirals (400 points: 200 train, 100 valid, 100 test), legendre d4r3, seed 42.
+# NAT alpha=0, 40 epochs; AT warm from it, alpha=0.01, cw=0.5, PGD-5 Linf eps_rel
+# 0.15, 5 epochs.
+STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 
 ANALYSE = """
 import json, sys, torch
@@ -67,10 +50,12 @@ def _python(args, root: Path) -> str:
     return proc.stdout
 
 
-def _train(root: Path, name: str, overrides: list[str]) -> Path:
-    run_dir = root / "outputs" / name  # the W&B group needs an `outputs/` ancestor
-    _python(["-m", "experiments.train", *overrides, f"hydra.run.dir={run_dir}"], root)
-    return run_dir
+def _train(root: Path, study: str) -> Path:
+    """Train the study's single job; returns its run dir (from experiments.runs)."""
+    _python(["-m", "experiments.train", study], root)
+    out = _python(["-c", "import sys; from experiments.runs import Study; "
+                   "print(Study(sys.argv[1]).jobs()[0].run_dir)", study], root)
+    return Path(out.strip().splitlines()[-1])
 
 
 def _objective(run_dir: Path) -> float:
@@ -99,8 +84,8 @@ def _analyse(run_dir: Path, root: Path) -> dict:
 def run_pipeline(root: Path) -> dict:
     """The harness: returns {"nat": metrics, "at": metrics} with the pinned names,
     each metrics dict holding the per-epoch "curves" too."""
-    nat = _train(root, "nat", DATA + NAT)
-    at = _train(root, "at", DATA + AT + [f"model_path={nat / 'models' / 'model'}"])
+    nat = _train(root, STUDIES["nat"])
+    at = _train(root, STUDIES["at"])  # warm: finds the NAT run through its run.json
     out = {}
     for name, run_dir in [("nat", nat), ("at", at)]:
         r = _analyse(run_dir, root)

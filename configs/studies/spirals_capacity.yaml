@@ -1,0 +1,11 @@
+# Spirals capacity sweep, NAT, own HPO per arch (D42). The d10r6 cells re-run
+# spirals_nat on purpose: best HPs and test metrics should agree with it.
+dataset: spirals
+regime: nat
+grid:
+  arch: [d4r3, d6r4, d10r6, d30r18]
+  alpha: [0, 1]
+config:
+  trainer.max_epoch: 300
+  trainer.batch_size: 256
+  trainer.patience: 100

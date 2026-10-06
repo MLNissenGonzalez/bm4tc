@@ -91,7 +91,7 @@ def test_spirals_ceiling_is_below_the_reported_at_robustness():
 
     from src.datahandler import DataHandler
 
-    cfg = OmegaConf.load("configs/dataset/2Dtoy/spirals.yaml")
+    cfg = OmegaConf.load("configs/dataset/spirals.yaml")
     OmegaConf.update(cfg, "overwrite", True, force_add=True)
 
     class _RangeOnly:
