@@ -104,6 +104,29 @@ change was 2026-07-29, and its vocabulary is not produced by any current config.
 
 The paper notebooks (§6.4) read only the datasets in §2.1.
 
+### 2.3a Paper scope (as stated by Martin, 2026-10-06)
+
+| Paper section | Dataset | Arch | Content |
+|---|---|---|---|
+| Main (quantitative) | mnist_full_r12 (goal: full-resolution MNIST later) | legendre d3r20c64 | NAT α-ladder; AT at α=0 and α=0.1; JEM baseline |
+| Main (qualitative) | spirals | legendre, d6r4c64 (to confirm) | same model families, discussed qualitatively |
+| Appendix | spirals | several | embedding comparison; possibly more |
+| — | time series (ecg200, italypowerdemand, …) | — | **not in the paper** |
+
+Consequences for this survey:
+- **Not in the paper:** everything for time-series, moons and circles; the MNIST
+  arches other than d3r20; and `mnist_full` (until the full-resolution move). That
+  is roughly 420 of the 506 configs and the `ts.ipynb` / `ts_*` visualisers.
+- **AT α discrepancy.** The committed MNIST d3r20 AT sweeps are `a0` and **`a001`
+  (α=0.01)**, not α=0.1. Either the paper means 0.01, or an α=0.1 AT sweep is still
+  missing.
+- **Spirals appendix (embeddings).** The non-legendre spirals configs
+  (fourier/hermite/chebychev, d10r6 and d30r18) have no committed analyses, so
+  either they were analysed elsewhere or this appendix isn't backed yet.
+- **Full-resolution MNIST** is a planned change. The pipeline should make "same
+  study, new dataset" a one-line change, which is a design requirement for
+  `plan.md`.
+
 ### 2.4 Stopping criterion: is it uniform?
 
 Your claim: *"all experiments now use as stopping criterion the same used for
@@ -416,10 +439,8 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 
 ## 10. Open questions for you (to settle before `plan.md`)
 
-1. **Paper scope.** Is the final paper exactly §2.1 (spirals, mnist_full_r12, ecg200,
-   italypowerdemand × legendre) plus spirals AT and the JEM baseline? If yes, ~400
-   of the 506 configs, the non-legendre embeddings and `mnist_full` are archive
-   candidates.
+1. **Paper scope.** *Mostly answered, see §2.3a.* Still open: the exact spirals
+   arch, AT at α=0.1 vs 0.01, and what else the appendix holds.
 2. **Stop criterion.** Should "select on the training objective evaluated on valid"
    become a *rule* (no `stop_crit` knob)? And do the MNIST/ECG/Italy `a0` sweeps
    (selected on `acc`) need re-running to comply?
