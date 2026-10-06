@@ -124,16 +124,43 @@ rebuttal version added the JEM baseline and proper upscaling to MNIST r12; that
 | — | MIA | **not in the paper at all** |
 | — | time series | not in the paper |
 
-**The next version, as stated by Martin (2026-10-06):**
-- **Main:** MNIST, moving from r12 to **full-resolution MNIST**. Legendre. The NAT
-  α-ladder, **AT at α=0 and α=0.1** (the committed sweeps are α=0 and **0.01**; to
-  confirm), and a **strengthened JEM baseline**. Probably **several capacities** for
-  full MNIST; otherwise capacity is mostly irrelevant.
+**The NeurIPS submission and rebuttal (27079, rejected).** Source: `_paper/general_draft_v2.tex`
+and the three `response_*_draft_v1.tex` files. What the rebuttal reported, and therefore
+what the journal version will at least have to reproduce:
+
+| Rebuttal claim | Models / settings | Committed analysis? |
+|---|---|---|
+| Headline table: clean / robust / purified / gain | MNIST r12, **MPS d3r40c64**, α ∈ {0, 0.01, 0.1, 1}, AT; JEM α ∈ {0, 0.01}, JEM AT; ε=0.1 pixel units (= `eps_rel` 0.1), δ=0.1; 5 seeds | yes: NAT d3r40 `a0_2506`, `a*_2107`; AT d3r40 `a0_2507`, `a001_2607`; JEM `*_2607`, `at_2707` |
+| Capacity at α=1: 0.451 / 0.568 / 0.644 | d3r10, d3r20, d3r40 | yes (`a1_2107` per arch) |
+| Accuracy vs. coverage at q ∈ {1, 5, 10, 20}% | d3r40, α ∈ {0, 0.01} | yes (UQ percentiles), **but τ came from the test set** while the text says "calibrated on clean validation data" |
+| Purification radius δ ∈ {0.1, 0.15} | d3r40, α ∈ {0, 0.01} | not visible in committed summaries (`delta_rel` default is [0.10]) |
+| Gibbs on MNIST: 0.733 → 0.756 after 6 sweeps; timing 5.6 ks (r10) vs 5.8 ks (r20) | MNIST | `gibbs_data.csv` (sweeps setting differs from `sweep.py` default [1, 3, 5]) |
+| Joint-likelihood attack: 0.930 purified vs 0.783 | d3r40 α=0.01 | yes (`COMPUTE_JOINT_ATTACK`) |
+| JEM SGLD purification 0.539 vs gradient 0.536 | JEM α=0.01 | `baselines/jem/` |
+| Class-conditional sample means show digit structure for α>0 | MNIST | `analysis/visualize/mnist_samples.py` |
+| "The appendix of the revised paper reports time-series experiments" | ecg200, italypowerdemand, … | NAT only (d3r10/d3r20 ladders); no TS AT |
+| Promised, not run: BPDA/EOT adaptive attacks, semi-supervised L_U, full-resolution MNIST | — | — |
+
+Points from the rebuttal that matter for the code:
+- **The headline MPS is d3r40, not d3r20.** Capacity matters after all: r10/r20/r40
+  are all reported.
+- **JEM fairness.** JEM has "about 349k parameters, matched to our r=20 MPS"
+  (d3r20 complex ≈ 145·3·20²·2 ≈ 348k real parameters). But the headline compares
+  it against **r=40** (≈ 1.4M). A journal reviewer will see this; it is part of
+  "strengthen JEM".
+- **AT at α=0.01** is what the rebuttal reports ("the adversarially trained model at
+  α=0.01"). That settles the earlier α=0.1 question in favour of the committed `a001`
+  sweeps.
+- **Time series are promised in the appendix**, so TS is in scope, at least for NAT.
+- **Adaptive attacks (BPDA/EOT) are the obvious journal-reviewer demand.** Unrolled
+  white-box PGD through gradient purification, and BPDA+EOT for Gibbs. Not implemented.
+
+**The journal version, as stated by Martin (2026-10-06):**
+- **Main:** MNIST, moving from r12 to **full-resolution MNIST**, possibly at several
+  capacities. Legendre. The NAT α-ladder, AT, and a **strengthened JEM baseline**.
 - **Spirals:** qualitative in the main text, with capacity and embedding appendices.
-  The arch is d6r4c64 or similar (to confirm; the published version used d10r6
-  real).
-- **Time series:** *maybe* added as a stronger case for MPS, so the TS configs are
-  not dead yet.
+  All architectures in **c64**.
+- **Time series:** a likely appendix (see the rebuttal).
 
 **Discrepancies between paper text and code** (worth fixing before the next
 submission):
@@ -142,8 +169,7 @@ submission):
    likelihoods". `analysis/run.py:299` passes `classification["test"]` to
    `UQEvaluation.evaluate`, which calibrates τ on that same loader
    (`uq.py:442`). The commit `0a7941d7` notes that this makes the clean FPR exactly
-   q. Either the text or the code has to change; using validation is the clean
-   choice.
+   q. **Decided: validation (D2, §11).**
 2. **The MNIST AT radius was changed after publication.** The published AT used
    `eps_rel=0.3` (abs 0.6, "relative strength 0.3" in the paper). The current
    configs use 0.1, per their own headers. The paper's AT numbers are therefore
@@ -485,12 +511,11 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 ## 10. Open questions for you (to settle before `plan.md`)
 
 1. **Paper scope.** *Mostly answered, see §2.3a.* Still open:
-   - the spirals arch (published: d10r6 real; new sweeps: c64)
-   - AT α=0.1 vs 0.01
-   - whether TS goes in
-   - the rebuttal-version `.tex` (JEM section, r12 upscaling)
-2a. **Detection calibration.** Switch τ to validation likelihoods (matches the paper
-   text), or change the text to say test?
+   - the spirals main-text arch (published: d10r6 real; new sweeps: d4r3/d6r4/d10r6 c64)
+   - ~~AT α=0.1 vs 0.01~~ → 0.01, per the rebuttal
+   - ~~whether TS goes in~~ → appendix, NAT at least, per the rebuttal; TS AT?
+   - which MNIST bond dimensions the journal version needs (rebuttal: 10/20/40; full MNIST: ?)
+2a. ~~Detection calibration~~ → validation (D2).
 2. **Stop criterion.** Should "select on the training objective evaluated on valid"
    become a *rule* (no `stop_crit` knob)? And do the MNIST/ECG/Italy `a0` sweeps
    (selected on `acc`) need re-running to comply?
@@ -498,8 +523,7 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
    non-split path and two of the three validation paths can go. MNIST AT a0 was run
    with the old path; at α=0 the losses coincide, but validation cadence and patience
    semantics differ.
-4. **MIA and `hpo.py`.** Neither appears in the paper. Drop or archive? (Gibbs and the
-   joint attack do appear and stay.)
+4. ~~MIA~~ → core only (D1). **`hpo.py`**: not in the paper; drop or archive?
 5. **JEM baseline.** Keep it as its own package, or fold its shared conventions
    (paths, metric keys, selection) into the main code?
 6. **CLAUDE.md.** Un-ignore it (or move its content into `GUIDE.md`) so design notes
@@ -507,3 +531,14 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 7. **Raw outputs.** Is mathqi `outputs/` the system of record, with only
    `analysis/outputs/` in git? A paper-reproduction script needs to know where
    checkpoints live.
+
+---
+
+## 11. Decisions taken (2026-10-06)
+
+| # | Decision | Implication for `plan.md` |
+|---|---|---|
+| D1 | **Cut MIA from the pipeline.** Keep only the core privacy-attack logic, standalone. | Remove MIA from `run.py`, `sweep.py`, the CSV schema and the tests' integration paths. Shrink `src/analysis/mia.py` to the attack itself. Move the misplaced helpers out of `analysis/utils/mia_utils.py` (`load_run_config`, `find_model_checkpoint`, used by `run.py`, `sweep.py`, `gibbs.py`, `hpo.py`) into a properly named run-loading module. |
+| D2 | **Calibrate the detection threshold on validation.** | `UQEvaluation.evaluate` takes a calibration loader (valid) separate from the evaluation loader (test). The detection numbers in the rebuttal (accuracy vs. coverage) must be regenerated. |
+| D3 | **Make the attack radii consistent.** | One relative budget grid for training AT, evaluation, UQ and purification. It lives in one place, not in each YAML plus `sweep.py` globals. The MNIST AT sweeps trained at `eps_rel` 0.3 (`a0_2507`) vs 0.1 (`*_2907`) need sorting out. |
+| D4 | **complex64 is the default dtype.** Real-valued becomes an explicit opt-in or is deleted. | Code default `float32` → `complex64` (`model.py` `_DTYPE_MAP.get(..., torch.float32)`, `MPSInitConfig.dtype=None`). The `c64` suffix in arch names, config file names and output paths (`${dtype_suffix:}`) becomes redundant. The real-dtype branches (`abs_square`, boundary re-cast) shrink. The old real spirals sweeps (`d10r6/*_3005`, `0506`, `0206`) are superseded. |
