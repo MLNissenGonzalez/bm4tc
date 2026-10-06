@@ -22,13 +22,6 @@ from .statistics import (
     compute_pareto_frontier,
     get_pareto_runs,
     compute_metric_correlations,
-    plot_accuracy_histogram,
-    plot_mean_with_std,
-    plot_scatter_vs_metric,
-    plot_accuracy_vs_strength,
-    plot_accuracy_vs_strength_band,
-    plot_pareto_frontier,
-    plot_correlation_heatmap,
 )
 
 from .resolve import (
@@ -66,7 +59,7 @@ __all__ = [
     # Config loading utilities
     "load_run_config",
     "find_model_checkpoint",
-    # Statistics & visualization
+    # Statistics
     "clean_column_name",
     "compute_statistics",
     "get_best_run",
@@ -74,13 +67,6 @@ __all__ = [
     "compute_pareto_frontier",
     "get_pareto_runs",
     "compute_metric_correlations",
-    "plot_accuracy_histogram",
-    "plot_mean_with_std",
-    "plot_scatter_vs_metric",
-    "plot_accuracy_vs_strength",
-    "plot_accuracy_vs_strength_band",
-    "plot_pareto_frontier",
-    "plot_correlation_heatmap",
     # HPO resolver utilities
     "resolve_regime_from_path",
     "resolve_embedding_from_path",

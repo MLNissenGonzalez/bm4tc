@@ -1,6 +1,6 @@
 # Simplification plan
 
-Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D46 in
+Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D47 in
 `status.md` §11. The principles come from `ousterhout.md`. This plan covers the
 *how* and the *order*. Where it has to choose something the decisions leave open,
 it says so; see §6.
@@ -219,6 +219,8 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
    - writes `run.json` (identity axes, study, init source, git sha, resolved
      hparams);
    - builds run dirs with the D14 name rule;
+   - gives W&B its group (study + grid cell), run name (seed) and `job_type` from
+     the run identity (D47), replacing `_derive_group_key`;
    - finds runs by querying manifests;
    - resolves `init: warm` to the selected α=0 NAT run of the same
      dataset/arch/seed.

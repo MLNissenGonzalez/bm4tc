@@ -584,6 +584,7 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D44 | **`mnist_capacity` has two pass criteria:** α=0, the smallest r within 0.5 acc points of the best; α=1, a plateau (doubling r gains < 2 points), not an absolute bar. `mnist_nat` / `mnist_at` use the larger r. | Thresholds are proposals; adjust after the first look at the curve. |
 | D45 | **Default α ladder {0, 1e-3, 1e-2, 1e-1, 0.5, 1}** for all NAT studies (0.2 dropped, 1e-3 added). | One ladder in `defaults.yaml`. |
 | D46 | **`mnist_at` added:** r from `mnist_capacity`, α ∈ {0, 1e-2}, warm, D43 budget. | |
+| D47 | **W&B grouping by grid cell:** group = study + grid cell, run name = seed, `job_type` = `hpo` \| `train`. W&B averages a group, so each cell shows its seeds as a mean with a spread band. Derived from `run.json` identity, not from the run path. | Replaces `_derive_group_key` (and its `outputs/` ancestor requirement) in Phase 4. |
 
 ---
 
