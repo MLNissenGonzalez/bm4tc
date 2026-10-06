@@ -16,6 +16,8 @@ from typing import Dict, Tuple, Optional, List
 
 from tqdm.auto import tqdm
 
+from src.utils.evasion import normalizing, project, random_in_ball
+
 
 @dataclass
 class PurificationConfig:
@@ -26,27 +28,6 @@ class PurificationConfig:
     # Relative: fractions of the input domain width. On legendre (width 2.0) these
     # are absolute radii 0.1 / 0.2 / 0.3.
     delta_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
-
-
-def normalizing(x: torch.FloatTensor, norm: int | str):
-    """
-    Normalize a tensor of shape (batch size, data dim)
-    along the data dim (flattened).
-    """
-    if norm == "inf":
-        normalized = x.sign()
-
-    elif isinstance(norm, int):
-        if norm < 1:
-            raise ValueError("Only accept p >= 1.")
-        x_norm = x.norm(p=norm, dim=1, keepdim=True)
-        x_norm = torch.clamp(x_norm, min=1e-12)
-        normalized = x / x_norm
-
-    else:
-        raise ValueError(f"{norm=}, but expected to be int or 'inf'.")
-
-    return normalized
 
 
 class LikelihoodPurification:
@@ -82,28 +63,6 @@ class LikelihoodPurification:
         self.step_size = step_size
         self.random_start = random_start
 
-    def _project(self, perturbation: torch.Tensor, delta_abs: float) -> torch.Tensor:
-        """Project perturbation back into the Lp ball."""
-        if self.norm == "inf":
-            return perturbation.clamp(-delta_abs, delta_abs)
-        elif isinstance(self.norm, int):
-            norms = perturbation.norm(p=self.norm, dim=1, keepdim=True)
-            scale = torch.clamp(norms / delta_abs, min=1.0)
-            return perturbation / scale
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
-
-    def _random_init(self, shape: torch.Size, delta_abs: float, device: torch.device) -> torch.Tensor:
-        """Initialize random perturbation within the Lp ball."""
-        if self.norm == "inf":
-            return (2 * torch.rand(shape, device=device) - 1) * delta_abs
-        elif isinstance(self.norm, int):
-            delta = torch.randn(shape, device=device)
-            delta = normalizing(delta, self.norm) * delta_abs * torch.rand(shape[0], 1, device=device)
-            return delta
-        else:
-            raise ValueError(f"{self.norm=}, but expected int or 'inf'.")
-
     def purify(
             self,
             born,
@@ -138,7 +97,7 @@ class LikelihoodPurification:
 
         # Initialize perturbation
         if self.random_start:
-            delta = self._random_init(data.shape, delta_abs, device)
+            delta = random_in_ball(data.shape, self.norm, delta_abs, device)
         else:
             delta = torch.zeros_like(data)
 
@@ -161,7 +120,7 @@ class LikelihoodPurification:
             # Gradient descent on NLL (subtract, not add)
             delta = delta.detach() - step_size * normalized_gradient
             # Project back into Lp ball
-            delta = self._project(delta, delta_abs)
+            delta = project(delta, self.norm, delta_abs)
 
         # Final purified samples, clamped to input range
         purified = (data + delta).clamp(input_range[0], input_range[1]).detach()

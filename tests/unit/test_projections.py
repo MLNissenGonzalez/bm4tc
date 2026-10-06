@@ -1,6 +1,8 @@
 import pytest
 import torch
-from src.analysis.purification import LikelihoodPurification, normalizing
+from src.utils.evasion import normalizing, project, random_in_ball
+
+CPU = torch.device("cpu")
 
 BATCH = 8
 DIM = 6
@@ -36,49 +38,49 @@ def test_normalizing_invalid_norm_raises(delta):
         normalizing(delta, 0)
 
 
-# ---- LikelihoodPurification._project ----
+# ---- project (attacks and purification share it) ----
 
 def test_project_linf_clamps(delta):
     eps = 0.3
-    purif = LikelihoodPurification(norm="inf")
-    projected = purif._project(delta, eps)
+    norm = "inf"
+    projected = project(delta, norm, eps)
     assert (projected >= -eps - 1e-6).all()
     assert (projected <= eps + 1e-6).all()
 
 
 def test_project_l2_bounded(delta):
     eps = 0.5
-    purif = LikelihoodPurification(norm=2)
-    projected = purif._project(delta, eps)
+    norm = 2
+    projected = project(delta, norm, eps)
     norms = projected.norm(p=2, dim=1)
     assert (norms <= eps + 1e-5).all()
 
 
 def test_project_zero_unchanged():
-    purif = LikelihoodPurification(norm="inf")
+    norm = "inf"
     zero = torch.zeros(BATCH, DIM)
-    projected = purif._project(zero, delta_abs=0.5)
+    projected = project(zero, norm, 0.5)
     assert torch.allclose(projected, zero)
 
 
-# ---- LikelihoodPurification._random_init ----
+# ---- random_in_ball ----
 
 def test_random_init_shape():
-    purif = LikelihoodPurification(norm="inf")
-    init = purif._random_init((BATCH, DIM), delta_abs=0.2, device=torch.device("cpu"))
+    norm = "inf"
+    init = random_in_ball((BATCH, DIM), norm, 0.2, CPU)
     assert init.shape == (BATCH, DIM)
 
 
 def test_random_init_within_l2_ball():
-    purif = LikelihoodPurification(norm=2)
+    norm = 2
     radius = 0.5
-    init = purif._random_init((BATCH, DIM), delta_abs=radius, device=torch.device("cpu"))
+    init = random_in_ball((BATCH, DIM), norm, radius, CPU)
     norms = init.norm(p=2, dim=1)
     assert (norms <= radius + 1e-5).all()
 
 
 def test_random_init_linf_bounded():
-    purif = LikelihoodPurification(norm="inf")
+    norm = "inf"
     radius = 0.2
-    init = purif._random_init((BATCH, DIM), delta_abs=radius, device=torch.device("cpu"))
+    init = random_in_ball((BATCH, DIM), norm, radius, CPU)
     assert (init.abs() <= radius + 1e-6).all()
