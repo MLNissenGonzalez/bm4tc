@@ -8,31 +8,7 @@ Standalone maintenance scripts for the bm4tc experiment pipeline. Run from the p
 
 | Script | Purpose |
 |--------|---------|
-| `fill_hpo.py` | Patch `seed_sweep` configs with best HPO hyperparameters (W&B or local fallback) |
 | `delete_runs.py` | Delete sweep outputs: local dirs, W&B runs/artifacts, analysis dirs |
-
----
-
-## `fill_hpo.py` — Patch seed_sweep configs from HPO results
-
-After a HPO run completes, propagate the best hyperparameters into the matching `seed_sweep` config.
-
-```bash
-# List all (hpo_kind → seed_kind) pairs and their fill status
-python tools/fill_hpo.py --list
-
-# Preview changes without writing (shows unified diff)
-python tools/fill_hpo.py --dry-run
-python tools/fill_hpo.py --trainer at --dry-run
-
-# Apply to a specific combination
-python tools/fill_hpo.py --dataset circles --embedding legendre
-
-# Overwrite already-filled values
-python tools/fill_hpo.py --force
-```
-
-**How it works**: scans `configs/experiments/` for `hpo*.yaml` files, finds the best run via W&B API (falling back to local Hydra outputs), and replaces `???  # FILL FROM HPO` placeholders in the corresponding `seed_sweep*.yaml`. Kind pairing is by stem: `hpo_a0 → seed_sweep_a0`, `hpo → seed_sweep`, etc.
 
 ---
 

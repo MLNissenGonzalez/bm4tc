@@ -123,24 +123,24 @@ To run without W&B logging: `tracking.mode=disabled`.
 
 ## Running Experiments
 
-All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/); the canonical way to design an experiment is to write a config under `configs/experiments/` and reference it with `+experiments=<path>`.
+All experiments are run as Python modules from the project root. Configurations are managed with [Hydra](https://hydra.cc/).
 
 ```bash
-# Single run (NLL discriminative, alpha=0)
-python -m experiments.train +experiments=spirals/nat/legendre/hpo/a0 born=legendre/d4r3c64
+# NAT (alpha=0), cold start; every knob is a group option or a key override
+python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
+    trainer/nat=default trainer.nat.alpha=0.0 tracking=online
 
-# Multirun / seed sweep (NLL generative, alpha=1)
-python -m experiments.train --multirun +experiments=spirals/nat/legendre/d10r6c64/seed_sweep/cold_a1
+# AT, warm-started from a NAT checkpoint
+python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
+    '~trainer/nat' trainer/at=pgd_at trainer.at.alpha=0.01 model_path=<run>/models/model
 
-# Adversarial training seed sweep
-python -m experiments.train --multirun +experiments=spirals/at/legendre/d10r6c64/seed_sweep/a0
-
-# Batch-run all unrun configs in a filter set
-python -m experiments.batch --trainer nat --embedding legendre --dry-run
-
-# Disable W&B for local debugging
-python -m experiments.train +experiments=tests/nll tracking.mode=disabled
+# Quick local check, no W&B
+python -m experiments.train +experiments=tests/nat tracking.mode=disabled
 ```
+
+The per-experiment YAML tree (`configs/experiments/{dataset}/...`) was deleted in the
+`ousterhout` refactor (D49); study files replace it in Phase 4. Until then, launch
+with group options and overrides as above.
 
 ## Post-Hoc Analysis
 
@@ -181,7 +181,7 @@ The matching interactive MNIST workflow is in
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (train.py, batch.py)
+├── experiments/        # Entry-point scripts (train.py, metrics.py, tracking.py)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
 │   ├── model.py        # ConditionalBornMachine
@@ -193,9 +193,9 @@ bm4tc/
 │   ├── sweep.py        # Post-hoc metrics for one seed sweep / alpha curve
 │   ├── batch.py        # Batch-run all unanalysed sweeps
 │   ├── run.py          # Single-model analysis (rob, UQ)
-│   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, runs.py
+│   ├── utils/          # statistics.py, resolve.py, runs.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)
-├── tools/              # Pipeline tools (fill_hpo.py, delete_runs.py, …)
+├── tools/              # Pipeline tools (delete_runs.py)
 ├── notebooks/          # Reproduction notebooks (2dtoy.ipynb, mnist.ipynb; archive/ git-ignored)
 └── environment.yml
 ```
