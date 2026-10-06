@@ -1,6 +1,6 @@
 # Simplification plan
 
-Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D41 in
+Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D46 in
 `status.md` §11. The principles come from `ousterhout.md`. This plan covers the
 *how* and the *order*. Where it has to choose something the decisions leave open,
 it says so; see §6.
@@ -186,20 +186,32 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
    `seeds: 5`, the `budgets:` radius grid, the analysis block (D20).
 2. **`datasets/*.yaml`:** spirals, mnist12, mnist, ecg200, italypowerdemand, plus the
    TS datasets in scope (D6).
-3. **`studies/*.yaml`:** the journal grid only. Proposed initial set, to confirm:
+3. **`studies/*.yaml`:** the journal grid only. Agreed 2026-10-06 (D42–D46).
+
+   **Default α ladder** (in `defaults.yaml`, used by every NAT study unless it overrides):
+   α ∈ {0, 1e-3, 1e-2, 1e-1, 0.5, 1}. That is log-spaced plus the generative end; 0.2
+   is dropped (D45).
 
    | Study | Grid |
    |---|---|
-   | `spirals_nat` | legendre d10r6, α ∈ {0, 0.01, 0.1, 0.5, 1}, cold |
-   | `spirals_at` | legendre d10r6, α ∈ {0, 0.01}, warm |
-   | `spirals_capacity` | legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)}, α ∈ {0, 1}, NAT, compare HPs with `spirals_nat` (D5) |
+   | `spirals_nat` | legendre d10r6, default α ladder, cold |
+   | `spirals_at` | legendre d10r6, α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43) |
+   | `spirals_capacity` | legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)}, α ∈ {0, 1}, NAT, cold, **own HPO per arch**. The (10,6) cells are *re-run on purpose* as a consistency check against `spirals_nat`: same best HPs (within the search's resolution) and the same test metrics (within seed spread) (D42) |
    | `spirals_embedding` | 5 embeddings, d10r6, α ∈ {0, 1}?, NAT (D5) |
-   | `mnist12_nat` | d3r{10,20,40}, α ∈ {0, 0.01, 0.1, 0.2, 0.5, 1}, cold |
-   | `mnist12_at` | d3r40 (+ r20?), α ∈ {0, 0.01}, warm, expensive (how cheaper?)|
-   | `mnist_capacity` | legendre, quantative test which capacity is needed to have first high accs, and second reasonable generative capability (D7) |
-   | `mnist_nat` | using good capacity, legendre α ∈ {0, 0.01, 0.1, 0.5, 1}, cold |
+   | `mnist12_nat` | d3r{10,20,40}, default α ladder, cold |
+   | `mnist12_at` | d3r40 (+ r20?), α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43) |
+   | `mnist_capacity` | legendre d3, r ∈ {10, 20, 40, 80, …} up to the 8 GB/cluster memory limit, α ∈ {0, 1}, cold, NAT. Two pass criteria (D44): **(i) α=0:** smallest r whose clean test acc is within 0.5 points of the best r; **(ii) α=1:** smallest r after which doubling r gains < 2 points of clean acc (a plateau rule, not an absolute bar, since α=1 may never get near 0.9 on images). Report both; `mnist_nat` uses the larger. Must finish before `mnist_nat` / `mnist_at` |
+   | `mnist_nat` | r from `mnist_capacity`, legendre, default α ladder, cold |
+   | `mnist_at` | r from `mnist_capacity`, α ∈ {0, 1e-2}, warm, reduced-budget PGD-AT (D43, D46) |
    | `ts_{dataset}_nat`, `ts_{dataset}_at` | TBD (D6) |
-   | `jem_*` | after phase 6, has to mirror ts and mnist for born. it is the baseline to compare against |
+   | `jem_*` | after phase 6; mirrors the MNIST and TS Born studies (same α, same attacks/defences). JEM sized to the parameter count of the MPS arch it is compared against |
+
+   **AT training budget (D43).** Training attack: PGD with 5 steps (down from 10),
+   step size 2.5·ε/steps, random start. Validation: PGD 10 steps on the fixed valid
+   subset. Evaluation: PGD 40 steps (unchanged). Plus a larger `eval_every` and a
+   smaller HPO budget per cell. **Before Phase 4 locks this in:** a one-off pilot on
+   mnist12 d3r40 α=0 comparing PGD-5 against PGD-10 training (robust acc at 40-step
+   evaluation, wall time). If PGD-5 loses more than ~1 point of robust accuracy, keep 10.
 
 4. **`configs/hparams/<study>.yaml`:** keyed by the study's grid cell `(arch, α[, embedding])`; consumed via a
    resolver at launch. Missing entries fail loudly; only `hpo` runs without them.

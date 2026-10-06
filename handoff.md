@@ -32,32 +32,21 @@ See `plan.md` §2 Phase 0:
 4. Benchmark of training-step time (NAT and AT, d3r20, MNIST12-sized random data). This
    is the gate for D31 (cache ownership) in Phase 3.
 
-## Open items Martin should settle (raised 2026-10-06, not yet answered)
+## Settled just before hand-off (D42–D46, see `plan.md` Phase 4)
 
-On his Phase 4 study-grid edits (`plan.md` §2 Phase 4 table):
-- **`spirals_capacity` "compare HPs with `spirals_nat`".** The meaning is unclear.
-  - The (10,6) × α∈{0,1} cells duplicate `spirals_nat` cells; the proposal is to reuse
-    those runs via manifests instead of re-training.
-  - If "compare HPs" means *reuse* the d10r6 HPs at all capacities, that confounds
-    capacity with tuning. The recommendation is HPO per arch.
-- **`mnist12_nat` is now cold.** It is supported by `notebooks/coldvswarm.ipynb` (at r40
-  α=1 cold wins, via its own lr). Consequence: the norm-control target can no longer come
-  from the pretrained model, so it needs a fixed expression (0 or `n·ln d / 2`). AT still
-  warm-starts from the α=0 NAT run.
-- **`mnist12_at` "expensive, how cheaper?"** Options:
-  - fewer PGD steps in training (10 → 3–5);
-  - **fast AT** (FGSM with random start, Wong et al. 2020) during training, with PGD
-    for validation and evaluation; this **conflicts with Phase 1 deleting the FGM
-    branch**, so decide before Phase 1;
-  - larger `eval_every`;
-  - smaller HPO budget per cell.
-- **`mnist_at` is missing** from the table. The main paper presumably needs AT on full
-  MNIST.
-- **`mnist_capacity`** needs concrete criteria (e.g. α=0 clean-acc plateau; α=1 test NLL
-  / accuracy) and a grid (r values, maybe d). It must run before `mnist_nat`.
-- `mnist_nat` uses α ∈ {0, 0.01, 0.1, 0.5, 1} (no 0.2, unlike `mnist12_nat`). Intended?
-- `jem_*` mirrors MNIST and TS. JEM size must be matched to the MPS arch it is compared
-  against (the rebuttal compared 349k-parameter JEM ≈ r20 against r40).
+- **`spirals_capacity`** re-runs d10r6 with its own HPO as a consistency check against
+  `spirals_nat` (D42).
+- **AT efficiency:** PGD-AT at a reduced budget (5 training steps, 10 for validation, 40
+  for evaluation, larger `eval_every`, smaller HPO budget). Fast AT / FGSM was
+  rejected for rigour (D43), so the FGM branch is still deleted in Phase 1. A PGD-5 vs
+  PGD-10 pilot on mnist12 d3r40 gates the step count before Phase 4.
+- **`mnist_capacity`:** two pass criteria, α=0 near-best accuracy and an α=1 plateau
+  (D44). `mnist_at` added (D46).
+- **Default α ladder {0, 1e-3, 1e-2, 1e-1, 0.5, 1}**; 0.2 dropped (D45).
+
+Still open: `spirals_embedding` α set ({0,1} or {1}); `mnist12_at` arches (r40 only or
+also r20); the TS dataset list and grids (D6); the norm-control target expression for
+cold MNIST runs (the pretrained model no longer supplies it: 0 or `n·ln d / 2`).
 
 ## Working with Martin
 

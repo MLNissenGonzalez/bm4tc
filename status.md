@@ -579,6 +579,11 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D39 | **W&B: live curves only.** Training logs curves (online on the cluster, disabled in tests); nothing reads back from W&B. | `wandb_fetcher.py` and the W&B branches in tools go. |
 | D40 | **AT: keep the curriculum, drop `acc_floor`.** The curriculum moves into defaults (ramp to the full radius by a fixed fraction of `max_epoch`). `acc_floor` was a second selection rule competing with D8. | |
 | D41 | **Study grids:** Martin edits the Phase 4 table in `plan.md` directly. | |
+| D42 | **`spirals_capacity` re-runs the d10r6 cells with its own HPO**, as a consistency check against `spirals_nat`: best HPs and test metrics should agree within search resolution and seed spread. Every capacity gets its own HPO (no HP transfer, which would confound capacity with tuning). | A built-in reproducibility check. |
+| D43 | **AT stays PGD-AT, at a reduced budget:** 5 training PGD steps (from 10), validation PGD 10 steps, evaluation 40 steps, larger `eval_every`, smaller HPO budget. **Fast AT (FGSM + random start) rejected:** it is prone to catastrophic overfitting, is untested on MPS (log-domain, complex gradients), and AT is the strongest baseline in the paper, so a weaker AT would read as a strawman to reviewers. A PGD-5 vs PGD-10 pilot (mnist12 d3r40) gates the step count. | The FGM branch is still deleted in Phase 1. |
+| D44 | **`mnist_capacity` has two pass criteria:** α=0, the smallest r within 0.5 acc points of the best; α=1, a plateau (doubling r gains < 2 points), not an absolute bar. `mnist_nat` / `mnist_at` use the larger r. | Thresholds are proposals; adjust after the first look at the curve. |
+| D45 | **Default α ladder {0, 1e-3, 1e-2, 1e-1, 0.5, 1}** for all NAT studies (0.2 dropped, 1e-3 added). | One ladder in `defaults.yaml`. |
+| D46 | **`mnist_at` added:** r from `mnist_capacity`, α ∈ {0, 1e-2}, warm, D43 budget. | |
 
 ---
 
