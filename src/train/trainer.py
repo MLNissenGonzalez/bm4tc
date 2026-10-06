@@ -220,16 +220,13 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
-        """log_Z and log|amp|² stats. Prefers the caches populated by the failing
-        mixed_nll forward (no extra contraction); falls back to a fresh no-grad
-        recompute when a cache is absent (e.g. alpha=0 leaves log_Z uncached)."""
-        result: Dict[str, float] = {}
+        """log_Z and log|amp|² stats. Prefers the failing mixed_nll forward's
+        stats (no extra contraction); falls back to a fresh no-grad recompute when
+        it did not form them (e.g. alpha=0 leaves log_Z out)."""
+        result: Dict[str, float] = self.cbm.forward_stats()
         _tiny = float(torch.finfo(torch.float32).tiny)
 
-        cached_log_Z = self.cbm._log_Z_cache
-        if cached_log_Z is not None:
-            result["log_Z"] = cached_log_Z.detach().item()
-        else:
+        if "log_Z" not in result:
             with torch.no_grad():
                 try:
                     self.cbm.reset()
@@ -237,10 +234,7 @@ class Trainer:
                 except Exception:
                     result["log_Z"] = float("nan")
 
-        cached_amp = self.cbm._amp_diag_cache
-        if cached_amp is not None:
-            result.update(cached_amp)
-        else:
+        if "log_amp_sq_mean" not in result:
             with torch.no_grad():
                 try:
                     amp = self.cbm.amplitudes(data)
@@ -346,18 +340,13 @@ class Trainer:
                 penalty = None
                 loss = nll
 
-            # log Z is cached by mixed_nll (alpha>0) or the regularizer; read it
-            # before optimizer.step() invalidates the cache.
+            # log Z is formed by mixed_nll (alpha>0) or the regularizer; read it
+            # before optimizer.step() changes the parameters.
             tracker.record_logZ(self.cbm)
 
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            # optimizer.step() mutated the tensors in place, so the with-grad log Z
-            # cache reflects stale params (and a freed graph). Drop it so the next
-            # step recomputes; essential for alpha=0 + soft norm control, where
-            # mixed_nll never refreshes it and the regularizer reads recompute=False.
-            self.cbm._invalidate_log_Z_cache()
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.cbm.renormalize_(log_target=self._nc_log_target)

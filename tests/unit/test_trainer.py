@@ -180,14 +180,14 @@ def test_diagnostics_uses_caches_without_recontracting():
                       wraps=cbm.log_partition_function) as mock_logZ:
         diag = t._diagnostics(x)
     mock_logZ.assert_not_called()
-    assert diag["log_Z"] == pytest.approx(cbm._log_Z_cache.detach().item())
+    assert diag["log_Z"] == pytest.approx(cbm.forward_stats()["log_Z"])
     assert {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
             "amp_nonfinite_count"} <= set(diag)
 
 
 def test_diagnostics_falls_back_when_cache_empty():
     t = _trainer(TrainConfig(alpha=1.0))
-    assert t.cbm._log_Z_cache is None and t.cbm._amp_diag_cache is None
+    assert t.cbm.forward_stats() == {}
     diag = t._diagnostics(torch.rand(4, 2))
     assert math.isfinite(diag["log_Z"])
     assert math.isfinite(diag["log_amp_sq_mean"])
@@ -269,7 +269,7 @@ def test_alpha0_soft_norm_control_multistep_backward(evasion):
     assert not t._collapsed
     assert t.step >= 2
     assert t._train_penalty > 0.0
-    assert t.cbm._log_Z_cache is None  # invalidated after the final step
+    assert t.cbm.forward_stats() == {}  # expired by the final step
 
 
 def test_norm_control_off_skips_renormalize():
@@ -299,12 +299,15 @@ def test_norm_stats_populated_after_epoch():
 # ── NormTracker ─────────────────────────────────────────────────────────────
 
 class _FakeNormCBM:
-    """Minimal cbm exposing the caches + dtype NormTracker reads."""
+    """Minimal cbm exposing what NormTracker reads: forward_stats() and dtype."""
     def __init__(self, dtype=torch.complex64, snapshot=3.0):
-        self._log_Z_cache = None
-        self._amp_diag_cache = None
+        self.log_Z = None
+        self.amp = {}
         self.dtype = dtype
         self._snapshot = snapshot
+
+    def forward_stats(self):
+        return {**self.amp, **({} if self.log_Z is None else {"log_Z": self.log_Z})}
 
     def log_partition_function(self):
         return torch.tensor(self._snapshot)
@@ -318,8 +321,8 @@ def test_norm_tracker_aggregates_mean_max_min():
         (5.0, {"log_amp_sq_mean": -4.0, "log_amp_sq_max":  0.0, "log_amp_sq_min": -6.0}),
     ]
     for lz, amp in steps:
-        cbm._log_Z_cache = torch.tensor(lz)
-        cbm._amp_diag_cache = amp
+        cbm.log_Z = lz
+        cbm.amp = amp
         t.record_amp(cbm)
         t.record_logZ(cbm)
     out = t.finalize(cbm)
@@ -337,9 +340,9 @@ def test_norm_tracker_aggregates_mean_max_min():
 def test_norm_tracker_logZ_snapshot_fallback():
     t = NormTracker()
     cbm = _FakeNormCBM(snapshot=3.0)
-    cbm._amp_diag_cache = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
+    cbm.amp = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
     t.record_amp(cbm)
-    t.record_logZ(cbm)  # _log_Z_cache is None → skipped
+    t.record_logZ(cbm)  # no log Z formed → skipped
     out = t.finalize(cbm)
     assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 3.0
     assert out["norm/log_amp_sq_mean"] == pytest.approx(-2.0)
@@ -348,8 +351,8 @@ def test_norm_tracker_logZ_snapshot_fallback():
 def test_norm_tracker_ignores_nonfinite():
     t = NormTracker()
     cbm = _FakeNormCBM()
-    cbm._log_Z_cache = torch.tensor(float("inf"))
-    cbm._amp_diag_cache = {"log_amp_sq_mean": float("nan"),
+    cbm.log_Z = float("inf")
+    cbm.amp = {"log_amp_sq_mean": float("nan"),
                            "log_amp_sq_max": float("inf"), "log_amp_sq_min": -5.0}
     t.record_logZ(cbm)
     t.record_amp(cbm)
@@ -378,7 +381,7 @@ class _DecompStubCBM:
 
     def train(self): pass
     def eval(self): pass
-    def _invalidate_log_Z_cache(self): pass
+    def forward_stats(self): return {}
 
     def mixed_nll(self, data, labels, alpha, debug=False):
         tag = float(data[0, 0])
@@ -553,13 +556,13 @@ def test_evaluate_objective_matches_hand_computed_reference():
 
     def _dis(x, y):
         with torch.no_grad():
-            las = cbm._log_amp_sq(x.unsqueeze(0))
+            las = cbm.log_amp_sq(x.unsqueeze(0))
         return (torch.logsumexp(las, dim=1) - las[0, y]).item()
 
     dis_adv = [_dis(xs[i] + shift, ys[i]) for i in sorted(adv_indices)]
     dis_cln = [_dis(xs[i], ys[i]) for i in range(len(xs)) if i not in adv_indices]
     with torch.no_grad():
-        las_all = cbm._log_amp_sq(xs)
+        las_all = cbm.log_amp_sq(xs)
     gen_all = (log_Z - las_all[range(len(ys)), ys]).mean().item()
     ref = (1 - alpha) * (
         (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)

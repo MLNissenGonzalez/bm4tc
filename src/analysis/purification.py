@@ -376,7 +376,7 @@ class GibbsPurification:
                         # overflows on long chains; log_amp_sq is the norm-
                         # accumulating (always overflow-safe) contraction, and
                         # logsumexp does the class sum without leaving log space.
-                        las = born.log_amp_sq(x_cand)                      # (bs*bins, C)
+                        las = born.log_amp_sq_accumulate(x_cand)                      # (bs*bins, C)
                         log_p = torch.logsumexp(las, dim=-1).view(bs, self.num_bins)
 
                     # No masking needed: the grid *is* the window, so every bin is
