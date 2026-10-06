@@ -12,7 +12,6 @@ from src.datahandler import DatasetConfig
 from src.model import CBMConfig
 from src.train.nll import NLLConfig
 from src.train.adversarial import AdversarialConfig
-from src.utils.evasion import EvasionConfig
 
 
 @dataclass
@@ -27,7 +26,6 @@ class TrackingConfig:
     entity: str = ""
     mode: str = "disabled"
     seed: int = 42
-    evasion: EvasionConfig = field(default_factory=EvasionConfig)
 
 
 @dataclass

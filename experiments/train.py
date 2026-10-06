@@ -44,7 +44,7 @@ def main(cfg: Config) -> float:
     datahandler.load()
     set_seed(cfg.tracking.seed)
 
-    model_path = getattr(cfg, "model_path", None)
+    model_path = cfg.model_path
     if model_path is not None:
         logger.info(f"Loading ConditionalBornMachine from {model_path}")
         cbm = ConditionalBornMachine.load(model_path)
@@ -52,7 +52,7 @@ def main(cfg: Config) -> float:
         # weights — honor the current run's born.accumulate on loaded models
         # (fresh models read it at construction). Lets pretrained/fine-tune runs
         # opt into the overflow-safe path even though the a0 checkpoint predates it.
-        cbm.accumulate = bool(cfg.born.get("accumulate", False))
+        cbm.accumulate = cfg.born.accumulate
         # Persist the override into the model's own config so the checkpoint
         # saved after training records the flag actually used — otherwise save()
         # would serialize the stale flag inherited from the loaded checkpoint,

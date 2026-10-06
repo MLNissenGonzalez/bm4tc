@@ -3,9 +3,10 @@ descriptor: ""
 stage: ""
 
 defaults:
+  - base_config  # the schema (experiments/config.py): unknown keys fail (D25)
   - _self_ # has to be here such that overrides work
   - dataset: 2Dtoy/circles
-  - born: fourier/d4r3
+  - born: fourier/test
   - trainer/nat: test
   - trainer/at: null
   - tracking: test

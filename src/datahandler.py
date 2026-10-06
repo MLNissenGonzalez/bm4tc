@@ -6,6 +6,7 @@ import numpy.typing as npt
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import logging
+from omegaconf import OmegaConf
 
 import torch
 from sklearn.preprocessing import MinMaxScaler
@@ -261,7 +262,7 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
     if not ts_dir.exists():
         if cfg.dow_link:
             url = cfg.dow_link[0]
-            password = getattr(cfg, "dow_password", None) or "someone"
+            password = cfg.dow_password or "someone"
             _download_and_extract_ucr(url, password, folder, ts_dir)
         else:
             raise FileNotFoundError(
@@ -294,7 +295,7 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
 def _npz_stem(cfg: DataGenDowConfig) -> str:
     """Return the npz filename stem for a dataset config (without .npz extension)."""
     _, variant = _parse_dataset_name(cfg.name)
-    resize = getattr(cfg, "resize", None)
+    resize = cfg.resize
     if resize is not None:
         return f"{variant}_r{resize}"
     return variant
@@ -499,8 +500,10 @@ class DataHandler:
 
         Args:
             cfg: Dataset configuration with gen_dow_kwargs, split ratios, etc.
+                Merged onto the DatasetConfig schema, so every field exists and an
+                unknown key fails (D25).
         """
-        self.cfg = cfg
+        self.cfg = OmegaConf.merge(OmegaConf.structured(DatasetConfig), cfg)
         self.data = None
         self.labels = None
         self.means: List[torch.Tensor] = None
@@ -555,7 +558,7 @@ class DataHandler:
         data = {}
         labels = {}
 
-        if getattr(self.cfg, 'use_ucr_split', False) and self.ucr_train_size is not None:
+        if self.cfg.use_ucr_split and self.ucr_train_size is not None:
             # Honour original UCR train/test boundary; carve valid from test half
             n_train = self.ucr_train_size
             train_data   = self.data[:n_train]
@@ -588,7 +591,7 @@ class DataHandler:
                                             )
         # Fit scaler to training data to avoid data leakage.
         if scaler_name is None:
-            scaler_name = getattr(self.cfg, 'scaler', 'minmax')
+            scaler_name = self.cfg.scaler
         self._get_scaler(scaler_name)
         data["train"] = self.scaler.fit_transform(data["train"])
         # Transform validation and test sets using the scaler fitted on training data

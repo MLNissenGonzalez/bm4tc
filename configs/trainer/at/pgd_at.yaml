@@ -9,8 +9,6 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.0
 
-criterion:
-  name: "negative log-likelihood"
 
 evasion:
   method: "PGD"
@@ -46,5 +44,3 @@ norm_control:
   debug: false
 
 save: true
-auto_stack: true
-auto_unbind: false
