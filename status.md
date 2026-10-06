@@ -547,4 +547,8 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D7 | **The full-MNIST bond dimension must be tested.** d3r10 is likely enough at α=0 and underperforms at higher α. | Capacity is a sweep axis for MNIST, not a fixed choice. |
 | D8 | **The stop criterion is a fixed rule:** select on the training objective evaluated on validation. | `stop_crit` is removed as a parameter. Every trainer logs one `objective/valid` (name to be settled), so selection needs no stop_crit → metric mapping anywhere (§5.1 disappears). |
 | D9 | **The journal version needs a lot of re-running.** | Refactor *before* re-running. Backward compatibility with old run dirs and old CSVs is not a constraint; migration shims (rename tolerance, legacy layouts) can go. |
+| D10 | **Regime vocabulary is `nat` / `at` everywhere:** paths, config groups (`trainer/nat`, `trainer/at`), class names, CSV columns, docs. | `nll`/`adversarial`, `dis`/`gen`/`adv` and `cls`/`cls_reg`/`comb` disappear. |
+| D11 | **Metric keys:** every trainer logs `objective/{split}` (the optimized loss and the only selection key), plus components `loss_dis`, `loss_gen`, `loss_adv`, `acc` and `rob/{eps_rel}`. | Defined once in a metrics module. The stop_crit → metric mapping (§5.1) is deleted. |
+| D12 | **Clean break.** New code doesn't read old run dirs, configs or CSVs. Old outputs stay reachable via a git tag (`pre-ousterhout`). | Rename tolerance, legacy layouts and the migration tools go. Confirms D9. |
+| D13 | **Delete `analysis/hpo.py`.** | −1 463 L. |
 
