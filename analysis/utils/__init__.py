@@ -15,12 +15,6 @@ from .statistics import (
     compute_metric_correlations,
 )
 
-from .resolve import (
-    resolve_regime_from_path,
-    resolve_embedding_from_path,
-    embedding_range_size,
-)
-
 __all__ = [
     # Run loading
     "load_run_config",
@@ -33,8 +27,4 @@ __all__ = [
     "compute_pareto_frontier",
     "get_pareto_runs",
     "compute_metric_correlations",
-    # Path resolvers
-    "resolve_regime_from_path",
-    "resolve_embedding_from_path",
-    "embedding_range_size",
 ]
