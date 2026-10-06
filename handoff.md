@@ -19,18 +19,31 @@ has changed yet; so far the branch holds only documents:
 
 `main` is untouched. Nothing has been pushed; ask before pushing.
 
-## Next step: Phase 0 (safety net, no behaviour change)
+## Done so far
 
-See `plan.md` §2 Phase 0:
-1. Tag `pre-ousterhout` on `main` (local; push only when Martin says).
-2. Commit `pytest.ini` (`pythonpath = .`, `slow` marker). Un-ignore `pytest.ini`,
-   `AGENTS.md` and `CLAUDE.md` in `.gitignore`.
-3. Seam test `tests/e2e/test_pipeline.py`: CPU, < 60 s, tiny spirals, legendre d4r3,
-   NAT α=0 → warm AT α=0.01 → analysis. It pins `objective`, clean acc, rob, purified
-   acc and detection rate with tolerances. Only the harness function changes as entry
-   points change.
-4. Benchmark of training-step time (NAT and AT, d3r20, MNIST12-sized random data). This
-   is the gate for D31 (cache ownership) in Phase 3.
+- **Phase 0** (`92fb5b3b`): tag `pre-ousterhout` on `main` (local, not pushed);
+  `pytest.ini`; seam test `tests/e2e/test_pipeline.py` (CPU, ~27 s, deterministic;
+  `detection` is expected to change with D2); benchmark
+  `python -m tests.bench.bench_train_step` (RTX 2080, d3r20 c64, batch 256:
+  NAT 175 ms/step, AT PGD-10 1163 ms/step), the D31 baseline.
+- **Phase 1** (`624b31e3`, `19d34ff3`): deleted `hpo.py`, the migration tools,
+  `run_local.py`, `alpha_dist_plots.py`, `simp`, FGM, the trainer smoke blocks and the
+  old `analysis/outputs/seed_sweep/*`. MIA is out of the pipeline:
+  `analysis/privacy.py` (standalone, shrunk, tested) and `analysis/utils/runs.py`
+  (`load_run_config`, `find_model_checkpoint`). Net −3 900 lines of py+yaml.
+  Suite: 787 passed, 4 skipped.
+
+## Next step: Phase 2 (one vocabulary, one metrics module, enforced schema)
+
+See `plan.md` §2 Phase 2. Noticed along the way:
+- `configs/trainer/adversarial/pgd_at.yaml` still has the stale `criterion` key and no
+  `alpha`; schema enforcement (D25) will surface both.
+- A training run fails unless its run dir has an `outputs/` ancestor
+  (`experiments/tracking.py::_derive_group_key`).
+- `analysis/utils/statistics.py`: `plot_accuracy_histogram`, `plot_mean_with_std`,
+  `plot_scatter_vs_metric` are called nowhere (Phase 5).
+- `analysis/utils/runs.py` still carries the legacy path-based config fallback
+  (`_load_final_experiment_config`); D12 says new code doesn't read old run dirs.
 
 ## Settled just before hand-off (D42–D46, see `plan.md` Phase 4)
 
