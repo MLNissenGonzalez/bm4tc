@@ -1,0 +1,10 @@
+# MNIST 12x12, NAT, the default alpha ladder, cold. The norm-control target for
+# cold MNIST runs (0 or n·ln d / 2) is open until an HPC pilot; 0 for now.
+dataset: mnist12
+regime: nat
+grid:
+  arch: [d3r10, d3r20, d3r40]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 50

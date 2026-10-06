@@ -1,0 +1,12 @@
+# MNIST 28x28 capacity sweep, legendre d3, NAT, cold (D44). Must finish before
+# mnist_nat / mnist_at, which take the larger of the two passing ranks. Extend r
+# up to the 8 GB/cluster memory limit.
+dataset: mnist
+regime: nat
+grid:
+  arch: [d3r10, d3r20, d3r40, d3r80]
+  alpha: [0, 1]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 50

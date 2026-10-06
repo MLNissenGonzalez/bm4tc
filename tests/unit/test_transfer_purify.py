@@ -112,10 +112,10 @@ def test_parse_models_rejects_malformed(spec):
 
 
 def _make_run(tmp_path, name="0", ckpt="model"):
-    """Build a minimal run dir: <name>/.hydra/config.yaml + <name>/models/<ckpt>."""
+    """Build a minimal finished run dir: <name>/run.json + <name>/models/<ckpt>."""
     run = tmp_path / name
-    (run / ".hydra").mkdir(parents=True)
-    (run / ".hydra" / "config.yaml").write_text("{}\n")
+    run.mkdir(parents=True)
+    (run / "run.json").write_text('{"config": {}}\n')
     (run / "models").mkdir()
     (run / "models" / ckpt).write_text("checkpoint")
     return run
@@ -159,8 +159,8 @@ def test_resolve_run_dir_from_sweep_root_uses_best_run_csv(tmp_path):
     assert ckpt is None
 
 
-def test_load_run_config_requires_the_hydra_config(tmp_path):
-    """No path-based reconstruction (D49): a run without .hydra/config.yaml fails loudly."""
+def test_load_run_config_requires_run_json(tmp_path):
+    """No path-based reconstruction (D17, D49): a run without run.json fails loudly."""
     run = tmp_path / "outputs/mnist_full_r12/nat/legendre/d3r20c64/seed_sweep_a0_1206/3"
     run.mkdir(parents=True)
     with pytest.raises(FileNotFoundError):

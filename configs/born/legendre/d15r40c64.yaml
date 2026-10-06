@@ -1,9 +1,0 @@
-init_kwargs:
-  in_dim: 15 # physical dimension
-  bond_dim: 40
-  boundary: "obc"
-  init_method: "randn_eye"
-  std: 1e-9
-  dtype: "complex64"
-embedding: "legendre"
-accumulate: true   # realistic high-feature dataset -> overflow-safe path on by default

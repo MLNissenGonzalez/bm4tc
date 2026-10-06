@@ -1,0 +1,22 @@
+# The seam test's AT run, warm from tests/seam_nat: PGD-5, Linf, eps 0.15.
+dataset: spirals
+regime: at
+init: warm
+warm_from: tests/seam_nat
+seeds: [42]
+grid:
+  arch: [d4r3]
+  alpha: [0.01]
+  eps: [0.15]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  trainer.max_epoch: 5
+  trainer.batch_size: 64
+  trainer.patience: 5
+  trainer.eval_every: 1
+  trainer.clean_weight: 0.5
+  trainer.curriculum: false
+  trainer.evasion.num_steps: 5
+  trainer.optimizer.kwargs.lr: 1e-2
+  tracking.mode: disabled
+hpo: null

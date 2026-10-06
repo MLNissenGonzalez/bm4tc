@@ -1,0 +1,3 @@
+# NAT: the Trainer without an attack (evasion: null), validating every epoch.
+# Every other knob is a TrainConfig default (src/train/trainer.py) or set by the study.
+save: true

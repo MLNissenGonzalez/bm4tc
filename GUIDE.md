@@ -26,21 +26,30 @@ Examples: `d4r3`, `d10r6`, `d30r18`.
 | Script | Trainer token | Description |
 |--------|--------------|-------------|
 | `experiments/train.py` | `nat` | `trainer.evasion: null`; any α (α=0 discriminative, α>0 generative) |
-| `experiments/train.py` | `at` | `trainer.evasion` set; loads a pretrained `nat` checkpoint via `model_path` |
+| `experiments/train.py` | `at` | `trainer.evasion` set; always warm from the study's `warm_from` NAT runs |
 
 Run as a Python module from the project root:
 ```bash
-# NAT (alpha=0), cold start; every knob is a group option or a key override
-python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer=nat/default trainer.alpha=0.0 tracking=online
+# Train every (cell, seed) of a study; finished runs are skipped, so relaunching resumes
+python -m experiments.train spirals_nat
 
-# AT, warm-started from a NAT checkpoint
-python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
-    trainer=at/pgd_at trainer.alpha=0.01 model_path=<run>/models/model
+# AT studies are warm: their alpha=0 NAT study (warm_from, default {dataset}_nat) first
+python -m experiments.train spirals_at
 
-# Quick local check, no W&B
-python -m experiments.train +experiments=tests/nat tracking.mode=disabled
+# One cell / one seed; --replace archives a finished run whose config changed
+python -m experiments.train spirals_nat --cell legendre/d10r6/a0.01 --seed 3
+
+# The seam study, as a quick local check (no W&B)
+python -m experiments.train tests/seam_nat
 ```
+
+A study (`configs/studies/<name>.yaml`) is merged onto `configs/defaults.yaml`: the
+dataset, the regime (`nat` | `at`), `init` (cold | warm), a grid (embedding x arch x
+alpha [x eps for AT]), fixed run-config values (`config:`) and the HPO space. Studies
+with an HPO space need their selected hparams in `configs/hparams/<study>.yaml`
+(written by `select`, Phase 5) and fail loudly without them. Runs land in
+`outputs/{study}/{embedding}/{arch}/a{alpha}[/eps{eps}]/s{seed}/` with a `run.json`
+(identity, warm start, git sha, resolved config and its hash).
 
 **The objective.** `L = (1-α)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + α·L_gen(x)`, with
 `cw = trainer.clean_weight`; NAT has no `x_adv` and is `(1-α)·L_dis(x) + α·L_gen(x)`. The
@@ -55,9 +64,6 @@ points, which works against detection and purification. That is what would make 
 informative ablation, and why it must not be the default. Recover it from the tag
 `pre-ousterhout` (`gen_on_clean: false`).
 
-The per-experiment YAML tree (`configs/experiments/{dataset}/...`) was deleted in the
-`ousterhout` refactor (D49); study files replace it in Phase 4. Until then, launch
-with group options and overrides as above.
 
 ---
 
@@ -68,16 +74,16 @@ structured schema in `experiments/config.py` (D25): an unknown key in a YAML fil
 plain override fails at composition. Selection is a fixed rule, not a parameter: the
 best epoch is the one with the lowest `objective/valid` (D8).
 
-**Config group layout**:
+**Config layout**:
 ```
 configs/
-├── config.yaml              # root defaults
-├── born/{embedding}/        # d{d}r{r}.yaml files — in_dim, bond_dim, boundary
-├── dataset/2Dtoy/           # circles.yaml, moons.yaml, spirals.yaml, *_small.yaml
-├── dataset/mnist/           # mnist.yaml, mnist_1k.yaml, mnist_full_r12.yaml
-├── dataset/ucr_ts/          # ECG200.yaml, ItalyPowerDemand.yaml, ...
-├── trainer/                 # TrainConfig presets: nat/{default,test}, at/{pgd_at,test}
-└── tracking/                # online.yaml, offline.yaml, disabled.yaml
+├── config.yaml              # the run config: picks group options; constants are schema defaults
+├── defaults.yaml            # study-level defaults: seeds, alpha ladder, radius, HPO space, budgets
+├── studies/                 # one file per study (D36); studies/tests/ holds the seam study
+├── hparams/                 # <study>.yaml, written by `select` only (D34)
+├── dataset/                 # spirals, circles, moons, mnist12, mnist, mnist_1k, UCR datasets
+├── trainer/                 # nat.yaml, at.yaml (the PGD-AT preset)
+└── tracking/                # online.yaml, disabled.yaml
 ```
 
 **Config dataclass location**: each module owns its config dataclass (e.g., `TrainConfig` in `src/train/trainer.py`). The top-level `Config`, `TrackingConfig` and `register()` live in `experiments/config.py`.
@@ -89,12 +95,7 @@ configs/
 ## Logging
 
 Training always writes `log.json` to the output directory — no W&B required.  
-W&B is opt-in: set `tracking.mode: online` in your experiment config, or `tracking.mode: disabled` to suppress it.
-
-```bash
-# Disable W&B explicitly
-python -m experiments.train +experiments=tests/nat tracking.mode=disabled
-```
+W&B is on (`tracking: online`); a study sets `tracking.mode: disabled` in its `config:` to suppress it. W&B groups a grid cell's seeds (group `{study}/{cell}`, run name `s{seed}`, D47).
 
 The epoch logger is constructed via `experiments.tracking.make_logger(output_dir, wandb_run)` and passed as `on_epoch_end` callback to the trainer.
 

@@ -1,8 +1,0 @@
-# @package _global_
-experiment: test
-
-defaults:
-  - override /born: fourier/test
-  - override /dataset: test
-  - override /trainer: nat/test
-  - override /tracking: test

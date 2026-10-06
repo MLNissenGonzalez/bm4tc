@@ -1,0 +1,17 @@
+# MNIST 28x28, PGD-AT (D43, D46), warm from mnist_nat's alpha=0 runs.
+dataset: mnist
+regime: at
+init: warm
+grid:
+  arch: ???                    # the rank mnist_capacity selects (D44)
+  alpha: [0, 1e-2]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 10
+  trainer.norm_control.soft_strength: 1e-3
+  trainer.norm_control.log_target: null
+hpo:
+  n_trials: 20
+  space:
+    trainer.clean_weight: [0.2, 1.0]

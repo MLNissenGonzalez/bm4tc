@@ -220,7 +220,7 @@ def _resolve_run_dir(path: str) -> Tuple[Path, Optional[Path]]:
     if p.is_file():
         # <run>/models/<ckpt>
         return p.parent.parent, p
-    if (p / ".hydra").is_dir():
+    if (p / "run.json").exists():
         return p, None
     # sweep root: analysis CSV mirrors outputs/ -> analysis/outputs/
     parts = list(p.parts)

@@ -1,50 +1,50 @@
-"""Every config composes under the structured schema, and the schema rejects unknown keys (D25)."""
-from pathlib import Path
-
+"""Every study composes under the schema (D25), job by job, and unknown keys fail."""
 import pytest
-from hydra import compose, initialize_config_dir
-from hydra.errors import ConfigCompositionException
 from omegaconf import OmegaConf
+from omegaconf.errors import ConfigAttributeError, MissingMandatoryValue
 
-from experiments.config import register
-from experiments.resolvers import register_resolvers
+from experiments.runs import CONFIGS, Job, Study
 from src.train.trainer import evasion_config
 
-CONFIGS = Path(__file__).resolve().parents[2] / "configs"
-GROUPS = ["born", "dataset", "trainer", "tracking"]
-
-register()
-register_resolvers()
-
-
-def _cases():
-    yield []
-    for test in sorted((CONFIGS / "experiments" / "tests").glob("*.yaml")):
-        yield [f"+experiments=tests/{test.stem}"]
-    for group in GROUPS:
-        for f in sorted((CONFIGS / group).rglob("*.yaml")):
-            option = f.relative_to(CONFIGS / group).with_suffix("").as_posix()
-            yield [f"{group}={option}"]
+STUDIES = sorted(p.relative_to(CONFIGS / "studies").with_suffix("").as_posix()
+                 for p in (CONFIGS / "studies").rglob("*.yaml"))
+# Studies waiting for a decision; they must fail loudly until it is made.
+PENDING = {"mnist_nat": "mnist_capacity picks the rank (D44)",
+           "mnist_at": "mnist_capacity picks the rank (D44)"}
 
 
-def _compose(overrides):
-    with initialize_config_dir(str(CONFIGS), version_base=None):
-        return compose("config", overrides=overrides)
-
-
-@pytest.mark.parametrize("overrides", list(_cases()), ids=lambda o: " ".join(o) or "default")
-def test_config_composes_under_schema(overrides):
-    cfg = _compose(overrides)
-    OmegaConf.to_container(cfg, resolve=False)
-    if cfg.trainer.evasion is not None:  # untyped in the schema; the Trainer checks it
-        evasion_config(cfg.trainer.evasion)
+@pytest.mark.parametrize("name", STUDIES)
+def test_study_composes_under_schema(name):
+    study = Study(name)
+    if name in PENDING:
+        with pytest.raises(MissingMandatoryValue):
+            study.cells()
+        return
+    for cell in study.cells():  # one seed per cell: seeds only set tracking.seed
+        cfg = Job(study, cell, study.seeds()[0]).compose(hparams=False)  # no `select` yet
+        OmegaConf.to_container(cfg, resolve=True)
+        if cfg.trainer.evasion is not None:  # untyped in the schema (D53)
+            evasion_config(cfg.trainer.evasion)
+        assert (cfg.trainer.evasion is not None) == (study.regime == "at")
+        # Every HPO key lands on an existing node (open dicts such as
+        # optimizer.kwargs take new keys).
+        for key in (study.cfg.hpo.space if study.cfg.hpo else {}):
+            parent, _, leaf = key.rpartition(".")
+            node = OmegaConf.select(cfg, parent)
+            assert node is not None and (leaf in node or parent.endswith("kwargs")), key
 
 
 def test_unknown_key_is_rejected():
-    """A key outside the schema fails, here a stale one. (An explicit `+key=` append
-    is Hydra's force-add and bypasses the schema by design.)"""
-    with pytest.raises(ConfigCompositionException):
-        _compose(["trainer.stop_crit=acc"])
+    study = Study("tests/seam_nat")
+    study.cfg.config["trainer.stop_crit"] = "acc"
+    with pytest.raises(ConfigAttributeError):
+        study.jobs()[0].compose()
+
+
+def test_unknown_study_key_is_rejected():
+    from experiments import runs
+    with pytest.raises(Exception, match="nonsense"):
+        OmegaConf.merge(OmegaConf.structured(runs.StudyConfig), {"nonsense": 1})
 
 
 def test_unknown_evasion_key_is_rejected():
