@@ -14,6 +14,7 @@ from src.utils.train import (
     NormRegularizer,
     NormTracker,
     eval_metrics,
+    mix,
     optimizer,
     resolve_log_target,
 )
@@ -26,18 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 
-_LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss"}
-_ACC_METRICS = {"acc", "rob"}
-_VALID_STOP_CRIT = {"dis_loss", "gen_loss", "mixed_loss", "acc", "rob"}
-
-
 @dataclass
 class NLLConfig:
     alpha: float = 0.0
     max_epoch: int = 100
     batch_size: int = 64
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    stop_crit: str = "acc"
     patience: int = 250
     norm_control: NormControlConfig = field(default_factory=NormControlConfig)
     save: bool = False
@@ -77,13 +72,7 @@ class NLLTrainer:
         self._collapsed = False
 
     def _init_best(self):
-        self.best = {"gen_loss": float("inf"), "dis_loss": float("inf"), "acc": 0.0}
-        self.stopping_criterion_name = self.train_cfg.stop_crit
-        if self.stopping_criterion_name not in _VALID_STOP_CRIT:
-            raise ValueError(
-                f"Invalid stop_crit '{self.stopping_criterion_name}'. "
-                f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
-            )
+        self.best = {"objective": float("inf")}
 
     def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
         """log_Z and log|amp|² stats. Prefers the caches populated by the failing
@@ -243,24 +232,13 @@ class NLLTrainer:
         self._norm_stats = tracker.finalize(self.cbm)
 
     def _update(self):
-        current_value = self.valid_perf.get(self.stopping_criterion_name)
+        """Select on the validation objective (D8): keep the epoch if it is lower."""
+        current_value = self.valid_perf.get("objective")
 
         if current_value is None or not math.isfinite(current_value):
             return
 
-        former_best = self.best.get(
-            self.stopping_criterion_name,
-            0.0 if self.stopping_criterion_name in _ACC_METRICS else float("inf"),
-        )
-
-        if self.stopping_criterion_name in _ACC_METRICS:
-            improved = current_value > former_best
-        elif self.stopping_criterion_name in _LOSS_METRICS:
-            improved = current_value < former_best
-        else:
-            raise ValueError(f"Unknown stopping criterion: {self.stopping_criterion_name}")
-
-        if improved:
+        if current_value < self.best["objective"]:
             self.best = dict(self.valid_perf)
             self.best_tensors = [t.clone().detach() for t in self.cbm.tensors]
             self.best_epoch = self.epoch
@@ -276,10 +254,10 @@ class NLLTrainer:
         if hasattr(self, "valid_perf"):
             del self.valid_perf
 
-        best_stop = self.best.get(self.stopping_criterion_name)
-        if best_stop is not None and not math.isfinite(best_stop):
+        best_objective = self.best["objective"]
+        if not math.isfinite(best_objective):
             logger.warning(
-                f"Best {self.stopping_criterion_name} is {best_stop} (non-finite); skipping model save."
+                f"Best objective is {best_objective} (non-finite); skipping model save."
             )
         elif self.train_cfg.save and output_dir is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -323,10 +301,10 @@ class NLLTrainer:
             dis_loss, acc, gen_loss = eval_metrics(
                 self.cbm, self.datahandler.classification["valid"], self.device
             )
-            alpha = self.train_cfg.alpha
-            mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
-            self.valid_perf = {"dis_loss": dis_loss, "acc": acc, "gen_loss": gen_loss,
-                               "mixed_loss": mixed_loss}
+            self.valid_perf = {
+                "objective": mix(dis_loss, gen_loss, self.train_cfg.alpha),
+                "loss_dis": dis_loss, "loss_gen": gen_loss, "acc": acc,
+            }
 
             pbar.set_postfix(
                 nll=f"{self._train_nll:.4f}",
@@ -337,17 +315,11 @@ class NLLTrainer:
             )
 
             if on_epoch_end is not None:
-                metrics = {
-                    "nll/train":      self._train_loss,
-                    "nll/train_nll":  self._train_nll,
-                    "nll/train_reg":  self._train_reg,
-                    "dis_loss/valid":   dis_loss,
-                    "gen_loss/valid":   gen_loss,
-                    "mixed_loss/valid": mixed_loss,
-                    "acc/valid":        acc,
-                }
-                metrics.update(self._norm_stats)
-                on_epoch_end(self.epoch, metrics)
+                on_epoch_end(self.epoch, {
+                    "train": {"objective": self._train_nll, "penalty": self._train_reg},
+                    "valid": dict(self.valid_perf),
+                    "norm": self._norm_stats,
+                })
 
             self._update()
             self.epoch_times.append(time.perf_counter() - epoch_start)

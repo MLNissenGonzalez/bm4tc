@@ -14,6 +14,7 @@ from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.datahandler import DataHandler, DatasetConfig, DataGenDowConfig
 from src.utils.evasion import EvasionConfig
 from src.utils.train import NormControlConfig
+from experiments.metrics import flatten_epoch, key
 
 pytestmark = pytest.mark.slow
 
@@ -51,7 +52,6 @@ def _cfg(**overrides):
         batch_size=8,
         alpha=0.5,
         evasion=EvasionConfig(method="PGD", num_steps=2, eps_rel=[0.05]),
-        stop_crit="rob",
         eval_rob_freq=2,
         patience=250,
         clean_weight=0.3,
@@ -70,7 +70,7 @@ def test_split_run_completes_and_selects_a_model(dh):
                                  device=torch.device("cpu"))
 
     logged = []
-    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
 
     assert [ep for ep, _ in logged] == [1, 2, 3, 4, 5, 6]
     # Validation only on eval_rob_freq epochs, nothing in between.
@@ -79,32 +79,32 @@ def test_split_run_completes_and_selects_a_model(dh):
     n_valid = len(dh.classification["valid"].dataset)
     assert len(trainer.adv_indices) == round(0.7 * n_valid)
     for _, m in logged:
-        if "n_rob_valid" in m:
-            assert m["n_rob_valid"] == len(trainer.adv_indices)
+        if "n_rob/valid" in m:
+            assert m["n_rob/valid"] == len(trainer.adv_indices)
 
     assert trainer.best["rob"] > 0.0
     assert all(torch.isfinite(t).all() for t in cbm.tensors)
 
 
 @pytest.mark.parametrize("gen_on_clean", [False, True])
-def test_at_loss_selection_runs_end_to_end(dh, gen_on_clean):
-    """stop_crit='at_loss' selects a checkpoint under both objectives."""
+def test_objective_selection_runs_end_to_end(dh, gen_on_clean):
+    """Selection on the validation objective picks a checkpoint under both objectives."""
     cbm = _cbm()
-    cfg = _cfg(stop_crit="at_loss", gen_on_clean=gen_on_clean, alpha=0.5,
+    cfg = _cfg(gen_on_clean=gen_on_clean, alpha=0.5,
                clean_weight=0.3, max_epoch=6, eval_rob_freq=2)
     trainer = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
                                  device=torch.device("cpu"))
 
     logged = []
-    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
 
-    # at_loss needs the attack pass, so it lands on eval_rob_freq epochs only.
-    assert [ep for ep, m in logged if "at_loss/valid" in m] == [2, 4, 6]
-    assert math.isfinite(trainer.best["at_loss"])
-    assert trainer.best["at_loss"] < float("inf")   # a model was actually selected
+    # The objective needs the attack pass, so it lands on eval_rob_freq epochs only.
+    assert [ep for ep, m in logged if "objective/valid" in m] == [2, 4, 6]
+    assert math.isfinite(trainer.best["objective"])  # a model was actually selected
     assert trainer.best_epoch in (2, 4, 6)
-    # Robustness is still evaluated and logged, it just no longer drives selection.
-    assert [ep for ep, m in logged if trainer.rob_metric_key in m] == [2, 4, 6]
+    # Robustness is still evaluated and logged, it just does not drive selection.
+    rob = key("rob", "valid", trainer.base_eps_rel)
+    assert [ep for ep, m in logged if rob in m] == [2, 4, 6]
     assert all(torch.isfinite(t).all() for t in cbm.tensors)
 
 
@@ -129,7 +129,7 @@ def test_split_and_unsplit_agree_at_alpha_zero(dh):
         trainer = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
                                      device=torch.device("cpu"))
         seen = []
-        trainer.train(on_epoch_end=lambda ep, m: seen.append(m["dis_loss/train"]))
+        trainer.train(on_epoch_end=lambda ep, m: seen.append(m["train"]["objective"]))
         runs[gen_on_clean] = (seen, [t.detach().clone() for t in cbm.tensors])
 
     assert runs[False][0] == pytest.approx(runs[True][0], abs=1e-9)

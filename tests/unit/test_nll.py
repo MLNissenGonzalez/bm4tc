@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.utils.train import NormRegularizer, NormTracker
+from experiments.metrics import flatten_epoch
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ class _FakeDataHandler:
 def test_nll_config_defaults():
     cfg = NLLConfig()
     assert cfg.alpha == 0.0
-    assert cfg.stop_crit == "acc"
+    assert not hasattr(cfg, "stop_crit")  # selection is a fixed rule (D8)
     assert cfg.patience == 250
     assert cfg.max_epoch == 100
     assert cfg.batch_size == 64
@@ -49,14 +50,6 @@ def test_norm_control_config_defaults():
     assert nc.log_target == 0.0
     assert nc.hard_every == 0
     assert nc.soft_strength == 0.1
-
-
-def test_nll_config_invalid_stop_crit():
-    cfg = NLLConfig(stop_crit="bad_metric")
-    cbm = _tiny_cbm()
-    dh = _FakeDataHandler()
-    with pytest.raises(ValueError, match="Invalid stop_crit"):
-        NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
 
 
 # ── Construction ───────────────────────────────────────────────────────────
@@ -282,7 +275,7 @@ def test_nll_logs_norm_metrics_by_default():
                     norm_control=NormControlConfig(hard_every=0, soft_strength=0.0))
     trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
     logged = []
-    trainer.train(on_epoch_end=lambda ep, m: logged.append(m))
+    trainer.train(on_epoch_end=lambda ep, m: logged.append(flatten_epoch(m)))
 
     assert logged
     for key in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_Z_min",

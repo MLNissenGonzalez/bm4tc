@@ -3,6 +3,8 @@ import torch
 from pathlib import Path
 
 from src.train.nll import NLLConfig, NLLTrainer, NormControlConfig
+from src.utils.train import OptimizerConfig
+from experiments.metrics import flatten_epoch
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.datahandler import DataHandler, DatasetConfig, DataGenDowConfig
 
@@ -68,11 +70,12 @@ def test_nll_alpha1_runs(cbm, dh):
 
 @pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
 def test_nll_epoch_dict_keys(cbm, dh, alpha):
-    expected = {"nll/train", "dis_loss/valid", "gen_loss/valid", "acc/valid"}
+    expected = {"objective/train", "penalty/train", "objective/valid",
+                "loss_dis/valid", "loss_gen/valid", "acc/valid"}
     cfg = NLLConfig(alpha=alpha, max_epoch=2, patience=999)
     trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
     logged = []
-    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
     for _, m in logged:
         assert expected <= m.keys(), f"missing keys: {expected - m.keys()}"
 
@@ -80,12 +83,18 @@ def test_nll_epoch_dict_keys(cbm, dh, alpha):
 # ── Patience / early stopping ───────────────────────────────────────────────
 
 def test_nll_early_stopping(cbm, dh):
-    """With patience=0 and stop_crit='acc', stops after 1 epoch (counter > 0)."""
-    cfg = NLLConfig(alpha=0.0, max_epoch=20, patience=0, stop_crit="acc")
+    """patience=0 stops at the first epoch without a lower valid objective.
+
+    lr=0 freezes the model: epoch 1 improves on inf, epoch 2 ties, and a tie is
+    not an improvement, so training ends after epoch 2.
+    """
+    cfg = NLLConfig(alpha=0.0, max_epoch=20, patience=0,
+                    optimizer=OptimizerConfig(kwargs={"lr": 0.0}),
+                    norm_control=NormControlConfig(soft_strength=0.0))
     trainer = NLLTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh, device=torch.device("cpu"))
     logged = []
     trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
-    assert len(logged) <= 3, f"Expected early stop, but ran {len(logged)} epochs"
+    assert [ep for ep, _ in logged] == [1, 2]
 
 
 # ── Save ────────────────────────────────────────────────────────────────────

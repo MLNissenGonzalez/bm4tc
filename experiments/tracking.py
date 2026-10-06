@@ -11,6 +11,7 @@ from hydra.types import RunMode
 from omegaconf import OmegaConf
 
 from experiments.config import Config
+from experiments.metrics import flatten_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,14 @@ logger = logging.getLogger(__name__)
 def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]:
     """
     Returns an on_epoch_end callback that writes epoch metrics to log.json
-    and optionally forwards them to a W&B run.
+    and optionally forwards them to a W&B run. The trainer passes plain names per
+    split; the logged keys come from :mod:`experiments.metrics`.
     """
     log_path = output_dir / "log.json"
     records = []
 
-    def log(epoch: int, metrics: dict) -> None:
+    def log(epoch: int, record: dict) -> None:
+        metrics = flatten_epoch(record)
         records.append({"epoch": epoch, **metrics})
         log_path.write_text(json.dumps(records, indent=2))
         if wandb_run is not None:

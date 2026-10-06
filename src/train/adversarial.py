@@ -6,7 +6,7 @@ from tqdm import tqdm
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
-from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
+from src.utils.embeddings import range_size_of, rel_to_abs
 from src.utils.train import (
     OptimizerConfig,
     NormControlConfig,
@@ -42,20 +42,16 @@ class AdversarialConfig:
     then counted in validation events, not epochs: ``eval_rob_freq=5`` with
     ``patience=200`` means 1000 epochs without improvement.
 
-    ``stop_crit="at_loss"`` (the default) selects on the validation mirror of
-    whichever of the two objectives above the run is training under — computed by
-    :func:`eval_at` or :func:`eval_split` respectively. It is the only criterion
-    that sees the generative half of the loss at ``alpha > 0``; ``rob`` selects on
-    robust accuracy alone, and ``mixed_loss`` on clean data alone. Like ``rob`` it
-    is produced only on ``eval_rob_freq`` epochs, so it requires
-    ``eval_rob_freq >= 1``.
+    Selection is on ``objective`` (D8): the validation mirror of whichever of the two
+    objectives above the run is training under, computed by :func:`eval_at` or
+    :func:`eval_split` respectively. It needs the attack, so it is produced only on
+    ``eval_rob_freq`` epochs, and ``eval_rob_freq >= 1`` is required.
     """
     max_epoch: int = 100
     batch_size: int = 64
     alpha: float = 0.0  # mixed-NLL weight for the training objective: alpha*gen + (1-alpha)*dis
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     evasion: EvasionConfig = field(default_factory=EvasionConfig)
-    stop_crit: str = "at_loss"
     patience: int = 250
     eval_rob_freq: int = 5
     clean_weight: float = 0.0
@@ -73,10 +69,6 @@ class AdversarialConfig:
 
 import logging
 logger = logging.getLogger(__name__)
-
-_LOSS_METRICS = {"dis_loss", "gen_loss", "mixed_loss", "at_loss"}
-_ACC_METRICS = {"acc", "rob"}
-_VALID_STOP_CRIT = _LOSS_METRICS | _ACC_METRICS
 
 # Constant (not the run seed) so every seed in a sweep evaluates robustness on
 # the same validation samples, keeping cross-seed rob comparisons clean.
@@ -111,7 +103,6 @@ class AdversarialTrainer:
         self._nc_log_target: float | None = None
 
         self.adv_indices: set[int] = set()
-        self._n_rob_valid: int | None = None
         if train_cfg.gen_on_clean:
             self._init_split()
 
@@ -125,11 +116,6 @@ class AdversarialTrainer:
         """
         cfg = self.train_cfg
 
-        if cfg.eval_rob_freq < 1:
-            raise ValueError(
-                "gen_on_clean=True requires eval_rob_freq >= 1: it is the cadence "
-                "of the whole validation pass, not just of the robustness eval."
-            )
         if cfg.alpha >= 1.0:
             logger.warning(
                 "gen_on_clean=True with alpha=1: the discriminative term vanishes, "
@@ -176,36 +162,20 @@ class AdversarialTrainer:
         self._curriculum_eps_start_abs = rel_to_abs(
             self.train_cfg.curriculum_eps_start_rel, range_size
         )
-        # Robustness is logged under its relative budget so the key states what was
-        # measured. The Optuna objective does NOT go through this key — it flows
-        # through trainer.best[stop_crit] <- valid_perf, whose adversarial entries
-        # ("rob", "at_loss") come from eval_at() / eval_split().
-        self.rob_metric_key = f"rob/valid/{fmt_budget(self.base_eps_rel)}"
+        # Robustness is reported under its relative budget, so the logged key states
+        # what was measured.
         logger.info(
             f"Attack budget: eps_rel={self.base_eps_rel:g} "
-            f"-> eps_abs={self.base_eps_abs:g} (input range width {range_size:g}); "
-            f"robustness logged as '{self.rob_metric_key}'"
+            f"-> eps_abs={self.base_eps_abs:g} (input range width {range_size:g})"
         )
 
     def _init_best(self):
-        self.best = {
-            "dis_loss": float("inf"), "gen_loss": float("inf"),
-            "mixed_loss": float("inf"), "acc": 0.0,
-        }
-        if self.train_cfg.eval_rob_freq > 0:
-            self.best["rob"] = 0.0
-            self.best["at_loss"] = float("inf")
-        self.stopping_criterion_name = self.train_cfg.stop_crit
-        if self.stopping_criterion_name not in _VALID_STOP_CRIT:
+        self.best = {"objective": float("inf")}
+        if self.train_cfg.eval_rob_freq < 1:
             raise ValueError(
-                f"Invalid stop_crit '{self.stopping_criterion_name}'. "
-                f"Must be one of: {sorted(_VALID_STOP_CRIT)}"
-            )
-        if self.stopping_criterion_name == "at_loss" and self.train_cfg.eval_rob_freq < 1:
-            raise ValueError(
-                "stop_crit='at_loss' requires eval_rob_freq >= 1: the criterion is "
-                "the objective mirrored on the validation attack, so with no "
-                "attack epochs it is never produced and no model is ever selected."
+                "Selection requires eval_rob_freq >= 1: it is on the objective "
+                "mirrored on the validation attack, so with no attack epochs it is "
+                "never produced and no model is ever selected."
             )
 
     def _get_eps_abs(self, epoch: int) -> float:
@@ -321,13 +291,13 @@ class AdversarialTrainer:
 
     def _update(self):
         """Check if valid_perf improved; update best tensors and patience counter."""
-        current_value = self.valid_perf.get(self.stopping_criterion_name)
+        current_value = self.valid_perf.get("objective")
         if current_value is None:
             return
 
         # Clean-accuracy floor: never select a model whose clean acc has collapsed.
         # Sub-floor epochs count as non-improvements. If no epoch ever meets the
-        # floor, `best` keeps its init (e.g. rob=0.0) and `best_tensors` stays the
+        # floor, `best` keeps its init (objective=inf) and `best_tensors` stays the
         # starting (pretrained) model — HPO then sees the worst objective, and a
         # saved seed_sweep run falls back to the clean pretrained model.
         floor = self.train_cfg.acc_floor
@@ -335,17 +305,7 @@ class AdversarialTrainer:
             self.patience_counter += 1
             return
 
-        former_best = self.best.get(
-            self.stopping_criterion_name,
-            0.0 if self.stopping_criterion_name in _ACC_METRICS else float("inf")
-        )
-
-        if self.stopping_criterion_name in _ACC_METRICS:
-            improved = current_value > former_best
-        else:
-            improved = current_value < former_best
-
-        if improved:
+        if current_value < self.best["objective"]:
             self.best = dict(self.valid_perf)
             self.best_tensors = [t.clone().detach() for t in self.cbm.tensors]
             self.best_epoch = self.epoch
@@ -412,8 +372,6 @@ class AdversarialTrainer:
                     clean_weight=self.train_cfg.clean_weight,
                     adv_indices=self.adv_indices,
                 )
-                # Kept out of valid_perf so it never leaks into `best`.
-                self._n_rob_valid = self.valid_perf.pop("n_rob")
             elif do_valid and rob_freq and (self.epoch % rob_freq == 0):
                 # One pass covering clean metrics, the attack, and the objective
                 # mirrored on valid — cheaper than eval_metrics + eval_rob, which
@@ -425,15 +383,11 @@ class AdversarialTrainer:
                     clean_weight=self.train_cfg.clean_weight,
                 )
             elif do_valid:
+                # Clean-only epoch: no attack, hence no objective and no selection.
                 dis_loss, acc, gen_loss = eval_metrics(
                     self.cbm, self.datahandler.classification["valid"], self.device
                 )
-                alpha = self.train_cfg.alpha
-                mixed_loss = alpha * gen_loss + (1 - alpha) * dis_loss
-                self.valid_perf = {
-                    "dis_loss": dis_loss, "gen_loss": gen_loss,
-                    "mixed_loss": mixed_loss, "acc": acc,
-                }
+                self.valid_perf = {"loss_dis": dis_loss, "loss_gen": gen_loss, "acc": acc}
 
             postfix = {"loss": f"{self._train_loss:.4f}"}
             if do_valid:
@@ -444,36 +398,25 @@ class AdversarialTrainer:
             pbar.set_postfix(**postfix)
 
             if on_epoch_end is not None:
-                metrics = {
-                    "dis_loss/train":   self._train_nll,
-                    "reg/train":        self._train_reg,
-                    # Both units, every epoch: under a curriculum these track the
-                    # ramp, so the resolved budget is always recoverable from the run.
-                    "eps_abs/train":    eps_abs,
-                    "eps_rel/train":    eps_abs / self.range_size,
+                # eps_rel follows the curriculum ramp, so the budget actually trained
+                # at stays recoverable from the run.
+                record = {
+                    "train": {
+                        "objective": self._train_nll,
+                        "penalty": self._train_reg,
+                        "eps_rel": eps_abs / self.range_size,
+                    },
+                    "norm": self._norm_stats,
                 }
-                metrics.update(self._norm_stats)
                 if do_valid:
-                    metrics.update({
-                        "dis_loss/valid":   self.valid_perf["dis_loss"],
-                        "gen_loss/valid":   self.valid_perf["gen_loss"],
-                        "mixed_loss/valid": self.valid_perf["mixed_loss"],
-                        "acc/valid":        self.valid_perf["acc"],
-                    })
-                    if "at_loss" in self.valid_perf:
-                        # The objective mirrored on valid — the selection criterion
-                        # under stop_crit="at_loss". Only produced on attack epochs.
-                        metrics["at_loss/valid"] = self.valid_perf["at_loss"]
-                    if "rob" in self.valid_perf:
-                        # Keyed by the run's relative budget. Robustness is always
-                        # evaluated at base_eps_abs (the curriculum's endpoint), so
-                        # this key is constant across epochs within a run.
-                        metrics[self.rob_metric_key] = self.valid_perf["rob"]
-                    if self._n_rob_valid is not None:
-                        # rob/valid is a (1-clean_weight) subset estimator in split
-                        # mode; log its size so that stays recoverable from the run.
-                        metrics["n_rob_valid"] = self._n_rob_valid
-                on_epoch_end(self.epoch, metrics)
+                    valid = dict(self.valid_perf)
+                    if "rob" in valid:
+                        # Always evaluated at the full budget (the curriculum's
+                        # endpoint), so the key is constant within a run. In split
+                        # mode it is a subset estimator over n_rob samples.
+                        valid["rob"] = {self.base_eps_rel: valid["rob"]}
+                    record["valid"] = valid
+                on_epoch_end(self.epoch, record)
 
             if do_valid:
                 self._update()

@@ -1,14 +1,15 @@
 """
 Unified training entry point (NLL discriminative/generative, adversarial).
 
-Mode is inferred from which trainer config is set:
-  cfg.trainer.adversarial is not None  →  adversarial (AdversarialTrainer only)
-  cfg.trainer.nll is not None          →  nll (NLLTrainer)
+Regime is inferred from which trainer config is set:
+  cfg.trainer.at is not None   →  at  (AdversarialTrainer)
+  cfg.trainer.nat is not None  →  nat (NLLTrainer)
+
+Returns the best validation objective (D8), which Optuna minimises.
 
 Usage:
-    python -m experiments.train +experiments=tests/nll tracking.mode=disabled
-    python -m experiments.train +experiments=tests/adversarial tracking.mode=disabled
-    python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
+    python -m experiments.train +experiments=tests/nat tracking.mode=disabled
+    python -m experiments.train +experiments=tests/at tracking.mode=disabled
 """
 import os
 import sys
@@ -69,23 +70,16 @@ def main(cfg: Config) -> float:
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     logger_cb = make_logger(run_dir, wandb_run=run)
 
-    if cfg.trainer.get("adversarial") is not None:
-        trainer = AdversarialTrainer(cbm, cfg.trainer.adversarial, datahandler, device)
-        trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
-        stop_crit = cfg.trainer.adversarial.stop_crit
-    elif cfg.trainer.get("nll") is not None:
-        trainer = NLLTrainer(cbm, cfg.trainer.nll, datahandler, device)
-        trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
-        stop_crit = cfg.trainer.nll.stop_crit
+    if cfg.trainer.get("at") is not None:
+        trainer = AdversarialTrainer(cbm, cfg.trainer.at, datahandler, device)
+    elif cfg.trainer.get("nat") is not None:
+        trainer = NLLTrainer(cbm, cfg.trainer.nat, datahandler, device)
     else:
-        raise ValueError("No trainer config: set trainer.nll or trainer.adversarial")
+        raise ValueError("No trainer config: set trainer.nat or trainer.at")
+    trainer.train(on_epoch_end=logger_cb, output_dir=run_dir / "models")
 
     run.finish()
-
-    objective = trainer.best.get(stop_crit, float("inf"))
-    if stop_crit in ("acc", "rob"):
-        objective = -objective
-    return objective
+    return trainer.best["objective"]
 
 
 if __name__ == "__main__":

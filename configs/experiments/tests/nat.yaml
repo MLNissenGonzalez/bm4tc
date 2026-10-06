@@ -1,10 +1,9 @@
 # @package _global_
-# Test configuration for adversarial training experiments
 experiment: test
 
 defaults:
   - override /born: fourier/test
   - override /dataset: test
-  - override /trainer/nll: null
-  - override /trainer/adversarial: test
+  - override /trainer/nat: test
+  - override /trainer/at: null
   - override /tracking: test
