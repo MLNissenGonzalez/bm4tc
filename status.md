@@ -551,4 +551,8 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D11 | **Metric keys:** every trainer logs `objective/{split}` (the optimized loss and the only selection key), plus components `loss_dis`, `loss_gen`, `loss_adv`, `acc` and `rob/{eps_rel}`. | Defined once in a metrics module. The stop_crit → metric mapping (§5.1) is deleted. |
 | D12 | **Clean break.** New code doesn't read old run dirs, configs or CSVs. Old outputs stay reachable via a git tag (`pre-ousterhout`). | Rename tolerance, legacy layouts and the migration tools go. Confirms D9. |
 | D13 | **Delete `analysis/hpo.py`.** | −1 463 L. |
+| D14 | **Name rule:** only identity axes (dataset, regime, embedding, arch, alpha, radius, seed) appear in names, written as prefix + literal: `d3r40`, `a0.01`, `eps0.1`, `s3`. lr, wd and clean_weight never appear in names. | e.g. `outputs/mnist12/at/legendre/d3r40/a0.01/eps0.1/s3/`. Prefixes are defined once. |
+| D15 | **One Trainer with an optional attack.** NAT is the no-attack case: one validation path, one selection rule, one patience meaning. (Whether the non-split AT objective survives as an option: open, see §10.) | Replaces `NLLTrainer` + `AdversarialTrainer`. |
+| D16 | **Config tree = studies + hparams table:** `defaults.yaml` (every constant, once), `datasets/*.yaml`, `studies/*.yaml` (grids), and `hparams.yaml` written only by the HPO selection step. | Replaces the 506 per-sweep YAMLs, `fill_hpo.py` and `patch_checkpoint.py`. |
+| D17 | **Run identity via manifest:** each run writes `run.json` (identity axes, study, source checkpoint, git sha, resolved hparams). Nothing parses paths. | Removes path parsing from ~25 files. |
 
