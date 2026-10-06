@@ -10,9 +10,6 @@ Standalone maintenance scripts for the bm4tc experiment pipeline. Run from the p
 |--------|---------|
 | `fill_hpo.py` | Patch `seed_sweep` configs with best HPO hyperparameters (W&B or local fallback) |
 | `delete_runs.py` | Delete sweep outputs: local dirs, W&B runs/artifacts, analysis dirs |
-| `migrate_configs.py` | One-off migration: old `nll/{dis,gen,mixed}/` layout → unified `{dataset}/{nat,at}/` layout |
-| `alpha_lr_interp.py` | Compute geometrically-interpolated LRs for alpha-curve sweeps (historical, post-migration) |
-| `fetcher.ipynb` | Interactive notebook for ad-hoc W&B data fetching |
 
 ---
 
@@ -62,29 +59,3 @@ python tools/delete_runs.py --analysis-only --list
 ```
 
 Filter flags (`--trainer`, `--kind`, `--embedding`, `--arch`, `--dataset`, `--date`) all accept one or more values; they are OR-within a flag, AND-across flags.
-
----
-
-## `migrate_configs.py` — Config layout migration (historical)
-
-One-off script that renamed the old `nll/{dis,gen,mixed}/` + `adversarial/` layout to the unified `{dataset}/{nat|at}/` layout. Also strips per-file `hydra.sweep.dir` overrides that were superseded by the global template.
-
-```bash
-python tools/migrate_configs.py --dry-run    # print move plan
-python tools/migrate_configs.py --execute    # git mv + strip overrides
-```
-
-The migration is already applied; keep this script for documentation and in case configs need to be re-migrated from an older branch.
-
----
-
-## `alpha_lr_interp.py` — Geometric LR interpolation (historical)
-
-Patches `alpha_curve_mixed` configs to use geometrically-interpolated learning rates across the alpha axis, expressed as OmegaConf resolver calls.
-
-```bash
-python tools/alpha_lr_interp.py            # print table + patch configs
-python tools/alpha_lr_interp.py --dry-run  # print table only
-```
-
-Note: references the pre-migration `configs/experiments/generative/legendre/d10r6/alpha_curve_mixed/` path. Keep for reference; re-run only if rebuilding those configs from an old branch.

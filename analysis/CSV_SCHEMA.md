@@ -39,8 +39,8 @@ abs_eps = [round(e * rs, 6) for e in [0.05, 0.1, 0.15]]
 
 > **Historical CSVs.** Files written before this convention landed key their columns by
 > *absolute* epsilon (`rob/0.2` where the same budget is now `rob/0.1` on legendre) and
-> have neither provenance column. `tools/migrate_metric_keys.py` converts them in place.
-> `baselines/jem/` is deliberately **not** migrated — JEM has no embedding, so its
+> have neither provenance column; re-run the analysis to regenerate them.
+> `baselines/jem/` is deliberately **not** relative-keyed — JEM has no embedding, so its
 > budgets are absolute by design; `compare.py` refuses to merge the two conventions.
 
 ### `eval/uq_adv_acc/{eps_rel}` vs `eval/test/rob/{eps_rel}`

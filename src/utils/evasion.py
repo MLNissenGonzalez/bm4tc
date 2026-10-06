@@ -19,7 +19,7 @@ _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 
 @dataclass
 class EvasionConfig:
-    method: str = "FGM"
+    method: str = "PGD"
     norm: int | str = "inf"
     criterion: CriterionConfig = field(default_factory=CriterionConfig)
     eps_rel: list = field(default_factory=lambda: [0.1, 0.3])
@@ -57,60 +57,12 @@ def normalizing(x: torch.FloatTensor, norm: int | str):
     
     return normalized
 
-class FastGradientMethod:
-    """
-    Fast Gradient Method (FGM) adversarial attack.
-
-    Single-step attack that perturbs inputs in the direction of the loss gradient,
-    normalized according to the specified Lp norm.
-    """
-
-    def __init__(
-            self,
-            norm: int | str = "inf",
-            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None)
-    ):
-        self.norm = norm
-        # criterion parameter retained for API compatibility; loss is now
-        # computed via born.mixed_nll(alpha=0) in generate().
-
-    def generate(
-            self,
-            born,
-            naturals: torch.Tensor,
-            labels: torch.LongTensor,
-            eps_abs: float = 0.1,
-            device: torch.device | str = "cpu"
-    ):
-        """Generate adversarial examples using a single gradient step.
-
-        ``eps_abs`` is an absolute model-domain budget, not a fraction.
-        """
-        born.to(device)
-        naturals = naturals.to(device).detach().clone().requires_grad_(True)
-        labels = labels.to(device)
-
-        loss = _dis_loss(born, naturals, labels)
-
-        _zero_grad(born)
-        if naturals.grad is not None:
-            naturals.grad.zero_()
-
-        loss.backward()
-
-        grad = naturals.grad.detach()
-        normalized_gradient = normalizing(grad, norm=self.norm)
-
-        ad_examples = (naturals + eps_abs * normalized_gradient).detach()
-        return ad_examples
-
-
 class ProjectedGradientDescent:
     """
     Projected Gradient Descent (PGD) adversarial attack.
 
     Iterative attack that performs multiple gradient ascent steps with projection
-    back onto the epsilon ball. Stronger than FGM but more expensive.
+    back onto the epsilon ball.
     """
 
     def __init__(
@@ -309,7 +261,6 @@ class JointProjectedGradientDescent:
 
 
 _METHOD_MAP = {
-    "FGM":       FastGradientMethod,
     "PGD":       ProjectedGradientDescent,
     "JOINT_PGD": JointProjectedGradientDescent,
 }
@@ -317,7 +268,7 @@ _METHOD_MAP = {
 
 def build_attack(
     evasion_cfg: EvasionConfig,
-) -> FastGradientMethod | ProjectedGradientDescent | JointProjectedGradientDescent:
+) -> ProjectedGradientDescent | JointProjectedGradientDescent:
     """Construct an attack object from an EvasionConfig."""
     method = evasion_cfg.method
     if method == "PGD":
@@ -328,11 +279,6 @@ def build_attack(
             step_size=evasion_cfg.step_size,
             random_start=evasion_cfg.random_start,
         )
-    if method == "FGM":
-        return FastGradientMethod(
-            norm=evasion_cfg.norm,
-            criterion=evasion_cfg.criterion,
-        )
     if method == "JOINT_PGD":
         return JointProjectedGradientDescent(
             norm=evasion_cfg.norm,
@@ -340,24 +286,23 @@ def build_attack(
             step_size=evasion_cfg.step_size,
             random_start=evasion_cfg.random_start,
         )
-    raise ValueError(f"Unknown attack method: {method!r}. Expected 'FGM', 'PGD', or 'JOINT_PGD'.")
+    raise ValueError(f"Unknown attack method: {method!r}. Expected 'PGD' or 'JOINT_PGD'.")
 
 
 class RobustnessEvaluation:
     """
     Dispatching wrapper around the attack methods.
 
-    Builds an FGM / PGD / JOINT_PGD attack from a method name and forwards
+    Builds a PGD / JOINT_PGD attack from a method name and forwards
     :meth:`generate` to it.
     """
 
     def __init__(
             self,
-            method: str = "FGM",
+            method: str = "PGD",
             norm: int | str = "inf",
             criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
             eps_rel: List[float] = [0.1, 0.3],
-            # PGD-specific parameters (ignored for FGM)
             num_steps: int = 10,
             step_size: float | None = None,
             random_start: bool = True
@@ -366,15 +311,15 @@ class RobustnessEvaluation:
         Initialize robustness evaluator.
 
         Args:
-            method: Attack method - "FGM", "PGD" or "JOINT_PGD".
+            method: Attack method - "PGD" or "JOINT_PGD".
             norm: Lp norm for perturbation ball.
             criterion: Loss function configuration.
             eps_rel: Relative budgets (fractions of the input domain) this evaluator
                 was configured with. Carried for provenance only — :meth:`generate`
                 takes an absolute ``eps_abs``.
-            num_steps: PGD iterations (ignored for FGM).
-            step_size: PGD step size (ignored for FGM).
-            random_start: PGD random initialization (ignored for FGM).
+            num_steps: PGD iterations.
+            step_size: PGD step size.
+            random_start: PGD random initialization.
         """
         self.eps_rel = eps_rel
         method_cls = _METHOD_MAP[method]
@@ -386,17 +331,12 @@ class RobustnessEvaluation:
                 step_size=step_size,
                 random_start=random_start
             )
-        elif method == "JOINT_PGD":
+        else:
             self.method = method_cls(
                 norm=norm,
                 num_steps=num_steps,
                 step_size=step_size,
                 random_start=random_start
-            )
-        else:
-            self.method = method_cls(
-                norm=norm,
-                criterion=criterion
             )
 
     def generate(
@@ -433,7 +373,6 @@ if __name__ == "__main__":
     eps_abs = rel_to_abs(eps_rel, range_size_of(cbm))  # legendre: 0.05 * 2.0 = 0.1
 
     for name, ec in [
-        ("FGM", EvasionConfig(method="FGM", eps_rel=[eps_rel])),
         ("PGD", EvasionConfig(method="PGD", num_steps=3, eps_rel=[eps_rel])),
     ]:
         attack = build_attack(ec)

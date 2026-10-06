@@ -14,7 +14,6 @@ For the full CSV column schema, see [`analysis/CSV_SCHEMA.md`](CSV_SCHEMA.md).
 | `run.py` | Single-model deep analysis (acc, rob, MIA, UQ) — callable API |
 | `sweep.py` | Post-hoc evaluation of a full seed sweep; primary analysis tool |
 | `gibbs.py` | Gibbs-purification defense on a seed sweep — split out because it costs orders of magnitude more than everything in `sweep.py` |
-| `hpo.py` | Explore HPO results: parameter-metric correlations, surface plots |
 | `batch.py` | Batch-queue runner: processes all unanalyzed sweeps via `sweep.py` |
 
 ---

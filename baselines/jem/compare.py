@@ -45,7 +45,7 @@ def _check_budget_units(frames: list[pd.DataFrame]) -> None:
             "Refusing to combine CSVs with mixed epsilon conventions: found "
             f"{sorted(units)}. Relative-keyed files carry eps_unit='rel' (and a "
             "range_size column); files without it are absolute-keyed. Re-run the "
-            "absolute-keyed analysis, or migrate it with tools/migrate_metric_keys.py."
+            "absolute-keyed analysis."
         )
 
 
