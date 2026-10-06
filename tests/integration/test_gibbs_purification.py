@@ -281,8 +281,11 @@ def test_gibbs_numeric_regression():
     def make_cbm():
         torch.manual_seed(0)
         m = ConditionalBornMachine(
-            cfg=CBMConfig(embedding="legendre",
-                          init_kwargs=MPSInitConfig(in_dim=2, bond_dim=3, std=1e-1)),
+            # Explicit: the model these goldens were pinned on (real dtype, randn
+            # init, raw amplitudes), independent of the schema defaults (D4).
+            cfg=CBMConfig(embedding="legendre", accumulate=False,
+                          init_kwargs=MPSInitConfig(in_dim=2, bond_dim=3, std=1e-1,
+                                                    init_method="randn", dtype="float32")),
             data_dim=4, num_classes=3, device=torch.device("cpu"),
         )
         m.prepare(device=torch.device("cpu")); m.eval(); m.cache_log_Z()

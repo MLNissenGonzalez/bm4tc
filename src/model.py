@@ -88,23 +88,23 @@ class MPSInitConfig:
     bond_dim: int = 3
     out_position: Optional[int] = None
     boundary: Text = "obc"
-    init_method: Text = "randn"
+    init_method: Text = "randn_eye"
     std: float = 1e-9
     n_features: Optional[int] = None
     out_dim: Optional[int] = None
-    dtype: Optional[str] = None
+    dtype: str = "complex64"  # D4; real dtypes stay available, none is in a study
 
 
 @dataclass
 class CBMConfig:
     init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
-    embedding: str = "fourier"
+    embedding: str = "legendre"
     model_path: Optional[str] = None
-    # Opt-in overflow-safe amplitudes: route mixed_nll + class_probabilities
-    # through the norm-accumulating contraction (log_amp_sq) instead of the raw
-    # amplitudes() path. Off by default; enable per-run for overflow-prone
-    # configs (high bond dim, alpha=1). See log_amp_sq.
-    accumulate: bool = False
+    # Overflow-safe amplitudes: route mixed_nll + class_probabilities through the
+    # norm-accumulating contraction (log_amp_sq_accumulate) instead of the raw
+    # amplitudes() path. On by default (every production config set it); equal to
+    # the raw path wherever that does not overflow. See log_amp_sq.
+    accumulate: bool = True
 
 
 class ConditionalBornMachine(tk.models.MPS):
@@ -158,7 +158,7 @@ class ConditionalBornMachine(tk.models.MPS):
         if tensors is not None:
             _dtype = tensors[0].dtype
         else:
-            _dtype = _DTYPE_MAP.get(cfg.init_kwargs.dtype, torch.float32)
+            _dtype = _DTYPE_MAP[cfg.init_kwargs.dtype]
 
         # ── Embedding ─────────────────────────────────────────────────────
         self.embedding_name = cfg.embedding

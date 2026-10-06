@@ -20,10 +20,12 @@ def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
 
 def test_cbmconfig_defaults():
     cfg = CBMConfig()
-    assert cfg.embedding == "fourier"
+    assert cfg.embedding == "legendre"
     assert cfg.model_path is None
-    assert cfg.init_kwargs.in_dim == 4
-    assert cfg.init_kwargs.bond_dim == 3
+    assert cfg.accumulate is True
+    assert cfg.init_kwargs.dtype == "complex64"  # D4
+    assert cfg.init_kwargs.init_method == "randn_eye"
+    assert cfg.init_kwargs.std == 1e-9
 
 
 def test_abs_square_real():
@@ -683,9 +685,8 @@ def test_accumulate_mode_isolation():
 # norm-accumulating log_amp_sq. Default off, so training/eval are unchanged
 # unless a run opts in (born.accumulate=true).
 
-def test_cbmconfig_accumulate_default_false():
-    assert CBMConfig().accumulate is False
-    assert _acc_cbm().accumulate is False
+def test_cbmconfig_accumulate_is_settable():
+    assert _acc_cbm(accumulate=False).accumulate is False
     assert _acc_cbm(accumulate=True).accumulate is True
 
 
