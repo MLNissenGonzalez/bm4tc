@@ -1,6 +1,6 @@
 # Simplification plan
 
-Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D36 in
+Draft, 2026-10-06, branch `ousterhout`. It implements the decisions D1–D41 in
 `status.md` §11. The principles come from `ousterhout.md`. This plan covers the
 *how* and the *order*. Where it has to choose something the decisions leave open,
 it says so; see §6.
@@ -40,7 +40,8 @@ bm4tc/
     data.py             # datasets, splits, rescaling (takes an input range, not a model)
     runs.py             # names (D14), run.json (D17), study resolution, warm-start lookup (D19)
     metrics.py          # metric keys, objective/{split}, selection rule; documents CSV columns
-    stages.py           # hpo, select, train, analyse, prune
+    stages.py           # hpo, select, train, analyse, prune, status
+    executor.py         # job DAG + GPU worker pool (D38)
     figures/            # one function per paper figure/table, driven by paper.yaml
   __main__.py           # CLI: python -m bm4tc <verb> <study>
 configs/
@@ -74,6 +75,10 @@ python -m bm4tc analyse  studies/mnist12_nat     # per-run analysis.json (cached
 python -m bm4tc run      studies/mnist12_nat     # all of the above, skipping finished steps
 python -m bm4tc figures  paper                   # every figure and .tex table
 python -m bm4tc prune    studies/mnist12_nat --keep-one | --all | --old
+python -m bm4tc status   studies/mnist12_nat     # done / running / failed per cell, log paths
+
+# parallel on a multi-GPU node, started by hand in tmux (D37, D38):
+python -m bm4tc run studies/mnist12_nat --gpus 0,1,2,3 --per-gpu 2
 ```
 
 **Interfaces that carry the design** (each owned by exactly one module):
@@ -159,8 +164,7 @@ remaining config passes the schema.
   NAT is `attack=None` (then `cw` is irrelevant and the bracket is `L_dis(x)`).
 - **One validation path:** every `eval_every` epochs, computing `objective/valid` and
   components, plus `rob` when there is an attack. Patience counts validation events,
-  in one documented sense. `acc_floor` and `curriculum` stay as `Trainer` options only
-  if a study in the journal scope sets them.
+  in one documented sense. `curriculum` stays (default on); `acc_floor` is deleted (D40).
 - **Delete** the non-split objective, `eval_at`, the third (metrics-only) AT path, and
   the duplicate metric-set constants. Record the non-split ablation idea in
   `GUIDE.md` (D18).
@@ -220,8 +224,19 @@ no code outside `runs.py` builds or parses a run path.
 
 1. **Package move** `src/` + `experiments/` + `analysis/` → `bm4tc/{core,analysis,pipeline}` (D32),
    with `__main__.py` exposing the verbs and `test_import_rule.py` guarding the boundaries.
-2. **`select`** (D21) and **`train`**: Hydra multirun over the study grid; the launcher
-   is pluggable (local: basic/joblib; mathqi: see §6, Q2).
+2. **`select`** (D21) and **`train`**: the study grid is expanded into jobs (one per
+   cell × seed). Hydra composes each job's config (compose API); **execution is our own
+   executor** (D38), not a Hydra launcher.
+   - **`pipeline/executor.py`:** a DAG of jobs (warm runs depend on their α=0 run;
+     analysis depends on training) run by a worker pool, `--gpus 0,1 --per-gpu k`.
+     Each worker pins `CUDA_VISIBLE_DEVICES`. Logs go to one file per job. A job is
+     done when its output (checkpoint + `run.json`, or `analysis.json`) exists, which
+     makes every verb resumable after a crash or a closed tmux.
+   - **`status <study>`** (new verb): shows done/running/failed/pending per cell, with
+     the path to the failing job's log. On the cluster there is no agent to ask
+     (D37), so this replaces it.
+   - **HPO:** one Optuna study per grid cell with a JournalFile storage under the
+     study's output dir; `--per-gpu`/`--gpus` workers pull trials in parallel.
 3. **`analyse`:**
    - per-run `analysis.json` keyed by a hash of the resolved analysis settings;
      resumes after failure;
@@ -270,8 +285,9 @@ detection numbers, which change by design (D2).
 - **`python -m bm4tc run paper`:** resolves `paper.yaml` into the study DAG
   (NAT α=0 → warm NAT/AT → analysis → figures), runs independent studies in
   parallel through the launcher, and skips finished steps.
-- Needs the mathqi launcher (§6, Q2), a compute estimate per study, and the final
-  study list (D6, D7).
+- Uses the D38 executor across studies (one DAG for the whole paper). Needs a
+  compute estimate per study and the final study list (D6, D7, D41). Runs by hand on
+  the lab HPC in tmux (D37); `status paper` reports progress.
 
 ### Phase 9 (separate track): tensorkrowch
 
@@ -307,6 +323,8 @@ Rough, to be checked after each phase:
 
 ## 5. Risks
 
+- **Tests on 8 GB** (RTX 2080): the seam test and the slow tests must fit; MNIST-scale
+  checks use tiny arches.
 - **Hydra limits:**
   - per-cell hparams lookup inside a multirun grid → solved with a resolver reading
     `configs/hparams/<study>.yaml`;
@@ -323,13 +341,8 @@ Rough, to be checked after each phase:
 ## 6. Open questions
 
 1. ~~Package layout~~ → three areas (D32).
-2. **mathqi.** What scheduler does it run (SLURM, or plain SSH/GPU)? That decides the
-   Hydra launcher (submitit vs. joblib) for phases 5 and 8. Where does
-   `BM4TC_DATA_ROOT` point there?
-3. **W&B.** Keep it for live training curves only (manifests and CSVs are the system
-   of record), or drop it?
-4. **Study grids** in the phase 4 table: confirm them, especially the embedding-appendix
-   α values, MNIST12 AT arches, and the TS dataset list.
-5. **`acc_floor` and `curriculum`:** keep as Trainer options only if the journal
-   studies use them. Do they?
+2. ~~Scheduler~~ → lab HPC, plain SSH, own executor (D37, D38). Still to fill in: `BM4TC_DATA_ROOT` on the cluster.
+3. ~~W&B~~ → live curves only (D39).
+4. **Study grids:** Martin edits the Phase 4 table (D41).
+5. ~~`acc_floor` / `curriculum`~~ → keep curriculum, drop acc_floor (D40).
 6. ~~CLI~~ → confirmed (D33).

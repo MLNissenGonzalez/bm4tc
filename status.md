@@ -5,8 +5,8 @@ against the vocabulary of `ousterhout.md`; red flags are named in **bold** where
 apply. The survey only describes what is there. Decisions go into `plan.md`.
 
 **How "actually run" was established.** A sweep counts as run if its analysis output
-is committed under `analysis/outputs/`. Raw `outputs/` lives on mathqi only and is not
-on this laptop. HPO studies are inferred from filled `???` placeholders and commit
+is committed under `analysis/outputs/`. Raw `outputs/` lived on mathqi (Martin's old thesis cluster) and is not
+on this laptop. Future runs use the lab HPC (D37). HPO studies are inferred from filled `???` placeholders and commit
 messages. W&B was not queried.
 
 ---
@@ -528,7 +528,7 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
    (paths, metric keys, selection) into the main code?
 6. **CLAUDE.md.** Un-ignore it (or move its content into `GUIDE.md`) so design notes
    travel with the repo?
-7. **Raw outputs.** Is mathqi `outputs/` the system of record, with only
+7. ~~Raw outputs~~ → lab HPC, `BM4TC_DATA_ROOT` (D37). Old: is mathqi `outputs/` the system of record, with only
    `analysis/outputs/` in git? A paper-reproduction script needs to know where
    checkpoints live.
 
@@ -574,6 +574,11 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 | D34 | **Hyperparameters per study:** `configs/hparams/<study>.yaml`, written only by `select <study>` (20–60 lines each; one big file would be ≈550). | |
 | D35 | **JEM: own trainer, shared analysis.** JEM keeps its SGLD training. It shares the study format, manifests, metric keys, `select` and the *entire* analysis (same attacks, detection, purification) through a narrow interface: `log p(c\|x)`, `log p(x)` (unnormalised allowed), save/load. Its duplicate `attacks.py`/`purification.py` go; the SGLD purifier stays as a JEM-specific defence. | Makes the rebuttal's "same attacks, same protocols" true by construction, not by convention. Supersedes D24's wording. |
 | D36 | **Study = dataset × regime (× model).** Appendix variants (capacity, embedding) are their own studies; `paper.yaml` maps figures to studies. | |
+| D37 | **Compute: the lab HPC, not mathqi.** Plain SSH, some nodes with several CUDA GPUs; jobs are started by hand in tmux/screen. **No AI agents on the cluster.** Tests and development run on the local RTX 2080 (8 GB). | The pipeline must be operable by hand from short commands, resumable, and must log to files. Parallelism is ours to provide (no scheduler). Tests must fit 8 GB. |
+| D38 | **Parallelism = one local job pool.** Every unit of work (a grid cell of a study: train or analyse one run) is an independent job with dependencies (warm runs wait for their α=0 run). `run` executes the DAG with a worker pool: `--gpus 0,1,…` × `--per-gpu k` (several jobs share one GPU's memory). The same pool parallelises runs within a study and across studies. | Hydra stays for config *composition*; execution uses our own small executor, not Hydra launchers. HPO trials parallelise through Optuna's shared storage. |
+| D39 | **W&B: live curves only.** Training logs curves (online on the cluster, disabled in tests); nothing reads back from W&B. | `wandb_fetcher.py` and the W&B branches in tools go. |
+| D40 | **AT: keep the curriculum, drop `acc_floor`.** The curriculum moves into defaults (ramp to the full radius by a fixed fraction of `max_epoch`). `acc_floor` was a second selection rule competing with D8. | |
+| D41 | **Study grids:** Martin edits the Phase 4 table in `plan.md` directly. | |
 
 ---
 
