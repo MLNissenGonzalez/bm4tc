@@ -897,7 +897,7 @@ def test_accumulate_cfg_sync_persists_override(tmp_path):
 
     cbm = ConditionalBornMachine.load(p)
     cbm.accumulate = True
-    # mirror experiments/train.py: persist the override into the model config
+    # mirror experiments/stages.py: persist the override into the model config
     OmegaConf.set_struct(cbm.cfg, False)
     cbm.cfg.accumulate = cbm.accumulate
     OmegaConf.set_struct(cbm.cfg, True)

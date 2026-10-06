@@ -33,16 +33,17 @@ def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]
     return log
 
 
-def init_wandb(cfg: Config, job) -> wandb.Run:
-    """Start the W&B run of a job: grouped by grid cell, named by seed (D47)."""
+def init_wandb(cfg: Config, run_dir: Path, names: Dict[str, str]) -> wandb.Run:
+    """Start a W&B run in ``run_dir``; ``names`` (group, name, job_type) come from
+    :meth:`experiments.runs.Job.wandb` (D47)."""
     return wandb.init(
         project=cfg.tracking.project,
         entity=cfg.tracking.entity,
-        dir=str(job.run_dir),
+        dir=str(run_dir),
         config=OmegaConf.to_container(cfg, resolve=True),
         mode=cfg.tracking.mode,
         reinit="finish_previous",
-        **job.wandb(),
+        **names,
     )
 
 

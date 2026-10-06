@@ -52,7 +52,7 @@ def _python(args, root: Path) -> str:
 
 def _train(root: Path, study: str) -> Path:
     """Train the study's single job; returns its run dir (from experiments.runs)."""
-    _python(["-m", "experiments.train", study], root)
+    _python(["-m", "experiments", "train", study], root)
     out = _python(["-c", "import sys; from experiments.runs import Study; "
                    "print(Study(sys.argv[1]).jobs()[0].run_dir)", study], root)
     return Path(out.strip().splitlines()[-1])

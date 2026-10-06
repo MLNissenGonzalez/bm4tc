@@ -19,7 +19,7 @@ dependencies:
       - tensorkrowch                                                                                                                                                                  
       - opt_einsum==3.2                                                                                                                                                               
       - hydra-core                                                                                                                                                                    
-      - hydra-optuna-sweeper                                                                                                                                                          
+      - optuna>=4
       - wandb 
       - pandas
       - h5py

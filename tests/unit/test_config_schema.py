@@ -21,7 +21,7 @@ def test_study_composes_under_schema(name):
             study.cells()
         return
     for cell in study.cells():  # one seed per cell: seeds only set tracking.seed
-        cfg = Job(study, cell, study.seeds()[0]).compose(hparams=False)  # no `select` yet
+        cfg = Job(study, cell, study.seeds()[0]).compose(hparams={})  # no `select` yet
         OmegaConf.to_container(cfg, resolve=True)
         if cfg.trainer.evasion is not None:  # untyped in the schema (D53)
             evasion_config(cfg.trainer.evasion)

@@ -1,0 +1,22 @@
+# tests/e2e/test_stages.py: warm AT HPO from tests/stages_nat's alpha=0 run.
+dataset: spirals
+regime: at
+init: warm
+warm_from: tests/stages_nat
+seeds: [7]
+grid:
+  arch: [d4r3]
+  alpha: [0]
+  eps: [0.1]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  trainer.max_epoch: 2
+  trainer.batch_size: 64
+  trainer.eval_every: 1
+  trainer.curriculum: false
+  trainer.evasion.num_steps: 2
+  tracking.mode: disabled
+hpo:
+  n_trials: 2
+  space:
+    trainer.clean_weight: [0.2, 1.0]

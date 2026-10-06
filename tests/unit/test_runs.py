@@ -56,13 +56,13 @@ def test_embedding_settings_apply_per_cell():
     study = Study("spirals_embedding")
     hermite = next(c for c in study.cells() if c.embedding == "hermite")
     legendre = next(c for c in study.cells() if c.embedding == "legendre")
-    assert Job(study, hermite, 1).compose(hparams=False).born.init_kwargs.init_method == "canonical"
-    assert Job(study, legendre, 1).compose(hparams=False).born.init_kwargs.init_method == "randn_eye"
+    assert Job(study, hermite, 1).compose(hparams={}).born.init_kwargs.init_method == "canonical"
+    assert Job(study, legendre, 1).compose(hparams={}).born.init_kwargs.init_method == "randn_eye"
 
 
 def test_cell_sets_the_model_and_alpha():
     study = Study("mnist12_at")
-    cfg = Job(study, Cell("legendre", "d3r20", 0.01, 0.1), 2).compose(hparams=False)
+    cfg = Job(study, Cell("legendre", "d3r20", 0.01, 0.1), 2).compose(hparams={})
     assert (cfg.born.init_kwargs.in_dim, cfg.born.init_kwargs.bond_dim) == (3, 20)
     assert cfg.trainer.alpha == 0.01
     assert list(cfg.trainer.evasion.eps_rel) == [0.1]
@@ -87,11 +87,13 @@ def test_missing_hparams_fail_loudly():
         study.jobs()[0].compose()
 
 
-def test_hparams_are_read_per_cell():
+def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
+    monkeypatch.setattr(runs, "HPARAMS", tmp_path)
     study = Study("spirals_at")
     cell = study.cells()[1]
-    study.__dict__["_hparams"] = {cell.name: {  # what configs/hparams/spirals_at.yaml would hold
-        "trainer.optimizer.kwargs.lr": 3e-3, "trainer.clean_weight": 0.4, "extra": 1}}
+    (tmp_path / "spirals_at.yaml").write_text(  # as `select spirals_at` writes it
+        f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-3\n"
+        "  trainer.clean_weight: 0.4\n  extra: 1\n")
     assert study.hparams(cell) == {"trainer.clean_weight": 0.4,
                                    "trainer.optimizer.kwargs.lr": 3e-3}
     cfg = Job(study, cell, 1).compose()

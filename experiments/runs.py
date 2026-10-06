@@ -13,6 +13,10 @@ Names follow D14: identity axes only, as prefix + value (``d3r40``, ``a0.01``,
 and is finished when it holds ``run.json`` (D17): identity, warm-start source,
 git sha, launch time, the resolved config and its hash. Nothing parses run paths;
 runs are found by reading manifests.
+
+A cell's HPO lives next to its seed runs, in ``{cell}/hpo/``: one Optuna study
+(``journal.log``) and one directory per trial (``t{n}/``, curves only, no
+checkpoint; D22). Trials train with the study's first seed (:meth:`Study.hpo_job`).
 """
 
 import dataclasses
@@ -24,7 +28,6 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from functools import cached_property
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +39,7 @@ from src.utils.paths import data_root
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIGS = REPO / "configs"
+HPARAMS = CONFIGS / "hparams"          # written by `select` only (D34)
 REGIMES = ("nat", "at")
 
 register()
@@ -186,24 +190,32 @@ class Study:
     def jobs(self) -> List["Job"]:
         return [Job(self, cell, seed) for cell in self.cells() for seed in self.seeds()]
 
-    @cached_property
-    def _hparams(self) -> Dict[str, Dict[str, Any]]:
-        path = CONFIGS / "hparams" / f"{self.name}.yaml"
-        if not path.exists():
-            return {}
-        return OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    # ── HPO (D21, D22, D34) ─────────────────────────────────────────────────
+
+    def hpo_job(self, cell: Cell) -> "Job":
+        """The job whose config and warm start every HPO trial of the cell uses."""
+        return Job(self, cell, self.seeds()[0])
+
+    def hpo_dir(self, cell: Cell) -> Path:
+        return outputs_root() / self.name / cell.name / "hpo"
+
+    @property
+    def hparams_path(self) -> Path:
+        return HPARAMS / f"{self.name}.yaml"
 
     def hparams(self, cell: Cell) -> Dict[str, Any]:
         """The selected hparams of a cell (D21, D34); every key of the HPO space."""
         if self.cfg.hpo is None:
             return {}
         wanted = set(self.cfg.hpo.space)
-        got = self._hparams.get(cell.name, {})
+        path = self.hparams_path
+        selected = OmegaConf.to_container(OmegaConf.load(path)) if path.exists() else {}
+        got = selected.get(cell.name, {})
         missing = wanted - set(got)
         if missing:
             raise LookupError(
                 f"{self.name}: no selected hparams for cell {cell.name} "
-                f"(missing {sorted(missing)} in configs/hparams/{self.name}.yaml); "
+                f"(missing {sorted(missing)} in {self.hparams_path}); "
                 f"run HPO and `select {self.name}` first"
             )
         return {k: got[k] for k in sorted(wanted)}
@@ -233,25 +245,32 @@ class Job:
                 "regime": self.study.regime, "embedding": c.embedding, "arch": c.arch,
                 "alpha": c.alpha, "eps": c.eps, "seed": self.seed}
 
-    def wandb(self) -> Dict[str, str]:
-        """W&B grouping (D47): one group per grid cell, its seeds as runs."""
-        return {"group": f"{self.study.name}/{self.cell.name}", "name": f"s{self.seed}",
-                "job_type": "train"}
+    def wandb(self, trial: Optional[int] = None) -> Dict[str, str]:
+        """W&B grouping (D47): one group per grid cell, its seeds (or HPO trials)
+        as runs."""
+        group = f"{self.study.name}/{self.cell.name}"
+        if trial is not None:
+            return {"group": group, "name": f"t{trial}", "job_type": "hpo"}
+        return {"group": group, "name": f"s{self.seed}", "job_type": "train"}
 
-    def values(self, hparams: bool = True) -> Dict[str, Any]:
-        """Every run-config value this job sets, in order of precedence (later wins)."""
+    def values(self, hparams: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Every run-config value this job sets, in order of precedence (later wins).
+        ``hparams``: the cell's selected ones if None, else these (an HPO trial)."""
+        if hparams is None:
+            hparams = self.study.hparams(self.cell)
         values = {
             **self.cell.values(),
             **self.study.cfg.embeddings.get(self.cell.embedding, {}),
             **self.study.cfg.config,
-            **(self.study.hparams(self.cell) if hparams else {}),
+            **hparams,
             "tracking.seed": self.seed,
         }
         return OmegaConf.to_container(OmegaConf.create(values), resolve=True)
 
-    def compose(self, hparams: bool = True) -> DictConfig:
+    def compose(self, hparams: Optional[Dict[str, Any]] = None) -> DictConfig:
         """The run config: config.yaml with the study's dataset and regime, then
-        this job's values set key by key on the schema (an unknown key fails)."""
+        this job's values set key by key on the schema (an unknown key fails).
+        ``hparams`` as in :meth:`values`."""
         with initialize_config_dir(str(CONFIGS), version_base=None):
             cfg = compose("config", overrides=[
                 f"dataset={self.study.cfg.dataset}", f"trainer={self.study.regime}",
@@ -328,10 +347,7 @@ class Job:
                     f"start changed). Pass --replace to move the old run to "
                     f"{outputs_root() / self.study.name / '.replaced'}/."
                 )
-            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            dest = outputs_root() / self.study.name / ".replaced" / stamp / self.cell.name / f"s{self.seed}"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(run_dir), str(dest))
+            archive(self.study.name, run_dir)
         elif run_dir.exists():
             shutil.rmtree(run_dir)
         run_dir.mkdir(parents=True)
@@ -352,6 +368,17 @@ class Job:
             "config": OmegaConf.to_container(cfg, resolve=True),
         }
         (self.run_dir / "run.json").write_text(json.dumps(manifest, indent=2, default=str))
+
+
+def archive(study: str, path: Path) -> Path:
+    """Move a run or HPO dir of a study to ``outputs/{study}/.replaced/{date}/``,
+    keeping its path below the study; only ``prune`` deletes it from there."""
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    root = outputs_root() / study
+    dest = root / ".replaced" / stamp / path.relative_to(root)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(path), str(dest))
+    return dest
 
 
 def find_runs(**identity) -> List[tuple[Path, Dict[str, Any]]]:
