@@ -78,7 +78,5 @@ data/
 $HOME/
 
 .pytest_cache/
-pytest.ini
 reference/
 DEFERRED.md
-CLAUDE.md
