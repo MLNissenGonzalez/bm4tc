@@ -104,28 +104,73 @@ change was 2026-07-29, and its vocabulary is not produced by any current config.
 
 The paper notebooks (§6.4) read only the datasets in §2.1.
 
-### 2.3a Paper scope (as stated by Martin, 2026-10-06)
+### 2.3a The paper: published version vs. next version
 
-| Paper section | Dataset | Arch | Content |
-|---|---|---|---|
-| Main (quantitative) | mnist_full_r12 (goal: full-resolution MNIST later) | legendre d3r20c64 | NAT α-ladder; AT at α=0 and α=0.1; JEM baseline |
-| Main (qualitative) | spirals | legendre, d6r4c64 (to confirm) | same model families, discussed qualitatively |
-| Appendix | spirals | several | embedding comparison; possibly more |
-| — | time series (ecg200, italypowerdemand, …) | — | **not in the paper** |
+**Source.** `_paper/main.tex` and `_paper/detection.tex`: the TPM 2026 version
+(`\documentclass[accepted]{tpm2026}`). Per Martin, this is **outdated**. The NeurIPS
+rebuttal version added the JEM baseline and proper upscaling to MNIST r12; that
+`.tex` is not here.
 
-Consequences for this survey:
-- **Not in the paper:** everything for time-series, moons and circles; the MNIST
-  arches other than d3r20; and `mnist_full` (until the full-resolution move). That
-  is roughly 420 of the 506 configs and the `ts.ipynb` / `ts_*` visualisers.
-- **AT α discrepancy.** The committed MNIST d3r20 AT sweeps are `a0` and **`a001`
-  (α=0.01)**, not α=0.1. Either the paper means 0.01, or an α=0.1 AT sweep is still
-  missing.
-- **Spirals appendix (embeddings).** The non-legendre spirals configs
-  (fourier/hermite/chebychev, d10r6 and d30r18) have no committed analyses, so
-  either they were analysed elsewhere or this appendix isn't backed yet.
-- **Full-resolution MNIST** is a planned change. The pipeline should make "same
-  study, new dataset" a one-line change, which is a design requirement for
-  `plan.md`.
+**What the published version reports, and where it came from:**
+
+| Paper item | Data / models | Code-side source |
+|---|---|---|
+| Fig. 1 `dists_with_adv` | spirals, α ladder + AT, p(c\|x) and p(x) | `figures/dists_with_adv.pdf` |
+| Main §4: Fig. `alpha_curve_accuracy`, `alpha_curve_nll`, `defense_comparison_eps0.2`; Table `detection` | MNIST r12, **d3r20c64**, α ∈ {0, 0.01, 0.1, 0.2, 0.5, 1}, AT; 5 seeds | `figures/mnist/…` (`detection.tex` is byte-identical to the repo copy) |
+| App. spirals quantitative (`legendre_d10D6_2804_*`, `metric_eps02_col`, `summary_attacks`) | spirals **d10r6, real-valued** (not c64); 20 seeds at α∈{0,1}, 5 in between, 8 for AT; Gibbs only here | old `seed_sweep_a0_3005/a05_3005/a1_0506`, `at/…/seed_sweep_0206`, i.e. the pre-c64 sweeps |
+| App. capacity | spirals legendre (d,r) ∈ {(4,3),(6,4),(10,6),(30,18)} at α ∈ {0,1} | `figures/spirals/capacity/*`; only d4r3/d6r4/d10r6 c64 have committed analyses (0208) |
+| App. embedding | spirals d10r6, α=1, five embeddings | `figures/spirals/embedding/*`; **no committed analysis** for the non-legendre configs |
+| App. joint attack | spirals ε=0.2; MNIST ε=0.2 | `COMPUTE_JOINT_ATTACK` in `sweep.py` |
+| — | MIA | **not in the paper at all** |
+| — | time series | not in the paper |
+
+**The next version, as stated by Martin (2026-10-06):**
+- **Main:** MNIST, moving from r12 to **full-resolution MNIST**. Legendre. The NAT
+  α-ladder, **AT at α=0 and α=0.1** (the committed sweeps are α=0 and **0.01**; to
+  confirm), and a **strengthened JEM baseline**. Probably **several capacities** for
+  full MNIST; otherwise capacity is mostly irrelevant.
+- **Spirals:** qualitative in the main text, with capacity and embedding appendices.
+  The arch is d6r4c64 or similar (to confirm; the published version used d10r6
+  real).
+- **Time series:** *maybe* added as a stronger case for MPS, so the TS configs are
+  not dead yet.
+
+**Discrepancies between paper text and code** (worth fixing before the next
+submission):
+1. **The detection threshold is calibrated on the test set, not validation.** The
+   paper (Implementation Details) says "10th percentile of *validation-set*
+   likelihoods". `analysis/run.py:299` passes `classification["test"]` to
+   `UQEvaluation.evaluate`, which calibrates τ on that same loader
+   (`uq.py:442`). The commit `0a7941d7` notes that this makes the clean FPR exactly
+   q. Either the text or the code has to change; using validation is the clean
+   choice.
+2. **The MNIST AT radius was changed after publication.** The published AT used
+   `eps_rel=0.3` (abs 0.6, "relative strength 0.3" in the paper). The current
+   configs use 0.1, per their own headers. The paper's AT numbers are therefore
+   from a different radius than the current sweeps.
+3. **The spirals models in the published version are real-valued d10r6.** The
+   0208 sweeps are complex64 d4r3/d6r4/d10r6. The appendix figures need
+   regenerating from one consistent set.
+
+**Consequences for the simplification:**
+- **In scope and must stay:**
+  - NAT and AT training, warm start, norm control
+  - likelihood purification, detection, joint attack, Gibbs (spirals only)
+  - the four extra embeddings (embedding appendix)
+  - the robust-accuracy ceiling
+  - the JEM baseline, which will *grow*
+- **Possibly in scope:** time series (configs and loaders stay until decided).
+- **Out of scope as far as the paper shows:**
+  - MIA (`src/analysis/mia.py` 692 L, MIA settings in `sweep.py`). Note that
+    `analysis/utils/mia_utils.py` is misnamed: it holds `load_run_config` and
+    `find_model_checkpoint`, which every analysis needs. → **Vague name**
+  - `analysis/hpo.py` (1 463 L)
+  - moons/circles
+  - `mnist_full` 28×28 configs in their current form (to be rebuilt for the
+    full-MNIST study)
+- **Design requirement:** "same study, different dataset or capacity" must be cheap
+  (r12 → full MNIST, several bond dimensions, possibly TS). Today that means copying
+  dozens of YAMLs per arch (§3).
 
 ### 2.4 Stopping criterion: is it uniform?
 
@@ -439,8 +484,13 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
 
 ## 10. Open questions for you (to settle before `plan.md`)
 
-1. **Paper scope.** *Mostly answered, see §2.3a.* Still open: the exact spirals
-   arch, AT at α=0.1 vs 0.01, and what else the appendix holds.
+1. **Paper scope.** *Mostly answered, see §2.3a.* Still open:
+   - the spirals arch (published: d10r6 real; new sweeps: c64)
+   - AT α=0.1 vs 0.01
+   - whether TS goes in
+   - the rebuttal-version `.tex` (JEM section, r12 upscaling)
+2a. **Detection calibration.** Switch τ to validation likelihoods (matches the paper
+   text), or change the text to say test?
 2. **Stop criterion.** Should "select on the training objective evaluated on valid"
    become a *rule* (no `stop_crit` knob)? And do the MNIST/ECG/Italy `a0` sweeps
    (selected on `acc`) need re-running to comply?
@@ -448,7 +498,8 @@ eGPU. Bare `pytest` fails collection: the repo root is not on `sys.path` (no
    non-split path and two of the three validation paths can go. MNIST AT a0 was run
    with the old path; at α=0 the losses coincide, but validation cadence and patience
    semantics differ.
-4. **MIA, Gibbs, joint attack, `hpo.py`.** Which of these produce paper content?
+4. **MIA and `hpo.py`.** Neither appears in the paper. Drop or archive? (Gibbs and the
+   joint attack do appear and stay.)
 5. **JEM baseline.** Keep it as its own package, or fold its shared conventions
    (paths, metric keys, selection) into the main code?
 6. **CLAUDE.md.** Un-ignore it (or move its content into `GUIDE.md`) so design notes
