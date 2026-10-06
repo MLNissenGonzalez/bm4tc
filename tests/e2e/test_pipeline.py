@@ -35,6 +35,8 @@ AT = [
     "~trainer/nat",
     "trainer/at=test",  # PGD-5, Linf, eps_rel 0.15
     "trainer.at.alpha=0.01",
+    "trainer.at.gen_on_clean=true",  # split objective, the only one after D18
+    "trainer.at.clean_weight=0.5",  # exercises every term of the split objective
     "trainer.at.max_epoch=5",
     "trainer.at.batch_size=64",
     "trainer.at.optimizer.kwargs.lr=1e-2",
@@ -113,8 +115,8 @@ RATE_TOL = 0.02
 EXPECTED = {
     "nat": {"objective": 0.094781, "acc": 1.00, "dis_loss": 0.061173,
             "rob": 0.56, "detection": 0.08, "purified_acc": 0.57},
-    "at": {"objective": 1.043574, "acc": 0.71, "dis_loss": 0.551664,
-           "rob": 0.64, "detection": 0.08, "purified_acc": 0.65},
+    "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.339687,
+           "rob": 0.66, "detection": 0.11, "purified_acc": 0.65},
 }
 
 
