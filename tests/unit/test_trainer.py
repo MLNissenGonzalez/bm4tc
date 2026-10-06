@@ -1,0 +1,640 @@
+"""Unit tests for the Trainer (NAT and AT), its objective, validation and selection."""
+
+import math
+from unittest.mock import MagicMock, patch
+
+import pytest
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+from experiments.metrics import flatten_epoch, key
+from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from src.train.trainer import Trainer, TrainConfig
+from src.utils.train import (
+    NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate, mix,
+)
+
+CPU = torch.device("cpu")
+PGD = {"method": "PGD", "eps_rel": [0.1]}
+NO_NORM = NormControlConfig(hard_every=0, soft_strength=0.0)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def _tiny_cbm():
+    cfg = CBMConfig(
+        embedding="fourier",
+        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
+    )
+    return ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
+
+
+class _FakeDataHandler:
+    """Minimal DataHandler substitute that skips file I/O."""
+    data_dim = 2
+
+    def __init__(self, n=16, batch_size=4):
+        ds = TensorDataset(torch.rand(n, 2), torch.randint(0, 2, (n,)))
+        loader = DataLoader(ds, batch_size=batch_size)
+        self.classification = {"train": loader, "valid": loader}
+
+    def get_classification_loaders(self, batch_size=4):
+        pass  # already set up
+
+
+class _ShiftAttack:
+    """Deterministic stand-in for PGD; records which samples it was handed."""
+
+    def __init__(self, shift=0.05):
+        self.shift = shift
+        self.seen = []
+
+    def generate(self, born, naturals, labels, eps_abs, device):
+        self.seen.append(naturals.detach().clone())
+        return (naturals + self.shift).detach()
+
+
+def _trainer(cfg, *, n=16, batch_size=4, stub_attack=True):
+    """A real Trainer on a tiny model; PGD replaced by a cheap shift."""
+    t = Trainer(_tiny_cbm(), cfg, _FakeDataHandler(n=n, batch_size=batch_size), CPU)
+    if stub_attack and t.attack is not None:
+        t.attack = _ShiftAttack()
+    return t
+
+
+def _ready(t, *, norm_regularizer=None, log_target=0.0):
+    """Do what train() does before the epoch loop, so _train_epoch can run alone."""
+    t.cbm.prepare(device=CPU)
+    t.step = 0
+    t._nc_log_target = log_target
+    t.norm_regularizer = norm_regularizer
+    t.optimizer = torch.optim.Adam(t.cbm.parameters(), lr=1e-3)
+    return t
+
+
+# ── Config and construction ────────────────────────────────────────────────
+
+def test_train_config_defaults():
+    cfg = TrainConfig()
+    assert cfg.alpha == 0.0
+    assert cfg.evasion is None  # NAT
+    assert cfg.eval_every == 1
+    assert cfg.patience == 250
+    assert cfg.max_epoch == 100
+    assert cfg.batch_size == 64
+    assert cfg.save is False
+    assert not hasattr(cfg, "stop_crit")  # selection is a fixed rule (D8)
+    assert not hasattr(cfg, "acc_floor")  # D40
+    assert not hasattr(cfg, "gen_on_clean")  # the split objective is the only one (D18)
+
+
+def test_norm_control_config_defaults():
+    nc = NormControlConfig()
+    assert nc.log_target == 0.0
+    assert nc.hard_every == 0
+    assert nc.soft_strength == 0.1
+
+
+def test_nat_trainer_constructs_without_attack():
+    t = _trainer(TrainConfig())
+    assert t.attack is None
+    assert t.adv_indices == set()
+    assert t.norm_regularizer is None
+    assert len(t.best_tensors) == len(t.cbm.tensors)
+
+
+def test_trainer_sets_up_classification_loaders():
+    """If datahandler.classification is None, get_classification_loaders is called."""
+    dh = _FakeDataHandler()
+    dh.classification = None
+    called = []
+    dh.get_classification_loaders = lambda batch_size: called.append(batch_size)
+    Trainer(_tiny_cbm(), TrainConfig(), dh, CPU)
+    assert called == [TrainConfig().batch_size]
+
+
+def test_eval_every_must_be_positive():
+    with pytest.raises(ValueError, match="eval_every"):
+        _trainer(TrainConfig(eval_every=0))
+
+
+def test_unknown_evasion_key_fails_at_construction():
+    with pytest.raises(Exception, match="eps"):
+        _trainer(TrainConfig(evasion={"method": "PGD", "eps": 0.1}))
+
+
+def test_attack_budget_and_valid_subset():
+    """The subset is (1-cw)·n_valid positions, drawn from a constant seed."""
+    cfg = TrainConfig(evasion=PGD, clean_weight=0.4)
+    t = _trainer(cfg, n=20, batch_size=5)
+    assert t.eps_rel == 0.1
+    assert len(t.adv_indices) == round(0.6 * 20)
+    again = _trainer(cfg, n=20, batch_size=5)
+    assert t.adv_indices == again.adv_indices  # constant seed, not the run seed
+
+
+def test_curriculum_reaches_the_full_radius_at_its_end_fraction():
+    t = _trainer(TrainConfig(evasion=PGD, curriculum=True, curriculum_end=0.5, max_epoch=10))
+    assert t._eps_abs(0) == pytest.approx(0.0)
+    assert t._eps_abs(1) == pytest.approx(t.eps_abs / 5)
+    assert t._eps_abs(5) == pytest.approx(t.eps_abs)
+    assert t._eps_abs(9) == pytest.approx(t.eps_abs)
+    flat = _trainer(TrainConfig(evasion=PGD, max_epoch=10))
+    assert flat._eps_abs(1) == flat.eps_abs
+
+
+# ── NormRegularizer ────────────────────────────────────────────────────────
+
+def test_norm_regularizer_zero_at_target():
+    log_target = math.log(2.5)
+    reg = NormRegularizer(strength=1.0, log_target=log_target)
+    cbm = MagicMock()
+    cbm.log_Z.return_value = torch.tensor(log_target)
+    penalty = reg(cbm)
+    cbm.log_Z.assert_called_once_with(recompute=False)
+    assert penalty.item() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_norm_regularizer_nonzero_off_target():
+    reg = NormRegularizer(strength=3.0, log_target=0.0)
+    cbm = MagicMock()
+    cbm.log_Z.return_value = torch.tensor(2.0)
+    assert reg(cbm).item() == pytest.approx(3.0 * 2.0 ** 2, rel=1e-5)
+
+
+def test_norm_regularizer_invalid_target():
+    with pytest.raises(ValueError, match="log_target must be finite"):
+        NormRegularizer(strength=1.0, log_target=float("inf"))
+
+
+# ── Collapse diagnostics ───────────────────────────────────────────────────
+
+def test_diagnostics_uses_caches_without_recontracting():
+    """When mixed_nll has populated the caches, _diagnostics reads them and does
+    not contract the norm again."""
+    t = _trainer(TrainConfig(alpha=1.0))
+    cbm = t.cbm
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    cbm.mixed_nll(x, y, alpha=1.0)            # populates both caches
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        diag = t._diagnostics(x)
+    mock_logZ.assert_not_called()
+    assert diag["log_Z"] == pytest.approx(cbm._log_Z_cache.detach().item())
+    assert {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
+            "amp_nonfinite_count"} <= set(diag)
+
+
+def test_diagnostics_falls_back_when_cache_empty():
+    t = _trainer(TrainConfig(alpha=1.0))
+    assert t.cbm._log_Z_cache is None and t.cbm._amp_diag_cache is None
+    diag = t._diagnostics(torch.rand(4, 2))
+    assert math.isfinite(diag["log_Z"])
+    assert math.isfinite(diag["log_amp_sq_mean"])
+
+
+def test_amp_nonfinite_count_always_tagged_overflow():
+    """2·log(|amp|.clamp(min=tiny)) floors underflow, so a non-finite count is
+    overflow, also when the mean log|amp|² is small."""
+    s = Trainer._format_diagnostics({
+        "log_Z": 0.0,
+        "log_amp_sq_mean": 1.0, "log_amp_sq_min": 0.0, "log_amp_sq_max": 2.0,
+        "amp_nonfinite_count": 3,
+    })
+    assert "3 non-finite → overflow" in s
+    assert "underflow" not in s
+
+
+def test_format_diagnostics_surfaces_overflow_headroom():
+    assert "overflow headroom=77.45" in Trainer._format_diagnostics(
+        {"log_Z": 100.0, "log_Z_headroom": 77.45})
+    assert "headroom" not in Trainer._format_diagnostics({"log_Z": 100.0})
+
+
+def test_log_Z_overflow_ceiling_matches_float32():
+    """The float32/complex64 overflow ceiling is 2·log(finfo.max) ≈ 177.45."""
+    ceiling = 2.0 * math.log(torch.finfo(torch.float32).max)
+    assert ceiling == pytest.approx(177.45, abs=0.1)
+
+
+@pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
+def test_nonfinite_loss_collapses_after_one_retry(evasion):
+    """Both regimes: a loss that stays non-finite after cbm.reset() ends the epoch."""
+    t = _ready(_trainer(TrainConfig(evasion=evasion, norm_control=NO_NORM)))
+    nan = torch.tensor(float("nan"), requires_grad=True)
+    with patch.object(t.cbm, "mixed_nll", return_value=nan) as m, \
+         patch.object(t.cbm, "reset") as m_reset:
+        t._train_epoch(eps_abs=0.0)
+    assert t._collapsed
+    assert m_reset.called
+    assert t.step == 1
+    # alpha=0, cw=0: one forward per objective (AT: the adversarial one only)
+    assert m.call_count == 2  # the first try and one retry
+
+
+def test_runtime_error_collapses_but_oom_is_raised():
+    t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=NO_NORM)))
+    with patch.object(t.cbm, "mixed_nll", side_effect=RuntimeError("svd failed")):
+        t._train_epoch(eps_abs=0.0)
+    assert t._collapsed
+    with patch.object(t.cbm, "mixed_nll", side_effect=RuntimeError("CUDA out of memory")):
+        with pytest.raises(RuntimeError, match="out of memory"):
+            t._train_epoch(eps_abs=0.0)
+
+
+# ── Norm control in the epoch loop ─────────────────────────────────────────
+
+def test_alpha0_skips_per_step_log_partition_function():
+    """NAT alpha=0 without norm control contracts the norm once per epoch: the
+    NormTracker's end-of-epoch snapshot, not once per step."""
+    t = _ready(_trainer(TrainConfig(alpha=0.0, norm_control=NO_NORM)))  # 4 steps
+    with patch.object(t.cbm, "log_partition_function",
+                      wraps=t.cbm.log_partition_function) as mock_logZ:
+        t._train_epoch(eps_abs=0.0)
+    assert mock_logZ.call_count == 1
+    assert math.isfinite(t._norm_stats["norm/log_Z_mean"])
+
+
+@pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
+def test_alpha0_soft_norm_control_multistep_backward(evasion):
+    """Regression: alpha=0 + soft norm control trains across several steps.
+
+    The regularizer reads the with-grad log Z via recompute=False and mixed_nll
+    never refreshes it at alpha=0; without per-step invalidation the second step
+    backwards through the first step's freed graph."""
+    nc = NormControlConfig(hard_every=0, soft_strength=1.0, log_target=0.0)
+    t = _ready(_trainer(TrainConfig(alpha=0.0, evasion=evasion, norm_control=nc)),
+               norm_regularizer=NormRegularizer(strength=1.0, log_target=0.0))
+    t._train_epoch(eps_abs=0.1)
+    assert not t._collapsed
+    assert t.step >= 2
+    assert t._train_penalty > 0.0
+    assert t.cbm._log_Z_cache is None  # invalidated after the final step
+
+
+def test_norm_control_off_skips_renormalize():
+    t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=NO_NORM)))
+    with patch.object(t.cbm, "renormalize_", wraps=t.cbm.renormalize_) as m_renorm:
+        t._train_epoch(eps_abs=0.1)
+    m_renorm.assert_not_called()
+    assert t._train_penalty == 0.0
+
+
+def test_hard_renorm_called_every_step():
+    nc = NormControlConfig(hard_every=1, soft_strength=0.0, log_target=0.0)
+    t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=nc)))  # 4 steps
+    with patch.object(t.cbm, "renormalize_", wraps=t.cbm.renormalize_) as m_renorm:
+        t._train_epoch(eps_abs=0.1)
+    assert m_renorm.call_count == 4
+
+
+def test_norm_stats_populated_after_epoch():
+    t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=NO_NORM)))
+    t._train_epoch(eps_abs=0.1)
+    # alpha=0 / no soft → log_Z via the end-of-epoch snapshot; amp from the adv forward.
+    for k in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_amp_sq_mean"):
+        assert math.isfinite(t._norm_stats[k]), k
+
+
+# ── NormTracker ─────────────────────────────────────────────────────────────
+
+class _FakeNormCBM:
+    """Minimal cbm exposing the caches + dtype NormTracker reads."""
+    def __init__(self, dtype=torch.complex64, snapshot=3.0):
+        self._log_Z_cache = None
+        self._amp_diag_cache = None
+        self.dtype = dtype
+        self._snapshot = snapshot
+
+    def log_partition_function(self):
+        return torch.tensor(self._snapshot)
+
+
+def test_norm_tracker_aggregates_mean_max_min():
+    t = NormTracker()
+    cbm = _FakeNormCBM()
+    steps = [
+        (1.0, {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}),
+        (5.0, {"log_amp_sq_mean": -4.0, "log_amp_sq_max":  0.0, "log_amp_sq_min": -6.0}),
+    ]
+    for lz, amp in steps:
+        cbm._log_Z_cache = torch.tensor(lz)
+        cbm._amp_diag_cache = amp
+        t.record_amp(cbm)
+        t.record_logZ(cbm)
+    out = t.finalize(cbm)
+
+    assert out["norm/log_Z_mean"] == pytest.approx(3.0)
+    assert out["norm/log_Z_max"] == 5.0
+    assert out["norm/log_Z_min"] == 1.0
+    assert out["norm/log_amp_sq_mean"] == pytest.approx(-3.0)
+    assert out["norm/log_amp_sq_max"] == 0.0
+    assert out["norm/log_amp_sq_min"] == -6.0
+    ceiling = 2.0 * math.log(torch.finfo(torch.complex64).max)
+    assert out["norm/log_Z_headroom"] == pytest.approx(ceiling - 5.0)
+
+
+def test_norm_tracker_logZ_snapshot_fallback():
+    t = NormTracker()
+    cbm = _FakeNormCBM(snapshot=3.0)
+    cbm._amp_diag_cache = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
+    t.record_amp(cbm)
+    t.record_logZ(cbm)  # _log_Z_cache is None → skipped
+    out = t.finalize(cbm)
+    assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 3.0
+    assert out["norm/log_amp_sq_mean"] == pytest.approx(-2.0)
+
+
+def test_norm_tracker_ignores_nonfinite():
+    t = NormTracker()
+    cbm = _FakeNormCBM()
+    cbm._log_Z_cache = torch.tensor(float("inf"))
+    cbm._amp_diag_cache = {"log_amp_sq_mean": float("nan"),
+                           "log_amp_sq_max": float("inf"), "log_amp_sq_min": -5.0}
+    t.record_logZ(cbm)
+    t.record_amp(cbm)
+    out = t.finalize(cbm)
+    assert out["norm/log_Z_mean"] == 3.0          # from snapshot, not inf
+    assert out["norm/log_amp_sq_min"] == -5.0
+    assert "norm/log_amp_sq_mean" not in out
+
+
+# ── The training objective ──────────────────────────────────────────────────
+
+# Distinct per-batch values so a test can tell the adversarial batch (tag 1.0)
+# from the clean one (tag 0.0) purely from the returned loss.
+_L_DIS = {0.0: 2.0, 1.0: 3.0}
+_L_GEN = {0.0: 7.0, 1.0: 8.0}
+
+
+class _DecompStubCBM:
+    """Stub whose mixed_nll decomposes exactly like the real one:
+    ``mixed_nll(x, y, a) = (1-a)*L_dis(x) + a*L_gen(x)``, with L_dis/L_gen keyed off
+    a per-batch tag, so the weighting can be checked in closed form."""
+
+    def __init__(self):
+        self.param = torch.nn.Parameter(torch.zeros(1))
+        self.calls = []
+
+    def train(self): pass
+    def eval(self): pass
+    def _invalidate_log_Z_cache(self): pass
+
+    def mixed_nll(self, data, labels, alpha, debug=False):
+        tag = float(data[0, 0])
+        self.calls.append((tag, alpha))
+        # param keeps the result a graph leaf so backward() works in _train_epoch
+        return self.param.sum() + (1 - alpha) * _L_DIS[tag] + alpha * _L_GEN[tag]
+
+
+class _OnesAttack:
+    def generate(self, born, naturals, labels, eps_abs, device):
+        return torch.ones_like(naturals)
+
+
+def _stub_trainer(alpha, cw, *, attack=True):
+    """Trainer wired with just what _objective / _train_epoch touch."""
+    cbm = _DecompStubCBM()
+    t = Trainer.__new__(Trainer)
+    t.cfg = TrainConfig(alpha=alpha, clean_weight=cw, norm_control=NO_NORM)
+    t.cbm = cbm
+    t.device = CPU
+    t.step = 0
+    t._nc = t.cfg.norm_control
+    t.norm_regularizer = None
+    t.attack = _OnesAttack() if attack else None
+    t.clean_weight = cw if attack else 1.0
+    clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
+    t.datahandler = type("DH", (), {"classification": {"train": [clean]}})()
+    t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
+    return t, cbm
+
+
+def _objective(t):
+    return t._objective(torch.zeros(4, 2), torch.zeros(4, dtype=torch.long), 0.1, NormTracker())
+
+
+def _naive_at_loss(alpha, cw):
+    """The three-term form the two-call implementation must reproduce."""
+    return (1 - alpha) * ((1 - cw) * _L_DIS[1.0] + cw * _L_DIS[0.0]) + alpha * _L_GEN[0.0]
+
+
+def test_at_objective_matches_naive_three_term_form():
+    for alpha, cw in [(0.5, 0.3), (0.1, 0.0), (0.9, 0.7), (0.25, 1.0), (0.0, 0.4)]:
+        t, _ = _stub_trainer(alpha, cw)
+        assert _objective(t).item() == pytest.approx(_naive_at_loss(alpha, cw), abs=1e-6)
+
+
+def test_at_objective_uses_two_forwards_with_rescaled_alpha():
+    alpha, cw = 0.5, 0.3
+    t, cbm = _stub_trainer(alpha, cw)
+    _objective(t)
+    s = (1 - alpha) * cw + alpha
+    assert len(cbm.calls) == 2, cbm.calls
+    assert cbm.calls[0] == (1.0, 0.0)           # adversarial batch, discriminative
+    assert cbm.calls[1][0] == 0.0               # clean batch
+    assert cbm.calls[1][1] == pytest.approx(alpha / s)
+
+
+def test_at_objective_at_alpha0_cw0_is_adversarial_dis_loss():
+    t, cbm = _stub_trainer(0.0, 0.0)
+    assert _objective(t).item() == pytest.approx(_L_DIS[1.0])
+    assert cbm.calls == [(1.0, 0.0)]
+
+
+def test_at_objective_at_alpha1_drops_the_adversarial_term():
+    t, cbm = _stub_trainer(1.0, 0.3)
+    assert _objective(t).item() == pytest.approx(_L_GEN[0.0])
+    assert cbm.calls == [(0.0, 1.0)]
+
+
+@pytest.mark.parametrize("alpha", [0.0, 0.01, 0.5, 1.0])
+def test_nat_objective_is_one_mixed_nll_at_alpha(alpha):
+    """No attack: exactly mixed_nll(x, alpha), not a rescaled call."""
+    t, cbm = _stub_trainer(alpha, 0.3, attack=False)
+    assert _objective(t).item() == pytest.approx((1 - alpha) * 2.0 + alpha * 7.0)
+    assert cbm.calls == [(0.0, alpha)]
+
+
+def test_train_epoch_routes_through_the_objective():
+    t, cbm = _stub_trainer(0.5, 0.3)
+    t._train_epoch(eps_abs=0.1)
+    assert len(cbm.calls) == 2  # one training step in the stub loader
+    assert cbm.calls[0][1] == 0.0
+    assert t._train_objective == pytest.approx(_naive_at_loss(0.5, 0.3))
+
+
+# ── evaluate ────────────────────────────────────────────────────────────────
+
+def _valid_loader(n=20, batch_size=6, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    ds = TensorDataset(torch.rand(n, 2, generator=g),
+                       torch.randint(0, 2, (n,), generator=g))
+    # shuffle=False mirrors DataHandler's non-train splits: positional indices stable
+    return DataLoader(ds, batch_size=batch_size, shuffle=False)
+
+
+def _ready_cbm():
+    cbm = _tiny_cbm()
+    cbm.prepare(device=CPU)
+    return cbm
+
+
+def test_evaluate_is_per_sample_not_per_batch():
+    """A short last batch is not over-weighted: batching does not change the means."""
+    cbm = _ready_cbm()
+    whole = evaluate(cbm, _valid_loader(n=20, batch_size=20), CPU, alpha=0.5)
+    ragged = evaluate(cbm, _valid_loader(n=20, batch_size=6), CPU, alpha=0.5)
+    for k in ("loss_dis", "loss_gen", "acc", "objective"):
+        assert ragged[k] == pytest.approx(whole[k], rel=1e-5), k
+
+
+def test_evaluate_without_attack_is_the_clean_mix():
+    cbm = _ready_cbm()
+    out = evaluate(cbm, _valid_loader(), CPU, alpha=0.3)
+    assert set(out) == {"objective", "loss_dis", "loss_gen", "acc"}
+    assert out["objective"] == mix(out["loss_dis"], out["loss_gen"], 0.3)
+
+
+def test_evaluate_clean_metrics_do_not_depend_on_the_attack():
+    """acc/loss_dis/loss_gen are clean and over the full set."""
+    cbm = _ready_cbm()
+    loader = _valid_loader()
+    out = evaluate(cbm, loader, CPU, alpha=0.5, attack=_ShiftAttack(), eps_abs=0.1,
+                   clean_weight=0.3, adv_indices={0, 1, 2})
+    clean = evaluate(cbm, loader, CPU, alpha=0.5)
+    for k in ("loss_dis", "loss_gen", "acc"):
+        assert out[k] == pytest.approx(clean[k], rel=1e-6), k
+
+
+def test_evaluate_attacks_only_the_given_subset():
+    cbm = _ready_cbm()
+    loader = _valid_loader(n=20, batch_size=6)
+    all_x = torch.cat([x for x, _ in loader])
+    adv_indices = {1, 5, 6, 13, 19}
+    attack = _ShiftAttack()
+    out = evaluate(cbm, loader, CPU, alpha=0.5, attack=attack, eps_abs=0.1,
+                   clean_weight=0.75, adv_indices=adv_indices)
+    assert out["n_rob"] == len(adv_indices)
+    attacked = torch.cat(attack.seen)
+    assert torch.allclose(attacked, all_x[sorted(adv_indices)])
+
+
+def test_evaluate_rob_absent_when_no_samples_attacked():
+    """clean_weight=1 => empty subset => 'rob' omitted rather than nan."""
+    out = evaluate(_ready_cbm(), _valid_loader(), CPU, alpha=0.5, attack=_ShiftAttack(),
+                   eps_abs=0.1, clean_weight=1.0, adv_indices=set())
+    assert "rob" not in out
+    assert out["n_rob"] == 0
+
+
+def test_evaluate_rob_matches_eval_rob_when_every_sample_is_attacked():
+    cbm = _ready_cbm()
+    loader = _valid_loader(n=20, batch_size=6)
+    out = evaluate(cbm, loader, CPU, attack=_ShiftAttack(), eps_abs=0.1,
+                   clean_weight=0.0, adv_indices=set(range(20)))
+    assert out["rob"] == pytest.approx(eval_rob(cbm, loader, _ShiftAttack(), 0.1, CPU))
+
+
+def test_evaluate_objective_matches_hand_computed_reference():
+    """The objective reproduces the AT training objective, sample by sample."""
+    cbm = _ready_cbm()
+    loader = _valid_loader(n=20, batch_size=6)
+    alpha, cw, shift = 0.4, 0.35, 0.05
+    adv_indices = {0, 3, 4, 9, 11, 15, 17}
+
+    out = evaluate(cbm, loader, CPU, alpha=alpha, attack=_ShiftAttack(shift),
+                   eps_abs=0.1, clean_weight=cw, adv_indices=adv_indices)
+
+    xs = torch.cat([x for x, _ in loader])
+    ys = torch.cat([y for _, y in loader])
+    with torch.no_grad():
+        log_Z = cbm.log_partition_function()
+
+    def _dis(x, y):
+        with torch.no_grad():
+            las = cbm._log_amp_sq(x.unsqueeze(0))
+        return (torch.logsumexp(las, dim=1) - las[0, y]).item()
+
+    dis_adv = [_dis(xs[i] + shift, ys[i]) for i in sorted(adv_indices)]
+    dis_cln = [_dis(xs[i], ys[i]) for i in range(len(xs)) if i not in adv_indices]
+    with torch.no_grad():
+        las_all = cbm._log_amp_sq(xs)
+    gen_all = (log_Z - las_all[range(len(ys)), ys]).mean().item()
+    ref = (1 - alpha) * (
+        (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)
+    ) + alpha * gen_all
+
+    assert out["objective"] == pytest.approx(ref, abs=1e-4)
+    # The clean alpha-mix is not the objective: it never sees x_adv.
+    assert abs(out["objective"] - mix(out["loss_dis"], out["loss_gen"], alpha)) > 1e-6
+
+
+# ── Selection ───────────────────────────────────────────────────────────────
+
+def _selector():
+    t = Trainer.__new__(Trainer)
+    t.cbm = _tiny_cbm()
+    t.best = {"objective": float("inf")}
+    t.best_tensors = [tt.cpu().clone().detach() for tt in t.cbm.tensors]
+    t.patience_counter = 0
+    t.best_epoch = 0
+    t.epoch = 1
+    return t
+
+
+def test_objective_is_minimized():
+    """The objective is a loss: lower wins, a higher value counts against patience."""
+    t = _selector()
+    t._update({"objective": 1.5, "acc": 0.9})
+    assert (t.best["objective"], t.best_epoch, t.patience_counter) == (1.5, 1, 0)
+
+    t.epoch = 2
+    t._update({"objective": 2.0, "acc": 0.9})
+    assert (t.best["objective"], t.patience_counter) == (1.5, 1)
+
+    t.epoch = 3
+    t._update({"objective": 0.3, "acc": 0.1})  # clean acc plays no part (D40)
+    assert (t.best["objective"], t.best_epoch, t.patience_counter) == (0.3, 3, 0)
+
+
+def test_nonfinite_objective_is_never_selected():
+    t = _selector()
+    initial = t.best_tensors
+    t._update({"objective": float("nan"), "acc": 0.9})
+    assert t.best_tensors is initial
+    assert t.patience_counter == 1
+
+
+# ── Validation cadence ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
+def test_validates_every_eval_every_epochs(evasion):
+    """Valid metrics appear on eval epochs only; patience counts valid events."""
+    t = _trainer(TrainConfig(alpha=0.5, evasion=evasion, clean_weight=0.5, max_epoch=9,
+                             eval_every=3, norm_control=NO_NORM), n=20, batch_size=5)
+    logged = []
+    t.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
+
+    assert [ep for ep, m in logged if "objective/valid" in m] == [3, 6, 9]
+    assert all("objective/train" in m for _, m in logged)
+    assert t.patience_counter <= 3
+    for ep, m in logged:
+        if "objective/valid" not in m:
+            continue
+        if evasion is None:
+            assert not any(k.startswith(("rob/", "n_rob/", "loss_adv/")) for k in m)
+        else:
+            rob = key("rob", "valid", t.eps_rel)
+            assert {rob, "loss_adv/valid", "n_rob/valid", "eps_rel/train"} <= set(m)
+            assert m["n_rob/valid"] == len(t.adv_indices)
+
+
+def test_nat_logs_norm_metrics_every_epoch():
+    t = _trainer(TrainConfig(max_epoch=2, norm_control=NO_NORM))
+    logged = []
+    t.train(on_epoch_end=lambda ep, m: logged.append(flatten_epoch(m)))
+    assert len(logged) == 2
+    for k in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_Z_min",
+              "norm/log_Z_headroom", "norm/log_amp_sq_mean"):
+        assert k in logged[-1], f"missing {k}"

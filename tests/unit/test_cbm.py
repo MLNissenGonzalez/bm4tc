@@ -6,7 +6,7 @@ import tensorkrowch as tk
 from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
 from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
-from src.utils.train import eval_metrics
+from src.utils.train import evaluate
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
@@ -709,8 +709,13 @@ def test_accumulate_flag_class_probabilities_finite_on_overflow():
     assert torch.allclose(probs.sum(dim=-1), torch.ones(4), atol=1e-5)
 
 
-def test_eval_metrics_accumulate_parity():
-    """eval_metrics returns the same (dis_loss, acc, gen_loss) with the flag on
+def _eval_metrics(cbm, loader):
+    out = evaluate(cbm, loader, "cpu")
+    return out["loss_dis"], out["acc"], out["loss_gen"]
+
+
+def test_evaluate_accumulate_parity():
+    """evaluate returns the same (dis_loss, acc, gen_loss) with the flag on
     or off on a non-overflowing model — the accumulate path only changes the
     contraction, not the result. Regression guard that existing (flag-off) valid
     numbers are unchanged by routing eval through _log_amp_sq."""
@@ -720,17 +725,17 @@ def test_eval_metrics_accumulate_parity():
     loader = DataLoader(ds, batch_size=5)
 
     cbm.accumulate = False
-    dis_off, acc_off, gen_off = eval_metrics(cbm, loader, "cpu")
+    dis_off, acc_off, gen_off = _eval_metrics(cbm, loader)
     cbm.accumulate = True
-    dis_on, acc_on, gen_on = eval_metrics(cbm, loader, "cpu")
+    dis_on, acc_on, gen_on = _eval_metrics(cbm, loader)
 
     assert acc_off == acc_on
     assert dis_on == pytest.approx(dis_off, abs=1e-4)
     assert gen_on == pytest.approx(gen_off, abs=1e-4)
 
 
-def test_eval_metrics_accumulate_finite_on_overflow():
-    """eval_metrics valid losses stay finite with accumulate on when the raw
+def test_evaluate_accumulate_finite_on_overflow():
+    """evaluate's valid losses stay finite with accumulate on when the raw
     amplitude overflows; with it off they are nan — the MNIST-resize symptom
     (stable training, nan valid) that motivated routing eval through the same
     _log_amp_sq path as the loss."""
@@ -743,11 +748,11 @@ def test_eval_metrics_accumulate_finite_on_overflow():
     loader = DataLoader(ds, batch_size=4)
 
     cbm.accumulate = False
-    dis_off, _, gen_off = eval_metrics(cbm, loader, "cpu")
+    dis_off, _, gen_off = _eval_metrics(cbm, loader)
     assert math.isnan(dis_off) and math.isnan(gen_off)
 
     cbm.accumulate = True
-    dis_on, _, gen_on = eval_metrics(cbm, loader, "cpu")
+    dis_on, _, gen_on = _eval_metrics(cbm, loader)
     assert math.isfinite(dis_on) and math.isfinite(gen_on)
 
 

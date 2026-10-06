@@ -22,14 +22,12 @@ evasion:
 
 patience: 5
 
-eval_rob_freq: 1
+eval_every: 1
 
 clean_weight: 0.0
-gen_on_clean: false
-acc_floor: null
 curriculum: false
 curriculum_eps_start_rel: 0.0
-curriculum_end_epoch: null
+curriculum_end: 1.0
 
 norm_control:
   log_target: 0.0

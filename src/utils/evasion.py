@@ -5,7 +5,7 @@ Budget convention (see "Budget vocabulary" in CLAUDE.md):
                  what configs carry, and it equals the budget in the data's own units.
     ``eps_abs``  model-domain value, ``eps_rel * (hi - lo)``. Every attack method in
                  this module takes ``eps_abs`` — conversion happens in the caller
-                 (``AdversarialTrainer._init_attack``, ``analysis/run.py``) via
+                 (``Trainer._init_attack``, ``analysis/run.py``) via
                  ``rel_to_abs``.
 """
 

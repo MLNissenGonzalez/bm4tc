@@ -121,12 +121,6 @@ def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class TrainResult:
-    best_epoch: int
-    best_metrics: dict
-
-
-@dataclass
 class NormControlConfig:
     log_target: Optional[Union[float, str]] = 0.0
     hard_every: int = 0
@@ -171,7 +165,6 @@ def resolve_log_target(cbm, datahandler, nc: NormControlConfig) -> float:
       ``in_dim``, ``out_dim``, ``bond_dim`` and ``sqrt``/``log``/``exp``.
     - ``float`` → used directly.
 
-    Shared by NLLTrainer and AdversarialTrainer.
     """
     raw = nc.log_target
 
@@ -307,50 +300,6 @@ class NormTracker:
         return out
 
 
-def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, float, float]:
-    """Single forward pass using CBM interface; returns (dis_loss, acc, gen_loss).
-
-    Losses are means over samples, not over batches, so a short last batch is not
-    over-weighted (same convention as :func:`eval_split`).
-
-    Set ``progress=True`` to show a transient per-batch tqdm bar (used by post-hoc
-    analysis); the default keeps training-time validation output clean.
-    """
-    cbm.eval()
-    with torch.no_grad():
-        log_Z = cbm.log_partition_function()
-    gen_finite = math.isfinite(log_Z.item())
-    if not gen_finite:
-        logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
-    dis_sum = gen_sum = 0.0
-    correct = total = gen_total = 0
-    with torch.no_grad():
-        for data, labels in tqdm(
-            loader, desc="eval", unit="batch", leave=False,
-            dynamic_ncols=True, disable=not progress,
-        ):
-            data, labels = data.to(device), labels.to(device)
-            # Shared entry point with the loss: dispatches on cbm.accumulate, so
-            # eval uses the same log|ψ|² path as training (overflow-safe when on).
-            las = cbm._log_amp_sq(data)                       # (B, C) = log|ψ|²
-            log_sq_obs     = las[range(len(labels)), labels]
-            log_class_marg = torch.logsumexp(las, dim=1)
-            dis_sum += (log_class_marg - log_sq_obs).sum().item()
-            correct += (las.argmax(dim=1) == labels).sum().item()
-            total += len(labels)
-            if gen_finite:
-                gen_batch = (log_Z - log_sq_obs).sum().item()
-                if math.isfinite(gen_batch):
-                    gen_sum += gen_batch
-                    gen_total += len(labels)
-                else:
-                    logger.warning(f"Non-finite gen_loss ({gen_batch}), skipping batch.")
-    dis_loss = dis_sum / total if total > 0 else float("nan")
-    acc = correct / total if total > 0 else float("nan")
-    gen_loss = gen_sum / gen_total if gen_total > 0 else float("nan")
-    return dis_loss, acc, gen_loss
-
-
 def mix(dis: float, gen: float, alpha: float) -> float:
     """``(1-α)·dis + α·gen``, gated exactly as in :meth:`CBM.mixed_nll`.
 
@@ -364,30 +313,30 @@ def mix(dis: float, gen: float, alpha: float) -> float:
     return out
 
 
-def eval_split(
-    cbm, loader, attack, eps_abs: float, device, *,
-    alpha: float, clean_weight: float, adv_indices, progress: bool = False,
+def evaluate(
+    cbm, loader, device, *,
+    alpha: float = 0.0, attack=None, eps_abs: float = 0.0,
+    clean_weight: float = 1.0, adv_indices=(), progress: bool = False,
 ) -> dict:
-    """Combined clean + robust validation for split-objective adversarial training.
+    """Validation (or test) metrics, and the training objective mirrored on them.
 
-    Mirrors the ``gen_on_clean`` training objective on the validation set:
+    Without an attack, ``objective = mix(L_dis, L_gen, α)``. With one, it mirrors
+    the AT objective of :class:`src.train.trainer.Trainer`:
 
         objective = (1-α)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
                         +    cw ·mean_{S_cln} L_dis(x)     ]
                 +   α ·mean_{all} L_gen(x)
 
     ``S_adv`` is the fixed sample subset given by ``adv_indices`` (positions in the
-    loader's iteration order — non-train splits are built with ``shuffle=False``,
+    loader's iteration order; non-train splits are built with ``shuffle=False``,
     so they are stable across epochs); ``S_cln`` is its complement. Sizing
     ``|S_adv| = (1-cw)·n`` makes the two weighted means reconstruct a single pass
-    over the validation set while attacking only a ``(1-cw)`` fraction of it.
+    over the set while attacking only a ``(1-cw)`` fraction of it.
 
-    ``loss_dis``/``loss_gen``/``acc`` are clean and over the *full* set, so they
-    stay directly comparable to :func:`eval_metrics`. ``loss_adv`` (mean L_dis on
-    x_adv) and ``rob`` are over ``S_adv`` only, and are omitted when that subset is
-    empty (``clean_weight == 1``); ``n_rob`` reports its size so the estimator is
-    recoverable from the run. ``objective`` is the only other key that sees
-    adversarial data.
+    Every mean is over samples. ``loss_dis``/``loss_gen``/``acc`` are clean and
+    over the full set. With an attack, ``n_rob`` is ``|S_adv|``, and ``loss_adv``
+    (mean L_dis on x_adv) and ``rob`` are over ``S_adv``, omitted when it is empty
+    (``clean_weight == 1``).
     """
     cbm.eval()
     with torch.no_grad():
@@ -396,7 +345,7 @@ def eval_split(
     if not gen_finite:
         logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
 
-    adv_indices = set(adv_indices)
+    adv_indices = set(adv_indices) if attack is not None else set()
     offset = 0
     dis_sum = gen_sum = 0.0      # clean, full set
     dis_adv_sum = 0.0            # adversarial, S_adv
@@ -405,31 +354,33 @@ def eval_split(
     rob_correct = n_adv = 0
 
     for data, labels in tqdm(
-        loader, desc="eval split", unit="batch", leave=False,
+        loader, desc="eval", unit="batch", leave=False,
         dynamic_ncols=True, disable=not progress,
     ):
         data, labels = data.to(device), labels.to(device)
         B = len(labels)
-        mask = torch.tensor(
-            [(offset + i) in adv_indices for i in range(B)],
-            dtype=torch.bool, device=device,
-        )
+        mask = None
+        if adv_indices:
+            mask = torch.tensor(
+                [(offset + i) in adv_indices for i in range(B)],
+                dtype=torch.bool, device=device,
+            )
         offset += B
 
         with torch.no_grad():
-            # Same log|ψ|² entry point as eval_metrics / the loss: dispatches on
-            # cbm.accumulate, so validation matches training's numerics.
+            # Same log|ψ|² entry point as the loss: dispatches on cbm.accumulate,
+            # so evaluation matches training's numerics.
             las = cbm._log_amp_sq(data)                       # (B, C)
             log_sq_obs = las[range(B), labels]
             dis = torch.logsumexp(las, dim=1) - log_sq_obs    # (B,)
             correct += (las.argmax(dim=1) == labels).sum().item()
             total += B
             dis_sum += dis.sum().item()
-            dis_cln_sum += dis[~mask].sum().item()
+            dis_cln_sum += dis[~mask].sum().item() if mask is not None else dis.sum().item()
             if gen_finite:
                 gen_sum += (log_Z - log_sq_obs).sum().item()
 
-        if bool(mask.any()):
+        if mask is not None and bool(mask.any()):
             sub_data, sub_labels = data[mask], labels[mask]
             adv = attack.generate(born=cbm, naturals=sub_data, labels=sub_labels,
                                   eps_abs=eps_abs, device=device)
@@ -441,125 +392,31 @@ def eval_split(
                 rob_correct += (las_adv.argmax(dim=1) == sub_labels).sum().item()
             n_adv += n_sub
 
-    n_cln = total - n_adv
-
     def _mean(s, n):
         return s / n if n else float("nan")
 
     dis_loss = _mean(dis_sum, total)
     gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
+    out = {"loss_dis": dis_loss, "loss_gen": gen_loss, "acc": _mean(correct, total)}
+
+    if attack is None:
+        out["objective"] = mix(dis_loss, gen_loss, alpha)
+        return out
 
     # Weighted means use the realised subset sizes, so a rounded |S_adv| stays
     # consistent with the weight it is combined under.
+    n_cln = total - n_adv
     dis_term = 0.0
     if n_adv:
         dis_term += (1.0 - clean_weight) * _mean(dis_adv_sum, n_adv)
     if n_cln:
         dis_term += clean_weight * _mean(dis_cln_sum, n_cln)
-
-    out = {
-        "objective": mix(dis_term, gen_loss, alpha),
-        "loss_dis": dis_loss,
-        "loss_gen": gen_loss,
-        "acc": _mean(correct, total),
-        "n_rob": n_adv,
-    }
+    out["objective"] = mix(dis_term, gen_loss, alpha)
+    out["n_rob"] = n_adv
     if n_adv:
         out["loss_adv"] = dis_adv_sum / n_adv
         out["rob"] = rob_correct / n_adv
     return out
-
-
-def eval_at(
-    cbm, loader, attack, eps_abs: float, device, *,
-    alpha: float, clean_weight: float, progress: bool = False,
-) -> dict:
-    """Combined clean + robust validation for the default adversarial objective.
-
-    The non-split counterpart of :func:`eval_split`: it mirrors
-
-        objective = (1-cw)·mixed_nll(x_adv, α) + cw·mixed_nll(x, α)
-
-    on the validation set, where ``mixed_nll(·, α) = (1-α)·L_dis + α·L_gen``. Both
-    terms are over the *whole* set — attacking a subset is the split path's device,
-    and is what makes its ``rob`` a subset estimator; here ``rob`` keeps exactly the
-    meaning it has in :func:`eval_rob`.
-
-    Note the generative half of the adversarial term is ``L_gen(x_adv)``, not
-    ``L_gen(x)``: this is a mirror of the objective actually minimized, and the
-    default objective does put the generative term on adversarial examples. (The
-    ``gen_on_clean`` objective does not — that is what ``eval_split`` is for.)
-
-    ``loss_dis``/``loss_gen``/``acc`` are clean, so they stay directly comparable to
-    :func:`eval_metrics`; ``objective``, ``loss_adv`` (mean L_dis on x_adv) and
-    ``rob`` see adversarial data. Cost is one clean forward plus one attack over the loader,
-    i.e. an ``eval_metrics`` and an ``eval_rob`` folded into a single pass.
-    """
-    cbm.eval()
-    with torch.no_grad():
-        log_Z = cbm.log_partition_function()
-    gen_finite = math.isfinite(log_Z.item())
-    if not gen_finite:
-        logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
-
-    dis_sum = gen_sum = 0.0              # clean
-    dis_adv_sum = gen_adv_sum = 0.0      # adversarial
-    correct = rob_correct = total = 0
-
-    for data, labels in tqdm(
-        loader, desc=f"eval at eps_abs={eps_abs:.3g}", unit="batch", leave=False,
-        dynamic_ncols=True, disable=not progress,
-    ):
-        data, labels = data.to(device), labels.to(device)
-        B = len(labels)
-
-        with torch.no_grad():
-            # Same log|ψ|² entry point as eval_metrics / the loss: dispatches on
-            # cbm.accumulate, so validation matches training's numerics.
-            las = cbm._log_amp_sq(data)                       # (B, C)
-            log_sq_obs = las[range(B), labels]
-            dis_sum += (torch.logsumexp(las, dim=1) - log_sq_obs).sum().item()
-            correct += (las.argmax(dim=1) == labels).sum().item()
-            total += B
-            if gen_finite:
-                gen_sum += (log_Z - log_sq_obs).sum().item()
-
-        adv = attack.generate(born=cbm, naturals=data, labels=labels,
-                              eps_abs=eps_abs, device=device)
-        with torch.no_grad():
-            las_adv = cbm._log_amp_sq(adv)
-            log_sq_adv = las_adv[range(B), labels]
-            dis_adv_sum += (torch.logsumexp(las_adv, dim=1) - log_sq_adv).sum().item()
-            rob_correct += (las_adv.argmax(dim=1) == labels).sum().item()
-            if gen_finite:
-                gen_adv_sum += (log_Z - log_sq_adv).sum().item()
-
-    def _mean(s, n):
-        return s / n if n else float("nan")
-
-    dis_loss = _mean(dis_sum, total)
-    gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
-    mixed_loss = mix(dis_loss, gen_loss, alpha)
-    mixed_adv = mix(
-        _mean(dis_adv_sum, total),
-        _mean(gen_adv_sum, total) if gen_finite else float("nan"),
-        alpha,
-    )
-
-    # Gated like the training objective: at cw=0 the clean term is absent, not
-    # weighted by zero, so a nan clean half cannot leak into the criterion.
-    objective = (1.0 - clean_weight) * mixed_adv if clean_weight < 1.0 else 0.0
-    if clean_weight > 0.0:
-        objective += clean_weight * mixed_loss
-
-    return {
-        "objective": objective,
-        "loss_dis": dis_loss,
-        "loss_gen": gen_loss,
-        "loss_adv": _mean(dis_adv_sum, total),
-        "acc": _mean(correct, total),
-        "rob": _mean(rob_correct, total),
-    }
 
 
 def eval_rob(cbm, loader, attack, eps_abs: float, device, progress: bool = False) -> float:

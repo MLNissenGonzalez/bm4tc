@@ -24,23 +24,21 @@ DATA = [
     "born=legendre/d4r3c64",
 ]
 NAT = [
-    "trainer/nat=test",
-    "trainer.nat.alpha=0.0",
-    "trainer.nat.max_epoch=40",
-    "trainer.nat.batch_size=64",
-    "trainer.nat.optimizer.kwargs.lr=1e-2",
-    "trainer.nat.save=true",
+    "trainer=nat/test",
+    "trainer.alpha=0.0",
+    "trainer.max_epoch=40",
+    "trainer.batch_size=64",
+    "trainer.optimizer.kwargs.lr=1e-2",
+    "trainer.save=true",
 ]
 AT = [
-    "~trainer/nat",
-    "trainer/at=test",  # PGD-5, Linf, eps_rel 0.15
-    "trainer.at.alpha=0.01",
-    "trainer.at.gen_on_clean=true",  # split objective, the only one after D18
-    "trainer.at.clean_weight=0.5",  # exercises every term of the split objective
-    "trainer.at.max_epoch=5",
-    "trainer.at.batch_size=64",
-    "trainer.at.optimizer.kwargs.lr=1e-2",
-    "trainer.at.save=true",
+    "trainer=at/test",  # PGD-5, Linf, eps_rel 0.15
+    "trainer.alpha=0.01",
+    "trainer.clean_weight=0.5",  # exercises every term of the AT objective
+    "trainer.max_epoch=5",
+    "trainer.batch_size=64",
+    "trainer.optimizer.kwargs.lr=1e-2",
+    "trainer.save=true",
 ]
 
 ANALYSE = """

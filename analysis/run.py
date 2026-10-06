@@ -116,7 +116,7 @@ def _get_rob_params(
         )
     else:
         try:
-            raw = OmegaConf.to_container(cfg.trainer.at.evasion, resolve=True)
+            raw = OmegaConf.to_container(cfg.trainer.evasion, resolve=True)
             ec = EvasionConfig(**raw)
             eps_rel = list(ec.eps_rel)
         except Exception:
@@ -149,7 +149,7 @@ def analyze_run(
     """
     from src.model import ConditionalBornMachine
     from src.datahandler import DataHandler
-    from src.utils.train import eval_metrics, eval_rob
+    from src.utils.train import evaluate, eval_rob
 
     run_dir = Path(run_dir)
     device = torch.device(cfg.device)
@@ -174,7 +174,8 @@ def analyze_run(
     # 4. Core metrics
     if cfg.compute_acc or cfg.compute_dis_loss or cfg.compute_gen_loss:
         try:
-            dis_loss, acc, gen_loss = eval_metrics(cbm, loader, device, progress=True)
+            m = evaluate(cbm, loader, device, progress=True)
+            dis_loss, acc, gen_loss = m["loss_dis"], m["acc"], m["loss_gen"]
             if cfg.compute_acc:
                 results["acc"] = acc
             if cfg.compute_dis_loss:
@@ -182,7 +183,7 @@ def analyze_run(
             if cfg.compute_gen_loss:
                 results["gen_loss"] = gen_loss
         except Exception as e:
-            logger.warning(f"eval_metrics failed: {e}")
+            logger.warning(f"evaluate failed: {e}")
             if cfg.compute_acc:
                 results["acc"] = np.nan
             if cfg.compute_dis_loss:

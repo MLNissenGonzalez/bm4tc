@@ -6,7 +6,7 @@ pytest; run by hand on the GPU and put the numbers in the commit message:
     python -m tests.bench.bench_train_step [--steps 20] [--epochs 3] [--device cuda]
 
 Random inputs in the embedding's input range; 144 features, 10 classes, batch 256.
-The trainers run through their public `train()`; only `_train_epoch` is timed (the
+The Trainer runs through its public `train()`; only `_train_epoch` is timed (the
 validation pass is not), and the first epoch is discarded as warm-up.
 """
 import argparse
@@ -20,15 +20,15 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.model import ConditionalBornMachine
-from src.train import NLLTrainer, AdversarialTrainer
+from src.train import Trainer, TrainConfig
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 N_FEATURES, N_CLASSES, BATCH = 144, 10, 256
 
 
 def _config(path: Path, **overrides):
-    """A config as Hydra passes it today: plain YAML, no schema (D25 is not in yet)."""
-    return OmegaConf.merge(OmegaConf.load(path), overrides)
+    """A preset merged onto the schema, as Hydra composes it."""
+    return OmegaConf.merge(OmegaConf.structured(TrainConfig), OmegaConf.load(path), overrides)
 
 
 def _datahandler(cbm, steps: int) -> SimpleNamespace:
@@ -53,11 +53,10 @@ def bench(regime: str, steps: int, epochs: int, device: torch.device) -> list[fl
     dh = _datahandler(cbm, steps)
     if regime == "nat":
         cfg = _config(CONFIGS / "trainer/nat/default.yaml", alpha=0.0, max_epoch=epochs, save=False)
-        trainer = NLLTrainer(cbm, cfg, dh, device)
     else:
         cfg = _config(CONFIGS / "trainer/at/pgd_at.yaml",
-                      alpha=0.0, max_epoch=epochs, save=False)
-        trainer = AdversarialTrainer(cbm, cfg, dh, device)
+                      alpha=0.0, max_epoch=epochs, eval_every=1, save=False)
+    trainer = Trainer(cbm, cfg, dh, device)
 
     times = []
     epoch = trainer._train_epoch

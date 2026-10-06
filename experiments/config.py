@@ -10,14 +10,7 @@ from hydra.core.config_store import ConfigStore
 
 from src.datahandler import DatasetConfig
 from src.model import CBMConfig
-from src.train.nll import NLLConfig
-from src.train.adversarial import AdversarialConfig
-
-
-@dataclass
-class TrainerConfig:
-    nat: Optional[NLLConfig] = None
-    at: Optional[AdversarialConfig] = None
+from src.train.trainer import TrainConfig
 
 
 @dataclass
@@ -33,7 +26,7 @@ class Config:
     """Top-level configuration for an experiment."""
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     born: CBMConfig = field(default_factory=CBMConfig)
-    trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    trainer: TrainConfig = field(default_factory=TrainConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     experiment: str = "default"
     descriptor: str = ""
@@ -46,6 +39,5 @@ def register():
     cs.store(name="base_config", node=Config)
     cs.store(group="dataset", name="schema", node=DatasetConfig)
     cs.store(group="model/born", name="schema", node=CBMConfig)
-    cs.store(group="trainer/nat", name="schema", node=NLLConfig)
-    cs.store(group="trainer/at", name="schema", node=AdversarialConfig)
+    cs.store(group="trainer", name="schema", node=TrainConfig)
     cs.store(group="tracking", name="schema", node=TrackingConfig)
