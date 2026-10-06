@@ -17,7 +17,7 @@ embeddings:
 hpo:
   n_trials: 30
   # key: {log: [lo, hi]} | [lo, hi] (uniform) | {choice: [...]}. weight_decay is
-  # fixed at 0, as in every recent sweep; add it here to tune it.
+  # 0 and not tuned (OptimizerConfig): norm control does a similar job.
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-1]}
 
