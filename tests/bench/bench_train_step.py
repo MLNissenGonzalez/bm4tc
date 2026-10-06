@@ -52,10 +52,10 @@ def bench(regime: str, steps: int, epochs: int, device: torch.device) -> list[fl
     cbm = ConditionalBornMachine(born, N_FEATURES, N_CLASSES, device)
     dh = _datahandler(cbm, steps)
     if regime == "nat":
-        cfg = _config(CONFIGS / "trainer/nll/default.yaml", alpha=0.0, max_epoch=epochs, save=False)
+        cfg = _config(CONFIGS / "trainer/nat/default.yaml", alpha=0.0, max_epoch=epochs, save=False)
         trainer = NLLTrainer(cbm, cfg, dh, device)
     else:
-        cfg = _config(CONFIGS / "trainer/adversarial/pgd_at.yaml",
+        cfg = _config(CONFIGS / "trainer/at/pgd_at.yaml",
                       alpha=0.0, max_epoch=epochs, save=False)
         trainer = AdversarialTrainer(cbm, cfg, dh, device)
 

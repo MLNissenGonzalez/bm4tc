@@ -93,42 +93,27 @@ def create_summary_table(
     acc_col: str,
     rob_cols: Optional[List[str]] = None,
     effective_n: Optional[int] = None,
-    stop_crit_col: Optional[str] = None,
-    stop_crit_minimize: bool = True,
 ) -> pd.DataFrame:
     """Create a summary table with best, mean, std, and stderr for all metrics.
 
-    The "Best" column shows values from the single run that achieved the best
-    stopping criterion value, falling back to per-column best when
-    *stop_crit_col* is not provided.
+    The "Best" column is the per-column best across runs.
 
     Args:
         df: DataFrame with metric columns.
         acc_col: Column for clean accuracy.
         rob_cols: Columns for robustness metrics.
         effective_n: Override for sample size in stderr.
-        stop_crit_col: Column used as stopping criterion.
-        stop_crit_minimize: Whether to minimise the stop criterion.
 
     Returns:
         Summary DataFrame.
     """
-    best_run = None
-    if stop_crit_col and stop_crit_col in df.columns:
-        best_run = get_best_run(df, stop_crit_col, minimize=stop_crit_minimize)
-
-    def _best_val(metric_col, stats):
-        if best_run is not None and metric_col in best_run.index and pd.notna(best_run[metric_col]):
-            return best_run[metric_col]
-        return stats["best"]
-
     rows = []
 
     if acc_col in df.columns:
         stats = compute_statistics(df, acc_col, effective_n)
         rows.append({
             "Metric": "Clean Accuracy",
-            "Best": _best_val(acc_col, stats),
+            "Best": stats["best"],
             "Mean": stats["mean"],
             "Std": stats["std"],
             "Std Error": stats["stderr"],
@@ -142,7 +127,7 @@ def create_summary_table(
                 strength = rob_col.split("/")[-1]
                 rows.append({
                     "Metric": f"Robust Accuracy (eps={strength})",
-                    "Best": _best_val(rob_col, stats),
+                    "Best": stats["best"],
                     "Mean": stats["mean"],
                     "Std": stats["std"],
                     "Std Error": stats["stderr"],

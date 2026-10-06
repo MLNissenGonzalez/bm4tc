@@ -116,7 +116,7 @@ def _get_rob_params(
         )
     else:
         try:
-            raw = OmegaConf.to_container(cfg.trainer.adversarial.evasion, resolve=True)
+            raw = OmegaConf.to_container(cfg.trainer.at.evasion, resolve=True)
             ec = EvasionConfig(**raw)
             eps_rel = list(ec.eps_rel)
         except Exception:

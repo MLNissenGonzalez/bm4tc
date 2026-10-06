@@ -17,8 +17,8 @@ from src.utils.evasion import EvasionConfig
 
 @dataclass
 class TrainerConfig:
-    nll: Optional[NLLConfig] = None
-    adversarial: Optional[AdversarialConfig] = None
+    nat: Optional[NLLConfig] = None
+    at: Optional[AdversarialConfig] = None
 
 
 @dataclass
@@ -48,6 +48,6 @@ def register():
     cs.store(name="base_config", node=Config)
     cs.store(group="dataset", name="schema", node=DatasetConfig)
     cs.store(group="model/born", name="schema", node=CBMConfig)
-    cs.store(group="trainer/nll", name="schema", node=NLLConfig)
-    cs.store(group="trainer/adversarial", name="schema", node=AdversarialConfig)
+    cs.store(group="trainer/nat", name="schema", node=NLLConfig)
+    cs.store(group="trainer/at", name="schema", node=AdversarialConfig)
     cs.store(group="tracking", name="schema", node=TrackingConfig)

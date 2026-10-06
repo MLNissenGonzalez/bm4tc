@@ -68,9 +68,9 @@ REGIME = _resolve_regime_from_path(SWEEP_DIR)
 if REGIME is None:
     print(
         f"WARNING: Could not auto-detect training regime from '{SWEEP_DIR}'.\n"
-        "  Set REGIME manually to one of: 'dis', 'gen', 'adv'."
+        "  Set REGIME manually to 'nat' or 'at'."
     )
-    REGIME = "dis"  # fallback — change if incorrect
+    REGIME = "nat"  # fallback — change if incorrect
 else:
     print(f"Auto-detected training regime: '{REGIME}' (from sweep_dir)")
 
@@ -149,14 +149,6 @@ DPI = 100
 # Set to None to auto-select the weakest non-zero budget.
 PARETO_ROB_EPS_REL = 0.10   # 10% of the input domain
 
-# --- SANITY CHECK ---
-# Map eval column -> W&B summary column for comparison.
-# Set to None or {} to skip sanity check.
-SANITY_CHECK_METRICS = {
-    "acc": "summary/adv/test/acc",
-}
-SANITY_CHECK_TOL = 1e-4
-
 # --- CONFIG KEYS TO EXTRACT ---
 # Hydra config keys to include in the DataFrame alongside eval metrics.
 CONFIG_KEYS = [
@@ -164,8 +156,8 @@ CONFIG_KEYS = [
     "tracking.seed",
     "dataset.gen_dow_kwargs.seed",
     # Alpha lives under the active trainer; the inactive one selects to None.
-    "trainer.nll.alpha",
-    "trainer.adversarial.alpha",
+    "trainer.nat.alpha",
+    "trainer.at.alpha",
     # Warm/cold start. `descriptor` is the discriminator: nll_pretrained (NAT alpha>0
     # fine-tuned from the alpha=0 checkpoint) | nll_cold (from scratch) | nll (alpha=0,
     # from scratch — the base both ladders share) | at_pretrained (AT; a different axis,
@@ -463,7 +455,7 @@ if not df.empty and ACC_COL and ACC_COL in df.columns:
 # %%
 from analysis.utils import compute_metric_correlations
 
-# Initialized here so Section 6 can reference it regardless of df being empty
+# Initialized here so Section 5 can reference it regardless of df being empty
 corr_test = pd.DataFrame()
 
 if not df.empty:
@@ -563,50 +555,7 @@ if not df.empty and ACC_COL:
         print(summary_df.to_string(index=False))
 
 # %% [markdown]
-# ## 4. Sanity Check vs W&B Summary Metrics
-
-# %%
-if not df.empty and SANITY_CHECK_METRICS:
-    from analysis.utils import load_local_hpo_runs
-
-    print("\n" + "=" * 60)
-    print("Sanity Check: Post-hoc vs W&B Summary Metrics")
-    print("=" * 60)
-
-    wb_df = load_local_hpo_runs(sweep_path)
-
-    if not wb_df.empty:
-        merged = df.merge(wb_df, on="run_name", suffixes=("_eval", "_wb"))
-
-        for eval_col, wb_col in SANITY_CHECK_METRICS.items():
-            if eval_col not in merged.columns:
-                print(f"\n  {eval_col}: not in eval results")
-                continue
-            wb_actual = wb_col if wb_col in merged.columns else wb_col + "_wb"
-            if wb_actual not in merged.columns:
-                print(f"\n  {wb_col}: not in W&B summary data")
-                continue
-
-            eval_vals = merged[eval_col].astype(float)
-            wb_vals = merged[wb_actual].astype(float)
-            diff = (eval_vals - wb_vals).abs()
-
-            print(f"\n  {eval_col} vs {wb_col}:")
-            print(f"    Max absolute diff: {diff.max():.6f}")
-            print(f"    Mean absolute diff: {diff.mean():.6f}")
-
-            mismatches = diff > SANITY_CHECK_TOL
-            if mismatches.any():
-                print(f"    WARNING: {mismatches.sum()} runs differ by > {SANITY_CHECK_TOL}")
-                mismatch_df = merged.loc[mismatches, ["run_name", eval_col, wb_actual]]
-                print(mismatch_df.to_string(index=False))
-            else:
-                print(f"    All runs match within tolerance {SANITY_CHECK_TOL}")
-    else:
-        print("Could not load W&B summary data for comparison.")
-
-# %% [markdown]
-# ## 5. Learned Distribution Visualization
+# ## 4. Learned Distribution Visualization
 
 # %%
 if COMPUTE_DISTRIBUTIONS and not df.empty and best_run is not None:
@@ -631,7 +580,7 @@ if COMPUTE_DISTRIBUTIONS and not df.empty and best_run is not None:
             print(f"Warning: Could not generate distribution visualization: {e}")
 
 # %% [markdown]
-# ## 6. Summary Export
+# ## 5. Summary Export
 
 # %%
 if not df.empty:

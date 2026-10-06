@@ -7,7 +7,6 @@ optimizer:
     lr: 1e-4
     weight_decay: 0.0
 patience: 50
-stop_crit: "dis_loss"
 norm_control:
   log_target: 0.0
   hard_every: 0

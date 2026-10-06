@@ -24,21 +24,21 @@ DATA = [
     "born=legendre/d4r3c64",
 ]
 NAT = [
-    "trainer/nll=test",
-    "trainer.nll.alpha=0.0",
-    "trainer.nll.max_epoch=40",
-    "trainer.nll.batch_size=64",
-    "trainer.nll.optimizer.kwargs.lr=1e-2",
-    "trainer.nll.save=true",
+    "trainer/nat=test",
+    "trainer.nat.alpha=0.0",
+    "trainer.nat.max_epoch=40",
+    "trainer.nat.batch_size=64",
+    "trainer.nat.optimizer.kwargs.lr=1e-2",
+    "trainer.nat.save=true",
 ]
 AT = [
-    "~trainer/nll",
-    "trainer/adversarial=test",  # PGD-5, Linf, eps_rel 0.15, stop_crit at_loss
-    "trainer.adversarial.alpha=0.01",
-    "trainer.adversarial.max_epoch=5",
-    "trainer.adversarial.batch_size=64",
-    "trainer.adversarial.optimizer.kwargs.lr=1e-2",
-    "trainer.adversarial.save=true",
+    "~trainer/nat",
+    "trainer/at=test",  # PGD-5, Linf, eps_rel 0.15
+    "trainer.at.alpha=0.01",
+    "trainer.at.max_epoch=5",
+    "trainer.at.batch_size=64",
+    "trainer.at.optimizer.kwargs.lr=1e-2",
+    "trainer.at.save=true",
 ]
 
 ANALYSE = """
@@ -73,10 +73,10 @@ def _train(root: Path, name: str, overrides: list[str]) -> Path:
     return run_dir
 
 
-def _objective(run_dir: Path, key: str) -> float:
-    """Best validation value of the stopping criterion: what selection is based on."""
+def _objective(run_dir: Path) -> float:
+    """Best validation objective: what selection minimises (D8)."""
     log = json.loads((run_dir / "log.json").read_text())
-    return min(r[key] for r in log if key in r)
+    return min(r["objective/valid"] for r in log if "objective/valid" in r)
 
 
 def _analyse(run_dir: Path, root: Path) -> dict:
@@ -90,10 +90,10 @@ def run_pipeline(root: Path) -> dict:
     nat = _train(root, "nat", DATA + NAT)
     at = _train(root, "at", DATA + AT + [f"+model_path={nat / 'models' / 'model'}"])
     out = {}
-    for name, run_dir, crit in [("nat", nat, "dis_loss/valid"), ("at", at, "at_loss/valid")]:
+    for name, run_dir in [("nat", nat), ("at", at)]:
         r = _analyse(run_dir, root)
         out[name] = {
-            "objective": _objective(run_dir, crit),
+            "objective": _objective(run_dir),
             "acc": r["acc"],
             "dis_loss": r["dis_loss"],
             "rob": r["rob/0.1"],

@@ -346,7 +346,7 @@ def eval_metrics(cbm, loader, device, progress: bool = False) -> tuple[float, fl
     return dis_loss, acc, gen_loss
 
 
-def _mix(dis: float, gen: float, alpha: float) -> float:
+def mix(dis: float, gen: float, alpha: float) -> float:
     """``(1-α)·dis + α·gen``, gated exactly as in :meth:`CBM.mixed_nll`.
 
     Each term is dropped rather than multiplied by a zero weight, so an endpoint
@@ -367,7 +367,7 @@ def eval_split(
 
     Mirrors the ``gen_on_clean`` training objective on the validation set:
 
-        at_loss = (1-α)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
+        objective = (1-α)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
                         +    cw ·mean_{S_cln} L_dis(x)     ]
                 +   α ·mean_{all} L_gen(x)
 
@@ -377,12 +377,12 @@ def eval_split(
     ``|S_adv| = (1-cw)·n`` makes the two weighted means reconstruct a single pass
     over the validation set while attacking only a ``(1-cw)`` fraction of it.
 
-    ``dis_loss``/``gen_loss``/``acc`` are clean and over the *full* set, so they
-    stay directly comparable to :func:`eval_metrics`, and so is ``mixed_loss``,
-    their clean α-mix — ``at_loss`` is the only key that sees adversarial data.
-    ``rob`` is over ``S_adv`` only, and is omitted when that subset is empty
-    (``clean_weight == 1``); ``n_rob`` reports its size so the estimator is
-    recoverable from the run.
+    ``loss_dis``/``loss_gen``/``acc`` are clean and over the *full* set, so they
+    stay directly comparable to :func:`eval_metrics`. ``loss_adv`` (mean L_dis on
+    x_adv) and ``rob`` are over ``S_adv`` only, and are omitted when that subset is
+    empty (``clean_weight == 1``); ``n_rob`` reports its size so the estimator is
+    recoverable from the run. ``objective`` is the only other key that sees
+    adversarial data.
     """
     cbm.eval()
     with torch.no_grad():
@@ -453,14 +453,14 @@ def eval_split(
         dis_term += clean_weight * _mean(dis_cln_sum, n_cln)
 
     out = {
-        "dis_loss": dis_loss,
-        "gen_loss": gen_loss,
+        "objective": mix(dis_term, gen_loss, alpha),
+        "loss_dis": dis_loss,
+        "loss_gen": gen_loss,
         "acc": _mean(correct, total),
-        "mixed_loss": _mix(dis_loss, gen_loss, alpha),
-        "at_loss": _mix(dis_term, gen_loss, alpha),
         "n_rob": n_adv,
     }
     if n_adv:
+        out["loss_adv"] = dis_adv_sum / n_adv
         out["rob"] = rob_correct / n_adv
     return out
 
@@ -473,7 +473,7 @@ def eval_at(
 
     The non-split counterpart of :func:`eval_split`: it mirrors
 
-        at_loss = (1-cw)·mixed_nll(x_adv, α) + cw·mixed_nll(x, α)
+        objective = (1-cw)·mixed_nll(x_adv, α) + cw·mixed_nll(x, α)
 
     on the validation set, where ``mixed_nll(·, α) = (1-α)·L_dis + α·L_gen``. Both
     terms are over the *whole* set — attacking a subset is the split path's device,
@@ -485,9 +485,9 @@ def eval_at(
     default objective does put the generative term on adversarial examples. (The
     ``gen_on_clean`` objective does not — that is what ``eval_split`` is for.)
 
-    ``dis_loss``/``gen_loss``/``acc``/``mixed_loss`` are clean, so they stay directly
-    comparable to :func:`eval_metrics`; ``at_loss`` is the only key that sees
-    adversarial data. Cost is one clean forward plus one attack over the loader,
+    ``loss_dis``/``loss_gen``/``acc`` are clean, so they stay directly comparable to
+    :func:`eval_metrics`; ``objective``, ``loss_adv`` (mean L_dis on x_adv) and
+    ``rob`` see adversarial data. Cost is one clean forward plus one attack over the loader,
     i.e. an ``eval_metrics`` and an ``eval_rob`` folded into a single pass.
     """
     cbm.eval()
@@ -534,8 +534,8 @@ def eval_at(
 
     dis_loss = _mean(dis_sum, total)
     gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
-    mixed_loss = _mix(dis_loss, gen_loss, alpha)
-    mixed_adv = _mix(
+    mixed_loss = mix(dis_loss, gen_loss, alpha)
+    mixed_adv = mix(
         _mean(dis_adv_sum, total),
         _mean(gen_adv_sum, total) if gen_finite else float("nan"),
         alpha,
@@ -543,16 +543,16 @@ def eval_at(
 
     # Gated like the training objective: at cw=0 the clean term is absent, not
     # weighted by zero, so a nan clean half cannot leak into the criterion.
-    at_loss = (1.0 - clean_weight) * mixed_adv if clean_weight < 1.0 else 0.0
+    objective = (1.0 - clean_weight) * mixed_adv if clean_weight < 1.0 else 0.0
     if clean_weight > 0.0:
-        at_loss += clean_weight * mixed_loss
+        objective += clean_weight * mixed_loss
 
     return {
-        "dis_loss": dis_loss,
-        "gen_loss": gen_loss,
+        "objective": objective,
+        "loss_dis": dis_loss,
+        "loss_gen": gen_loss,
+        "loss_adv": _mean(dis_adv_sum, total),
         "acc": _mean(correct, total),
-        "mixed_loss": mixed_loss,
-        "at_loss": at_loss,
         "rob": _mean(rob_correct, total),
     }
 

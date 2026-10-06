@@ -1,9 +1,8 @@
 import pytest
 from analysis.utils.resolve import (
     resolve_regime_from_path,
+    resolve_embedding_from_path,
     embedding_range_size,
-    normalize_param,
-    resolve_params,
 )
 
 
@@ -29,31 +28,10 @@ def test_resolve_regime_at_with_time():
     assert result == "at"
 
 
-# ---- resolve_regime_from_path — legacy backward compat ----
-
-def test_resolve_regime_cls_legacy():
-    result = resolve_regime_from_path("outputs/seed_sweep/cls/fourier/d4r3/moons_0102")
-    assert result == "dis"
-
-
-def test_resolve_regime_dis_legacy():
-    result = resolve_regime_from_path("outputs/seed_sweep/dis/fourier/d4r3/circles_0102")
-    assert result == "dis"
-
-
-def test_resolve_regime_gen_legacy():
-    result = resolve_regime_from_path("outputs/seed_sweep/gen/legendre/d10r6/moons_0102")
-    assert result == "gen"
-
-
-def test_resolve_regime_adv_legacy():
-    result = resolve_regime_from_path("outputs/seed_sweep/adv/fourier/d10r6/moons_0102")
-    assert result == "adv"
-
-
-def test_resolve_regime_old_flat_path():
-    result = resolve_regime_from_path("outputs/seed_sweep_adv_d30r18fourier_moons_4k_1202")
-    assert result == "adv"
+def test_resolve_regime_legacy_tokens_are_not_regimes():
+    """D10/D12: dis/gen/adv/cls are no longer regime names."""
+    for token in ("dis", "gen", "adv", "cls"):
+        assert resolve_regime_from_path(f"outputs/seed_sweep/{token}/fourier/d4r3/moons_0102") is None
 
 
 def test_resolve_regime_none():
@@ -88,62 +66,8 @@ def test_embedding_range_size_unknown_fallback():
     assert embedding_range_size("unknown_emb") == pytest.approx(1.0)
 
 
-# ---- normalize_param ----
+# ---- resolve_embedding_from_path ----
 
-def test_normalize_param_aliases():
-    assert normalize_param("wd") == "weight-decay"
-    assert normalize_param("bs") == "batch-size"
-
-
-def test_normalize_param_passthrough():
-    assert normalize_param("lr") == "lr"
-
-
-# ---- resolve_params — new vocabulary ----
-
-def test_resolve_params_nat_returns_nll_lr_path():
-    result = resolve_params("nat", ["lr"])
-    assert "lr" in result
-    assert "trainer.nll" in result["lr"]
-
-
-def test_resolve_params_at_returns_adversarial_lr_path():
-    result = resolve_params("at", ["lr"])
-    assert "lr" in result
-    assert "trainer.adversarial" in result["lr"]
-
-
-def test_resolve_params_at_has_clean_weight():
-    result = resolve_params("at", ["clean-weight"])
-    assert "clean-weight" in result
-    assert "clean_weight" in result["clean-weight"]
-
-
-# ---- resolve_params — legacy aliases ----
-
-def test_resolve_params_dis_returns_nll_lr_path():
-    result = resolve_params("dis", ["lr"])
-    assert "lr" in result
-    assert "trainer.nll" in result["lr"]
-
-
-def test_resolve_params_gen_returns_nll_lr_path():
-    result = resolve_params("gen", ["lr"])
-    assert "lr" in result
-    assert "trainer.nll" in result["lr"]
-
-
-def test_resolve_params_adv_returns_adversarial_lr_path():
-    result = resolve_params("adv", ["lr"])
-    assert "lr" in result
-    assert "trainer.adversarial" in result["lr"]
-
-
-def test_resolve_params_weight_decay_alias():
-    result = resolve_params("nat", ["wd"])
-    assert "weight-decay" in result
-
-
-def test_resolve_params_unknown_regime_raises():
-    with pytest.raises(ValueError):
-        resolve_params("nonexistent_regime", ["lr"])
+def test_resolve_embedding_from_path():
+    assert resolve_embedding_from_path("outputs/moons/nat/legendre/d10r6/hpo_a1_2804") == "legendre"
+    assert resolve_embedding_from_path("outputs/moons/nat/d10r6/hpo_a1_2804") is None

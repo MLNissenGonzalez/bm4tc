@@ -11,6 +11,7 @@ import torch
 
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.train.adversarial import AdversarialTrainer, AdversarialConfig
+from experiments.metrics import key
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent
 from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
 from src.analysis.purification import LikelihoodPurification, GibbsPurification
@@ -77,8 +78,8 @@ def test_trainer_resolves_eps_rel_per_embedding(embedding, expected_abs):
 
     assert t.base_eps_rel == pytest.approx(EPS_REL)
     assert t.base_eps_abs == pytest.approx(expected_abs)
-    # The metric key states the relative budget, not the absolute one.
-    assert t.rob_metric_key == f"rob/valid/{fmt_budget(EPS_REL)}"
+    # The logged key states the relative budget, not the absolute one.
+    assert key("rob", "valid", t.base_eps_rel) == f"rob/valid/{fmt_budget(EPS_REL)}"
 
 
 def test_curriculum_start_is_relative_too():

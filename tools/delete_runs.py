@@ -52,11 +52,35 @@ from typing import Any, Dict, List, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from analysis.utils.wandb_fetcher import (
-    _load_hydra_config,
-    _get_nested_value,
-    WANDB_AVAILABLE,
-)
+from omegaconf import OmegaConf
+
+try:
+    import wandb  # noqa: F401
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+
+def _load_hydra_config(run_dir: Path) -> Optional[Dict]:
+    """The run's resolved Hydra config as a dict, or None if absent or unreadable."""
+    config_path = run_dir / ".hydra" / "config.yaml"
+    if not config_path.exists():
+        return None
+    try:
+        return OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
+    except Exception as e:
+        print(f"Warning: Failed to load config from {config_path}: {e}")
+        return None
+
+
+def _get_nested_value(d: Dict, key: str, default: Any = None) -> Any:
+    """Get a nested dict value by dot notation."""
+    value = d
+    for k in key.split("."):
+        if not isinstance(value, dict):
+            return default
+        value = value.get(k, default)
+    return value
 
 # =============================================================================
 # Constants

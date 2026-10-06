@@ -14,17 +14,17 @@ from src.train.adversarial import AdversarialTrainer, AdversarialConfig
 from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from src.utils.train import (
     NormControlConfig, NormRegularizer, NormTracker, eval_at, eval_metrics,
-    eval_rob, eval_split,
+    eval_rob, eval_split, mix,
 )
+from experiments.metrics import flatten_epoch, key
 
 
-def _make_trainer(cbm, *, stop_crit="rob", acc_floor=None):
+def _make_trainer(cbm, *, acc_floor=None):
     """Build a trainer with just the attributes `_update` touches."""
     t = AdversarialTrainer.__new__(AdversarialTrainer)
-    t.train_cfg = AdversarialConfig(stop_crit=stop_crit, acc_floor=acc_floor)
+    t.train_cfg = AdversarialConfig(acc_floor=acc_floor)
     t.cbm = cbm
-    t.stopping_criterion_name = stop_crit
-    t.best = {"dis_loss": float("inf"), "acc": 0.0, "rob": 0.0}
+    t.best = {"objective": float("inf")}
     t.best_tensors = [tt.cpu().clone().detach() for tt in cbm.tensors]
     t.patience_counter = 0
     t.best_epoch = 0
@@ -33,41 +33,41 @@ def _make_trainer(cbm, *, stop_crit="rob", acc_floor=None):
 
 
 def test_floor_blocks_selection(cbm):
-    """rob improved but clean acc < floor => no best update, patience increments."""
+    """objective improved but clean acc < floor => no best update, patience increments."""
     t = _make_trainer(cbm, acc_floor=0.9)
     initial_tensors = t.best_tensors
-    t.valid_perf = {"dis_loss": 0.5, "acc": 0.8, "rob": 0.5}
+    t.valid_perf = {"objective": 0.5, "acc": 0.8}
 
     t._update()
 
-    assert t.best["rob"] == 0.0          # best untouched
+    assert t.best["objective"] == float("inf")  # best untouched
     assert t.best_tensors is initial_tensors
     assert t.best_epoch == 0
     assert t.patience_counter == 1       # counted as non-improvement
 
 
 def test_floor_allows_selection(cbm):
-    """rob improved and clean acc >= floor => best updates, patience resets."""
+    """objective improved and clean acc >= floor => best updates, patience resets."""
     t = _make_trainer(cbm, acc_floor=0.9)
     t.patience_counter = 3
-    t.valid_perf = {"dis_loss": 0.5, "acc": 0.95, "rob": 0.5}
+    t.valid_perf = {"objective": 0.5, "acc": 0.95}
 
     t._update()
 
-    assert t.best["rob"] == 0.5
+    assert t.best["objective"] == 0.5
     assert t.best == dict(t.valid_perf)
     assert t.best_epoch == 1
     assert t.patience_counter == 0
 
 
 def test_no_floor_ignores_acc(cbm):
-    """acc_floor=None reproduces prior behavior: clean acc is irrelevant."""
+    """acc_floor=None: clean acc is irrelevant."""
     t = _make_trainer(cbm, acc_floor=None)
-    t.valid_perf = {"dis_loss": 0.5, "acc": 0.1, "rob": 0.5}
+    t.valid_perf = {"objective": 0.5, "acc": 0.1}
 
     t._update()
 
-    assert t.best["rob"] == 0.5          # selected despite low clean acc
+    assert t.best["objective"] == 0.5    # selected despite low clean acc
 
 
 def test_all_subfloor_keeps_initial_model(cbm):
@@ -77,40 +77,46 @@ def test_all_subfloor_keeps_initial_model(cbm):
 
     for epoch in range(1, 6):
         t.epoch = epoch
-        t.valid_perf = {"dis_loss": 0.5, "acc": 0.5, "rob": 0.1 * epoch}
+        t.valid_perf = {"objective": 1.0 / epoch, "acc": 0.5}
         t._update()
 
-    assert t.best["rob"] == 0.0
+    assert t.best["objective"] == float("inf")
     assert t.best_tensors is initial_tensors
     assert t.best_epoch == 0
     assert t.patience_counter == 5
 
 
-def test_missing_rob_metric_is_skipped(cbm):
-    """Non-rob epochs (no 'rob' in valid_perf) return early, before floor/patience logic."""
+def test_missing_objective_is_skipped(cbm):
+    """Clean-only epochs (no objective without the attack) return before floor/patience."""
     t = _make_trainer(cbm, acc_floor=0.9)
-    t.valid_perf = {"dis_loss": 0.5, "acc": 0.95}  # rob not evaluated this epoch
+    t.valid_perf = {"loss_dis": 0.5, "acc": 0.95}
 
     t._update()
 
     assert t.patience_counter == 0       # untouched: nothing to compare against
-    assert t.best["rob"] == 0.0
+    assert t.best["objective"] == float("inf")
 
 
-def test_mixed_loss_stop_crit_selection(cbm):
-    """mixed_loss is a loss (lower-is-better): improves on decrease, not on increase."""
-    t = _make_trainer(cbm, stop_crit="mixed_loss")
-    t.valid_perf = {"dis_loss": 1.0, "gen_loss": 2.0, "mixed_loss": 1.5, "acc": 0.9}
+def test_objective_is_minimized_not_maximized(cbm):
+    """The objective is a loss: lower wins, a higher value counts against patience."""
+    t = _make_trainer(cbm)
+    t.valid_perf = {"objective": 1.5, "acc": 0.9}
     t._update()
-    assert t.best["mixed_loss"] == 1.5
+    assert t.best["objective"] == 1.5
     assert t.best_epoch == 1
     assert t.patience_counter == 0
 
-    t.epoch = 2  # worse (higher) mixed_loss => no improvement
-    t.valid_perf = {"dis_loss": 1.0, "gen_loss": 3.0, "mixed_loss": 2.0, "acc": 0.9}
+    t.epoch = 2
+    t.valid_perf = {"objective": 2.0, "acc": 0.9}
     t._update()
-    assert t.best["mixed_loss"] == 1.5   # unchanged
+    assert t.best["objective"] == 1.5   # unchanged
     assert t.patience_counter == 1
+
+    t.epoch = 3
+    t.valid_perf = {"objective": 0.3, "acc": 0.9}
+    t._update()
+    assert t.best["objective"] == 0.3
+    assert t.best_epoch == 3
 
 
 def test_alpha_threads_into_training_objective():
@@ -428,7 +434,7 @@ def _valid_loader(n=20, batch_size=6, seed=0):
 
 
 def test_eval_split_clean_metrics_match_eval_metrics():
-    """acc/dis_loss/gen_loss are clean and over the full set, as in eval_metrics."""
+    """acc/loss_dis/loss_gen are clean and over the full set, as in eval_metrics."""
     cbm = _tiny_cbm()
     cbm.prepare(device=torch.device("cpu"))
     # Evenly-dividing batches: eval_metrics averages per-batch means while
@@ -441,8 +447,8 @@ def test_eval_split_clean_metrics_match_eval_metrics():
     dis_loss, acc, gen_loss = eval_metrics(cbm, loader, torch.device("cpu"))
 
     assert abs(out["acc"] - acc) < 1e-9
-    assert abs(out["dis_loss"] - dis_loss) < 1e-5
-    assert abs(out["gen_loss"] - gen_loss) < 1e-5
+    assert abs(out["loss_dis"] - dis_loss) < 1e-5
+    assert abs(out["loss_gen"] - gen_loss) < 1e-5
 
 
 def test_eval_split_attacks_only_the_given_subset():
@@ -476,8 +482,8 @@ def test_eval_split_rob_absent_when_no_samples_attacked():
     assert out["n_rob"] == 0
 
 
-def test_eval_split_at_loss_matches_hand_computed_reference():
-    """at_loss reproduces the split training objective, sample by sample."""
+def test_eval_split_objective_matches_hand_computed_reference():
+    """The objective reproduces the split training objective, sample by sample."""
     device = torch.device("cpu")
     cbm = _tiny_cbm()
     cbm.prepare(device=device)
@@ -509,18 +515,16 @@ def test_eval_split_at_loss_matches_hand_computed_reference():
         (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)
     ) + alpha * gen_all
 
-    assert abs(out["at_loss"] - ref) < 1e-4
-    # mixed_loss is the CLEAN alpha-mix, not the objective: it never sees x_adv,
-    # so it stays comparable to a NAT run's mixed_loss/valid.
-    clean_ref = (1 - alpha) * out["dis_loss"] + alpha * out["gen_loss"]
-    assert abs(out["mixed_loss"] - clean_ref) < 1e-9
-    assert abs(out["mixed_loss"] - out["at_loss"]) > 1e-6
+    assert abs(out["objective"] - ref) < 1e-4
+    # The clean alpha-mix is not the objective: it never sees x_adv.
+    clean_ref = (1 - alpha) * out["loss_dis"] + alpha * out["loss_gen"]
+    assert abs(out["objective"] - clean_ref) > 1e-6
 
 
 # ── default objective: combined validation (eval_at) ────────────────────────
 
 def test_eval_at_clean_metrics_match_eval_metrics():
-    """acc/dis_loss/gen_loss are clean and over the full set, as in eval_metrics."""
+    """acc/loss_dis/loss_gen are clean and over the full set, as in eval_metrics."""
     cbm = _tiny_cbm()
     cbm.prepare(device=torch.device("cpu"))
     # Evenly-dividing batches: eval_metrics averages per-batch means while eval_at
@@ -532,8 +536,8 @@ def test_eval_at_clean_metrics_match_eval_metrics():
     dis_loss, acc, gen_loss = eval_metrics(cbm, loader, torch.device("cpu"))
 
     assert abs(out["acc"] - acc) < 1e-9
-    assert abs(out["dis_loss"] - dis_loss) < 1e-5
-    assert abs(out["gen_loss"] - gen_loss) < 1e-5
+    assert abs(out["loss_dis"] - dis_loss) < 1e-5
+    assert abs(out["loss_gen"] - gen_loss) < 1e-5
 
 
 def test_eval_at_rob_matches_eval_rob_over_the_full_set():
@@ -551,8 +555,8 @@ def test_eval_at_rob_matches_eval_rob_over_the_full_set():
     assert torch.cat(attack.seen).shape[0] == 20   # whole set, once each
 
 
-def test_eval_at_at_loss_matches_hand_computed_reference():
-    """at_loss reproduces (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x), sample by sample."""
+def test_eval_at_objective_matches_hand_computed_reference():
+    """The objective reproduces (1-cw)*mixed_nll(x_adv) + cw*mixed_nll(x), sample by sample."""
     device = torch.device("cpu")
     cbm = _tiny_cbm()
     cbm.prepare(device=device)
@@ -584,7 +588,7 @@ def test_eval_at_at_loss_matches_hand_computed_reference():
     # this mirrors the objective, which puts the whole mixed NLL on x_adv.
     ref = (1 - cw) * _mixed(shift) + cw * _mixed(0.0)
 
-    assert abs(out["at_loss"] - ref) < 1e-4
+    assert abs(out["objective"] - ref) < 1e-4
 
 
 def test_eval_at_reduces_to_adversarial_dis_loss_at_alpha0_cw0():
@@ -604,7 +608,8 @@ def test_eval_at_reduces_to_adversarial_dis_loss_at_alpha0_cw0():
     shifted = DataLoader(TensorDataset(xs, ys), batch_size=5, shuffle=False)
     ref_dis, _, _ = eval_metrics(cbm, shifted, device)
 
-    assert abs(out["at_loss"] - ref_dis) < 1e-5
+    assert abs(out["objective"] - ref_dis) < 1e-5
+    assert abs(out["loss_adv"] - ref_dis) < 1e-5
 
 
 def test_eval_at_reduces_to_clean_mixed_loss_at_cw1():
@@ -616,35 +621,20 @@ def test_eval_at_reduces_to_clean_mixed_loss_at_cw1():
     out = eval_at(cbm, _valid_loader(), _ShiftAttack(), 0.1, device,
                   alpha=0.5, clean_weight=1.0)
 
-    assert abs(out["at_loss"] - out["mixed_loss"]) < 1e-9
+    clean_mix = mix(out["loss_dis"], out["loss_gen"], 0.5)
+    assert abs(out["objective"] - clean_mix) < 1e-9
     # rob is still measured and reported at cw=1 -- selection stops using the
     # attack, evaluation does not.
     assert math.isfinite(out["rob"])
 
 
-# ── at_loss as a stopping criterion ─────────────────────────────────────────
+# ── selection needs the attack ──────────────────────────────────────────────
 
-def test_at_loss_is_minimized_not_maximized(cbm):
-    """at_loss is a loss: lower wins. Guards against an acc-style comparison."""
-    t = _make_trainer(cbm, stop_crit="at_loss")
-    t.best["at_loss"] = 0.5
-
-    t.valid_perf = {"acc": 0.9, "at_loss": 0.7}
-    t._update()
-    assert t.best["at_loss"] == 0.5          # worse (higher) => rejected
-    assert t.patience_counter == 1
-
-    t.valid_perf = {"acc": 0.9, "at_loss": 0.3}
-    t._update()
-    assert t.best["at_loss"] == 0.3          # better (lower) => selected
-    assert t.patience_counter == 0
-
-
-def test_at_loss_requires_positive_eval_rob_freq():
-    """at_loss comes from the attack pass, so eval_rob_freq=0 never produces it."""
+def test_selection_requires_positive_eval_rob_freq():
+    """The objective comes from the attack pass, so eval_rob_freq=0 never produces it."""
     import pytest
     cfg = AdversarialConfig(
-        stop_crit="at_loss", eval_rob_freq=0,
+        eval_rob_freq=0,
         norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
     )
     with pytest.raises(ValueError, match="eval_rob_freq >= 1"):
@@ -661,7 +651,6 @@ def _split_run_trainer(*, eval_rob_freq, clean_weight=0.5, max_epoch=9, patience
     cfg = AdversarialConfig(
         alpha=0.5, clean_weight=clean_weight, gen_on_clean=True,
         max_epoch=max_epoch, eval_rob_freq=eval_rob_freq, patience=patience,
-        stop_crit="rob",
         norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
     )
     t = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
@@ -692,18 +681,17 @@ def test_split_validates_only_every_eval_rob_freq_epochs():
     t = _split_run_trainer(eval_rob_freq=3, max_epoch=9)
 
     logged = []
-    t.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+    t.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
 
     valid_epochs = [ep for ep, m in logged if "acc/valid" in m]
     assert valid_epochs == [3, 6, 9]
+    rob = key("rob", "valid", t.base_eps_rel)  # keyed by the run's relative budget
     for ep, m in logged:
         # train-side metrics are still emitted every epoch
-        assert "dis_loss/train" in m
+        assert "objective/train" in m
         if ep in valid_epochs:
-            # Robustness is keyed by the run's relative budget (see AdversarialTrainer
-            # .rob_metric_key), so the key states what was measured.
-            assert {t.rob_metric_key, "mixed_loss/valid", "n_rob_valid"} <= set(m)
-            assert m["n_rob_valid"] == len(t.adv_indices)
+            assert {rob, "objective/valid", "loss_adv/valid", "n_rob/valid"} <= set(m)
+            assert m["n_rob/valid"] == len(t.adv_indices)
     # 3 valid events => patience can have ticked at most 3 times
     assert t.patience_counter <= 3
 
@@ -713,7 +701,7 @@ def test_unsplit_still_validates_every_epoch():
     cbm = _tiny_cbm()
     dh = _FakeDataHandler(n=20, batch_size=5)
     cfg = AdversarialConfig(
-        alpha=0.0, max_epoch=4, eval_rob_freq=2, stop_crit="acc",
+        alpha=0.0, max_epoch=4, eval_rob_freq=2,
         norm_control=NormControlConfig(hard_every=0, soft_strength=0.0),
     )
     t = AdversarialTrainer(cbm=cbm, train_cfg=cfg, datahandler=dh,
@@ -722,12 +710,13 @@ def test_unsplit_still_validates_every_epoch():
     t._generate_adversarial = lambda data, labels, eps_abs: data + 0.05
 
     logged = []
-    t.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
+    t.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
 
+    rob = key("rob", "valid", t.base_eps_rel)
     assert [ep for ep, m in logged if "acc/valid" in m] == [1, 2, 3, 4]
-    assert [ep for ep, m in logged if t.rob_metric_key in m] == [2, 4]
-    assert not any("n_rob_valid" in m for _, m in logged)
-    # at_loss needs the attack, so it appears on rob epochs only; mixed_loss is
-    # clean and therefore emitted every epoch.
-    assert [ep for ep, m in logged if "at_loss/valid" in m] == [2, 4]
-    assert [ep for ep, m in logged if "mixed_loss/valid" in m] == [1, 2, 3, 4]
+    assert [ep for ep, m in logged if rob in m] == [2, 4]
+    assert not any("n_rob/valid" in m for _, m in logged)
+    # The objective needs the attack, so it appears on rob epochs only; the clean
+    # losses are emitted every epoch.
+    assert [ep for ep, m in logged if "objective/valid" in m] == [2, 4]
+    assert [ep for ep, m in logged if "loss_dis/valid" in m] == [1, 2, 3, 4]
