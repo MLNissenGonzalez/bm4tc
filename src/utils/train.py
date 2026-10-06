@@ -74,7 +74,9 @@ class CriterionConfig:
 @dataclass
 class OptimizerConfig:
     name: str = "adam"
-    kwargs: Optional[Dict[str, Any]] = field(default_factory=dict)
+    # weight_decay is 0 and not a knob of these experiments: norm control (the
+    # soft log Z penalty) already constrains the parameter scale.
+    kwargs: Optional[Dict[str, Any]] = field(default_factory=lambda: {"weight_decay": 0.0})
 
 
 _OPTIMIZER_MAP = {
