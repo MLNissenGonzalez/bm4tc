@@ -18,7 +18,7 @@ from src.utils.train import (
     optimizer,
     resolve_log_target,
 )
-from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, FastGradientMethod
+from src.utils.evasion import EvasionConfig, ProjectedGradientDescent
 from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 
@@ -163,11 +163,6 @@ class AdversarialTrainer:
                 num_steps=evasion.num_steps,
                 step_size=evasion.step_size,
                 random_start=evasion.random_start
-            )
-        elif evasion.method == "FGM":
-            self.attack = FastGradientMethod(
-                norm=evasion.norm,
-                criterion=evasion.criterion
             )
         else:
             raise ValueError(f"Unknown attack method: {evasion.method}")
@@ -489,51 +484,3 @@ class AdversarialTrainer:
                 break
 
         self._summarise_training(output_dir)
-
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    import torch
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    from src.datahandler import DataHandler
-    from src.datahandler import DatasetConfig, DataGenDowConfig
-    from src.utils.evasion import EvasionConfig
-
-    device = torch.device("cpu")
-    cbm = ConditionalBornMachine(
-        cfg=CBMConfig(
-            embedding="legendre",
-            init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3),
-        ),
-        data_dim=2, num_classes=2, device=device,
-    )
-    ds_cfg = DatasetConfig(
-        name="spirals",
-        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
-        overwrite=True,
-    )
-    dh = DataHandler(ds_cfg)
-    dh.load()
-    dh.split_and_rescale(cbm)
-
-    # Authored relative: 0.05 of the legendre domain (width 2.0) → eps_abs 0.1
-    evasion_cfg = EvasionConfig(method="PGD", num_steps=3, eps_rel=[0.05])
-    train_cfg = AdversarialConfig(
-        max_epoch=10, batch_size=4, patience=250,
-        evasion=evasion_cfg, eval_rob_freq=2,
-    )
-    trainer = AdversarialTrainer(cbm=cbm, train_cfg=train_cfg, datahandler=dh, device=device)
-
-    logged = []
-    trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, m)))
-
-    assert len(logged) == 10, f"Expected 10 epochs, got {len(logged)}"
-    assert trainer.base_eps_abs == 0.1, f"Expected eps_abs 0.1, got {trainer.base_eps_abs}"
-    rob_key = trainer.rob_metric_key  # "rob/valid/0.05"
-    rob_epochs = [m for _, m in logged if rob_key in m]
-    assert len(rob_epochs) == 5, f"Expected 5 rob evals (every 2 epochs), got {len(rob_epochs)}"
-    last_ep, last_m = logged[-1]
-    print(f"  epoch={last_ep}  dis_loss/valid={last_m['dis_loss/valid']:.4f}  acc/valid={last_m['acc/valid']:.4f}")
-    print(f"  rob evals at epochs: {[ep for ep, m in logged if rob_key in m]}  (key '{rob_key}')")
-    print("adversarial.py smoke test passed.")

@@ -7,7 +7,6 @@ Entry point scripts for running experiments. All scripts are run as Python modul
 | Script | Purpose |
 |--------|---------|
 | `train.py` | Unified Hydra entry point — NLL (dis/gen) and adversarial training |
-| `run_local.py` | Self-contained local runner — no Hydra, no W&B; edit CONFIG BLOCK |
 | `batch.py` | Batch-run/list HPO and seed_sweep configs, skip already-run |
 
 ---
@@ -83,27 +82,6 @@ python -m experiments.train --multirun \
 **HPO objective** — `train.py` returns a scalar: `trainer.best[stop_crit]`, negated for `acc`/`rob` so Optuna can always minimize. Keep `direction: minimize` in your Optuna config.
 
 Valid `stop_crit` values: `"dis_loss"`, `"gen_loss"`, `"acc"`, `"rob"`.
-
----
-
-## `run_local.py` — self-contained runner
-
-No Hydra, no W&B. Edit the CONFIG BLOCK at the top of the file, then run:
-
-```bash
-python -m experiments.run_local
-```
-
-Key CONFIG BLOCK fields:
-
-| Variable | Values | Notes |
-|----------|--------|-------|
-| `REGIME` | `"nll"` \| `"adversarial"` | Selects trainer |
-| `DATASET_CFG` | `DatasetConfig(name=...)` | See inline comments for dataset names |
-| `CBM_CFG` | `CBMConfig(init_kwargs=MPSInitConfig(...))` | Architecture + embedding |
-| `NLL_CFG` | `NLLConfig(alpha=...)` | `alpha=0` → dis, `alpha=1` → gen |
-| `ADV_CFG` | `AdversarialConfig(...)` | PGD-AT or FGM |
-| `MODEL_PATH` | `Path(...)` \| `None` | Pre-trained checkpoint to fine-tune from |
 
 ---
 

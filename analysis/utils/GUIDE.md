@@ -59,17 +59,6 @@ EPS_REL = [0.05, 0.1, 0.15]
 
 ## Adversarial attacks
 
-### Fast Gradient Method (FGM)
-
-Single-step attack. Given a loss `L(x, y)`:
-
-```
-x_adv = x + ε · sign(∇_x L(x, y))      [L∞ norm]
-x_adv = x + ε · ∇_x L(x,y) / ‖∇_x L‖_2  [L2 norm]
-```
-
-Fast but weak — underestimates robustness for multi-step capable models.
-
 ### Projected Gradient Descent (PGD)
 
 Iterative attack (Madry et al., 2018). Start from `x_0 = x + δ_0` where δ_0 is uniform in the ε-ball (random_start=True), then iterate:

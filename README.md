@@ -181,18 +181,17 @@ The matching interactive MNIST workflow is in
 
 ```
 bm4tc/
-├── experiments/        # Entry-point scripts (train.py, run_local.py, batch.py)
+├── experiments/        # Entry-point scripts (train.py, batch.py)
 ├── configs/            # Hydra configs — born/, dataset/, trainer/, tracking/, experiments/
 ├── src/
 │   ├── model.py        # ConditionalBornMachine
 │   ├── datahandler.py  # DataHandler, dataset generation and loading
 │   ├── train/          # NLLTrainer, AdversarialTrainer
 │   ├── analysis/       # viz.py, purification.py, mia.py, uq.py (no W&B dependency)
-│   └── utils/          # Embeddings, PGD/FGM attacks, optimizer config, train utilities
+│   └── utils/          # Embeddings, PGD attacks, optimizer config, train utilities
 ├── analysis/
 │   ├── sweep.py        # Post-hoc metrics for one seed sweep / alpha curve
 │   ├── batch.py        # Batch-run all unanalysed sweeps
-│   ├── hpo.py          # HPO result exploration
 │   ├── run.py          # Single-model analysis (MIA, UQ)
 │   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)

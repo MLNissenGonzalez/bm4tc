@@ -437,8 +437,8 @@ class LinearScaler:
     near-constant background pixels (e.g. MNIST border pixels).
 
     Reduces to a passthrough when the data already lies in
-    ``feature_range`` (e.g. MNIST ∈ [0,1] with SimpEmbedding or
-    FourierEmbedding, both targeting [0,1]).
+    ``feature_range`` (e.g. MNIST ∈ [0,1] with FourierEmbedding,
+    which targets [0,1]).
     """
 
     def __init__(self, feature_range=(0., 1.), clip=False):
