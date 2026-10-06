@@ -56,7 +56,6 @@ SWEEP_DIR = "outputs/seed_sweep_uq_gen_d30r18fourier_moons_4k_1702"
 _cli = argparse.ArgumentParser(add_help=False)
 _cli.add_argument("sweep_dir", nargs="?", default=None)
 _cli.add_argument("--viz", action="store_true", help="Generate best-run distribution plots.")
-_cli.add_argument("--no-mia", action="store_true", help="Skip membership inference attack.")
 _cli_args, _ = _cli.parse_known_args()
 if _cli_args.sweep_dir is not None:
     SWEEP_DIR = _cli_args.sweep_dir
@@ -86,7 +85,6 @@ print(f"Embedding: '{_EMBEDDING or 'unknown'}'  →  input range size: {_RANGE_S
 # --- METRIC TOGGLES ---
 COMPUTE_ACC = True
 COMPUTE_ROB = True
-COMPUTE_MIA = False
 COMPUTE_DIS_LOSS = True
 COMPUTE_GEN_LOSS = True
 COMPUTE_UQ = True  # Uncertainty quantification (detection + purification)
@@ -95,7 +93,7 @@ COMPUTE_JOINT_ATTACK = True  # Joint generative attack (JOINT_PGD) alongside sta
 COMPUTE_DISTRIBUTIONS = False  # Set True (or pass --viz) to generate best-run distribution plots
 
 # --- EVASION CONFIG (single source of truth for all adversarial attacks) ---
-# Applies to: robustness eval, UQ adversarial examples, adversarial MIA.
+# Applies to: robustness eval and UQ adversarial examples.
 # Set to None to use each run's own evasion config.
 # Budgets are RELATIVE — fractions of the input domain width (see "Budget
 # vocabulary" in CLAUDE.md). Conversion to absolute happens per model, downstream.
@@ -108,24 +106,6 @@ EVASION_CONFIG = {
     "num_steps": 40,
     "eps_rel": EPS_REL,
 }
-
-# --- MIA SETTINGS ---
-# Feature toggles: which confidence features to extract from p(c|x).
-MIA_FEATURES = {
-    "max_prob": True,
-    "entropy": True,
-    "correct_prob": True,
-    "loss": False,
-    "margin": False,
-    "modified_entropy": False,
-    # True  = use ground-truth labels for correct_prob/loss (worst-case risk).
-    # False = use predicted labels (argmax of probs) to avoid label leakage.
-    "use_true_labels": True,
-}
-
-# --- MIA ADVERSARIAL SETTINGS ---
-# Set MIA_ADV_EPS_REL to None to skip adversarial MIA entirely.
-MIA_ADV_EPS_REL = 0.10  # 10% of the input domain
 
 # --- UQ SETTINGS (UQ-specific params only; attack settings from EVASION_CONFIG) ---
 UQ_CONFIG = {
@@ -199,22 +179,17 @@ CONFIG_KEYS = [
 # --- CLI overrides (applied after config block so they take effect) ---
 if _cli_args.viz:
     COMPUTE_DISTRIBUTIONS = True
-if _cli_args.no_mia:
-    COMPUTE_MIA = False
 
 # %% [markdown]
 # ## 2. Per-Model Evaluation
 
 # %%
-# Add PARETO and MIA budgets to EVASION_CONFIG; sort. Build full UQ config.
+# Add the PARETO budget to EVASION_CONFIG; sort. Build full UQ config.
 if EVASION_CONFIG:
     _eps_rel = [float(s) for s in EVASION_CONFIG.get("eps_rel", [])]
     if COMPUTE_ROB and PARETO_ROB_EPS_REL is not None:
         if float(PARETO_ROB_EPS_REL) not in _eps_rel:
             _eps_rel.append(float(PARETO_ROB_EPS_REL))
-    if COMPUTE_MIA and MIA_ADV_EPS_REL is not None:
-        if float(MIA_ADV_EPS_REL) not in _eps_rel:
-            _eps_rel.append(float(MIA_ADV_EPS_REL))
     EVASION_CONFIG["eps_rel"] = sorted(set(_eps_rel))
     print(
         f"Final attack budgets: eps_rel={EVASION_CONFIG['eps_rel']}  "
@@ -268,7 +243,7 @@ def _eval_all_runs(sweep_path, cfg, config_keys=None):
     """
     import pandas as pd
     from omegaconf import OmegaConf
-    from analysis.utils.mia_utils import load_run_config
+    from analysis.utils.runs import load_run_config
 
     sweep_path = Path(sweep_path)
     run_dirs = sorted(
@@ -316,16 +291,10 @@ def _eval_all_runs(sweep_path, cfg, config_keys=None):
 eval_cfg = AnalysisConfig(
     compute_acc=COMPUTE_ACC,
     compute_rob=COMPUTE_ROB,
-    compute_mia=COMPUTE_MIA,
     compute_dis_loss=COMPUTE_DIS_LOSS,
     compute_gen_loss=COMPUTE_GEN_LOSS,
     compute_uq=COMPUTE_UQ,
     evasion_override=EVASION_CONFIG,
-    mia_features=MIA_FEATURES,
-    mia_adv_eps_rel=MIA_ADV_EPS_REL,
-    mia_adversarial_num_steps=EVASION_CONFIG.get("num_steps", 20) if EVASION_CONFIG else 20,
-    mia_adversarial_step_size=None,
-    mia_adversarial_norm=EVASION_CONFIG.get("norm", "inf") if EVASION_CONFIG else "inf",
     uq_config=_full_uq_config if COMPUTE_UQ else None,
     joint_uq_config=_full_joint_uq_config,
     device=DEVICE,
@@ -381,25 +350,6 @@ ROB_CEILING_COLS = (
 )
 DIS_LOSS_COL = "dis_loss" if COMPUTE_DIS_LOSS else None
 
-# MIA is split-agnostic (always uses train vs test internally)
-MIA_COL = "mia_accuracy" if COMPUTE_MIA else None
-
-# Adversarial MIA: best worst-case threshold accuracy across all features
-ADV_MIA_COL = None
-ADV_MIA_FEATURE_COLS = []
-if COMPUTE_MIA and MIA_ADV_EPS_REL is not None and not df.empty:
-    if "adv_mia_wc_best" in df.columns:
-        ADV_MIA_COL = "adv_mia_wc_best"
-    ADV_MIA_FEATURE_COLS = [c for c in df.columns if c.startswith("adv_mia_wc/")]
-
-# Clean worst-case threshold (for apples-to-apples comparison with adversarial MIA)
-MIA_WC_COL = None
-MIA_WC_FEATURE_COLS = []
-if COMPUTE_MIA and MIA_ADV_EPS_REL is not None and not df.empty:
-    if "mia_wc_best" in df.columns:
-        MIA_WC_COL = "mia_wc_best"
-    MIA_WC_FEATURE_COLS = [c for c in df.columns if c.startswith("mia_wc/")]
-
 UQ_ADV_ACC_COLS = []
 UQ_PURIFY_ACC_COLS = []
 UQ_PURIFY_RECOVERY_COLS = []
@@ -436,11 +386,6 @@ if COMPUTE_JOINT_ATTACK and COMPUTE_UQ and not df.empty:
 
 print(f"ACC_COL:      {ACC_COL}")
 print(f"ROB_COLS:     {ROB_COLS}")
-print(f"MIA_COL:      {MIA_COL}")
-print(f"ADV_MIA_COL:  {ADV_MIA_COL}")
-print(f"MIA_WC_COL:   {MIA_WC_COL}")
-if ADV_MIA_FEATURE_COLS:
-    print(f"ADV_MIA per-feature: {ADV_MIA_FEATURE_COLS}")
 
 # Resolve single robustness strength for Pareto frontier
 PARETO_ROB_COL = None
@@ -489,8 +434,6 @@ if not df.empty and ACC_COL and ACC_COL in df.columns:
             if rob_col in best_run.index:
                 strength = rob_col.split("/")[-1]
                 print(f"  Test Robust Accuracy (eps={strength}): {best_run[rob_col]:.4f}")
-        if MIA_COL and MIA_COL in best_run.index:
-            print(f"  MIA Accuracy: {best_run[MIA_COL]:.4f}")
         if COMPUTE_UQ and UQ_PURIFY_ACC_COLS:
             print(f"  --- UQ (Detection + Purification on test) ---")
             uq_clean = best_run.get("uq_clean_accuracy")
@@ -524,7 +467,7 @@ from analysis.utils import compute_metric_correlations
 corr_test = pd.DataFrame()
 
 if not df.empty:
-    test_metrics = [c for c in [ACC_COL, DIS_LOSS_COL, MIA_COL, MIA_WC_COL, ADV_MIA_COL] if c] + list(ROB_COLS)
+    test_metrics = [c for c in [ACC_COL, DIS_LOSS_COL] if c] + list(ROB_COLS)
     test_metrics = [c for c in test_metrics if c in df.columns and df[c].nunique() > 1]
 
     if len(test_metrics) >= 2:
@@ -563,45 +506,6 @@ if not df.empty and PARETO_ROB_COL:
             display_cols = ["run_name", ACC_COL, PARETO_ROB_COL]
             display_cols = [c for c in display_cols if c in pareto_df.columns]
             print(pareto_df[display_cols].to_string(index=False))
-
-# %% [markdown]
-# ### 3g. Adversarial MIA Results
-
-# %%
-# Compute sweep-mean correct_prob arrays (best model's arrays accessible via best_run row)
-if not df.empty and COMPUTE_MIA:
-    TRAIN_CP_COL = "mia_train_correct_probs"
-    TEST_CP_COL = "mia_test_correct_probs"
-    if TRAIN_CP_COL in df.columns and TEST_CP_COL in df.columns:
-        train_arrays = [np.array(x) for x in df[TRAIN_CP_COL].dropna() if x is not None]
-        test_arrays = [np.array(x) for x in df[TEST_CP_COL].dropna() if x is not None]
-        if train_arrays and len(set(a.shape for a in train_arrays)) == 1:
-            mean_train = np.mean(train_arrays, axis=0).tolist()
-            df["mia_mean_train_correct_probs"] = [mean_train] * len(df)
-        elif train_arrays:
-            print("Warning: mia_train_correct_probs arrays have inhomogeneous shapes "
-                  "(e.g. varying split sizes across seeds) — skipping sweep-mean.")
-        if test_arrays and len(set(a.shape for a in test_arrays)) == 1:
-            mean_test = np.mean(test_arrays, axis=0).tolist()
-            df["mia_mean_test_correct_probs"] = [mean_test] * len(df)
-        elif test_arrays:
-            print("Warning: mia_test_correct_probs arrays have inhomogeneous shapes "
-                  "(e.g. varying split sizes across seeds) — skipping sweep-mean.")
-
-if not df.empty and ADV_MIA_COL and ADV_MIA_FEATURE_COLS:
-    print(f"\nAdversarial MIA Worst-Case Threshold (eps_rel={MIA_ADV_EPS_REL}):")
-    print("  Per-feature accuracy (oracle threshold, mean +/- std across runs):\n")
-    if MIA_WC_COL and MIA_WC_COL in df.columns:
-        vals_wc = df[MIA_WC_COL].dropna()
-        print(f"    {'WC Threshold (clean)':25s}  {vals_wc.mean():.4f} +/- {vals_wc.std():.4f}")
-    for col in sorted(ADV_MIA_FEATURE_COLS):
-        feat = col.split("/")[-1]
-        vals = df[col].dropna()
-        print(f"    {feat:25s}  {vals.mean():.4f} +/- {vals.std():.4f}")
-
-    if ADV_MIA_COL in df.columns:
-        vals = df[ADV_MIA_COL].dropna()
-        print(f"\n    {'BEST (across features)':25s}  {vals.mean():.4f} +/- {vals.std():.4f}")
 
 # %% [markdown]
 # ### 3h. UQ Results (detection + purification across all runs)
@@ -649,7 +553,7 @@ from analysis.utils import create_summary_table
 
 if not df.empty and ACC_COL:
     summary_df = create_summary_table(
-        df, acc_col=ACC_COL, rob_cols=ROB_COLS, mia_col=MIA_COL,
+        df, acc_col=ACC_COL, rob_cols=ROB_COLS,
         effective_n=EFFECTIVE_N,
     )
 
@@ -890,24 +794,6 @@ if not df.empty:
                 f.write(f"{_lbl:<{_jlabel_w}}" + "".join(_sfmt(v) for v in _vals) + "\n")
             f.write("\n")
 
-        # --- MIA ---
-        if MIA_COL and MIA_COL in df.columns:
-            f.write("-" * 60 + "\n")
-            f.write("Membership Inference Attack\n")
-            f.write("-" * 60 + "\n\n")
-            f.write(f"  LR accuracy:  {_smean(MIA_COL):.4f} ± {_sstd(MIA_COL):.4f}\n")
-            if "mia_auc_roc" in df.columns:
-                f.write(f"  AUC-ROC:      {_smean('mia_auc_roc'):.4f} ± {_sstd('mia_auc_roc'):.4f}\n")
-            if MIA_WC_COL and MIA_WC_COL in df.columns:
-                f.write(f"  WC threshold (clean): {_smean(MIA_WC_COL):.4f} ± {_sstd(MIA_WC_COL):.4f}\n")
-            if ADV_MIA_COL and ADV_MIA_COL in df.columns:
-                f.write(f"  WC threshold (adv, eps_rel={MIA_ADV_EPS_REL}): "
-                        f"{_smean(ADV_MIA_COL):.4f} ± {_sstd(ADV_MIA_COL):.4f}\n")
-                for _col in sorted(ADV_MIA_FEATURE_COLS):
-                    _feat = _col.split("/")[-1]
-                    f.write(f"    {_feat}: {_smean(_col):.4f} ± {_sstd(_col):.4f}\n")
-            f.write("\n")
-
         # --- Pareto frontier ---
         if ACC_COL and PARETO_ROB_COL:
             _pf_df = get_pareto_runs(df, ACC_COL, PARETO_ROB_COL, True, True)
@@ -939,9 +825,6 @@ if not df.empty:
 #   dis_loss                    — discriminative NLL loss (test)
 #   gen_loss                    — generative (joint) NLL loss (test)
 #   rob/<eps_rel>               — robust accuracy at each relative epsilon (test)
-#   mia_accuracy, mia_auc_roc   — LR attack accuracy and AUC-ROC
-#   mia_wc/<feat>, mia_wc_best  — per-feature worst-case threshold accuracy
-#   adv_mia_wc/<feat>, adv_mia_wc_best — adversarial MIA worst-case accuracy
 #   uq_clean_accuracy           — UQ clean accuracy on test
 #   uq_adv_acc/<eps_rel>        — adversarial accuracy (no defense) at each eps_rel
 #   uq_detection/<pct>pct/<eps_rel> — detection rate at threshold percentile & eps_rel

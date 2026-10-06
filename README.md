@@ -25,7 +25,7 @@ For classification, a special output tensor yields a class-conditioned amplitude
 
 **Uncertainty quantification** — `ConditionalBornMachine.marginal_log_probability(x)` gives log p(x) = log Σ_c |ψ(x,c)|² − log Z. Used for (i) likelihood-based detection of adversarial examples (threshold calibrated on clean test percentiles) and (ii) likelihood purification (projected gradient ascent on log p(x) within an Lp ball).
 
-**Membership inference** — Logistic-regression attack and worst-case oracle threshold attack on confidence features derived from p(c|x). Also evaluated on adversarial inputs (adversarial MIA).
+**Membership inference** — standalone, outside the pipeline: `analysis/privacy.py` (logistic-regression and worst-case threshold attacks on confidence features of p(c|x)).
 
 ## Feature Embeddings
 
@@ -187,13 +187,13 @@ bm4tc/
 │   ├── model.py        # ConditionalBornMachine
 │   ├── datahandler.py  # DataHandler, dataset generation and loading
 │   ├── train/          # NLLTrainer, AdversarialTrainer
-│   ├── analysis/       # viz.py, purification.py, mia.py, uq.py (no W&B dependency)
+│   ├── analysis/       # viz.py, purification.py, uq.py (no W&B dependency)
 │   └── utils/          # Embeddings, PGD attacks, optimizer config, train utilities
 ├── analysis/
 │   ├── sweep.py        # Post-hoc metrics for one seed sweep / alpha curve
 │   ├── batch.py        # Batch-run all unanalysed sweeps
-│   ├── run.py          # Single-model analysis (MIA, UQ)
-│   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, mia_utils.py
+│   ├── run.py          # Single-model analysis (rob, UQ)
+│   ├── utils/          # statistics.py, resolve.py, wandb_fetcher.py, runs.py
 │   └── outputs/        # Generated analysis artifacts (git-ignored)
 ├── tools/              # Pipeline tools (fill_hpo.py, delete_runs.py, …)
 ├── notebooks/          # Reproduction notebooks (2dtoy.ipynb, mnist.ipynb; archive/ git-ignored)

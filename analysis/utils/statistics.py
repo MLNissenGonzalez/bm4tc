@@ -93,7 +93,6 @@ def create_summary_table(
     df: pd.DataFrame,
     acc_col: str,
     rob_cols: Optional[List[str]] = None,
-    mia_col: Optional[str] = None,
     effective_n: Optional[int] = None,
     stop_crit_col: Optional[str] = None,
     stop_crit_minimize: bool = True,
@@ -108,7 +107,6 @@ def create_summary_table(
         df: DataFrame with metric columns.
         acc_col: Column for clean accuracy.
         rob_cols: Columns for robustness metrics.
-        mia_col: Column for MIA accuracy (optional).
         effective_n: Override for sample size in stderr.
         stop_crit_col: Column used as stopping criterion.
         stop_crit_minimize: Whether to minimise the stop criterion.
@@ -151,17 +149,6 @@ def create_summary_table(
                     "Std Error": stats["stderr"],
                     "N": stats["n"],
                 })
-
-    if mia_col and mia_col in df.columns:
-        stats = compute_statistics(df, mia_col, effective_n)
-        rows.append({
-            "Metric": "MIA Accuracy",
-            "Best": _best_val(mia_col, stats),
-            "Mean": stats["mean"],
-            "Std": stats["std"],
-            "Std Error": stats["stderr"],
-            "N": stats["n"],
-        })
 
     return pd.DataFrame(rows)
 
@@ -283,7 +270,6 @@ def plot_accuracy_histogram(
     df: pd.DataFrame,
     acc_col: str,
     rob_cols: Optional[List[str]] = None,
-    mia_col: Optional[str] = None,
     title: str = "Accuracy Distribution",
     figsize: Tuple[int, int] = (10, 6),
     dpi: int = 100,
@@ -294,7 +280,6 @@ def plot_accuracy_histogram(
         df: DataFrame with accuracy columns.
         acc_col: Column for clean accuracy.
         rob_cols: Columns for robustness metrics.
-        mia_col: Column for MIA accuracy.
         title: Plot title.
         figsize: Base figure size (width per subplot is 5).
         dpi: Figure DPI.
@@ -305,8 +290,6 @@ def plot_accuracy_histogram(
     n_plots = 1
     if rob_cols:
         n_plots += len([c for c in rob_cols if c in df.columns])
-    if mia_col and mia_col in df.columns:
-        n_plots += 1
 
     fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4), dpi=dpi, squeeze=False)
     axes = axes.flatten()
@@ -340,18 +323,6 @@ def plot_accuracy_histogram(
                     ax.grid(True, alpha=0.3)
                 plot_idx += 1
 
-    if mia_col and mia_col in df.columns:
-        ax = axes[plot_idx]
-        values = df[mia_col].dropna()
-        if len(values) > 0:
-            ax.hist(values, bins=15, color="purple", edgecolor="white", alpha=0.8)
-            ax.axvline(values.mean(), color="red", linestyle="--", label=f"Mean: {values.mean():.4f}")
-            ax.set_xlabel("MIA Accuracy")
-            ax.set_ylabel("Count")
-            ax.set_title("MIA Accuracy")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-
     fig.suptitle(title, fontsize=12, y=1.02)
     fig.tight_layout()
     return fig
@@ -361,7 +332,6 @@ def plot_mean_with_std(
     df: pd.DataFrame,
     acc_col: str,
     rob_cols: Optional[List[str]] = None,
-    mia_col: Optional[str] = None,
     title: str = "Mean Accuracies",
     figsize: Tuple[int, int] = (10, 6),
     dpi: int = 100,
@@ -372,7 +342,6 @@ def plot_mean_with_std(
         df: DataFrame with accuracy columns.
         acc_col: Column for clean accuracy.
         rob_cols: Columns for robustness metrics.
-        mia_col: Column for MIA accuracy.
         title: Plot title.
         figsize: Figure size.
         dpi: Figure DPI.
@@ -401,13 +370,6 @@ def plot_mean_with_std(
                 means.append(stats["mean"])
                 stds.append(stats["std"])
                 colors.append("orange")
-
-    if mia_col and mia_col in df.columns:
-        stats = compute_statistics(df, mia_col)
-        metrics.append("MIA\nAccuracy")
-        means.append(stats["mean"])
-        stds.append(stats["std"])
-        colors.append("purple")
 
     if not metrics:
         return None
@@ -438,7 +400,6 @@ def plot_scatter_vs_metric(
     x_col: str,
     acc_col: str,
     rob_cols: Optional[List[str]] = None,
-    mia_col: Optional[str] = None,
     x_label: str = "X",
     title: str = "Accuracy vs Metric",
     figsize: Tuple[int, int] = (10, 6),
@@ -454,7 +415,6 @@ def plot_scatter_vs_metric(
         x_col: Column for the x-axis metric.
         acc_col: Column for clean accuracy.
         rob_cols: Columns for robustness metrics.
-        mia_col: Column for MIA accuracy.
         x_label: Label for the x-axis.
         title: Plot title.
         figsize: Figure size (width per subplot is 5).
@@ -469,8 +429,6 @@ def plot_scatter_vs_metric(
     n_plots = 1
     if rob_cols:
         n_plots += len([c for c in rob_cols if c in df.columns])
-    if mia_col and mia_col in df.columns:
-        n_plots += 1
 
     fig, axes = plt.subplots(1, n_plots, figsize=(5 * n_plots, 4), dpi=dpi, squeeze=False)
     axes = axes.flatten()
@@ -505,9 +463,6 @@ def plot_scatter_vs_metric(
             if rob_col in df.columns and plot_idx < len(axes):
                 strength = rob_col.split("/")[-1]
                 _scatter(axes[plot_idx], rob_col, "orange", "Robust Accuracy", f"Robust Acc (eps={strength})")
-
-    if mia_col and mia_col in df.columns and plot_idx < len(axes):
-        _scatter(axes[plot_idx], mia_col, "purple", "MIA Accuracy", "MIA Accuracy")
 
     fig.suptitle(title, fontsize=12, y=1.02)
     fig.tight_layout()

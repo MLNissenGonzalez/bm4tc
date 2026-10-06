@@ -9,7 +9,7 @@ from .wandb_fetcher import (
     find_local_sweep_dirs,
 )
 
-from .mia_utils import (
+from .runs import (
     load_run_config,
     find_model_checkpoint,
 )
