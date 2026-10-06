@@ -11,8 +11,7 @@ This guide explains **what is being computed** in the analysis pipeline and **ho
 | `../run.py` | Top-level `analyze_run()` — orchestrates all metrics for a single model |
 | `src/analysis/uq.py` | Uncertainty quantification: detection + likelihood purification |
 | `runs.py` | Config loading (`load_run_config`) and checkpoint finding |
-| `wandb_fetcher.py` | W&B API + local summary loading |
-| `resolve.py` | Path-to-regime/embedding detection, range-size table, param shorthands |
+| `resolve.py` | Path-to-regime/embedding detection (`nat`/`at`) |
 | `statistics.py` | Summary tables, Pareto frontiers, correlation heatmaps |
 
 ---
@@ -192,10 +191,10 @@ _RANGE_SIZE = embedding_range_size(_EMBEDDING)
 # → 1.0 | 2.0 | 8.0 | 1.98 | 2.0
 
 REGIME = resolve_regime_from_path(SWEEP_DIR)
-# → "pre" | "gen" | "adv" | "gan"
+# → "nat" | "at" | None
 ```
 
-Both functions tokenize the path on `/` and `_` and match against known strings. This works for paths like `outputs/seed_sweep/gen/hermite/d4r3/moons_2102`.
+The regime is the first directory named `nat` or `at`; the embedding is the first `/`- or `_`-separated token that names one. This works for paths like `outputs/moons/nat/hermite/d4r3/seed_sweep_a0_2102`.
 
 ---
 

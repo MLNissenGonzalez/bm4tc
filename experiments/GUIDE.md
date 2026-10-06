@@ -1,161 +1,56 @@
 # Experiments Guide
 
-Entry point scripts for running experiments. All scripts are run as Python modules from the project root.
+The pipeline weaving: configs, the training entry point, logging and metric keys. Run
+everything as a Python module from the project root.
 
-## Entry Points
-
-| Script | Purpose |
-|--------|---------|
-| `train.py` | Unified Hydra entry point — NLL (dis/gen) and adversarial training |
-| `batch.py` | Batch-run/list HPO and seed_sweep configs, skip already-run |
-
----
-
-## `train.py` — Hydra entry point
-
-Mode is inferred from config: if `trainer.adversarial` is set → adversarial; if `trainer.nll` is set → NLL (dis or gen depending on `alpha`).
-
-### Basic Usage
-
-```bash
-# NLL discriminative run
-python -m experiments.train +experiments=nll/dis/fourier/d4r3/hpo/moons
-
-# NLL generative run
-python -m experiments.train +experiments=nll/gen/legendre/d10r6/hpo/circles
-
-# Adversarial training run
-python -m experiments.train +experiments=adversarial/fourier/d4r3/hpo/moons
-
-# Quick test run (tiny config, no W&B)
-python -m experiments.train +experiments=tests/nll         tracking.mode=disabled
-python -m experiments.train +experiments=tests/adversarial tracking.mode=disabled
-```
-
-### Command-Line Overrides
-
-```bash
-# Fewer epochs
-python -m experiments.train +experiments=tests/nll \
-    trainer.nll.max_epoch=10 tracking.mode=disabled
-
-# Disable W&B
-python -m experiments.train +experiments=tests/nll \
-    tracking.mode=disabled
-
-# Different learning rate
-python -m experiments.train +experiments=tests/nll \
-    trainer.nll.optimizer.kwargs.lr=1e-3 tracking.mode=disabled
-```
-
-### Multirun (Grid / Seed Sweep)
-
-```bash
-python -m experiments.train --multirun +experiments=nll/gen/legendre/d10r6/seed_sweep/circles
-```
-
-### Debug config (print resolved config without running)
-
-```bash
-python -m experiments.train --cfg job +experiments=tests/nll
-```
-
-### Hyperparameter Optimization (Optuna)
-
-**Option 1** — Specify sweeper in experiment config (recommended):
-```yaml
-# configs/experiments/nll/dis/fourier/d4r3/hpo/moons.yaml
-defaults:
-  - override /hydra/sweeper: optuna
-```
-```bash
-python -m experiments.train --multirun +experiments=nll/dis/fourier/d4r3/hpo/moons
-```
-
-**Option 2** — Specify sweeper on the command line:
-```bash
-python -m experiments.train --multirun \
-    hydra/sweeper=optuna \
-    +experiments=nll/dis/fourier/d4r3/hpo/moons
-```
-
-**HPO objective** — `train.py` returns a scalar: `trainer.best[stop_crit]`, negated for `acc`/`rob` so Optuna can always minimize. Keep `direction: minimize` in your Optuna config.
-
-Valid `stop_crit` values: `"dis_loss"`, `"gen_loss"`, `"acc"`, `"rob"`.
+| File | Purpose |
+|------|---------|
+| `train.py` | Hydra entry point for NAT and AT training; returns the best `objective/valid` |
+| `config.py` | Top-level schema (`Config`, `TrainerConfig`, `TrackingConfig`) and `register()` |
+| `metrics.py` | The only place that builds logged metric keys (`quantity/split[/budget]`, D48) |
+| `tracking.py` | `log.json` writer and W&B init |
+| `resolvers.py` | OmegaConf resolvers used in the output-path templates |
 
 ---
 
-## `batch.py` — batch runner
+## `train.py`
 
-Discovers all `hpo/`, `seed_sweep/`, and `grid_sweep/` configs under `configs/experiments/` and runs them sequentially, skipping any that already have a matching output directory.
-
-Config layout expected:
-```
-configs/experiments/nll/{dis,gen}/{embedding}/{arch}/{kind}/{dataset}.yaml
-configs/experiments/adversarial/{embedding}/{arch}/{kind}/{dataset}.yaml
-```
-
-### Usage
+The regime follows from the trainer group that is set: `trainer/at` → AT
+(`AdversarialTrainer`), `trainer/nat` → NAT (`NLLTrainer`). The best epoch is the one
+with the lowest `objective/valid` (D8); `train.py` returns that value, so an Optuna
+sweep always uses `direction: minimize`.
 
 ```bash
-# List all discovered configs with [ran]/[   ] status
-python -m experiments.batch --list
+# NAT, cold start
+python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
+    trainer/nat=default trainer.nat.alpha=0.0
 
-# Dry-run: print commands without executing
-python -m experiments.batch --dry-run
+# AT, warm-started from a NAT checkpoint
+python -m experiments.train dataset=2Dtoy/spirals born=legendre/d10r6c64 \
+    '~trainer/nat' trainer/at=pgd_at trainer.at.alpha=0.01 model_path=<run>/models/model
 
-# Run everything that hasn't been run yet
-python -m experiments.batch
+# Quick checks, no W&B
+python -m experiments.train +experiments=tests/nat tracking.mode=disabled
+python -m experiments.train +experiments=tests/at  tracking.mode=disabled
 
-# Filter by type (dis | gen | adv or full name)
-python -m experiments.batch --type gen --dry-run
-
-# Filter by embedding
-python -m experiments.batch --embedding legendre --dry-run
-
-# Filter by architecture (exact match)
-python -m experiments.batch --arch d10r6 --dry-run
-
-# Filter by kind (seed_sweep | hpo | grid_sweep)
-python -m experiments.batch --kind hpo --dry-run
-
-# Filter by dataset (substring match)
-python -m experiments.batch --dataset circles --dry-run
-
-# Re-run even if output already exists
-python -m experiments.batch --force --dry-run
+# Print the composed config without running
+python -m experiments.train --cfg job +experiments=tests/nat
 ```
+
+The config is checked against the schema (D25): a typo in a key fails at composition.
+The per-experiment YAML tree was deleted (D49); Phase 4 study files replace it.
 
 ---
 
-## Output Directory Structure
+## Output directory
 
-Each single run creates:
 ```
-outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM_HHMM}/
-    .hydra/
-    │   ├── config.yaml       # Resolved config (all values)
-    │   ├── hydra.yaml        # Hydra settings
-    │   └── overrides.yaml    # Overrides used
-    ├── models/               # Saved model checkpoint (if save=True)
-    │   └── model.pt
-    └── log.json              # Epoch-level metrics (always written)
+outputs/{dataset}/{nat|at}/{embedding}/{arch}/[{stage}/]{experiment}_{DDMM_HHMM}/
+    .hydra/config.yaml     # resolved config
+    models/model           # checkpoint (if save=true)
+    log.json               # epoch metrics, keys from metrics.py
 ```
 
-For multirun/sweep:
-```
-outputs/{kind}/{regime}/{embedding}/{arch}/{dataset}_{DDMM}/
-    ├── 0/                    # First trial
-    │   ├── .hydra/
-    │   ├── log.json
-    │   └── models/model.pt
-    ├── 1/                    # Second trial
-    └── multirun.yaml
-```
-
-**Naming components:**
-- `{kind}`: `hpo` | `seed_sweep` | `alpha_curve` | `test`
-- `{regime}`: `nll` (dis/gen) | `adv`
-- `{arch}`: `d{in_dim}r{bond_dim}` — e.g. `d4r3`, `d30r18`
-- `{dataset}`: dataset name — e.g. `moons`, `circles`
-- `{date}`: `DDMM` for multiruns, `DDMM_HHMM` for single runs
+A multirun adds one numbered subdirectory per job. Training needs an `outputs/`
+ancestor in the run directory, because the W&B group is derived from the path (D47
+replaces this in Phase 4).
