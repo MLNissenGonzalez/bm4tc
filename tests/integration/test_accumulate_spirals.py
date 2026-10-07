@@ -93,7 +93,7 @@ def test_training_curves_agree(dh, pair):
         cfg = TrainConfig(alpha=0.5, max_epoch=5, batch_size=64,
                           optimizer=OptimizerConfig(kwargs={"lr": 1e-3}))
         logged = []
-        Trainer(m, cfg, dh, CPU).train(
+        Trainer(m, cfg, dh.classification["train"], dh.classification["valid"], CPU).train(
             on_epoch_end=lambda ep, r: logged.append(flatten_epoch(r)["objective/valid"]))
         curves.append(logged)
     assert curves[1] == pytest.approx(curves[0], rel=1e-3)

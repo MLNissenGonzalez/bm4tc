@@ -152,7 +152,7 @@ class NormRegularizer(nn.Module):
         return self.strength * (log_Z - self.log_target) ** 2
 
 
-def resolve_log_target(cbm, datahandler, nc: NormControlConfig) -> float:
+def resolve_log_target(cbm, nc: NormControlConfig) -> float:
     """Resolve ``NormControlConfig.log_target`` to a finite float.
 
     - ``None`` → the pretrained model's current ``log Z`` (a no-op target that
@@ -173,7 +173,7 @@ def resolve_log_target(cbm, datahandler, nc: NormControlConfig) -> float:
 
     if isinstance(raw, str):
         n_features = cbm.n_features
-        data_dim = datahandler.data_dim
+        data_dim = n_features - 1  # every site but the class site
         in_dim = cbm.in_dim
         out_dim = cbm.out_dim
         bond_dim = cbm.bond_dim

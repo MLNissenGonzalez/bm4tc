@@ -43,9 +43,13 @@ def dh():
     return handler
 
 
+def _loaders(dh):
+    return dh.classification["train"], dh.classification["valid"]
+
+
 def _train(dh, cbm=None, **cfg):
     cbm = cbm or _cbm()
-    trainer = Trainer(cbm, TrainConfig(batch_size=8, patience=999, **cfg), dh, CPU)
+    trainer = Trainer(cbm, TrainConfig(batch_size=8, patience=999, **cfg), *_loaders(dh), CPU)
     logged = []
     trainer.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
     return trainer, logged
@@ -73,14 +77,15 @@ def test_early_stopping(dh):
         alpha=0.0, max_epoch=20, batch_size=8, patience=0,
         optimizer=OptimizerConfig(kwargs={"lr": 0.0}),
         norm_control=NormControlConfig(soft_strength=0.0),
-    ), dh, CPU)
+    ), *_loaders(dh), CPU)
     logged = []
     trainer.train(on_epoch_end=lambda ep, m: logged.append(ep))
     assert logged == [1, 2]
 
 
 def test_save_creates_file(dh, tmp_path):
-    trainer = Trainer(_cbm(), TrainConfig(max_epoch=2, batch_size=8, save=True), dh, CPU)
+    trainer = Trainer(_cbm(), TrainConfig(max_epoch=2, batch_size=8, save=True),
+                      *_loaders(dh), CPU)
     trainer.train(output_dir=tmp_path)
     assert (tmp_path / "model").exists()
 
