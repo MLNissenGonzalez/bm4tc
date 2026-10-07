@@ -1,4 +1,4 @@
-"""Membership inference attack (analysis/privacy.py)."""
+"""Membership inference attack (bm4tc/analysis/privacy.py)."""
 import numpy as np
 import pytest
 import torch

@@ -83,7 +83,7 @@ def test_spirals_ceiling_is_below_the_reported_at_robustness():
     """The register's D1 finding, as a regression test.
 
     On the spirals test split the ceiling is ~0.68 at abs 0.2 and ~0.63 at abs 0.3, while
-    `analysis/outputs/spirals/at/legendre/d10r6/seed_sweep_0206` reports 0.929 and 0.829.
+    `analysis/outputs/spirals/at/legendre/d10r6/seed_sweep_0206` (tag pre-ousterhout) reports 0.929 and 0.829.
     Measured `rob` >= true robust accuracy, so that gap is an attack failure, not a model
     property. If this test ever passes trivially the dataset generation has changed.
     """

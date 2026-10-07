@@ -7,17 +7,10 @@ spec_file.txt
 # Save images only locally.
 images/
 
-# Generated figures (reproduced by the notebooks under notebooks/)
-# figures/
+# figures/ (written by `python -m bm4tc figures paper`) is tracked: the paper uses it.
 
-# Track notebooks/ but keep the personal-experimentation archive out of git
-notebooks/archive/
-
-# Experiment run outputs: logging, images, model parameters. Nothing here is
-# worth versioning -- checkpoints were never tracked anyway (see `models/` and
-# `*.pt` below), and the resolved Hydra configs are reproducible from configs/.
-# Leading slash anchors this to the top-level dir only -- a bare `outputs/`
-# would also swallow analysis/outputs/, which IS tracked.
+# Run outputs (checkpoints, curves, analyses) live under $BM4TC_DATA_ROOT/outputs,
+# or here when it is unset.
 /outputs/
 multirun/
 
@@ -55,14 +48,6 @@ maxBond_2d.py
 
 # archive (old version of of the code (pre refactoring in object oriented coding))
 archive/
-
-# Analysis outputs (evaluation CSVs, summaries, figures) are TRACKED on main --
-# they are the results and must be backed up by an ordinary commit + push.
-# Deliberately not ignored: git never touches ignored files, but it also never
-# saves them.
-# analysis/outputs/
-# analysis/*.png
-# analysis/scratchbook.ipynb
 
 # github
 .github/

@@ -1,8 +1,8 @@
 # A Philosophy of Software Design: a compact summary
 
 John Ousterhout, *A Philosophy of Software Design* (2nd ed., 2021). This is a summary of
-its ideas and of what they imply in general. What they mean for this repository goes in
-`status.md` and `plan.md`.
+its ideas and of what they imply in general. What they meant for this repository is in
+`decisions.md`.
 
 ## 1. The central claim
 

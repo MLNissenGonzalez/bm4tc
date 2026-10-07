@@ -137,8 +137,7 @@ class ChebyshevT1Embedding:
     measure and diverges at x = ±1.  Restricting the data range to ±0.99
     bounds the weight to at most (1−0.99²)^{−1/4} ≈ 2.24, preventing the
     Born Machine from placing artificially high probability mass at the
-    boundaries due to the embedding magnitude alone.  See the embeddings section of GUIDE.md
-    "Chebyshev T1 boundary artefact" for a full explanation.
+    boundaries due to the embedding magnitude alone.
     """
     def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
