@@ -49,7 +49,7 @@ def test_shift_down_detects_all():
 def test_shift_up_detects_none():
     """Regression-pins the spirals-AT signature: det 0.0 with err_detected nan.
 
-    See analysis/outputs/spirals/at/legendre/d10r6/seed_sweep_0206 -- detection was
+    See (tag pre-ousterhout) analysis/outputs/spirals/at/legendre/d10r6/seed_sweep_0206 -- detection was
     0.0000 in all 96 cells while err_detected was nan in all 96, i.e. the flagged set
     was empty because every adversarial score sat ABOVE the threshold.
     """
