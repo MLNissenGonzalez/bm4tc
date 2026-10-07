@@ -35,6 +35,22 @@ def test_spirals_small():
     assert ds.X.dtype in (np.float32, np.float64)
 
 
+def test_generation_settings_name_the_cached_file(tmp_path, monkeypatch):
+    """A cached dataset is reused only for the same settings: a spirals file of
+    another size must not be loaded in place of the configured one."""
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
+
+    monkeypatch.setenv("BM4TC_DATA_ROOT", str(tmp_path))
+    sizes = {}
+    for size in (32, 48):
+        cfg = DatasetConfig(name="spirals", gen_dow_kwargs=DataGenDowConfig(
+            name="spirals", size=size, seed=42, noise=0.1))
+        sizes[size] = load_dataset(cfg).X.shape[0]
+    assert sizes == {32: 64, 48: 96}
+    assert sorted(p.name for p in (tmp_path / ".datasets" / "spirals").iterdir()) == [
+        "spirals_n32_s42_noise0.1.npz", "spirals_n48_s42_noise0.1.npz"]
+
+
 def test_handler_spirals_small():
     lo, hi = -1.0, 1.0  # legendre range
     bm, dh = _make_spirals_handler()
