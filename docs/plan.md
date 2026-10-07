@@ -14,11 +14,10 @@ Run the studies on the lab HPC, then `python -m bm4tc figures paper`.
 
 Order (warm studies need their `warm_from` study trained):
 
-1. Pilots that set defaults (one-off, by hand):
-   - PGD-5 vs PGD-10 AT training on `mnist12` d3r40 α=0 (D43): if PGD-5 loses more
-     than ~1 point of robust accuracy at PGD-40 evaluation, keep 10; otherwise set
-     `num_steps: 5` in `configs/trainer/at.yaml`.
-   - The norm-control target for cold MNIST runs, 0 vs n·ln d / 2 (D59).
+1. Pilots that set defaults (D83): `pilot_norm_zero` + `pilot_norm_half` (the
+   norm-control target, D59), then `pilot_pgd10` + `pilot_pgd5` (warm from
+   `pilot_norm_zero`; PGD-5 vs 10, D43). Apply the verdicts to
+   `configs/studies/mnist*_nat.yaml` (target) and `configs/trainer/at.yaml` (steps).
 2. `spirals_nat`, `spirals_capacity`, `spirals_embedding`, `mnist12_nat`,
    `mnist_capacity`, `jem_mnist12_nat` (independent; cold).
 3. `spirals_at`, `mnist12_at`, `jem_mnist12_at` (warm).
@@ -44,6 +43,12 @@ Still to provide for Phase 8:
 - **Gibbs purification on full MNIST costs ≈ 40–80 GPU-h per run** (see below).
   Fix it first, or enable `analysis.sweep_purify` only where the paper reads it
   (`paper.yaml`'s `mnist_sweep_purify`: `mnist_nat` α = 0.01).
+- **HPO workers per cell = the launch's slots** (capped at the cell's trials). With
+  ≥ 15 slots every trial of a cell starts at once: TPE never sees a finished trial
+  and the pruner never acts, so the HPO is random search. Cap the workers per cell
+  (e.g. at ~1/3 of the trials) before Phase 8; until then, give a study ~8 slots.
+- `run <study> --cell X` stops at `select`, which needs every cell's HPO. Let
+  select (and run) work on the launched cells only.
 - Time one probe on a cluster node first. Training is limited by CPU speed, and
   the cluster's CPU threads may be slower than the laptop's.
 

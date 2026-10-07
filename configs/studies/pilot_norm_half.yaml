@@ -1,0 +1,18 @@
+# Pilot A (D59, D83): the norm-control target for cold MNIST runs. This study:
+# log Z pulled to n·ln d / 2; pilot_norm_zero: to 0. Same soft penalty
+# 0.1·(log Z − target)², no hard projection. Decide on test acc (α 0, 0.1),
+# test generative NLL (α 0.1, 1) and collapsed runs; a tie keeps 0.
+dataset: mnist12
+regime: nat
+seeds: 3
+grid:
+  arch: [d3r40]
+  alpha: [0, 1e-1, 1]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # 145 sites: ≈ 79.6
+budgets: [0.1]                 # the pilot reads clean metrics; one radius keeps analysis cheap
+analysis:
+  joint_attack: false
