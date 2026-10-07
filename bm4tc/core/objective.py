@@ -11,6 +11,8 @@ import torch.optim as optim
 from torch import nn
 from tqdm.auto import tqdm
 
+from bm4tc.core.interface import class_probabilities
+
 logger = logging.getLogger(__name__)
 
 
@@ -309,7 +311,7 @@ def mix(dis: float, gen: float, alpha: float) -> float:
 
 
 def evaluate(
-    cbm, loader, device, *,
+    cbm, loader, device, *, log_Z=None,
     alpha: float = 0.0, attack=None, eps_abs: float = 0.0,
     clean_weight: float = 1.0, adv_indices=(), progress: bool = False,
 ) -> dict:
@@ -332,13 +334,19 @@ def evaluate(
     over the full set. With an attack, ``n_rob`` is ``|S_adv|``, and ``loss_adv``
     (mean L_dis on x_adv) and ``rob`` are over ``S_adv``, omitted when it is empty
     (``clean_weight == 1``).
+
+    Any model of :mod:`bm4tc.core.interface` (``cbm`` is its ``log_joint``):
+    ``L_gen = log Z - log_joint(x)[y]``. ``log_Z`` None computes the MPS's exact
+    one; JEM passes its SGLD estimate, or nan when there is no generative term
+    (then ``loss_gen`` is nan and the objective drops it).
     """
     cbm.eval()
-    with torch.no_grad():
-        log_Z = cbm.log_partition_function()
-    gen_finite = math.isfinite(log_Z.item())
-    if not gen_finite:
-        logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
+    if log_Z is None:
+        with torch.no_grad():
+            log_Z = cbm.log_partition_function()
+        if not math.isfinite(log_Z.item()):
+            logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
+    gen_finite = math.isfinite(float(log_Z))
 
     adv_indices = set(adv_indices) if attack is not None else set()
     offset = 0
@@ -363,9 +371,9 @@ def evaluate(
         offset += B
 
         with torch.no_grad():
-            # Same log|ψ|² entry point as the loss: dispatches on cbm.accumulate,
+            # MPS: log|ψ|², the loss's entry point (dispatches on cbm.accumulate),
             # so evaluation matches training's numerics.
-            las = cbm.log_amp_sq(data)                       # (B, C)
+            las = cbm.log_joint(data)                        # (B, C)
             log_sq_obs = las[range(B), labels]
             dis = torch.logsumexp(las, dim=1) - log_sq_obs    # (B,)
             correct += (las.argmax(dim=1) == labels).sum().item()
@@ -380,7 +388,7 @@ def evaluate(
             adv = attack.generate(model=cbm, naturals=sub_data, labels=sub_labels,
                                   eps_abs=eps_abs, device=device)
             with torch.no_grad():
-                las_adv = cbm.log_amp_sq(adv)
+                las_adv = cbm.log_joint(adv)
                 n_sub = len(sub_labels)
                 log_sq_adv = las_adv[range(n_sub), sub_labels]
                 dis_adv_sum += (torch.logsumexp(las_adv, dim=1) - log_sq_adv).sum().item()
@@ -433,7 +441,7 @@ def eval_rob(cbm, loader, attack, eps_abs: float, device, progress: bool = False
         adv = attack.generate(model=cbm, naturals=data, labels=labels,
                               eps_abs=eps_abs, device=device)
         with torch.no_grad():
-            probs = cbm.class_probabilities(adv)
+            probs = class_probabilities(cbm, adv)
         correct += (probs.argmax(dim=1) == labels).sum().item()
         total += len(labels)
     return correct / total if total > 0 else float("nan")

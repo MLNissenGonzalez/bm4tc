@@ -1,5 +1,9 @@
 # JEM baseline guide
 
+> **Outdated (Phase 6):** JEM now lives in `bm4tc/core/jem/` and runs through the
+> pipeline (`python -m bm4tc run jem_mnist12_nat`, studies `configs/studies/jem_*`).
+> The commands below describe the removed Hydra entry point; Phase 7 rewrites this.
+
 This package is an isolated, conservative MLP/JEM baseline for the existing
 `mnist_full_r12` MPS experiments. Run every command from the repository root
 while on the `jem` branch.

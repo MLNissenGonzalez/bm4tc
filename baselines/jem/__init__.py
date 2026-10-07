@@ -1,6 +1,2 @@
-"""Parameter-matched MLP/JEM baseline for resized MNIST."""
-
-from .model import JEMMLP
-from .sampler import ReplayBuffer, SGLDSampler
-
-__all__ = ["JEMMLP", "ReplayBuffer", "SGLDSampler"]
+"""Leftovers of the JEM baseline: CSV plots and tables over the rebuttal's metric
+names, until Phase 7's figures replace them. JEM itself is bm4tc.core.jem."""

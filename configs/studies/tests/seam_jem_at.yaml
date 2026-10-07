@@ -1,0 +1,37 @@
+# tests/e2e/test_pipeline.py: the JEM seam, AT, warm from tests/seam_jem_nat.
+dataset: spirals
+model: jem
+regime: at
+init: warm
+warm_from: tests/seam_jem_nat
+seeds: [42]
+grid:
+  embedding: [raw]
+  arch: [d4r3]
+  alpha: [0, 0.5]
+  eps: [0.15]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  trainer.max_epoch: 4
+  trainer.batch_size: 64
+  trainer.patience: 5
+  trainer.eval_every: 2
+  trainer.clean_weight: 0.5
+  trainer.curriculum: false
+  trainer.evasion.num_steps: 5
+  trainer.optimizer.kwargs.lr: 1e-2
+  jem.sampler.num_steps: 5
+  jem.sampler.buffer_size: 128
+  jem.valid_sampler.num_steps: 5
+  jem.valid_sampler.buffer_size: 64
+  jem.valid_sampler.batch_size: 32
+  jem.valid_sampler.num_batches: 2
+  tracking.mode: disabled
+hpo: null
+budgets: [0.1, 0.15]
+analysis:
+  attack_steps: 10
+  rob_ceiling: false
+  percentiles: [5]
+  purify_steps: 10
+  sweep_purify: {enabled: true, sweeps: [1, 2], subsample: 50, sgld: {steps: 5}}

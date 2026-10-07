@@ -34,6 +34,8 @@ from omegaconf import DictConfig, OmegaConf
 from bm4tc.pipeline.runs import Cell, Job, RunConflict, Study, _git_version, archive
 from bm4tc.pipeline.tracking import init_wandb, log_dataset_viz, make_logger
 from bm4tc.pipeline.data import DataHandler
+from bm4tc.core.jem.model import JEMMLP
+from bm4tc.core.jem.train import JEMTrainer
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.train import Trainer
 from bm4tc.core.objective import set_seed
@@ -59,9 +61,10 @@ def _log_to(path: Path) -> Iterator[None]:
 
 
 def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
-         names: Dict[str, str]) -> Trainer:
+         names: Dict[str, str]):
     """Train one model in ``run_dir`` (log.json; the checkpoint in models/ if
-    ``trainer.save``); cold, or warm from the run ``init`` names."""
+    ``trainer.save``); cold, or warm from the run ``init`` names. Returns the
+    trainer (``best``, ``best_epoch``)."""
     run = init_wandb(cfg, run_dir, names)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -69,20 +72,35 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     datahandler.load()
     set_seed(cfg.tracking.seed)
 
-    if init is not None:
-        source = f"{init['run']}/models/model"
+    source = f"{init['run']}/models/model" if init is not None else None
+    if source is not None:
         logger.info(f"Warm start from {source}")
-        cbm = ConditionalBornMachine.load(source, accumulate=cfg.born.accumulate)
-        cbm.to(device)
+    buffer = None
+    if cfg.model == "jem":
+        if source is not None:
+            model, extra = JEMMLP.load(source, device)
+            buffer = extra.get("replay_buffer")
+        else:
+            model = JEMMLP(cfg.jem.model, datahandler.data_dim, datahandler.num_cls)
+        logger.info(f"JEM hidden layers {model.hidden_dims}: {model.count_parameters()} "
+                    f"parameters, sized to d{cfg.jem.model.match_in_dim}"
+                    f"r{cfg.jem.model.match_bond_dim} (D70)")
+    elif source is not None:
+        model = ConditionalBornMachine.load(source, accumulate=cfg.born.accumulate)
+        model.to(device)
     else:
-        cbm = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
+        model = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
 
-    datahandler.split_and_rescale(cbm.input_range)
+    datahandler.split_and_rescale(model.input_range)
     log_dataset_viz(datahandler)
 
     datahandler.get_classification_loaders(batch_size=cfg.trainer.batch_size)
     loaders = datahandler.classification
-    trainer = Trainer(cbm, cfg.trainer, loaders["train"], loaders["valid"], device)
+    if cfg.model == "jem":
+        trainer = JEMTrainer(model, cfg.trainer, cfg.jem, loaders["train"], loaders["valid"],
+                             device, seed=cfg.tracking.seed, buffer=buffer)
+    else:
+        trainer = Trainer(model, cfg.trainer, loaders["train"], loaders["valid"], device)
     trainer.train(on_epoch_end=make_logger(run_dir, wandb_run=run),
                   output_dir=run_dir / "models")
     run.finish()
@@ -287,7 +305,7 @@ def analyse(job: Job) -> Dict[str, float]:
     path = job.run_dir / "analysis.json"
     stored = json.loads(path.read_text()) if path.exists() else {}
 
-    todo = {name: part for name, part in parts_.parts(analysis).items()
+    todo = {name: part for name, part in parts_.parts(analysis, job.study.cfg.model).items()
             if stored.get(name, {}).get("hash") != parts_.part_hash(name, analysis, budgets, run_hash)}
     if todo and job.pruned:
         raise LookupError(f"{job.name}: parts {sorted(todo)} need the checkpoint, which was "
@@ -322,7 +340,7 @@ def analysed(job: Job) -> Optional[Dict[str, float]]:
     analysis, budgets = job.study.cfg.analysis, list(job.study.cfg.budgets)
     stored = json.loads(path.read_text())
     out = {}
-    for name in parts_.parts(analysis):
+    for name in parts_.parts(analysis, job.study.cfg.model):
         part = stored.get(name, {})
         if part.get("hash") != parts_.part_hash(name, analysis, budgets, run_hash):
             return None
