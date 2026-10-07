@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D77 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D78 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -49,7 +49,7 @@ place, no pass-through layers.
 - Point `BM4TC_DATA_ROOT` at a scratch directory for experiments, to keep datasets
   and outputs out of the repo.
 - Local GPU: an RTX 2080 (8 GB); tests must fit in it.
-- **Runs happen on the lab HPC**: SSH, jobs started by hand in tmux, several GPUs per
+- **Runs happen on the lab HPC**: SSH, jobs started by hand in screen, several GPUs per
   node, **no AI agents there** (D37). Everything must be operable from short commands
   and diagnosable from `status` and the log files.
   `BM4TC_DATA_ROOT=/ceph/chercheurs/nisseng261/bm4tc`. The HPC env needs recreating

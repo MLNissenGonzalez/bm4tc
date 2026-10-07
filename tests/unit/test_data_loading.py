@@ -1,3 +1,6 @@
+import multiprocessing
+import os
+
 import pytest
 import torch
 
@@ -47,8 +50,25 @@ def test_generation_settings_name_the_cached_file(tmp_path, monkeypatch):
             name="spirals", size=size, seed=42, noise=0.1))
         sizes[size] = load_dataset(cfg).X.shape[0]
     assert sizes == {32: 64, 48: 96}
-    assert sorted(p.name for p in (tmp_path / ".datasets" / "spirals").iterdir()) == [
+    assert sorted(p.name for p in (tmp_path / ".datasets" / "spirals").glob("*.npz")) == [
         "spirals_n32_s42_noise0.1.npz", "spirals_n48_s42_noise0.1.npz"]
+
+
+def _load_spirals(root: str) -> tuple:
+    os.environ["BM4TC_DATA_ROOT"] = root
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
+    cfg = DatasetConfig(name="spirals", gen_dow_kwargs=DataGenDowConfig(
+        name="spirals", size=20000, seed=42, noise=0.1))
+    return load_dataset(cfg).X.shape
+
+
+def test_parallel_first_use_creates_the_dataset_once(tmp_path):
+    """Units starting together on an empty cache all load a whole file (the first
+    creates it under a lock; the write is atomic), and no temporary file is left."""
+    with multiprocessing.get_context("fork").Pool(6) as pool:
+        shapes = pool.map(_load_spirals, [str(tmp_path)] * 6)
+    assert shapes == [(40000, 2)] * 6
+    assert [p.name for p in (tmp_path / ".datasets" / "spirals").glob("*.tmp")] == []
 
 
 def test_handler_spirals_small():
