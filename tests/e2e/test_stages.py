@@ -3,6 +3,7 @@
 configs/studies/tests/stages_{nat,at}.yaml; outputs and the hparams file go to a
 scratch dir.
 """
+import csv
 import json
 
 import optuna
@@ -99,3 +100,34 @@ def test_suggest_parses_the_space():
     assert stages.suggest(trial, "opt", {"choice": ["adam", "sgd"]}) == "adam"
     with pytest.raises(ValueError):
         stages.suggest(trial, "lr", {"uniform": [0, 1]})
+
+
+@pytest.mark.slow
+def test_analyse_caches_each_part(scratch):
+    nat = Study("tests/stages_nat")
+    job = nat.jobs()[0]
+    with pytest.raises(LookupError, match="train tests/stages_nat"):
+        stages.analyse(job)
+    nat.hparams_path.parent.mkdir(parents=True)
+    nat.hparams_path.write_text(f"{job.cell.name}:\n  trainer.optimizer.kwargs.lr: 0.01\n")
+    stages.train(job)
+    metrics = stages.analyse(job)
+    for k in ("acc/test", "rob/test/0.1", "detect/test/0/q10", "detect/test/0.1/q10",
+              "purify/test/0.1/d0.1", "rob_joint/test/0.1", "purify_gibbs/test/0.1/k1",
+              "purify_gibbs/test/0/k1"):
+        assert k in metrics, k
+
+    path = job.run_dir / "analysis.json"
+    before = json.loads(path.read_text())
+    assert stages.analyse(job) == metrics                          # all cached
+    nat.cfg.analysis.purify_steps = 3                              # uq, uq_joint only
+    stages.analyse(job)
+    after = json.loads(path.read_text())
+    assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]
+    assert after["uq"]["hash"] != before["uq"]["hash"]
+
+    stages.collect(nat)                                            # one run analysed
+    with open(scratch / "outputs/tests/stages_nat/results.csv") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1 and rows[0]["alpha"] == "0.0"
+    assert "trainer.optimizer.kwargs.lr" in rows[0] and "rob/test/0.1" in rows[0]

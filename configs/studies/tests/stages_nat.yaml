@@ -14,3 +14,9 @@ hpo:
   n_trials: 3
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-3, 1e-1]}
+budgets: [0.1]
+analysis:
+  attack_steps: 2
+  purify_steps: 2
+  percentiles: [10]
+  gibbs: {enabled: true, sweeps: [1], num_bins: 4, subsample: 10}

@@ -10,6 +10,8 @@ parts ran before it (a resumed analysis reproduces them).
     uq_joint   the same under the joint attack (if analysis.joint_attack)
     gibbs      Gibbs purification of PGD examples (if analysis.gibbs.enabled)
 """
+import hashlib
+import json
 from pathlib import Path
 from typing import Callable, Dict, List
 
@@ -38,6 +40,24 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
     datahandler.split_and_rescale(cbm)
     datahandler.get_classification_loaders(batch_size=batch_size)
     return cbm, datahandler
+
+
+# The analysis settings each part's numbers depend on (besides the budgets): a
+# part is recomputed when one of them, the budgets or the run changes.
+SETTINGS = {
+    "clean": ("rob_ceiling",),
+    "uq": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
+    "uq_joint": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
+    "gibbs": ("attack_steps", "batch_size", "gibbs"),
+}
+
+
+def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
+    """What makes a part's results reusable: its settings, the budgets, the run."""
+    settings = {k: OmegaConf.to_container(analysis, resolve=True)[k] for k in SETTINGS[name]}
+    blob = json.dumps({"part": name, "settings": settings, "budgets": list(budgets),
+                       "run": run_hash, "seed": SEED}, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 def parts(analysis) -> Dict[str, Callable]:

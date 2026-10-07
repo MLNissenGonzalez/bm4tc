@@ -3,11 +3,14 @@
     python -m experiments hpo    <study> [--cell C] [--replace]
     python -m experiments select <study>
     python -m experiments train  <study> [--cell C] [--seed S] [--replace]
+    python -m experiments analyse <study> [--cell C] [--seed S]
 
 ``hpo`` runs one Optuna study per grid cell (TPE, no pruning) whose trials save
 no checkpoint; ``select`` writes each cell's best trial (argmin
 ``objective/valid``, D8) to ``configs/hparams/<study>.yaml``; ``train`` runs the
-seed runs with those hparams. Every stage resumes: finished trials and runs are
+seed runs with those hparams; ``analyse`` evaluates each finished run on test
+(:mod:`experiments.analyse`) into its ``analysis.json`` and collects the study's
+``results.csv``. Every stage resumes: finished trials and runs are
 kept, and a changed config is refused unless ``--replace`` archives the old
 results (:meth:`experiments.runs.Job.claim`). Warm studies need their
 ``warm_from`` study trained first.
@@ -254,4 +257,95 @@ def select(study: Study) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n")
     logger.info(f"Wrote {path}")
+    return path
+
+
+# ── analyse ─────────────────────────────────────────────────────────────────
+
+def analyse(job: Job) -> Dict[str, float]:
+    """Analyse one finished run; returns its metrics.
+
+    ``{run}/analysis.json`` holds each part's results under the hash of what they
+    depend on (:func:`experiments.analyse.part_hash`). A part with a matching hash
+    is kept, so a failed or extended analysis resumes; a part the settings no
+    longer ask for stays in the file (Gibbs is expensive) but is not returned.
+    """
+    from experiments import analyse as parts_
+
+    manifest_path = job.run_dir / "run.json"
+    if not manifest_path.exists():
+        raise LookupError(f"{job.name}: not trained; run `train {job.study.name}` first")
+    run_hash = json.loads(manifest_path.read_text())["config_hash"]
+    analysis, budgets = job.study.cfg.analysis, list(job.study.cfg.budgets)
+    path = job.run_dir / "analysis.json"
+    stored = json.loads(path.read_text()) if path.exists() else {}
+
+    todo = {name: part for name, part in parts_.parts(analysis).items()
+            if stored.get(name, {}).get("hash") != parts_.part_hash(name, analysis, budgets, run_hash)}
+    if todo:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        with _log_to(job.run_dir / "analyse.log"):
+            cbm, datahandler = parts_.load(job.run_dir, analysis.batch_size, device)
+            for name, part in todo.items():
+                logger.info(f"{job.name}: analysis part {name}")
+                results = parts_.run_part(part, cbm, datahandler, analysis, budgets, device)
+                stored[name] = {"hash": parts_.part_hash(name, analysis, budgets, run_hash),
+                                "results": results}
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(stored, indent=2))
+                tmp.replace(path)  # a part is written whole or not at all
+            del cbm
+    else:
+        logger.info(f"{job.name}: analysis up to date, skipping.")
+    return analysed(job)
+
+
+def analysed(job: Job) -> Optional[Dict[str, float]]:
+    """The run's metrics if every part the study asks for is up to date, else None."""
+    from experiments import analyse as parts_
+
+    manifest, path = job.run_dir / "run.json", job.run_dir / "analysis.json"
+    if not (manifest.exists() and path.exists()):
+        return None
+    run_hash = json.loads(manifest.read_text())["config_hash"]
+    analysis, budgets = job.study.cfg.analysis, list(job.study.cfg.budgets)
+    stored = json.loads(path.read_text())
+    out = {}
+    for name in parts_.parts(analysis):
+        part = stored.get(name, {})
+        if part.get("hash") != parts_.part_hash(name, analysis, budgets, run_hash):
+            return None
+        out.update(part["results"])
+    return out
+
+
+def collect(study: Study) -> Path:
+    """Write ``outputs/{study}/results.csv``: one row per run whose analysis is up
+    to date (identity, selected hparams, best objective/valid, metrics), plus the
+    analysis settings next to it (D20)."""
+    import pandas as pd
+    from experiments.runs import outputs_root
+
+    space = sorted(study.cfg.hpo.space) if study.cfg.hpo is not None else []
+    rows, missing = [], []
+    for job in study.jobs():
+        metrics = analysed(job)
+        if metrics is None:
+            missing.append(job.name)
+            continue
+        manifest = json.loads((job.run_dir / "run.json").read_text())
+        config = OmegaConf.create(manifest["config"])
+        rows.append({**manifest["identity"],
+                     **{k: OmegaConf.select(config, k) for k in space},
+                     "objective/valid": manifest["result"]["objective"],
+                     **metrics})
+    root = outputs_root() / study.name
+    path = root / "results.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+    settings = {"budgets": list(study.cfg.budgets),
+                "analysis": OmegaConf.to_container(study.cfg.analysis, resolve=True)}
+    (root / "analysis.yaml").write_text(yaml.safe_dump(settings, sort_keys=False))
+    logger.info(f"Wrote {path} ({len(rows)} runs)")
+    if missing:
+        logger.warning(f"{len(missing)} runs not (fully) analysed, left out: {missing}")
     return path

@@ -7,11 +7,11 @@ this green, or changes an expected number on purpose and says why in the commit.
 Only `run_pipeline` (the harness) is rewritten when entry points change. `EXPECTED`
 (end-point metrics, loose) and `CURVES` (per-epoch training curves, tight) stay put.
 """
+import csv
 import json
 import os
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -24,18 +24,6 @@ REPO = Path(__file__).resolve().parents[2]
 # 0.15, 5 epochs.
 STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 
-ANALYSE = """
-import json, sys, torch
-from experiments import analyse
-from experiments.runs import Study
-study = Study(sys.argv[2])
-a, budgets, device = study.cfg.analysis, list(study.cfg.budgets), torch.device("cpu")
-cbm, data = analyse.load(sys.argv[1], a.batch_size, device)
-out = {}
-for part in analyse.parts(a).values():
-    out.update(analyse.run_part(part, cbm, data, a, budgets, device))
-print("RESULTS=" + json.dumps(out))
-"""
 
 
 def _python(args, root: Path) -> str:
@@ -72,10 +60,12 @@ def _curves(run_dir: Path) -> dict:
     return curves
 
 
-def _analyse(run_dir: Path, study: str, root: Path) -> dict:
-    out = _python(["-c", textwrap.dedent(ANALYSE), str(run_dir), study], root)
-    line = next(l for l in out.splitlines() if l.startswith("RESULTS="))
-    return json.loads(line.removeprefix("RESULTS="))
+def _analyse(root: Path, study: str) -> dict:
+    """Analyse the study's single run; returns its row of the study's results.csv."""
+    _python(["-m", "experiments", "analyse", study], root)
+    with open(root / "outputs" / study / "results.csv") as f:
+        (row,) = csv.DictReader(f)
+    return {k: float(v) for k, v in row.items() if "/" in k}
 
 
 def run_pipeline(root: Path) -> dict:
@@ -85,7 +75,7 @@ def run_pipeline(root: Path) -> dict:
     at = _train(root, STUDIES["at"])  # warm: finds the NAT run through its run.json
     out = {}
     for name, run_dir in [("nat", nat), ("at", at)]:
-        r = _analyse(run_dir, STUDIES[name], root)
+        r = _analyse(root, STUDIES[name])
         out[name] = {
             "objective": _objective(run_dir),
             "acc": r["acc/test"],

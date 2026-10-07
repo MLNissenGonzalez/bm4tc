@@ -5,7 +5,7 @@ import logging
 from experiments import stages
 from experiments.runs import Study
 
-VERBS = ("hpo", "select", "train")
+VERBS = ("hpo", "select", "train", "analyse")
 
 
 def main(argv=None):
@@ -16,7 +16,7 @@ def main(argv=None):
     parser.add_argument("--cell", action="append",
                         help="only this cell (repeatable), e.g. legendre/d3r40/a0.01")
     parser.add_argument("--seed", type=int, action="append",
-                        help="train: only this seed (repeatable)")
+                        help="train, analyse: only this seed (repeatable)")
     parser.add_argument("--replace", action="store_true",
                         help="archive finished results whose config changed, then redo them")
     args = parser.parse_args(argv)
@@ -30,15 +30,18 @@ def main(argv=None):
             parser.error(f"no such cell(s) in {study.name}: {sorted(unknown)}")
         cells = [c for c in cells if c.name in args.cell]
 
+    jobs = [j for j in study.jobs() if j.cell in cells and (not args.seed or j.seed in args.seed)]
     if args.verb == "hpo":
         stages.hpo(study, cells, replace=args.replace)
     elif args.verb == "select":
         stages.select(study)
     elif args.verb == "train":
-        for job in study.jobs():
-            if job.cell in cells and (not args.seed or job.seed in args.seed):
-                stages.train(job, replace=args.replace)
-
+        for job in jobs:
+            stages.train(job, replace=args.replace)
+    elif args.verb == "analyse":
+        for job in jobs:
+            stages.analyse(job)
+        stages.collect(study)
 
 if __name__ == "__main__":
     main()
