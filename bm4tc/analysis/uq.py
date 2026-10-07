@@ -29,6 +29,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import logging
+from functools import partial
+
+from bm4tc.core.interface import class_probabilities, log_px
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +89,14 @@ class UQConfig:
     eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch
 
 
-def _recover_after_failure(born) -> None:
+def _recover_after_failure(model) -> None:
     """Restore a clean state after a failed/aborted block so later blocks are unaffected.
 
     A mid-contraction OOM leaves the tk network's data nodes dirty; reset() clears them,
     and empty_cache() releases the freed memory back to the allocator for the next block.
     """
     try:
-        born.reset()
+        model.reset()
     except Exception:
         pass
     if torch.cuda.is_available():
@@ -116,7 +119,7 @@ def _batched_forward(fn, x: torch.Tensor, batch_size: Optional[int], device) -> 
 
 
 def compute_log_px(
-    born,
+    model,
     loader: DataLoader,
     device: torch.device,
     desc: str = "log p(x)",
@@ -124,7 +127,7 @@ def compute_log_px(
     """Compute marginal log p(x) for all samples in a loader.
 
     Args:
-        born: ConditionalBornMachine instance.
+        model: ConditionalBornMachine instance.
         loader: DataLoader yielding (data, labels) tuples.
         device: Torch device.
         desc: Label for the progress bar.
@@ -135,22 +138,22 @@ def compute_log_px(
     all_log_px = []
     all_labels = []
 
-    born.to(device)
+    model.to(device)
 
     with torch.no_grad():
         for batch_data, batch_labels in tqdm(
             loader, desc=desc, unit="batch", leave=False, dynamic_ncols=True
         ):
             batch_data = batch_data.to(device)
-            log_px = born.marginal_log_probability(batch_data)
-            all_log_px.append(log_px.cpu())
+            batch_log_px = log_px(model, batch_data)
+            all_log_px.append(batch_log_px.cpu())
             all_labels.append(batch_labels)
 
     return torch.cat(all_log_px), torch.cat(all_labels)
 
 
 def compute_thresholds(
-    born,
+    model,
     clean_loader: DataLoader,
     percentiles: List[float],
     device: torch.device,
@@ -161,7 +164,7 @@ def compute_thresholds(
     at percentiles of the clean data's log p(x) distribution.
 
     Args:
-        born: ConditionalBornMachine instance.
+        model: ConditionalBornMachine instance.
         clean_loader: DataLoader for clean (in-distribution) data.
         percentiles: List of percentile values (e.g., [1, 5, 10, 20]).
         device: Torch device.
@@ -171,7 +174,7 @@ def compute_thresholds(
             - Dict mapping percentile -> threshold value.
             - Tensor of all clean log p(x) values.
     """
-    clean_log_px, _ = compute_log_px(born, clean_loader, device)
+    clean_log_px, _ = compute_log_px(model, clean_loader, device)
 
     thresholds = {}
     for p in percentiles:
@@ -375,7 +378,7 @@ class UQEvaluation:
 
     Example:
         >>> uq_eval = UQEvaluation(uq_config)
-        >>> results = uq_eval.evaluate(born, test_loader, device)
+        >>> results = uq_eval.evaluate(model, test_loader, device)
         >>> print(results.summary())
     """
 
@@ -389,7 +392,7 @@ class UQEvaluation:
 
     def evaluate(
         self,
-        born,
+        model,
         clean_loader: DataLoader,
         device: torch.device,
         *,
@@ -412,7 +415,7 @@ class UQEvaluation:
         inside this method.
 
         Args:
-            born: ConditionalBornMachine instance.
+            model: ConditionalBornMachine instance.
             clean_loader: DataLoader for clean test data.
             device: Torch device.
             calib_loader: DataLoader for the clean calibration split (validation),
@@ -426,11 +429,11 @@ class UQEvaluation:
         from bm4tc.core.embeddings import range_size_of, rel_to_abs
 
         cfg = self.config
-        born.to(device)
+        model.to(device)
 
         # 0. The rel -> abs boundary. Below this point every budget is absolute;
         #    the relative values survive only as dict/metric keys.
-        range_size = range_size_of(born)
+        range_size = range_size_of(model)
         eps_abs_of = {r: rel_to_abs(r, range_size) for r in cfg.eps_rel}
         delta_abs_of = {r: rel_to_abs(r, range_size) for r in cfg.delta_rel}
 
@@ -442,8 +445,8 @@ class UQEvaluation:
             )
 
         # 1. Cache log Z
-        logger.info("Computing partition function...")
-        born.cache_log_Z()
+        logger.info("Computing the normalizer (MPS: log Z)...")
+        model.log_normalizer()
 
         # 2. Thresholds from the calibration split; clean log p(x) on the test split
         logger.info("Calibrating thresholds and computing clean log p(x)...")
@@ -451,8 +454,8 @@ class UQEvaluation:
             calib_loader = DataLoader(
                 calib_loader.dataset, batch_size=cfg.eval_batch_size, shuffle=False
             )
-        thresholds, _ = compute_thresholds(born, calib_loader, cfg.percentiles, device)
-        clean_log_px = compute_log_px(born, clean_loader, device)[0].numpy()
+        thresholds, _ = compute_thresholds(model, calib_loader, cfg.percentiles, device)
+        clean_log_px = compute_log_px(model, clean_loader, device)[0].numpy()
         clean_flagged = {p: float((clean_log_px < tau).mean()) for p, tau in thresholds.items()}
 
         # Compute clean accuracy
@@ -464,7 +467,7 @@ class UQEvaluation:
             ):
                 batch_data = batch_data.to(device)
                 batch_labels = batch_labels.to(device)
-                probs = born.class_probabilities(batch_data)
+                probs = class_probabilities(model, batch_data)
                 preds = probs.argmax(dim=1)
                 clean_correct += (preds == batch_labels).sum().item()
                 clean_total += len(batch_labels)
@@ -510,12 +513,12 @@ class UQEvaluation:
 
                     # Generate adversarial examples
                     adv_data = attack.generate(
-                        born, batch_data, batch_labels, eps_abs, device
+                        model, batch_data, batch_labels, eps_abs, device
                     )
 
                     # Classify adversarial examples
                     with torch.no_grad():
-                        adv_probs = born.class_probabilities(adv_data)
+                        adv_probs = class_probabilities(model, adv_data)
                         adv_preds = adv_probs.argmax(dim=1)
                         correct_batch = adv_preds == batch_labels
                         all_adv_correct += correct_batch.sum().item()
@@ -523,7 +526,7 @@ class UQEvaluation:
                         all_adv_total += len(batch_labels)
 
                         # Compute log p(x_adv)
-                        log_px_adv = born.marginal_log_probability(adv_data)
+                        log_px_adv = log_px(model, adv_data)
                         all_adv_log_px.append(log_px_adv.cpu())
 
                     adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
@@ -564,7 +567,7 @@ class UQEvaluation:
                     )
             except Exception as e:
                 logger.warning(f"Detection/attack failed (eps_rel={eps_rel}): {e}; skipping")
-                _recover_after_failure(born)
+                _recover_after_failure(model)
 
         # 4. Purification
         purifier = LikelihoodPurification(
@@ -605,20 +608,20 @@ class UQEvaluation:
 
                         # Log p(x) before purification
                         with torch.no_grad():
-                            log_px_before = born.marginal_log_probability(adv_data)
+                            log_px_before = log_px(model, adv_data)
                             # Classify before purification
-                            adv_probs = born.class_probabilities(adv_data)
+                            adv_probs = class_probabilities(model, adv_data)
                             adv_preds = adv_probs.argmax(dim=1)
                             misclassified = (adv_preds != labels)
 
                         # Purify
                         purified, log_px_after = purifier.purify(
-                            born, adv_data, delta_abs, device
+                            model, adv_data, delta_abs, device
                         )
 
                         # Classify after purification
                         with torch.no_grad():
-                            pur_probs = born.class_probabilities(purified)
+                            pur_probs = class_probabilities(model, purified)
                             pur_preds = pur_probs.argmax(dim=1)
                             correct_after = (pur_preds == labels)
 
@@ -661,7 +664,7 @@ class UQEvaluation:
                         f"Gradient purification failed (eps_rel={eps_rel}, "
                         f"delta_rel={delta_rel}): {e}; skipping"
                     )
-                    _recover_after_failure(born)
+                    _recover_after_failure(model)
 
         # 5. Clean purification (natural examples, no attack)
         clean_purification_results: Dict[float, PurificationMetrics] = {}
@@ -684,12 +687,12 @@ class UQEvaluation:
                     batch_labels = batch_labels.to(device)
 
                     with torch.no_grad():
-                        log_px_before = born.marginal_log_probability(batch_data)
+                        log_px_before = log_px(model, batch_data)
 
-                    purified, log_px_after = purifier.purify(born, batch_data, delta_abs, device)
+                    purified, log_px_after = purifier.purify(model, batch_data, delta_abs, device)
 
                     with torch.no_grad():
-                        preds = born.class_probabilities(purified).argmax(dim=1)
+                        preds = class_probabilities(model, purified).argmax(dim=1)
                         all_correct += (preds == batch_labels).sum().item()
                         all_total += len(batch_labels)
 
@@ -709,7 +712,7 @@ class UQEvaluation:
                 logger.warning(
                     f"Clean purification failed (delta_rel={delta_rel}): {e}; skipping"
                 )
-                _recover_after_failure(born)
+                _recover_after_failure(model)
 
         # 6. Gibbs purification
         gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
@@ -749,27 +752,27 @@ class UQEvaluation:
                     # Recompute misclassification + mean log p(x) on the SAME subsample so
                     # accuracy/recovery/log-px are internally consistent.
                     adv_preds = _batched_forward(
-                        born.class_probabilities, all_adv, cfg.eval_batch_size, device
+                        partial(class_probabilities, model), all_adv, cfg.eval_batch_size, device
                     ).argmax(dim=1)
                     misclassified = adv_preds != all_labels
                     mean_log_px_before = float(
                         _batched_forward(
-                            born.marginal_log_probability, all_adv, cfg.eval_batch_size, device
+                            partial(log_px, model), all_adv, cfg.eval_batch_size, device
                         ).mean()
                     )
 
                     snapshots = gibbs_purifier.purify_snapshots(
-                        born, all_adv, sweep_points, device
+                        model, all_adv, sweep_points, device
                     )
                 except Exception as e:
                     logger.warning(f"Gibbs failed (eps_rel={eps_rel}): {e}; skipping")
-                    _recover_after_failure(born)
+                    _recover_after_failure(model)
                     continue
 
                 for n_sw, (x_purified, log_px_after) in snapshots.items():
                     try:
                         pur_preds = _batched_forward(
-                            born.class_probabilities, x_purified, cfg.eval_batch_size, device
+                            partial(class_probabilities, model), x_purified, cfg.eval_batch_size, device
                         ).argmax(dim=1)
                         correct_after = pur_preds == all_labels
                         acc_after = correct_after.float().mean().item()
@@ -796,7 +799,7 @@ class UQEvaluation:
                             f"Gibbs scoring failed (eps_rel={eps_rel}, n_sweeps={n_sw}): "
                             f"{e}; skipping"
                         )
-                        _recover_after_failure(born)
+                        _recover_after_failure(model)
 
             # Clean Gibbs purification
             all_clean = torch.cat([b for b, _ in clean_loader])
@@ -805,22 +808,22 @@ class UQEvaluation:
             try:
                 clean_mean_log_px_before = float(
                     _batched_forward(
-                        born.marginal_log_probability, all_clean, cfg.eval_batch_size, device
+                        partial(log_px, model), all_clean, cfg.eval_batch_size, device
                     ).mean()
                 )
                 clean_snapshots = gibbs_purifier.purify_snapshots(
-                    born, all_clean, sweep_points, device
+                    model, all_clean, sweep_points, device
                 )
             except Exception as e:
                 logger.warning(f"Clean Gibbs failed: {e}; skipping")
-                _recover_after_failure(born)
+                _recover_after_failure(model)
                 clean_snapshots = {}
                 clean_mean_log_px_before = float("nan")
 
             for n_sw, (x_purified, log_px_after) in clean_snapshots.items():
                 try:
                     pur_preds = _batched_forward(
-                        born.class_probabilities, x_purified, cfg.eval_batch_size, device
+                        partial(class_probabilities, model), x_purified, cfg.eval_batch_size, device
                     ).argmax(dim=1)
                     acc = (pur_preds == all_clean_labels).float().mean().item()
                     clean_gibbs_purification_results[n_sw] = PurificationMetrics(
@@ -835,7 +838,7 @@ class UQEvaluation:
                     logger.warning(
                         f"Clean Gibbs scoring failed (n_sweeps={n_sw}): {e}; skipping"
                     )
-                    _recover_after_failure(born)
+                    _recover_after_failure(model)
 
         return UQResults(
             clean_log_px=clean_log_px,

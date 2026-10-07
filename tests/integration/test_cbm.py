@@ -147,9 +147,8 @@ def test_log_partition_reentrant_stable_complex(cbm):
     assert torch.allclose(third, ref, atol=1e-5)
 
 
-def test_cache_log_Z_attribute_finite(cbm):
-    assert cbm._log_Z is not None
-    assert torch.isfinite(torch.tensor(cbm._log_Z))
+def test_log_normalizer_finite(cbm):
+    assert torch.isfinite(torch.tensor(cbm.log_normalizer()))
 
 
 # ── Marginal log prob ──────────────────────────────────────────────────────

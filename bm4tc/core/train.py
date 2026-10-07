@@ -192,7 +192,7 @@ class Trainer:
         if adv_w > 0.0:
             self.cbm.eval()
             adv_data = self.attack.generate(
-                born=self.cbm, naturals=data, labels=labels, eps_abs=eps_abs,
+                model=self.cbm, naturals=data, labels=labels, eps_abs=eps_abs,
                 device=self.device,
             )
             self.cbm.train()

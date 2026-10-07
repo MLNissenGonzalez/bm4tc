@@ -802,7 +802,7 @@ def test_marginal_log_probability_safe_parity():
 
     x_raw = x.detach().clone().requires_grad_(True)
     log_abs = torch.log(cbm.amplitudes(x_raw).abs().clamp(min=1e-30))
-    lp_raw = torch.logsumexp(2.0 * log_abs, dim=-1) - cbm._log_Z
+    lp_raw = torch.logsumexp(2.0 * log_abs, dim=-1) - cbm.log_normalizer()
     lp_raw.sum().backward()
 
     assert torch.allclose(lp.detach(), lp_raw.detach(), atol=1e-4)
