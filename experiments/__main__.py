@@ -4,6 +4,9 @@
     run                     hpo -> select -> train -> analyse, skipping what is done
     select                  write configs/hparams/<study>.yaml
     status                  progress per cell; running and failed units with logs
+    prune --keep-one|--all|--old [--yes]
+                            delete checkpoints (all but seed 1 per cell, or all) or
+                            archived old runs; asks first unless --yes
 
     --gpus 0,1 --per-gpu 2  four parallel units, two per GPU (default: one unit)
 """
@@ -15,7 +18,7 @@ from pathlib import Path
 from experiments import stages
 from experiments.runs import Study
 
-VERBS = ("hpo", "select", "train", "analyse", "run", "status")
+VERBS = ("hpo", "select", "train", "analyse", "run", "status", "prune")
 POOLED = {"hpo": ("hpo",), "train": ("train",), "analyse": ("analyse",), "run": stages.STAGES}
 
 
@@ -53,8 +56,18 @@ def main(argv=None):
     parser.add_argument("--per-gpu", type=int, default=1,
                         help="parallel units per GPU (or in total without --gpus)")
     parser.add_argument("--replace", action="store_true",
-                        help="archive finished results whose config changed, then redo them")
+                        help="archive finished results whose config changed (or whose checkpoint "
+                             "was pruned), then redo them")
+    prune = parser.add_mutually_exclusive_group()
+    for mode in stages.PRUNE_MODES:
+        prune.add_argument(f"--{mode}", dest="prune", action="store_const", const=mode,
+                           help="prune: " + {"keep-one": "keep seed 1's checkpoint per cell",
+                                             "all": "every checkpoint",
+                                             "old": "the archived runs in .replaced/"}[mode])
+    parser.add_argument("--yes", action="store_true", help="prune: do not ask")
     args = parser.parse_args(argv)
+    if (args.verb == "prune") != (args.prune is not None):
+        parser.error("prune takes exactly one of --keep-one, --all, --old (and only prune does)")
 
     study = Study(args.study)
     cells = study.cells()
@@ -68,6 +81,8 @@ def main(argv=None):
         stages.select(study)
     elif args.verb == "status":
         print(stages.status(study))
+    elif args.verb == "prune":
+        stages.prune(study, args.prune, args.yes)
     else:
         gpus = args.gpus.split(",") if args.gpus else None
         states = stages.launch(study, POOLED[args.verb], cells, args.seed, gpus,
