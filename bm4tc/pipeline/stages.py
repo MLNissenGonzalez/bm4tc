@@ -94,7 +94,11 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     datahandler.split_and_rescale(model.input_range)
     log_dataset_viz(datahandler)
 
-    datahandler.get_classification_loaders(batch_size=cfg.trainer.batch_size)
+    if cfg.model == "jem" and cfg.trainer.micro_batch_size:
+        raise ValueError("trainer.micro_batch_size is MPS only (D79): a JEM step draws "
+                         "its SGLD negatives per batch")
+    datahandler.get_classification_loaders(batch_size=cfg.trainer.batch_size,
+                                           eval_batch_size=cfg.trainer.micro_batch_size)
     loaders = datahandler.classification
     if cfg.model == "jem":
         trainer = JEMTrainer(model, cfg.trainer, cfg.jem, loaders["train"], loaders["valid"],
