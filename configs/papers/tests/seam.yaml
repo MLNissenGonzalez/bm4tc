@@ -1,0 +1,60 @@
+# tests/e2e/test_figures.py: every kind on the seam studies (tests/seam_*), drawn
+# into the test's data root.
+out: ${oc.env:BM4TC_DATA_ROOT}/figures
+items:
+  purify_vs_eps:
+    kind: curve
+    x: eps
+    series:
+      - {study: tests/seam_nat, key: "purify/test/{x}/d0.1", label: NAT}
+      - {study: tests/seam_at, key: "purify/test/{x}/d0.1", label: AT}
+  jem_alpha:
+    kind: curve
+    x: alpha
+    series:
+      - {study: tests/seam_jem_nat, key: acc/test, label: Clean}
+      - {study: tests/seam_jem_nat, key: "rob/test/{eps}", label: Robust}
+    eps: 0.1
+  jem_sweeps:
+    kind: curve
+    x: sweeps
+    eps: 0.1
+    series:
+      - {study: tests/seam_jem_nat, where: {alpha: 0.5}, key: "purify_sgld/test/{eps}/k{x}",
+         label: SGLD, axis: right}
+  defenses:
+    kind: bars
+    eps: [0.1, 0.15]
+    models: &models
+      - {study: tests/seam_nat, label: NAT}
+      - {study: tests/seam_at, label: AT}
+      - {study: tests/seam_jem_nat, where: {alpha: 0}, label: JEM}
+    metrics: &metrics
+      - {key: acc/test, label: Clean, best: max}
+      - {key: "rob/test/{eps}", label: Robust, best: max}
+      - {key: "purify/test/{eps}/d0.1", label: Purified, best: max}
+      - {key: "purify/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain}
+  coverage:
+    kind: coverage
+    eps: 0.1
+    models: *models
+  headline:
+    kind: table
+    eps: 0.1
+    models: *models
+    metrics: *metrics
+  density:
+    kind: density
+    resolution: 40
+    models:
+      - {study: tests/seam_nat, label: NAT}
+      - {study: tests/seam_at, label: AT}
+      - {study: tests/seam_jem_nat, where: {alpha: 0.5}, label: JEM}
+  samples:
+    kind: samples
+    n_per_class: 20
+    num_bins: 20
+    sgld_steps: 10
+    models:
+      - {study: tests/seam_nat, label: NAT}
+      - {study: tests/seam_jem_nat, where: {alpha: 0.5}, label: JEM}

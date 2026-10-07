@@ -9,14 +9,11 @@ Only `run_pipeline` (the harness) is rewritten when entry points change. `EXPECT
 """
 import csv
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+from tests.e2e.conftest import python
 
 # The two runs are the studies configs/studies/tests/seam_{nat,at}.yaml: tiny
 # spirals (400 points: 200 train, 100 valid, 100 test), legendre d4r3, seed 42.
@@ -26,20 +23,11 @@ STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 
 
 
-def _python(args, root: Path) -> str:
-    env = {**os.environ, "BM4TC_DATA_ROOT": str(root), "CUDA_VISIBLE_DEVICES": ""}
-    proc = subprocess.run(
-        [sys.executable, *args], cwd=REPO, env=env, capture_output=True, text=True
-    )
-    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
-    return proc.stdout
-
-
-def _run(root: Path, study: str) -> tuple[Path, dict]:
+def _run(seam, study: str) -> tuple[Path, dict]:
     """`run` the study (train, then analyse its single job); returns the run dir
     (from bm4tc.pipeline.runs) and the job's metrics (its row of results.csv)."""
-    _python(["-m", "bm4tc", "run", study], root)
-    out = _python(["-c", "import sys; from bm4tc.pipeline.runs import Study; "
+    root = seam(study)
+    out = python(["-c", "import sys; from bm4tc.pipeline.runs import Study; "
                    "print(Study(sys.argv[1]).jobs()[0].run_dir)", study], root)
     with open(root / "outputs" / study / "results.csv") as f:
         (row,) = csv.DictReader(f)
@@ -64,13 +52,13 @@ def _curves(run_dir: Path) -> dict:
     return curves
 
 
-def run_pipeline(root: Path) -> dict:
+def run_pipeline(seam) -> dict:
     """The harness: returns {"nat": metrics, "at": metrics} with the pinned names,
     each metrics dict holding the per-epoch "curves" too."""
     out = {}
     # AT is warm: it finds the NAT run through its run.json.
     for name in ("nat", "at"):
-        run_dir, r = _run(root, STUDIES[name])
+        run_dir, r = _run(seam, STUDIES[name])
         out[name] = {
             "objective": _objective(run_dir),
             "acc": r["acc/test"],
@@ -144,8 +132,8 @@ CURVES = {
 
 
 @pytest.fixture(scope="module")
-def results(tmp_path_factory):
-    return run_pipeline(tmp_path_factory.mktemp("seam"))
+def results(seam):
+    return run_pipeline(seam)
 
 
 @pytest.mark.slow

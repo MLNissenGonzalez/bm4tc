@@ -3,6 +3,8 @@
     hpo | train | analyse   that stage, through the job pool
     run                     hpo -> select -> train -> analyse, skipping what is done
     select                  write configs/hparams/<study>.yaml
+    figures <paper>         every figure and table of configs/papers/<paper>.yaml
+                            (--item NAME: only that one, repeatable)
     status                  progress per cell; running and failed units with logs
     prune --keep-one|--all|--old [--yes]
                             delete checkpoints (all but seed 1 per cell, or all) or
@@ -18,7 +20,7 @@ from pathlib import Path
 from bm4tc.pipeline import stages
 from bm4tc.pipeline.runs import Study
 
-VERBS = ("hpo", "select", "train", "analyse", "run", "status", "prune")
+VERBS = ("hpo", "select", "train", "analyse", "run", "status", "prune", "figures")
 POOLED = {"hpo": ("hpo",), "train": ("train",), "analyse": ("analyse",), "run": stages.STAGES}
 
 
@@ -47,7 +49,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m bm4tc", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("verb", choices=VERBS)
-    parser.add_argument("study", help="a study under configs/studies/, e.g. spirals_nat")
+    parser.add_argument("study", help="a study under configs/studies/, e.g. spirals_nat "
+                                      "(figures: a paper under configs/papers/)")
     parser.add_argument("--cell", action="append",
                         help="only this cell (repeatable), e.g. legendre/d3r40/a0.01")
     parser.add_argument("--seed", type=int, action="append",
@@ -65,9 +68,17 @@ def main(argv=None):
                                              "all": "every checkpoint",
                                              "old": "the archived runs in .replaced/"}[mode])
     parser.add_argument("--yes", action="store_true", help="prune: do not ask")
+    parser.add_argument("--item", action="append", help="figures: only this item (repeatable)")
     args = parser.parse_args(argv)
     if (args.verb == "prune") != (args.prune is not None):
         parser.error("prune takes exactly one of --keep-one, --all, --old (and only prune does)")
+    if args.verb == "figures":
+        from bm4tc.pipeline import figures
+        done = figures.make(args.study, args.item)
+        failed = sorted(n for n, paths in done.items() if paths is None)
+        print(f"{len(done) - len(failed)} items drawn, {len(failed)} failed"
+              + (f": {failed}" if failed else ""))
+        sys.exit(1 if failed else 0)
 
     study = Study(args.study)
     cells = study.cells()

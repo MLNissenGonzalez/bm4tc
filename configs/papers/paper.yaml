@@ -1,0 +1,309 @@
+# The journal paper's figures and tables (D28, D75): `python -m bm4tc figures paper`.
+# Kinds and fields: bm4tc/pipeline/figures/. A first draft mirroring the TPM paper
+# and the NeurIPS rebuttal; edit freely as the paper takes shape.
+#
+# Main text: full-resolution MNIST (mnist_*; arch from mnist_capacity, D44), so no
+# arch filter is needed there. JEM on full MNIST needs studies jem_mnist_{nat,at}
+# (not written yet; jem_mnist12_* exist). Appendix: spirals, MNIST 12x12, (TS: D6).
+out: figures/journal
+
+items:
+  # ── Main: MNIST ───────────────────────────────────────────────────────────
+  mnist_alpha_acc:
+    kind: curve
+    x: alpha
+    eps: 0.1
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    series:
+      - {study: mnist_nat, key: acc/test, label: Clean}
+      - {study: mnist_nat, key: "rob/test/{eps}", label: Robust}
+      - {study: mnist_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: mnist_nat, key: "rob_joint/test/{eps}", label: "Robust (joint attack)", style: "--"}
+      - {study: mnist_nat, key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint attack)", style: "--"}
+
+  mnist_alpha_nll:
+    kind: curve
+    x: alpha
+    ylabel: "$-\\log p(c|x)$"
+    ylabel_right: "$-\\log p(x, c)$"
+    series:
+      - {study: mnist_nat, key: loss_dis/test, label: Discriminative NLL}
+      - {study: mnist_nat, key: loss_gen/test, label: Generative NLL, axis: right}
+
+  mnist_headline:
+    kind: table
+    eps: 0.1
+    models: &mnist_models
+      - {study: mnist_nat, where: {alpha: 0}, label: "MPS $\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
+      - {study: mnist_nat, where: {alpha: 0.1}, label: "MPS $\\alpha=0.1$"}
+      - {study: mnist_nat, where: {alpha: 1}, label: "MPS $\\alpha=1$"}
+      - {study: mnist_at, where: {alpha: 0}, label: "MPS AT"}
+      - {study: mnist_at, where: {alpha: 0.01}, label: "MPS AT $\\alpha=0.01$"}
+      - {study: jem_mnist_nat, where: {alpha: 0}, label: "JEM $\\alpha=0$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+      - {study: jem_mnist_at, where: {alpha: 0}, label: "JEM AT"}
+      - {study: jem_mnist_at, where: {alpha: 0.01}, label: "JEM AT $\\alpha=0.01$"}
+    metrics: &headline_metrics
+      - {key: acc/test, label: Clean, best: max}
+      - {key: "rob/test/{eps}", label: Robust, best: max}
+      - {key: "purify/test/{eps}/d0.1", label: Purified, best: max}
+      - {key: "purify/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain, best: max}
+
+  mnist_defenses:
+    kind: bars
+    eps: [0.1, 0.2]
+    models:
+      - {study: mnist_nat, where: {alpha: 0}, label: "MPS $\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
+      - {study: mnist_at, where: {alpha: 0.01}, label: "MPS AT $\\alpha=0.01$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+      - {study: jem_mnist_at, where: {alpha: 0}, label: "JEM AT"}
+    metrics:
+      - {key: acc/test, label: Clean}
+      - {key: "rob/test/{eps}", label: Robust}
+      - {key: "purify/test/{eps}/d0.1", label: Purified}
+      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
+      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)"}
+
+  mnist_capacity:
+    kind: curve
+    x: bond_dim
+    ylabel: Clean accuracy
+    ylabel_right: "$-\\log p(x, c)$"
+    series:
+      - {study: mnist_capacity, where: {alpha: 0}, key: acc/test, label: "acc, $\\alpha=0$"}
+      - {study: mnist_capacity, where: {alpha: 1}, key: acc/test, label: "acc, $\\alpha=1$"}
+      - {study: mnist_capacity, where: {alpha: 1}, key: loss_gen/test, label: "gen. NLL, $\\alpha=1$",
+         axis: right, style: ":"}
+
+  mnist_coverage:
+    kind: coverage
+    eps: 0.1
+    models:
+      - {study: mnist_nat, where: {alpha: 0}, label: "MPS $\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
+      - {study: mnist_at, where: {alpha: 0.01}, label: "MPS AT $\\alpha=0.01$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+
+  mnist_detection:        # fraction of PGD examples flagged at the clean q-th percentile (D2)
+    kind: table
+    eps: 0.1
+    models: *mnist_models
+    metrics:
+      - {key: "detect/test/0/q5", label: "FPR ($q=5$)"}
+      - {key: "detect/test/{eps}/q1", label: "$q=1$", best: max}
+      - {key: "detect/test/{eps}/q5", label: "$q=5$", best: max}
+      - {key: "detect/test/{eps}/q10", label: "$q=10$", best: max}
+      - {key: "detect/test/{eps}/q20", label: "$q=20$", best: max}
+
+  mnist_joint:            # the detector-aware attack minus PGD
+    kind: table
+    eps: [0.1, 0.2]
+    models: *mnist_models
+    metrics:
+      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
+      - {key: "rob_joint/test/{eps}", minus: "rob/test/{eps}", label: "$\\Delta$ robust"}
+      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)", best: max}
+      - {key: "purify_joint/test/{eps}/d0.1", minus: "purify/test/{eps}/d0.1", label: "$\\Delta$ purified"}
+
+  mnist_purify_vs_eps:
+    kind: curve
+    x: eps
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    series:
+      - {study: mnist_nat, where: {alpha: 0}, key: "purify/test/{x}/d0.1", label: "purified, $\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, key: "purify/test/{x}/d0.1", label: "purified, $\\alpha=0.01$"}
+      - {study: mnist_at, where: {alpha: 0.01}, key: "purify/test/{x}/d0.1", label: "purified, AT"}
+      - {study: mnist_nat, where: {alpha: 0}, key: "rob/test/{x}", label: "robust, $\\alpha=0$", style: "--", color: C0}
+      - {study: mnist_nat, where: {alpha: 0.01}, key: "rob/test/{x}", label: "robust, $\\alpha=0.01$", style: "--", color: C1}
+      - {study: mnist_at, where: {alpha: 0.01}, key: "rob/test/{x}", label: "robust, AT", style: "--", color: C2}
+
+  mnist_sweep_purify:     # needs analysis.sweep_purify.enabled in the studies
+    kind: curve
+    x: sweeps
+    eps: 0.1
+    ylabel: Accuracy
+    series:
+      - {study: mnist_nat, where: {alpha: 0.01}, key: "purify_gibbs/test/{eps}/k{x}", label: "MPS Gibbs, $\\alpha=0.01$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, key: "purify_sgld/test/{eps}/k{x}", label: "JEM SGLD, $\\alpha=0.01$"}
+
+  mnist_samples:
+    kind: samples
+    models:
+      - {study: mnist_nat, where: {alpha: 0}, label: "$\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, label: "$\\alpha=0.01$"}
+      - {study: mnist_nat, where: {alpha: 0.1}, label: "$\\alpha=0.1$"}
+      - {study: mnist_nat, where: {alpha: 1}, label: "$\\alpha=1$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+
+  mnist_transfer:
+    kind: transfer
+    eps: 0.1
+    delta: 0.1
+    models:
+      - {study: mnist_at, where: {alpha: 0.01}, label: "MPS AT", source: true}
+      - {study: mnist_nat, where: {alpha: 0}, label: "MPS $\\alpha=0$"}
+      - {study: mnist_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
+      - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+
+  # ── Appendix: spirals ─────────────────────────────────────────────────────
+  spirals_density:
+    kind: density
+    models:
+      - {study: spirals_at, where: {alpha: 0}, label: AT}
+      - {study: spirals_nat, where: {alpha: 0}, label: "$\\alpha=0$"}
+      - {study: spirals_nat, where: {alpha: 0.5}, label: "$\\alpha=0.5$"}
+      - {study: spirals_nat, where: {alpha: 1}, label: "$\\alpha=1$"}
+
+  spirals_alpha_acc:
+    kind: curve
+    x: alpha
+    eps: 0.2
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    series:
+      - {study: spirals_nat, key: acc/test, label: Clean}
+      - {study: spirals_nat, key: "rob/test/{eps}", label: Robust}
+      - {study: spirals_nat, key: "rob_ceiling/test/{eps}", label: "Robust ceiling", style: ":"}
+      - {study: spirals_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+
+  spirals_alpha_nll:
+    kind: curve
+    x: alpha
+    ylabel: "$-\\log p(c|x)$"
+    ylabel_right: "$-\\log p(x, c)$"
+    series:
+      - {study: spirals_nat, key: loss_dis/test, label: Discriminative NLL}
+      - {study: spirals_nat, key: loss_gen/test, label: Generative NLL, axis: right}
+
+  spirals_defenses:
+    kind: bars
+    eps: [0.1, 0.2, 0.3]
+    models: &spirals_models
+      - {study: spirals_nat, where: {alpha: 0}, label: "$\\alpha=0$"}
+      - {study: spirals_nat, where: {alpha: 0.5}, label: "$\\alpha=0.5$"}
+      - {study: spirals_nat, where: {alpha: 1}, label: "$\\alpha=1$"}
+      - {study: spirals_at, where: {alpha: 0}, label: AT}
+      - {study: spirals_at, where: {alpha: 0.01}, label: "AT $\\alpha=0.01$"}
+    metrics:
+      - {key: acc/test, label: Clean}
+      - {key: "rob/test/{eps}", label: Robust}
+      - {key: "purify/test/{eps}/d0.1", label: Purified}
+      - {key: "rob_ceiling/test/{eps}", label: Ceiling}
+
+  spirals_summary:
+    kind: table
+    eps: [0.1, 0.2, 0.3]
+    models: *spirals_models
+    metrics: *headline_metrics
+
+  spirals_joint:
+    kind: table
+    eps: 0.2
+    models: *spirals_models
+    metrics:
+      - {key: "rob/test/{eps}", label: Robust}
+      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
+      - {key: "purify/test/{eps}/d0.1", label: Purified}
+      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)"}
+
+  spirals_capacity:
+    kind: curve
+    x: bond_dim
+    eps: 0.2
+    ylabel: Accuracy
+    series:
+      - {study: spirals_capacity, where: {alpha: 0}, key: acc/test, label: "clean, $\\alpha=0$"}
+      - {study: spirals_capacity, where: {alpha: 1}, key: acc/test, label: "clean, $\\alpha=1$"}
+      - {study: spirals_capacity, where: {alpha: 0}, key: "rob/test/{eps}", label: "robust, $\\alpha=0$", style: "--"}
+      - {study: spirals_capacity, where: {alpha: 1}, key: "rob/test/{eps}", label: "robust, $\\alpha=1$", style: "--"}
+
+  spirals_capacity_density:
+    kind: density
+    where: {alpha: 1}
+    models:
+      - {study: spirals_capacity, where: {arch: d4r3}, label: "$d=4, r=3$"}
+      - {study: spirals_capacity, where: {arch: d6r4}, label: "$d=6, r=4$"}
+      - {study: spirals_capacity, where: {arch: d10r6}, label: "$d=10, r=6$"}
+      - {study: spirals_capacity, where: {arch: d30r18}, label: "$d=30, r=18$"}
+
+  spirals_capacity_check:   # D42: the d10r6 cells, tuned twice, should agree
+    kind: table
+    eps: 0.2
+    models:
+      - {study: spirals_nat, where: {alpha: 0}, label: "spirals\\_nat $\\alpha=0$"}
+      - {study: spirals_capacity, where: {arch: d10r6, alpha: 0}, label: "spirals\\_capacity $\\alpha=0$"}
+      - {study: spirals_nat, where: {alpha: 1}, label: "spirals\\_nat $\\alpha=1$"}
+      - {study: spirals_capacity, where: {arch: d10r6, alpha: 1}, label: "spirals\\_capacity $\\alpha=1$"}
+    metrics:
+      - {key: acc/test, label: Clean}
+      - {key: loss_gen/test, label: "Gen. NLL"}
+      - {key: "rob/test/{eps}", label: Robust}
+      - {key: objective/valid, label: "Objective (valid)"}
+
+  spirals_embedding_density:
+    kind: density
+    where: {alpha: 1}
+    models:
+      - {study: spirals_embedding, where: {embedding: legendre}, label: Legendre}
+      - {study: spirals_embedding, where: {embedding: fourier}, label: Fourier}
+      - {study: spirals_embedding, where: {embedding: hermite}, label: Hermite}
+      - {study: spirals_embedding, where: {embedding: chebychev1}, label: "Chebyshev I"}
+      - {study: spirals_embedding, where: {embedding: chebychev2}, label: "Chebyshev II"}
+
+  spirals_embedding:
+    kind: table
+    eps: 0.2
+    models:
+      - {study: spirals_embedding, where: {embedding: legendre, alpha: 1}, label: Legendre}
+      - {study: spirals_embedding, where: {embedding: fourier, alpha: 1}, label: Fourier}
+      - {study: spirals_embedding, where: {embedding: hermite, alpha: 1}, label: Hermite}
+      - {study: spirals_embedding, where: {embedding: chebychev1, alpha: 1}, label: "Chebyshev I"}
+      - {study: spirals_embedding, where: {embedding: chebychev2, alpha: 1}, label: "Chebyshev II"}
+    metrics:
+      - {key: acc/test, label: Clean, best: max}
+      - {key: loss_gen/test, label: "Gen. NLL", best: min}
+      - {key: "rob/test/{eps}", label: Robust, best: max}
+      - {key: "purify/test/{eps}/d0.1", label: Purified, best: max}
+
+  # ── Appendix: MNIST 12x12 (the rebuttal's setting) ─────────────────────────
+  mnist12_alpha_acc:
+    kind: curve
+    x: alpha
+    eps: 0.1
+    where: {arch: d3r40}
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    series:
+      - {study: mnist12_nat, key: acc/test, label: Clean}
+      - {study: mnist12_nat, key: "rob/test/{eps}", label: Robust}
+      - {study: mnist12_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: jem_mnist12_nat, key: acc/test, label: "JEM clean", style: "--"}
+      - {study: jem_mnist12_nat, key: "purify/test/{eps}/d0.1", label: "JEM purified", style: "--"}
+
+  mnist12_capacity:
+    kind: curve
+    x: bond_dim
+    ylabel: Clean accuracy
+    series:
+      - {study: mnist12_nat, where: {alpha: 0}, key: acc/test, label: "$\\alpha=0$"}
+      - {study: mnist12_nat, where: {alpha: 0.01}, key: acc/test, label: "$\\alpha=0.01$"}
+      - {study: mnist12_nat, where: {alpha: 1}, key: acc/test, label: "$\\alpha=1$"}
+
+  mnist12_headline:
+    kind: table
+    eps: 0.1
+    where: {arch: d3r40}
+    models:
+      - {study: mnist12_nat, where: {alpha: 0}, label: "MPS $\\alpha=0$"}
+      - {study: mnist12_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
+      - {study: mnist12_nat, where: {alpha: 0.1}, label: "MPS $\\alpha=0.1$"}
+      - {study: mnist12_nat, where: {alpha: 1}, label: "MPS $\\alpha=1$"}
+      - {study: mnist12_at, where: {alpha: 0.01}, label: "MPS AT $\\alpha=0.01$"}
+      - {study: jem_mnist12_nat, where: {alpha: 0}, label: "JEM $\\alpha=0$"}
+      - {study: jem_mnist12_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+      - {study: jem_mnist12_at, where: {alpha: 0}, label: "JEM AT"}
+    metrics: *headline_metrics
