@@ -37,7 +37,7 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
     cbm.to(device)
     datahandler = DataHandler(manifest.config.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(cbm)
+    datahandler.split_and_rescale(cbm.input_range)
     datahandler.get_classification_loaders(batch_size=batch_size)
     return cbm, datahandler
 

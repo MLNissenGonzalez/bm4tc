@@ -34,7 +34,7 @@ def dh():
         split=(0.5, 0.25, 0.25), split_seed=11, overwrite=True,
     ))
     handler.load()
-    handler.split_and_rescale(_cbm(True))
+    handler.split_and_rescale(_cbm(True).input_range)
     handler.get_classification_loaders(batch_size=64)
     return handler
 

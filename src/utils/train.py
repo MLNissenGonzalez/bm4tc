@@ -66,12 +66,6 @@ def set_seed(seed: int):
 # ---------------------------------------------------------------------------
 
 @dataclass
-class CriterionConfig:
-    name: str = "nll"
-    kwargs: Optional[Dict[str, Any]] = None
-
-
-@dataclass
 class OptimizerConfig:
     name: str = "adam"
     # weight_decay is 0 and not a knob of these experiments: norm control (the

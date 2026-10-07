@@ -134,7 +134,7 @@ def main(cfg: DictConfig) -> float:
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
     model = _make_model(cfg, datahandler.data_dim, datahandler.num_cls, device)
-    datahandler.split_and_rescale(model)
+    datahandler.split_and_rescale(model.input_range)
 
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     run = _init_wandb(cfg, output_dir)

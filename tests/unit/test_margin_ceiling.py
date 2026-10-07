@@ -94,13 +94,9 @@ def test_spirals_ceiling_is_below_the_reported_at_robustness():
     cfg = OmegaConf.load("configs/dataset/spirals.yaml")
     OmegaConf.update(cfg, "overwrite", True, force_add=True)
 
-    class _RangeOnly:
-        """split_and_rescale only consults input_range; legendre is [-1, 1]."""
-        input_range = (-1.0, 1.0)
-
     dh = DataHandler(cfg)
     dh.load()
-    dh.split_and_rescale(_RangeOnly())
+    dh.split_and_rescale((-1.0, 1.0))  # legendre's range
     X = dh.data["test"].numpy()
     y = dh.labels["test"].numpy()
 

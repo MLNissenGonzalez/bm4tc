@@ -12,7 +12,6 @@ Budget convention (see "Budget vocabulary" in CLAUDE.md):
 import torch
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
-from src.utils.train import CriterionConfig
 
 _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 
@@ -21,7 +20,6 @@ _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 class EvasionConfig:
     method: str = "PGD"
     norm: int | str = "inf"
-    criterion: CriterionConfig = field(default_factory=CriterionConfig)
     eps_rel: list = field(default_factory=lambda: [0.1, 0.3])
     num_steps: int = 10
     step_size: Optional[float] = None
@@ -159,19 +157,6 @@ class _PGD:
 class ProjectedGradientDescent(_PGD):
     """PGD maximising the discriminative NLL -log p(c|x)."""
 
-    def __init__(
-            self,
-            norm: int | str = "inf",
-            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
-            num_steps: int = 10,
-            step_size: float | None = None,
-            random_start: bool = True
-    ):
-        # criterion is accepted for API compatibility and ignored: the loss is
-        # always born.mixed_nll(alpha=0).
-        super().__init__(norm=norm, num_steps=num_steps, step_size=step_size,
-                         random_start=random_start)
-
     def _loss(self, born, x, labels):
         return _dis_loss(born, x, labels)
 
@@ -211,85 +196,3 @@ def build_attack(
         step_size=evasion_cfg.step_size,
         random_start=evasion_cfg.random_start,
     )
-
-
-class RobustnessEvaluation:
-    """
-    Dispatching wrapper around the attack methods.
-
-    Builds a PGD / JOINT_PGD attack from a method name and forwards
-    :meth:`generate` to it.
-    """
-
-    def __init__(
-            self,
-            method: str = "PGD",
-            norm: int | str = "inf",
-            criterion: CriterionConfig = CriterionConfig(name="nll", kwargs=None),
-            eps_rel: List[float] = [0.1, 0.3],
-            num_steps: int = 10,
-            step_size: float | None = None,
-            random_start: bool = True
-    ):
-        """
-        Initialize robustness evaluator.
-
-        Args:
-            method: Attack method - "PGD" or "JOINT_PGD".
-            norm: Lp norm for perturbation ball.
-            criterion: Loss function configuration.
-            eps_rel: Relative budgets (fractions of the input domain) this evaluator
-                was configured with. Carried for provenance only — :meth:`generate`
-                takes an absolute ``eps_abs``.
-            num_steps: PGD iterations.
-            step_size: PGD step size.
-            random_start: PGD random initialization.
-        """
-        self.eps_rel = eps_rel
-        self.method = _METHOD_MAP[method](
-            norm=norm, num_steps=num_steps, step_size=step_size, random_start=random_start,
-        )
-
-    def generate(
-            self,
-            born,
-            naturals: torch.Tensor,
-            labels: torch.LongTensor,
-            eps_abs: float,
-            device: torch.device | str = "cpu"
-    ):
-        return self.method.generate(
-            born, naturals, labels, eps_abs, device
-        )
-
-
-if __name__ == "__main__":
-    import sys
-    import torch
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    from src.utils.embeddings import range_size_of, rel_to_abs
-
-    device = torch.device("cpu")
-    cbm = ConditionalBornMachine(
-        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
-        data_dim=2, num_classes=2, device=device,
-    )
-    cbm.prepare(device=device)
-
-    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2).clone()
-    y = torch.randint(0, 2, (8,))
-    # Authored relative; converted once, as every caller must.
-    eps_rel = 0.05
-    eps_abs = rel_to_abs(eps_rel, range_size_of(cbm))  # legendre: 0.05 * 2.0 = 0.1
-
-    for name, ec in [
-        ("PGD", EvasionConfig(method="PGD", num_steps=3, eps_rel=[eps_rel])),
-    ]:
-        attack = build_attack(ec)
-        adv = attack.generate(born=cbm, naturals=x, labels=y, eps_abs=eps_abs, device=device)
-        assert adv.shape == x.shape, f"{name}: shape mismatch"
-        delta = (adv - x).abs().max().item()
-        print(f"  {name:5s}  max_delta={delta:.4f}  (eps_rel={eps_rel}, eps_abs={eps_abs})")
-
-    print("evasion.py smoke test passed.")

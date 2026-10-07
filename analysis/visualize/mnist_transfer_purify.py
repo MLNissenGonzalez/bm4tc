@@ -255,7 +255,7 @@ def _test_loader(run_cfg, cbm, batch_size: int):
     OmegaConf.update(run_cfg, "dataset.overwrite", True, force_add=True)
     dh = DataHandler(run_cfg.dataset)
     dh.load()
-    dh.split_and_rescale(cbm)
+    dh.split_and_rescale(cbm.input_range)
     dh.get_classification_loaders()
     loader = dh.classification["test"]
     return torch.utils.data.DataLoader(loader.dataset, batch_size=batch_size, shuffle=False)

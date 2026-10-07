@@ -421,8 +421,7 @@ class UQEvaluation:
         Returns:
             UQResults with all evaluation metrics.
         """
-        from src.utils.evasion import RobustnessEvaluation
-        from src.utils.train import CriterionConfig
+        from src.utils.evasion import EvasionConfig, build_attack
         from src.analysis.purification import LikelihoodPurification
         from src.utils.embeddings import range_size_of, rel_to_abs
 
@@ -473,14 +472,12 @@ class UQEvaluation:
         logger.info(f"Clean accuracy: {clean_accuracy:.4f}")
 
         # 3. Generate adversarial examples and evaluate detection
-        attack = RobustnessEvaluation(
+        attack = build_attack(EvasionConfig(
             method=cfg.attack_method,
             norm=cfg.norm,
-            criterion=CriterionConfig(name="nll", kwargs=None),
-            eps_rel=cfg.eps_rel,
             num_steps=cfg.attack_num_steps,
             random_start=True,
-        )
+        ))
 
         adv_log_px: Dict[float, np.ndarray] = {}
         adv_accuracies: Dict[float, float] = {}
