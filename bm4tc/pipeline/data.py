@@ -56,7 +56,11 @@ class LabelledDataset:
 # Dataset directories
 # -----------------------------
 from bm4tc.pipeline.paths import data_root as _data_root
-_DATA_DIR = str(_data_root() / ".datasets")
+
+
+def _data_dir() -> str:
+    """Datasets live under the data root, read when used (as the outputs are)."""
+    return str(_data_root() / ".datasets")
 
 # -----------------------------
 # Supported dataset types
@@ -176,9 +180,9 @@ def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
     # working S3 mirror directly.
     tv_datasets.MNIST.mirrors = ["https://ossci-datasets.s3.amazonaws.com/mnist/"]
 
-    # Raw files go to _DATA_DIR/MNIST/raw/ (torchvision convention)
-    train_ds = tv_datasets.MNIST(root=_DATA_DIR, train=True, download=True)
-    test_ds = tv_datasets.MNIST(root=_DATA_DIR, train=False, download=True)
+    # Raw files go to <data root>/.datasets/MNIST/raw/ (torchvision convention)
+    train_ds = tv_datasets.MNIST(root=_data_dir(), train=True, download=True)
+    test_ds = tv_datasets.MNIST(root=_data_dir(), train=False, download=True)
 
     # Access tensors directly — avoids iterating the full dataset
     data = np.concatenate(
@@ -256,7 +260,7 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
     """
     canonical, _ = _parse_dataset_name(cfg.name)
     folder = _UCR_TS_DATASET_DIRS[canonical]
-    ts_dir = Path(_DATA_DIR) / "ucr_ts" / folder
+    ts_dir = Path(_data_dir()) / "ucr_ts" / folder
 
     if not ts_dir.exists():
         if cfg.dow_link:
@@ -292,12 +296,16 @@ def _ucr_ts_loader(cfg: DataGenDowConfig):
 
 
 def _npz_stem(cfg: DataGenDowConfig) -> str:
-    """Return the npz filename stem for a dataset config (without .npz extension)."""
+    """The npz filename stem: the variant plus every generation setting that is set
+    (``spirals_n4000_s25_noise0.5``, ``mnist_full_s42_r12``), so datasets generated
+    with different settings never share a file."""
     _, variant = _parse_dataset_name(cfg.name)
-    resize = cfg.resize
-    if resize is not None:
-        return f"{variant}_r{resize}"
-    return variant
+    parts = [variant]
+    for prefix, value in (("n", cfg.size), ("s", cfg.seed), ("noise", cfg.noise),
+                          ("f", cfg.circ_factor), ("r", cfg.resize)):
+        if value is not None:
+            parts.append(f"{prefix}{value:g}")
+    return "_".join(parts)
 
 
 def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
@@ -321,7 +329,7 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
 
     Saves
     -----
-    `{variant}.npz` in the given path, containing:
+    `{_npz_stem(cfg)}.npz` in the given path, containing:
         - `X` : np.ndarray of shape (n_samples, n_features), dtype float32
             Feature matrix of the generated dataset.
         - `y` : np.ndarray of shape (n_samples,), dtype int
@@ -340,17 +348,17 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
 
     os.makedirs(path, exist_ok=True)
     name = cfg.name.replace(" ", "").lower()
-    canonical, variant = _parse_dataset_name(name)
-
+    canonical, _ = _parse_dataset_name(name)
+    file =os.path.join(path, f"{_npz_stem(cfg)}.npz")
     if canonical in _TWO_DIM_DATA:
         X, t = _two_dim_generator(cfg)
-        np.savez(os.path.join(path, f"{variant}.npz"), X=X, y=t)
+        np.savez(file, X=X, y=t)
     elif canonical in _NIST_DATA:
         X, t = _nist_generator(cfg)
-        np.savez(os.path.join(path, f"{_npz_stem(cfg)}.npz"), X=X, y=t)
+        np.savez(file, X=X, y=t)
     elif canonical in _TS_DATA:
         X, t, ucr_train_size = _ucr_ts_loader(cfg)
-        np.savez(os.path.join(path, f"{variant}.npz"),
+        np.savez(file,
                  X=X, y=t, ucr_train_size=np.array(ucr_train_size))
     else:
         raise ValueError(f"Dataset {name} not supported.")
@@ -372,7 +380,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
         Dataset configuration object. Must include:
         - `gen_dow_kwargs.name`: str — dataset name (e.g., "moons", "circles").
         - `overwrite`: bool — if True, regenerate even if file exists.
-        The dataset file is expected under `_DATA_DIR/<canonical>/<variant>.npz`.
+        The dataset file is expected under `<data root>/.datasets/<canonical>/<stem>.npz` (see `_npz_stem`).
 
     Returns
     -------
@@ -387,7 +395,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
 
     Side Effects
     ------------
-    - Creates directories under `_DATA_DIR` if missing.
+    - Creates directories under `<data root>/.datasets` if missing.
     - May trigger dataset generation and disk writes.
     - Logs dataset shapes at debug level.
 
@@ -398,7 +406,7 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     """
 
     canonical, variant = _parse_dataset_name(cfg.gen_dow_kwargs.name)
-    dataset_dir = os.path.join(_DATA_DIR, canonical)
+    dataset_dir = os.path.join(_data_dir(), canonical)
     stem = _npz_stem(cfg.gen_dow_kwargs)
     dataset_file = os.path.join(dataset_dir, f"{stem}.npz")
 
