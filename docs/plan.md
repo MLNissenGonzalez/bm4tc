@@ -31,9 +31,41 @@ Order (warm studies need their `warm_from` study trained):
 Still to provide for Phase 8:
 - A `run paper`-style launcher across studies (the executor already runs a DAG;
   today one launch runs one study, D66).
-- Compute estimates per study (HPO budget × cells × seeds).
-- Gibbs/SGLD purification is off by default; enable `analysis.sweep_purify` in the
-  studies whose figures need it (`paper.yaml`'s `mnist_sweep_purify`).
+- **Decide batch size and HPO budget** from the compute estimates in
+  [compute.md](compute.md): ≈ 3,500 GPU-h upper bound without Gibbs, 71% of it
+  HPO. A bigger batch is ≈ 3.6× faster at 4× but changes every result. d3r80 on
+  full MNIST fits no GPU at batch 512 (≈ 41 GB): drop it or give it batch 128.
+- **Gibbs purification on full MNIST costs ≈ 40–80 GPU-h per run** (see below).
+  Fix it first, or enable `analysis.sweep_purify` only where the paper reads it
+  (`paper.yaml`'s `mnist_sweep_purify`: `mnist_nat` α = 0.01).
+- Time one probe on a cluster node first. Training is limited by CPU speed, and
+  the cluster's CPU threads may be slower than the laptop's.
+
+## Efficiency (before the expensive studies; Phase 9 track, D30)
+
+Measured in [compute.md](compute.md).
+
+- **Gibbs purification is O(n²) per sweep.** `GibbsPurification.purify_snapshots`
+  (`bm4tc/analysis/purification.py`) builds (batch × num_bins) candidates for each
+  feature and evaluates each one with a full forward pass through all n sites.
+  - Cost: MNIST 12×12 447 s per 24 points; full MNIST ≈ 30× that per batch, and it
+    runs out of memory at Gibbs batch 24 on 8 GB.
+  - Fix: cache the left and right environments for the batch, so a candidate
+    costs L_{k-1} · A_k(x) · R_{k+1}, then update the left environment after
+    feature k is resampled (the sampler already does this from left to right). That
+    is about n× cheaper.
+  - It is tensor-network maths, so it belongs in `ConditionalBornMachine` on
+    tensorkrowch nodes. It must reproduce the current snapshots bit for bit (or to
+    floating-point tolerance, with the seam re-pinned).
+- **Python overhead dominates training and analysis.** Epoch time does not depend
+  on the bond dimension; it grows with the number of sites × steps. One unit
+  keeps one CPU core busy and leaves the GPU mostly idle (6 units per GPU = 4×
+  throughput). Candidates: fewer, larger kernels per step (tensorkrowch
+  stacking, CUDA graphs, `torch.compile`), and a larger `analysis.batch_size`
+  (changes PGD's random draws, so it needs a re-pin).
+- Minor: the Gibbs/SGLD analysis part logs a spurious
+  `Detection/attack failed: ; skipping` at every budget (`bm4tc/analysis/uq.py:556`:
+  `next(iter(det.values()))` on empty percentiles). Harmless; guard it.
 
 ## Phase 9 (separate track): tensorkrowch
 
