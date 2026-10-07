@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import torch
+from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from src.datahandler import DataHandler
 from src.model import ConditionalBornMachine
 from src.utils.embeddings import range_size_of, rel_to_abs
 from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, build_attack
@@ -83,18 +83,17 @@ class Trainer:
         self,
         cbm: ConditionalBornMachine,
         cfg: TrainConfig,
-        datahandler: DataHandler,
+        train_loader: DataLoader,
+        valid_loader: DataLoader,
         device: torch.device,
     ):
         if cfg.eval_every < 1:
             raise ValueError(f"eval_every must be >= 1, got {cfg.eval_every}")
         self.cbm = cbm
         self.cfg = cfg
-        self.datahandler = datahandler
+        self.train_loader = train_loader
+        self.valid_loader = valid_loader  # not shuffled: adv_indices are positions in it
         self.device = device
-
-        if self.datahandler.classification is None:
-            self.datahandler.get_classification_loaders(batch_size=cfg.batch_size)
 
         self.best = {"objective": float("inf")}
         self.best_tensors = [t.cpu().clone().detach() for t in cbm.tensors]
@@ -145,7 +144,7 @@ class Trainer:
         # The validation attack subset: (1 - cw)·n positions in the valid loader's
         # order (stable: only the train split is shuffled), drawn once from a
         # constant seed so the rob curve is not perturbed by resampling.
-        n = len(self.datahandler.classification["valid"].dataset)
+        n = len(self.valid_loader.dataset)
         k = min(n, max(0, int(round((1.0 - cfg.clean_weight) * n))))
         gen = torch.Generator().manual_seed(_ADV_SUBSET_SEED)
         self.adv_indices = set(torch.randperm(n, generator=gen)[:k].tolist())
@@ -297,7 +296,7 @@ class Trainer:
         tracker = NormTracker()
         self.cbm.train()
 
-        for data, labels in self.datahandler.classification["train"]:
+        for data, labels in self.train_loader:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
 
@@ -355,7 +354,7 @@ class Trainer:
 
     def _validate(self) -> dict:
         return evaluate(
-            self.cbm, self.datahandler.classification["valid"], self.device,
+            self.cbm, self.valid_loader, self.device,
             alpha=self.cfg.alpha,
             attack=self.attack,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
@@ -410,7 +409,7 @@ class Trainer:
         self._collapsed = False
 
         self.cbm.prepare(device=self.device)
-        self._nc_log_target = resolve_log_target(self.cbm, self.datahandler, self._nc)
+        self._nc_log_target = resolve_log_target(self.cbm, self._nc)
         if self._nc.soft_strength > 0.0:
             self.norm_regularizer = NormRegularizer(
                 strength=self._nc.soft_strength, log_target=self._nc_log_target

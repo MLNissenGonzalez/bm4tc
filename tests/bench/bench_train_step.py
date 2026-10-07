@@ -56,7 +56,7 @@ def bench(regime: str, steps: int, epochs: int, device: torch.device) -> list[fl
     else:
         cfg = _config(CONFIGS / "trainer/at.yaml",
                       alpha=0.0, max_epoch=epochs, eval_every=1, save=False)
-    trainer = Trainer(cbm, cfg, dh, device)
+    trainer = Trainer(cbm, cfg, dh.classification["train"], dh.classification["valid"], device)
 
     times = []
     epoch = trainer._train_epoch

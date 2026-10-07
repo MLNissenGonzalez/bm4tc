@@ -80,7 +80,9 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     datahandler.split_and_rescale(cbm.input_range)
     log_dataset_viz(datahandler)
 
-    trainer = Trainer(cbm, cfg.trainer, datahandler, device)
+    datahandler.get_classification_loaders(batch_size=cfg.trainer.batch_size)
+    loaders = datahandler.classification
+    trainer = Trainer(cbm, cfg.trainer, loaders["train"], loaders["valid"], device)
     trainer.train(on_epoch_end=make_logger(run_dir, wandb_run=run),
                   output_dir=run_dir / "models")
     run.finish()

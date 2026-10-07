@@ -34,17 +34,10 @@ def _cbm(embedding: str) -> ConditionalBornMachine:
     return m
 
 
-class _FakeDataHandler:
-    data_dim = DATA_DIM
-
-    def __init__(self, n=8, batch_size=4):
-        from torch.utils.data import DataLoader, TensorDataset
-        ds = TensorDataset(torch.rand(n, DATA_DIM), torch.randint(0, NUM_CLASSES, (n,)))
-        loader = DataLoader(ds, batch_size=batch_size)
-        self.classification = {"train": loader, "valid": loader}
-
-    def get_classification_loaders(self, batch_size=4):
-        pass
+def _loader(n=8, batch_size=4):
+    from torch.utils.data import DataLoader, TensorDataset
+    ds = TensorDataset(torch.rand(n, DATA_DIM), torch.randint(0, NUM_CLASSES, (n,)))
+    return DataLoader(ds, batch_size=batch_size)
 
 
 # ---- the conversion boundary ----
@@ -72,7 +65,7 @@ def test_trainer_resolves_eps_rel_per_embedding(embedding, expected_abs):
     cbm = _cbm(embedding)
     cfg = TrainConfig(evasion=EvasionConfig(method="PGD", eps_rel=[EPS_REL]))
     t = Trainer(
-        cbm=cbm, cfg=cfg, datahandler=_FakeDataHandler(),
+        cbm=cbm, cfg=cfg, train_loader=_loader(), valid_loader=_loader(),
         device=torch.device("cpu"),
     )
 
@@ -90,7 +83,7 @@ def test_curriculum_start_is_relative_too():
         curriculum=True, curriculum_eps_start_rel=0.01, max_epoch=10,
     )
     t = Trainer(
-        cbm=cbm, cfg=cfg, datahandler=_FakeDataHandler(),
+        cbm=cbm, cfg=cfg, train_loader=_loader(), valid_loader=_loader(),
         device=torch.device("cpu"),
     )
 

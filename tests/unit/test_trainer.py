@@ -29,17 +29,11 @@ def _tiny_cbm():
     return ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
 
 
-class _FakeDataHandler:
-    """Minimal DataHandler substitute that skips file I/O."""
-    data_dim = 2
-
-    def __init__(self, n=16, batch_size=4):
-        ds = TensorDataset(torch.rand(n, 2), torch.randint(0, 2, (n,)))
-        loader = DataLoader(ds, batch_size=batch_size)
-        self.classification = {"train": loader, "valid": loader}
-
-    def get_classification_loaders(self, batch_size=4):
-        pass  # already set up
+def _loaders(n=16, batch_size=4):
+    """The same tiny random loader as train and valid (no file I/O)."""
+    ds = TensorDataset(torch.rand(n, 2), torch.randint(0, 2, (n,)))
+    loader = DataLoader(ds, batch_size=batch_size)
+    return loader, loader
 
 
 class _ShiftAttack:
@@ -56,7 +50,7 @@ class _ShiftAttack:
 
 def _trainer(cfg, *, n=16, batch_size=4, stub_attack=True):
     """A real Trainer on a tiny model; PGD replaced by a cheap shift."""
-    t = Trainer(_tiny_cbm(), cfg, _FakeDataHandler(n=n, batch_size=batch_size), CPU)
+    t = Trainer(_tiny_cbm(), cfg, *_loaders(n=n, batch_size=batch_size), CPU)
     if stub_attack and t.attack is not None:
         t.attack = _ShiftAttack()
     return t
@@ -101,16 +95,6 @@ def test_nat_trainer_constructs_without_attack():
     assert t.adv_indices == set()
     assert t.norm_regularizer is None
     assert len(t.best_tensors) == len(t.cbm.tensors)
-
-
-def test_trainer_sets_up_classification_loaders():
-    """If datahandler.classification is None, get_classification_loaders is called."""
-    dh = _FakeDataHandler()
-    dh.classification = None
-    called = []
-    dh.get_classification_loaders = lambda batch_size: called.append(batch_size)
-    Trainer(_tiny_cbm(), TrainConfig(), dh, CPU)
-    assert called == [TrainConfig().batch_size]
 
 
 def test_eval_every_must_be_positive():
@@ -408,7 +392,7 @@ def _stub_trainer(alpha, cw, *, attack=True):
     t.attack = _OnesAttack() if attack else None
     t.clean_weight = cw if attack else 1.0
     clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
-    t.datahandler = type("DH", (), {"classification": {"train": [clean]}})()
+    t.train_loader = [clean]
     t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
     return t, cbm
 
