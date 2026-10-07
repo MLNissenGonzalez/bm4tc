@@ -49,7 +49,7 @@ def test_defaults_fill_the_grid():
 
 def test_at_cells_carry_the_radius():
     cells = Study("spirals_at").cells()
-    assert [(c.alpha, c.eps) for c in cells] == [(0.0, 0.1), (0.01, 0.1)]
+    assert [(c.alpha, c.eps) for c in cells] == [(0.0, 0.1), (0.01, 0.1), (0.1, 0.1)]
 
 
 def test_embedding_settings_apply_per_cell():
@@ -248,3 +248,11 @@ def test_prune_old_deletes_the_archive(data_root):
     assert stages.prune_plan(study, "old") == [data_root / "outputs/tests/seam_nat/.replaced"]
     stages.prune(study, "old", yes=True)
     assert stages.prune_plan(study, "old") == []
+
+
+def test_arch_settings_apply_to_their_arch_only():
+    """``archs:`` sets run config per arch, over the study's ``config`` (D79)."""
+    study = Study("mnist_capacity")
+    micro = {c.arch: Job(study, c, 1).compose(hparams={}).trainer.micro_batch_size
+             for c in study.cells() if c.alpha == 0}
+    assert micro == {"d3r10": None, "d3r20": None, "d3r40": 256, "d3r80": 128}

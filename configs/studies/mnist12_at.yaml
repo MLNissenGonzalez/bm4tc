@@ -4,7 +4,7 @@ regime: at
 init: warm
 grid:
   arch: [d3r20, d3r40]
-  alpha: [0, 1e-2]
+  alpha: [0, 1e-2, 1e-1]
 config:
   trainer.max_epoch: 100
   trainer.batch_size: 512

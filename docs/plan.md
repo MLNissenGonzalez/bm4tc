@@ -34,14 +34,13 @@ Still to provide for Phase 8:
 - **HPO budget (D81):** 15 trials per tuned hparam with median pruning (50%
   warm-up). The HPO share of [compute.md](compute.md)'s ≈ 3,500 GPU-h (71% at 30
   trials, unpruned) drops to roughly 40% of what it was.
-- **Batch size (D79):** one batch size per study for every capacity. Models that
-  don't fit use `trainer.micro_batch_size` (same step, more time): set it for
-  full-MNIST d3r80 (128) and, on 1080 Tis, d3r40. Analysis runs in
-  `analysis.batch_size` chunks, which is set per study. `mnist_capacity` needs a
-  smaller one for d3r80 (PGD-40 at 256 ≈ 20 GB).
+- **Batch size (D79, D82):** one batch size per study for every capacity; the
+  full-MNIST studies micro-batch d3r40 (256) and d3r80 (128) through `archs:`, and
+  analyse those runs in chunks of the same size. Gibbs (`sweep_purify.gibbs.batch_size`
+  24) still runs out of memory on full MNIST: part of the Gibbs rework below.
 - **AT (D80):** cw = 0, the lr is the only tuned hparam (done in the four AT
-  studies). Warm AT tunes the lr in [1e-5, 1e-2] (D81). Open: the α grid
-  for AT ({0, 0.01, 0.1}?).
+  studies). Warm AT tunes the lr in [1e-5, 1e-2] (D81). AT α grid
+  {0, 0.01, 0.1} (D82).
 - **Gibbs purification on full MNIST costs ≈ 40–80 GPU-h per run** (see below).
   Fix it first, or enable `analysis.sweep_purify` only where the paper reads it
   (`paper.yaml`'s `mnist_sweep_purify`: `mnist_nat` α = 0.01).

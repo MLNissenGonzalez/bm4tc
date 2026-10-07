@@ -10,3 +10,6 @@ config:
   trainer.max_epoch: 100
   trainer.batch_size: 512
   trainer.patience: 50
+archs:                         # memory only, same optimizer steps (D79); analysis chunks follow
+  d3r40: {trainer.micro_batch_size: 256}    # ≈ 5 GB per chunk: fits an 11 GB 1080 Ti
+  d3r80: {trainer.micro_batch_size: 128}    # ≈ 10 GB per chunk: tight on a 1080 Ti, safe on an RTX 6000

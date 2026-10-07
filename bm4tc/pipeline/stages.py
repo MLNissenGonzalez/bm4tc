@@ -339,8 +339,14 @@ def analyse(job: Job) -> Dict[str, float]:
     manifest_path = job.run_dir / "run.json"
     if not manifest_path.exists():
         raise LookupError(f"{job.name}: not trained; run `train {job.study.name}` first")
-    run_hash = json.loads(manifest_path.read_text())["config_hash"]
+    manifest = json.loads(manifest_path.read_text())
+    run_hash = manifest["config_hash"]
     analysis, budgets = job.study.cfg.analysis, list(job.study.cfg.budgets)
+    micro = manifest["config"]["trainer"].get("micro_batch_size")
+    if micro and micro < analysis.batch_size:
+        # A model trained in micro-batches is analysed in chunks of that size: the
+        # memory of PGD through every site is the memory of a training chunk (D79).
+        analysis = OmegaConf.merge(analysis, {"batch_size": micro})
     path = job.run_dir / "analysis.json"
     stored = json.loads(path.read_text()) if path.exists() else {}
 

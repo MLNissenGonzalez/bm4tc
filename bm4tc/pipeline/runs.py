@@ -136,6 +136,7 @@ class StudyConfig:
     grid: GridConfig = field(default_factory=GridConfig)
     embeddings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     config: Dict[str, Any] = field(default_factory=dict)   # fixed run-config values
+    archs: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # per-arch run config, over `config`
     hpo: Optional[HPOConfig] = None    # None: no HPO, the study fixes every hparam
     hparams_from: Optional[HparamsFromConfig] = None
     budgets: List[float] = MISSING
@@ -333,6 +334,7 @@ class Job:
             **self.cell.values(self.study.cfg.model),
             **self.study.cfg.embeddings.get(self.cell.embedding, {}),
             **self.study.cfg.config,
+            **self.study.cfg.archs.get(self.cell.arch, {}),
             **self.study.inherited(self.cell),
             **hparams,
             "tracking.seed": self.seed,
