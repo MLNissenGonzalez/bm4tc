@@ -238,7 +238,13 @@ test uses split already); benchmark within noise; `src/train/` ≈ 950 → ≈ 4
 *Exit:* every study composes under the schema; the seam test runs from a study file;
 no code outside `runs.py` builds or parses a run path.
 
-### Phase 5: Pipeline verbs and analysis (D2, D3, D20–D23)
+### Phase 5: Pipeline verbs and analysis (D2, D3, D20–D23) — done (D62–D68)
+
+*Done 2026-10-07:* `python -m bm4tc {hpo,select,train,analyse,run,status,prune}`;
+the seam runs `run tests/seam_{nat,at}`. Deviations from the list below: the
+package move came last (deletions first); `wandb_fetcher.py` and `tools/` were
+already gone; `analysis/{visualize,utils,outputs}` wait for Phase 7.
+
 
 1. **Package move** `src/` + `experiments/` + `analysis/` → `bm4tc/{core,analysis,pipeline}` (D32),
    with `__main__.py` exposing the verbs and `test_import_rule.py` guarding the boundaries.
