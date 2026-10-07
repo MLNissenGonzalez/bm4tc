@@ -11,5 +11,4 @@ config:
   trainer.patience: 20         # validations (eval_every 5): 100 epochs
 hpo:
   n_trials: 20
-  space:
-    trainer.clean_weight: [0.2, 1.0]
+  # space: only the lr from defaults.yaml; clean_weight stays 0 (D80)

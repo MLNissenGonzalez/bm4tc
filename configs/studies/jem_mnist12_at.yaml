@@ -15,8 +15,7 @@ config:
   trainer.patience: 10         # validations (eval_every 5): 50 epochs
 hpo:
   n_trials: 20
-  space:
-    trainer.clean_weight: [0.2, 1.0]
+  # space: only the lr from defaults.yaml; clean_weight stays 0 (D80)
 hparams_from:
   study: jem_mnist12_nat
   params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
