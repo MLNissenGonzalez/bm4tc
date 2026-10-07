@@ -641,12 +641,15 @@ class DataHandler:
         del all_data
         del all_labels
 
-    def get_classification_loaders(self, batch_size: int = 64):
+    def get_classification_loaders(self, batch_size: int = 64,
+                                   eval_batch_size: Optional[int] = None):
         """Create DataLoaders for classification training (data, labels) pairs.
 
         Args:
             batch_size: Number of samples per batch. Should match the trainer's
                         configured batch_size (from ClassificationConfig, etc.).
+            eval_batch_size: for the valid and test splits, when set (the trainer's
+                        micro_batch_size, D79); else ``batch_size``.
         """
         if not isinstance(self.data, dict):
             raise AttributeError(f"Call split_and_rescale first.")
@@ -655,10 +658,11 @@ class DataHandler:
         for split, split_data in self.data.items():
             split_labels = self.labels[split]
             lbd_data = TensorDataset(split_data, split_labels)
-            effective_bs = min(batch_size, len(split_data))
-            if effective_bs < batch_size:
+            bs = batch_size if split == "train" or eval_batch_size is None else eval_batch_size
+            effective_bs = min(bs, len(split_data))
+            if effective_bs < bs:
                 logger.warning(
-                    f"batch_size ({batch_size}) exceeds {split} split size "
+                    f"batch_size ({bs}) exceeds {split} split size "
                     f"({len(split_data)}); clamping to {effective_bs}."
                 )
             self.classification[split] = DataLoader(lbd_data,

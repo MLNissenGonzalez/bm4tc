@@ -625,3 +625,42 @@ def test_nat_logs_norm_metrics_every_epoch():
     for k in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_Z_min",
               "norm/log_Z_headroom", "norm/log_amp_sq_mean"):
         assert k in logged[-1], f"missing {k}"
+
+
+# ── Micro-batches (D79) ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("evasion", [None, {"method": "PGD", "eps_rel": [0.1],
+                                            "num_steps": 3, "random_start": False}])
+def test_micro_batches_take_the_full_batch_step(evasion):
+    """A batch computed in chunks takes the same optimizer step as the batch at
+    once, up to float rounding: the gradient of the batch mean, the norm penalty added once (NAT and
+    real PGD, which must leave the accumulated parameter gradients alone)."""
+    torch.manual_seed(0)
+    loaders = _loaders(n=16, batch_size=8)
+    tensors = []
+    for micro in (None, 2):
+        torch.manual_seed(1)
+        cfg = TrainConfig(alpha=0.5, evasion=evasion, micro_batch_size=micro,
+                          norm_control=NO_NORM)
+        t = Trainer(_tiny_cbm(), cfg, *loaders, CPU)
+        _ready(t, norm_regularizer=NormRegularizer(strength=1e-2, log_target=0.0))
+        # SGD carries the gradient over one to one; Adam's first step g/(|g|+eps)
+        # would blow float rounding up into a visible difference on tiny entries.
+        t.optimizer = torch.optim.SGD(t.cbm.parameters(), lr=1e-6)
+        t._train_epoch(eps_abs=0.05 if evasion else 0.0)
+        assert not t._collapsed and t.step == 2
+        tensors.append([x.detach().clone() for x in t.cbm.tensors])
+    for full, chunked in zip(*tensors):
+        torch.testing.assert_close(chunked, full, rtol=1e-5, atol=1e-7)
+
+
+def test_pgd_leaves_parameter_gradients_alone():
+    from bm4tc.core.attacks import ProjectedGradientDescent
+    torch.manual_seed(0)
+    cbm = _tiny_cbm()
+    cbm.prepare(device=CPU)
+    for p in cbm.parameters():
+        p.grad = torch.ones_like(p)
+    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
+    ProjectedGradientDescent(norm="inf", num_steps=2).generate(cbm, x, y, 0.05, CPU)
+    assert all(torch.equal(p.grad, torch.ones_like(p)) for p in cbm.parameters())

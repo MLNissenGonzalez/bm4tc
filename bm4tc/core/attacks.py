@@ -129,14 +129,10 @@ class _PGD:
         for _ in range(self.num_steps):
             delta.requires_grad_(True)
             loss = self._loss(model, naturals + delta, labels)
-
-            model.zero_grad()
-            if delta.grad is not None:
-                delta.grad.zero_()
-
-            loss.backward()
-
-            grad = delta.grad.detach()
+            # The input gradient only: parameter gradients are left untouched, so an
+            # attack inside a training step does not disturb the gradient a
+            # micro-batched step accumulates (D79).
+            (grad,) = torch.autograd.grad(loss, delta)
             delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
             delta = self._bounded_delta(delta, naturals, eps_abs, model.input_range)
 

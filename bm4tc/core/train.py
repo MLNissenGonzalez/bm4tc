@@ -52,6 +52,10 @@ class TrainConfig:
     alpha: float = 0.0  # weight of the generative term
     max_epoch: int = 100
     batch_size: int = 64
+    # Memory only (D79): compute each batch in chunks of this many samples and take
+    # one optimizer step per batch, the gradient of the mean over the whole batch.
+    # Validation then also runs in chunks of this size. None: the batch at once.
+    micro_batch_size: Optional[int] = None
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     patience: int = 250  # in validation events: eval_every=5, patience=10 is 50 epochs
     eval_every: int = 1
@@ -299,6 +303,36 @@ class Trainer:
     # Loop
     # ------------------------------------------------------------------
 
+    def _chunk_objective(self, data, labels, eps_abs: float, tracker) -> Optional[torch.Tensor]:
+        """The objective on one (micro-)batch, retried once after ``cbm.reset()`` if
+        it is not finite. None, with ``_collapsed`` set, when training must stop."""
+        try:
+            nll = self._objective(data, labels, eps_abs, tracker)
+            if not torch.isfinite(nll):
+                # Reset clears stale tensorkrowch contraction nodes; the retry
+                # is for recovery only.
+                self.cbm.reset()
+                nll = self._objective(data, labels, eps_abs, tracker)
+                if not torch.isfinite(nll):
+                    diag = self._diagnostics(data)
+                    logger.warning(
+                        f"NaN/inf loss at step {self.step} (also after cbm.reset()): "
+                        f"{self._format_diagnostics(diag)}"
+                    )
+                    self._collapsed = True
+                    return None
+                logger.warning(
+                    f"NaN/inf loss at step {self.step} recovered after cbm.reset(); continuing."
+                )
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                logger.error(f"CUDA OOM at step {self.step}, re-raising.")
+                raise
+            logger.warning(f"Training stopped at step {self.step}: {e}")
+            self._collapsed = True
+            return None
+        return nll
+
     def _train_epoch(self, eps_abs: float):
         """One pass over the training split. Sets ``_collapsed`` and stops early on
         a non-OOM error or a loss that stays non-finite after ``cbm.reset()``."""
@@ -307,55 +341,44 @@ class Trainer:
         tracker = NormTracker()
         self.cbm.train()
 
+        micro = self.cfg.micro_batch_size
         for data, labels in self.train_loader:
             data, labels = data.to(self.device), labels.to(self.device)
             self.step += 1
-
-            try:
-                nll = self._objective(data, labels, eps_abs, tracker)
-                if not torch.isfinite(nll):
-                    # Reset clears stale tensorkrowch contraction nodes; the retry
-                    # is for recovery only.
-                    self.cbm.reset()
-                    nll = self._objective(data, labels, eps_abs, tracker)
-                    if not torch.isfinite(nll):
-                        diag = self._diagnostics(data)
-                        logger.warning(
-                            f"NaN/inf loss at step {self.step} (also after cbm.reset()): "
-                            f"{self._format_diagnostics(diag)}"
-                        )
-                        self._collapsed = True
-                        break
-                    logger.warning(
-                        f"NaN/inf loss at step {self.step} recovered after cbm.reset(); continuing."
-                    )
-            except RuntimeError as e:
-                if "out of memory" in str(e).lower():
-                    logger.error(f"CUDA OOM at step {self.step}, re-raising.")
-                    raise
-                logger.warning(f"Training stopped at step {self.step}: {e}")
-                self._collapsed = True
-                break
-
-            if self.norm_regularizer is not None:
-                penalty = self.norm_regularizer(self.cbm)
-                loss = nll + penalty
-            else:
-                penalty = None
-                loss = nll
-
-            # log Z is formed by mixed_nll (alpha>0) or the regularizer; read it
-            # before optimizer.step() changes the parameters.
-            tracker.record_logZ(self.cbm)
-
             self.optimizer.zero_grad()
-            loss.backward()
+
+            # One chunk is the batch itself: the same graph and numbers as without
+            # micro-batching. Each chunk's objective is a mean over the chunk, so
+            # weighting it by its share of the batch accumulates the gradient of
+            # the batch mean (D79).
+            chunks = (list(zip(data.split(micro), labels.split(micro))) if micro
+                      else [(data, labels)])
+            batch_nll, penalty = 0.0, None
+            for i, (x, y) in enumerate(chunks):
+                nll = self._chunk_objective(x, y, eps_abs, tracker)
+                if nll is None:
+                    break
+                weight = len(x) / len(data)
+                loss = nll if len(chunks) == 1 else weight * nll
+                if i == len(chunks) - 1:
+                    # The penalty is per step, added once, on the last chunk's graph
+                    # (it may share that chunk's log Z).
+                    if self.norm_regularizer is not None:
+                        penalty = self.norm_regularizer(self.cbm)
+                        loss = loss + penalty
+                    # log Z is formed by mixed_nll (alpha>0) or the regularizer;
+                    # read it before optimizer.step() changes the parameters.
+                    tracker.record_logZ(self.cbm)
+                loss.backward()
+                batch_nll += weight * nll.detach().cpu().item()
+            if self._collapsed:
+                break
             self.optimizer.step()
 
             if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
                 self.cbm.renormalize_(log_target=self._nc_log_target)
 
-            objectives.append(nll.detach().cpu().item())
+            objectives.append(batch_nll)
             penalties.append(penalty.detach().cpu().item() if penalty is not None else 0.0)
 
         n = len(objectives)
