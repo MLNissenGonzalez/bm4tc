@@ -71,6 +71,14 @@ class HPOConfig:
 
 
 @dataclass
+class HparamsFromConfig:
+    """Selected hparams taken from another study's matching cell (same embedding,
+    arch, alpha): e.g. JEM-AT's SGLD settings from the JEM NAT study."""
+    study: str = MISSING
+    params: List[str] = MISSING
+
+
+@dataclass
 class GibbsConfig:
     num_bins: int = MISSING
     batch_size: int = MISSING
@@ -120,6 +128,7 @@ class StudyConfig:
     embeddings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     config: Dict[str, Any] = field(default_factory=dict)   # fixed run-config values
     hpo: Optional[HPOConfig] = None    # None: no HPO, the study fixes every hparam
+    hparams_from: Optional[HparamsFromConfig] = None
     budgets: List[float] = MISSING
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
@@ -253,6 +262,21 @@ class Study:
         return {k: got[k] for k in sorted(wanted)}
 
 
+    def inherited(self, cell: Cell) -> Dict[str, Any]:
+        """The hparams ``hparams_from`` names, as selected for the matching cell of
+        that study; they apply before this study's own hparams."""
+        source = self.cfg.hparams_from
+        if source is None:
+            return {}
+        other = Study(source.study)
+        selected = other.hparams(Cell(cell.embedding, cell.arch, cell.alpha))
+        missing = set(source.params) - set(selected)
+        if missing:
+            raise LookupError(f"{self.name}: hparams_from {source.study} has no "
+                              f"{sorted(missing)} (not in its HPO space)")
+        return {k: selected[k] for k in source.params}
+
+
 class RunConflict(RuntimeError):
     """A finished run with a different config sits where a job would write."""
 
@@ -295,6 +319,7 @@ class Job:
             **self.cell.values(self.study.cfg.model),
             **self.study.cfg.embeddings.get(self.cell.embedding, {}),
             **self.study.cfg.config,
+            **self.study.inherited(self.cell),
             **hparams,
             "tracking.seed": self.seed,
         }

@@ -1,6 +1,6 @@
 # JEM PGD-AT on MNIST 12x12 (D71), warm from jem_mnist12_nat's alpha=0 runs; the
 # same attack, budgets and alpha grid as mnist12_at. alpha=0 is MLP-AT; at 1e-2 the
-# generative term uses the default training SGLD.
+# training SGLD is the one selected for the same jem_mnist12_nat cell (hparams_from).
 dataset: mnist12
 model: jem
 regime: at
@@ -17,5 +17,8 @@ hpo:
   n_trials: 20
   space:
     trainer.clean_weight: [0.2, 1.0]
+hparams_from:
+  study: jem_mnist12_nat
+  params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
 analysis:
   sweep_purify: {enabled: true}

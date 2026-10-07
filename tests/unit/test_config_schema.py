@@ -14,8 +14,10 @@ PENDING = {"mnist_nat": "mnist_capacity picks the rank (D44)",
 
 
 @pytest.mark.parametrize("name", STUDIES)
-def test_study_composes_under_schema(name):
+def test_study_composes_under_schema(name, monkeypatch):
     study = Study(name)
+    # hparams_from needs the other study selected; check its keys exist instead.
+    monkeypatch.setattr(Study, "inherited", lambda self, cell: {})
     if name in PENDING:
         with pytest.raises(MissingMandatoryValue):
             study.cells()
@@ -23,6 +25,8 @@ def test_study_composes_under_schema(name):
     for cell in study.cells():  # one seed per cell: seeds only set tracking.seed
         cfg = Job(study, cell, study.seeds()[0]).compose(hparams={})  # no `select` yet
         OmegaConf.to_container(cfg, resolve=True)
+        for key in (study.cfg.hparams_from.params if study.cfg.hparams_from else []):
+            assert OmegaConf.select(cfg, key) is not None, key
         if cfg.trainer.evasion is not None:  # untyped in the schema (D53)
             evasion_config(cfg.trainer.evasion)
         assert (cfg.trainer.evasion is not None) == (study.regime == "at")
