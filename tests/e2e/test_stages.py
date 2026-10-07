@@ -131,3 +131,30 @@ def test_analyse_caches_each_part(scratch):
         rows = list(csv.DictReader(f))
     assert len(rows) == 1 and rows[0]["alpha"] == "0.0"
     assert "trainer.optimizer.kwargs.lr" in rows[0] and "rob/test/0.1" in rows[0]
+
+
+@pytest.mark.slow
+def test_run_in_parallel_then_status(scratch):
+    """`run` with two parallel units: HPO workers share each cell's journal."""
+    import os
+    import subprocess
+    import sys
+    env = {**os.environ, "BM4TC_DATA_ROOT": str(scratch), "CUDA_VISIBLE_DEVICES": ""}
+    # The units are subprocesses, which the HPARAMS monkeypatch does not reach:
+    # select writes configs/hparams/tests/stages_nat.yaml, removed afterwards.
+    nat = Study("tests/stages_nat")
+    path = runs.CONFIGS / "hparams" / "tests" / "stages_nat.yaml"
+    try:
+        proc = subprocess.run([sys.executable, "-m", "experiments", "run", "tests/stages_nat",
+                               "--per-gpu", "2"], cwd=runs.REPO, env=env,
+                              capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
+        assert yaml.safe_load(path.read_text()).keys() == {c.name for c in nat.cells()}
+    finally:
+        path.unlink(missing_ok=True)
+    for cell in nat.cells():
+        assert len(_states(nat, cell)) == 3                         # not 3 per worker
+    with open(scratch / "outputs/tests/stages_nat/results.csv") as f:
+        assert len(list(csv.DictReader(f))) == 2
+    report = stages.status(nat)
+    assert "legendre/d4r3/a0" in report and "3/3" in report and "failed" not in report
