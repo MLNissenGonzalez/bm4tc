@@ -11,7 +11,7 @@ config:
   trainer.batch_size: 64
   tracking.mode: disabled
 hpo:
-  n_trials: 3
+  trials_per_param: 3          # one hparam: 3 trials
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-3, 1e-1]}
 budgets: [0.1]

@@ -5,6 +5,7 @@ scratch dir.
 """
 import csv
 import json
+import logging
 
 import optuna
 import pytest
@@ -73,7 +74,7 @@ def test_hpo_select_train(scratch):
 def test_changed_space_is_refused(scratch, monkeypatch):
     nat = Study("tests/stages_nat")
     cell = nat.cells()[0]
-    monkeypatch.setattr(nat.cfg.hpo, "n_trials", 1)
+    monkeypatch.setattr(nat.cfg.hpo, "trials_per_param", 1)
     stages.hpo(nat, [cell])
     nat.cfg.hpo.space["trainer.optimizer.kwargs.lr"] = {"log": [1e-4, 1e-1]}
     with pytest.raises(RunConflict, match="--replace"):
@@ -158,3 +159,46 @@ def test_run_in_parallel_then_status(scratch):
         assert len(list(csv.DictReader(f))) == 2
     report = stages.status(nat)
     assert "legendre/d4r3/a0" in report and "3/3" in report and "failed" not in report
+
+
+def test_pruner_follows_the_config():
+    nat = Study("tests/stages_nat")                    # max_epoch 3, warmup 0.5 -> 2 epochs
+    pruner = stages._pruner(nat, nat.cells()[0])
+    assert isinstance(pruner, optuna.pruners.MedianPruner)
+    assert (pruner._n_startup_trials, pruner._n_warmup_steps) == (6, 2)
+    nat.cfg.hpo.pruning.enabled = False
+    assert isinstance(stages._pruner(nat, nat.cells()[0]), optuna.pruners.NopPruner)
+    assert nat.n_trials == 3                           # trials_per_param 3 x one hparam
+
+
+@pytest.mark.slow
+def test_pruned_trials_count_as_finished(scratch, monkeypatch):
+    """A pruned trial stops at the validation the pruner rejects, counts towards
+    n_trials, and is never selected (D81)."""
+    nat = Study("tests/stages_nat")
+    cell = nat.cells()[0]
+    monkeypatch.setattr(stages, "_pruner",
+                        lambda study, cell: optuna.pruners.ThresholdPruner(upper=-1e30))
+    root = logging.getLogger()
+    level = root.level
+    root.setLevel(logging.INFO)                        # as the CLI runs
+    try:
+        stages.hpo(nat, [cell])
+    finally:
+        root.setLevel(level)
+    assert _states(nat, cell) == [optuna.trial.TrialState.PRUNED] * nat.n_trials
+    log = (nat.hpo_dir(cell) / "t0" / "train.log").read_text()
+    assert "pruned at epoch 1" in log and "failed" not in log
+    with pytest.raises(LookupError, match="no trial reached a finite"):
+        stages.select(nat)
+
+
+@pytest.mark.slow
+def test_changed_pruning_is_refused(scratch, monkeypatch):
+    nat = Study("tests/stages_nat")
+    cell = nat.cells()[0]
+    monkeypatch.setattr(nat.cfg.hpo, "trials_per_param", 1)
+    stages.hpo(nat, [cell])
+    nat.cfg.hpo.pruning.warmup = 0.3
+    with pytest.raises(RunConflict, match="--replace"):
+        stages.hpo(nat, [cell])

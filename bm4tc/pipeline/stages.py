@@ -24,7 +24,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 import optuna
 import torch
@@ -52,6 +52,8 @@ def _log_to(path: Path) -> Iterator[None]:
     logging.getLogger().addHandler(handler)
     try:
         yield
+    except optuna.TrialPruned:
+        raise  # an outcome, logged where it is decided, not a failure
     except Exception:
         logger.exception("failed")
         raise
@@ -61,10 +63,11 @@ def _log_to(path: Path) -> Iterator[None]:
 
 
 def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
-         names: Dict[str, str]):
+         names: Dict[str, str], on_valid: Optional[Callable[[int, float], None]] = None):
     """Train one model in ``run_dir`` (log.json; the checkpoint in models/ if
     ``trainer.save``); cold, or warm from the run ``init`` names. Returns the
-    trainer (``best``, ``best_epoch``)."""
+    trainer (``best``, ``best_epoch``). ``on_valid(epoch, objective/valid)`` runs
+    after each validation; an exception from it ends training (HPO pruning)."""
     run = init_wandb(cfg, run_dir, names)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -105,9 +108,17 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
                              device, seed=cfg.tracking.seed, buffer=buffer)
     else:
         trainer = Trainer(model, cfg.trainer, loaders["train"], loaders["valid"], device)
-    trainer.train(on_epoch_end=make_logger(run_dir, wandb_run=run),
-                  output_dir=run_dir / "models")
-    run.finish()
+    log = make_logger(run_dir, wandb_run=run)
+
+    def on_epoch_end(epoch: int, record: Dict) -> None:
+        log(epoch, record)
+        if on_valid is not None and "valid" in record:
+            on_valid(epoch, record["valid"]["objective"])
+
+    try:
+        trainer.train(on_epoch_end=on_epoch_end, output_dir=run_dir / "models")
+    finally:
+        run.finish()
     return trainer
 
 
@@ -140,8 +151,9 @@ def train(job: Job, replace: bool = False) -> Optional[float]:
 optuna.logging.set_verbosity(optuna.logging.WARNING)  # trials log their own results
 TPE_SEED = 42
 TPE_STARTUP_TRIALS = 6
-_COUNTED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.FAIL,
-            optuna.trial.TrialState.RUNNING)
+_FINISHED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED,
+             optuna.trial.TrialState.FAIL)
+_COUNTED = _FINISHED + (optuna.trial.TrialState.RUNNING,)
 
 
 def suggest(trial: optuna.Trial, key: str, spec: Any) -> Any:
@@ -166,7 +178,18 @@ def _space(study: Study) -> Dict[str, Any]:
     return OmegaConf.to_container(study.cfg.hpo.space, resolve=True)
 
 
-def _optuna_study(study: Study, cell: Cell, worker: int = 0) -> optuna.Study:
+def _pruner(study: Study, cell: Cell) -> optuna.pruners.BasePruner:
+    """Median pruning after ``warmup`` of the trials' max_epoch (D81), or none."""
+    p = study.cfg.hpo.pruning
+    if not p.enabled:
+        return optuna.pruners.NopPruner()
+    max_epoch = study.hpo_job(cell).compose(hparams={}).trainer.max_epoch
+    return optuna.pruners.MedianPruner(n_startup_trials=p.startup_trials,
+                                       n_warmup_steps=math.ceil(p.warmup * max_epoch))
+
+
+def _optuna_study(study: Study, cell: Cell, worker: int = 0,
+                  pruner: Optional[optuna.pruners.BasePruner] = None) -> optuna.Study:
     from optuna.storages import JournalStorage
     from optuna.storages.journal import JournalFileBackend
 
@@ -179,17 +202,20 @@ def _optuna_study(study: Study, cell: Cell, worker: int = 0) -> optuna.Study:
         sampler=optuna.samplers.TPESampler(seed=TPE_SEED + worker,
                                            n_startup_trials=TPE_STARTUP_TRIALS),
         direction="minimize",
+        pruner=pruner,
         load_if_exists=True,
     )
 
 
 def _hpo_hash(study: Study, cell: Cell) -> str:
     """What makes two HPOs of a cell the same: the trial config without hparams,
-    the warm start and the search space."""
+    the warm start, the search space and the pruning (not the trial count, so an
+    HPO can be extended)."""
     job = study.hpo_job(cell)
     base = job.config_hash(job.compose(hparams={}), job.warm_source())
     space = json.dumps(_space(study), sort_keys=True)
-    return hashlib.sha256(f"{base}{space}".encode()).hexdigest()[:16]
+    pruning = json.dumps(OmegaConf.to_container(study.cfg.hpo.pruning), sort_keys=True)
+    return hashlib.sha256(f"{base}{space}{pruning}".encode()).hexdigest()[:16]
 
 
 def prepare_hpo(study: Study, cell: Cell, replace: bool = False) -> None:
@@ -217,12 +243,13 @@ def prepare_hpo(study: Study, cell: Cell, replace: bool = False) -> None:
 
 
 def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
-    """Run trials of the cell until ``hpo.n_trials`` are finished or running.
-    Several workers may run at once on the same journal."""
+    """Run trials of the cell until ``study.n_trials`` are finished or running.
+    Several workers may run at once on the same journal. A trial reports
+    objective/valid at each validation and stops when the pruner says so (D81)."""
     job = study.hpo_job(cell)
     init = job.warm_source()
     space = _space(study)
-    opt = _optuna_study(study, cell, worker)
+    opt = _optuna_study(study, cell, worker, pruner=_pruner(study, cell))
 
     def objective(trial: optuna.Trial) -> float:
         hparams = {key: suggest(trial, key, spec) for key, spec in space.items()}
@@ -230,15 +257,24 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
         cfg.trainer.save = False  # D22: trials keep curves only
         trial_dir = study.hpo_dir(cell) / f"t{trial.number}"
         trial_dir.mkdir(parents=True, exist_ok=True)
+        def report(epoch: int, value: float) -> None:
+            if not math.isfinite(value):
+                return  # a collapse ends the trial by itself; no value to compare
+            trial.report(value, epoch)
+            if trial.should_prune():
+                logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} pruned "
+                            f"at epoch {epoch} (objective/valid {value:.6g})")
+                raise optuna.TrialPruned()
+
         with _log_to(trial_dir / "train.log"):
             logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} {hparams}")
-            trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number))
+            trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number), report)
         trial.set_user_attr("best_epoch", trainer.best_epoch)
         logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
                     f"{trainer.best['objective']:.6g} (epoch {trainer.best_epoch})")
         return trainer.best["objective"]  # inf if no validation was finite
 
-    while len(opt.get_trials(deepcopy=False, states=_COUNTED)) < study.cfg.hpo.n_trials:
+    while len(opt.get_trials(deepcopy=False, states=_COUNTED)) < study.n_trials:
         opt.optimize(objective, n_trials=1, catch=(Exception,))
 
 
@@ -257,7 +293,7 @@ def select(study: Study) -> Path:
     Refuses while a cell's HPO is unfinished or has no finite trial."""
     if study.cfg.hpo is None:
         raise ValueError(f"{study.name} has no HPO (hpo: null): nothing to select")
-    n_trials = study.cfg.hpo.n_trials
+    n_trials = study.n_trials
     lines = [f"# Selected by `select {study.name}`: per cell, the HPO trial with the lowest",
              "# objective/valid (D8, D21). Written by select only; do not edit.",
              f"# {datetime.datetime.now().isoformat(timespec='seconds')}, git {_git_version()}"]
@@ -266,8 +302,7 @@ def select(study: Study) -> Path:
             raise LookupError(f"{study.name}/{cell.name}: no HPO; run `hpo {study.name}` first")
         trials = _optuna_study(study, cell).get_trials(deepcopy=False)
         states = [t.state for t in trials]
-        finished = sum(s in (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.FAIL)
-                       for s in states)
+        finished = sum(s in _FINISHED for s in states)
         if finished < n_trials or optuna.trial.TrialState.RUNNING in states:
             raise LookupError(f"{study.name}/{cell.name}: HPO unfinished ({finished} of "
                               f"{n_trials} trials); run `hpo {study.name}`")
@@ -466,7 +501,7 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
     jobs = [j for j in study.jobs() if j.cell in cells and (not seeds or j.seed in seeds)]
     out, hpo_names = [], []
     if "hpo" in stages and has_hpo:
-        n = min(workers, study.cfg.hpo.n_trials)
+        n = min(workers, study.n_trials)
         for cell in cells:
             for w in range(n):
                 hpo_names.append(f"hpo/{cell.name}/w{w}")
@@ -563,9 +598,9 @@ def status(study: Study) -> str:
             journal = study.hpo_dir(cell) / "journal.log"
             n = 0
             if journal.exists():
-                n = sum(t.state in (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.FAIL)
+                n = sum(t.state in _FINISHED
                         for t in _optuna_study(study, cell).get_trials(deepcopy=False))
-            hpo_col = f"{n}/{study.cfg.hpo.n_trials}"
+            hpo_col = f"{n}/{study.n_trials}"
             sel_col = "yes" if cell.name in selected else "no"
         jobs = [Job(study, cell, s) for s in seeds]
         trained = sum((j.run_dir / "run.json").exists() for j in jobs)

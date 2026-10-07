@@ -13,9 +13,9 @@ config:
   trainer.max_epoch: 100
   trainer.batch_size: 512
   trainer.patience: 10         # validations (eval_every 5): 50 epochs
-hpo:
-  n_trials: 20
-  # space: only the lr from defaults.yaml; clean_weight stays 0 (D80)
+hpo:                           # the lr only; clean_weight stays 0 (D80)
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}   # the jem_mnist12_nat range (D81)
 hparams_from:
   study: jem_mnist12_nat
   params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
