@@ -24,6 +24,7 @@ import datetime
 import hashlib
 import itertools
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -36,6 +37,8 @@ from omegaconf import MISSING, DictConfig, OmegaConf, open_dict
 
 from experiments.config import register
 from src.utils.paths import data_root
+
+logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIGS = REPO / "configs"
@@ -314,6 +317,11 @@ class Job:
                 + f"; train {self.study.warm_from} first"
             )
         run_dir, manifest = found[0]
+        if not (run_dir / "models" / "model").exists():
+            raise LookupError(
+                f"{self.name}: the warm-start run {run_dir} was pruned; retrain it with "
+                f"`train {self.study.warm_from} --cell {self.cell.embedding}/{self.cell.arch}/a0 "
+                f"--seed {self.seed} --replace`")
         return {"run": str(run_dir), "hash": manifest["config_hash"]}
 
     # ── run.json (D17) ──────────────────────────────────────────────────────
@@ -328,10 +336,20 @@ class Job:
         blob = json.dumps(content, sort_keys=True, default=str)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
+    @property
+    def checkpoint(self) -> Path:
+        return self.run_dir / "models" / "model"
+
+    @property
+    def pruned(self) -> bool:
+        """Finished, but ``prune`` removed the checkpoint (results are kept)."""
+        return (self.run_dir / "run.json").exists() and not self.checkpoint.exists()
+
     def claim(self, config_hash: str, replace: bool = False) -> bool:
         """Make the run dir ready for this job; False if it is already done.
 
         - finished with the same config hash: done, skip (a relaunch resumes);
+          if ``prune`` removed its checkpoint, ``replace`` retrains it;
         - finished with another hash: raise :class:`RunConflict`, unless
           ``replace``, which first moves the old run to
           ``outputs/{study}/.replaced/{date}/...`` (deleted only by ``prune``);
@@ -341,7 +359,10 @@ class Job:
         manifest = run_dir / "run.json"
         if manifest.exists():
             old = json.loads(manifest.read_text())["config_hash"]
-            if old == config_hash:
+            if old == config_hash and not (replace and self.pruned):
+                if self.pruned:
+                    logger.info(f"{self.name}: finished, checkpoint pruned; "
+                                "--replace retrains it")
                 return False
             if not replace:
                 raise RunConflict(

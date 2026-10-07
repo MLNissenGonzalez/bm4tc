@@ -287,6 +287,10 @@ def analyse(job: Job) -> Dict[str, float]:
 
     todo = {name: part for name, part in parts_.parts(analysis).items()
             if stored.get(name, {}).get("hash") != parts_.part_hash(name, analysis, budgets, run_hash)}
+    if todo and job.pruned:
+        raise LookupError(f"{job.name}: parts {sorted(todo)} need the checkpoint, which was "
+                          f"pruned; `train {job.study.name} --cell {job.cell.name} "
+                          f"--seed {job.seed} --replace` first")
     if todo:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         with _log_to(job.run_dir / "analyse.log"):
@@ -354,6 +358,59 @@ def collect(study: Study) -> Path:
     if missing:
         logger.warning(f"{len(missing)} runs not (fully) analysed, left out: {missing}")
     return path
+
+
+# ── prune (D22) ─────────────────────────────────────────────────────────────
+
+PRUNE_MODES = ("keep-one", "all", "old")
+
+
+def prune_plan(study: Study, mode: str) -> List[Path]:
+    """What ``prune`` deletes. Results (run.json, curves, analysis.json, logs)
+    stay, so results.csv and status keep working; only checkpoints go:
+
+    - ``all``: every seed run's checkpoint;
+    - ``keep-one``: all but the first seed's in each cell (kept for visualisation);
+    - ``old``: the archived runs and HPOs in ``.replaced/`` (D58), entirely.
+    """
+    from experiments.runs import outputs_root
+
+    if mode == "old":
+        replaced = outputs_root() / study.name / ".replaced"
+        return [replaced] if replaced.exists() else []
+    if mode not in ("all", "keep-one"):
+        raise ValueError(f"prune mode must be one of {PRUNE_MODES}, got {mode!r}")
+    keep = study.seeds()[0] if mode == "keep-one" else None
+    return [j.run_dir / "models" for j in study.jobs()
+            if j.seed != keep and (j.run_dir / "models").exists()]
+
+
+def _size(path: Path) -> int:
+    files = [path] if path.is_file() else path.rglob("*")
+    return sum(f.stat().st_size for f in files if f.is_file())
+
+
+def prune(study: Study, mode: str, yes: bool = False) -> List[Path]:
+    """Delete what :func:`prune_plan` lists, after printing it and asking (unless
+    ``yes``). Destructive: nothing else in the pipeline deletes results."""
+    import shutil
+
+    plan = prune_plan(study, mode)
+    if not plan:
+        print(f"{study.name}: nothing to prune ({mode}).")
+        return []
+    total = sum(_size(p) for p in plan)
+    print(f"{study.name}: prune --{mode} deletes {len(plan)} paths, {total / 2**20:.1f} MiB:")
+    for p in plan:
+        print(f"  {p}")
+    if not yes and input("Delete? [y/N] ").strip().lower() != "y":
+        print("Nothing deleted.")
+        return []
+    with study_lock(study):
+        for p in plan:
+            shutil.rmtree(p)
+    print(f"Deleted {len(plan)} paths.")
+    return plan
 
 
 # ── launching: units, lock, status (D38) ────────────────────────────────────
