@@ -49,6 +49,17 @@ Still to provide for Phase 8:
   (e.g. at ~1/3 of the trials) before Phase 8; until then, give a study ~8 slots.
 - `run <study> --cell X` stops at `select`, which needs every cell's HPO. Let
   select (and run) work on the launched cells only.
+- **Cluster checks (2026-10-08), pilots running on G21G01 since 2026-10-07:**
+  1. The AT seam fails on G21G01 (CPU; objective/train differs from epoch 1), the
+     NAT seam passes to 1e-6. Suspected: float summation order (40 cores vs the
+     laptop's 8) amplified by PGD's sign(). Run `tests/e2e/test_pipeline.py` with
+     `OMP_NUM_THREADS=8 MKL_NUM_THREADS=8`, then also `MKL_CBWR=AVX2`; record the
+     cause and pin seams per machine (or loosen the AT curve check).
+  2. `python -m tests.bench.bench_train_step` on a cluster GPU: the suite took 8 min
+     there vs 3 on the laptop, so the cluster may be ~2x slower per thread, which
+     stretches every estimate in compute.md.
+  3. D78 and the notes say "CephFS locks": /ceph is ceph served over NFSv4.2
+     (`local_lock=none`, so flock is cluster-wide); fix the wording.
 - Time one probe on a cluster node first. Training is limited by CPU speed, and
   the cluster's CPU threads may be slower than the laptop's.
 
