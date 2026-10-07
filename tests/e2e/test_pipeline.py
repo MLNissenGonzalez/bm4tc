@@ -26,18 +26,15 @@ STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 
 ANALYSE = """
 import json, sys, torch
-from pathlib import Path
-from analysis.run import AnalysisConfig, analyze_run
-torch.manual_seed(0)
-cfg = AnalysisConfig(
-    compute_acc=True, compute_dis_loss=True, compute_rob=True,
-    compute_uq=True, compute_rob_ceiling=False, device="cpu",
-    evasion_override={"method": "PGD", "norm": "inf", "num_steps": 10,
-                      "random_start": False, "eps_rel": [0.1]},
-    uq_config={"eps_rel": [0.1], "delta_rel": [0.1], "percentiles": [5],
-               "attack_num_steps": 10, "num_steps": 10},
-)
-print("RESULTS=" + json.dumps(analyze_run(Path(sys.argv[1]), cfg)))
+from experiments import analyse
+from experiments.runs import Study
+study = Study(sys.argv[2])
+a, budgets, device = study.cfg.analysis, list(study.cfg.budgets), torch.device("cpu")
+cbm, data = analyse.load(sys.argv[1], a.batch_size, device)
+out = {}
+for part in analyse.parts(a).values():
+    out.update(analyse.run_part(part, cbm, data, a, budgets, device))
+print("RESULTS=" + json.dumps(out))
 """
 
 
@@ -75,8 +72,8 @@ def _curves(run_dir: Path) -> dict:
     return curves
 
 
-def _analyse(run_dir: Path, root: Path) -> dict:
-    out = _python(["-c", textwrap.dedent(ANALYSE), str(run_dir)], root)
+def _analyse(run_dir: Path, study: str, root: Path) -> dict:
+    out = _python(["-c", textwrap.dedent(ANALYSE), str(run_dir), study], root)
     line = next(l for l in out.splitlines() if l.startswith("RESULTS="))
     return json.loads(line.removeprefix("RESULTS="))
 
@@ -88,14 +85,15 @@ def run_pipeline(root: Path) -> dict:
     at = _train(root, STUDIES["at"])  # warm: finds the NAT run through its run.json
     out = {}
     for name, run_dir in [("nat", nat), ("at", at)]:
-        r = _analyse(run_dir, root)
+        r = _analyse(run_dir, STUDIES[name], root)
         out[name] = {
             "objective": _objective(run_dir),
-            "acc": r["acc"],
-            "dis_loss": r["dis_loss"],
-            "rob": r["rob/0.1"],
-            "detection": r["uq_detection/5pct/0.1"],
-            "purified_acc": r["uq_purify_acc/0.1/0.1"],
+            "acc": r["acc/test"],
+            "dis_loss": r["loss_dis/test"],
+            "rob": r["rob/test/0.1"],
+            "detection": r["detect/test/0.1/q5"],
+            "clean_flagged": r["detect/test/0/q5"],
+            "purified_acc": r["purify/test/0.1/d0.1"],
             "curves": _curves(run_dir),
         }
     return out
@@ -106,14 +104,17 @@ def run_pipeline(root: Path) -> dict:
 LOSS_TOL = 1e-3
 RATE_TOL = 0.02
 
-# `detection`: tau calibrated on valid (D2); was 0.08 / 0.11 calibrated on test.
-# NAT `purified_acc` moved 0.57 -> 0.63 with it: the calibration pass iterates one
-# more DataLoader, which shifts the RNG behind the attack's random start.
+# Re-pinned on purpose:
+# - `detection`: tau calibrated on valid (D2); was 0.08 / 0.11 calibrated on test.
+# - The analysis is the `analyse` parts (Phase 5): `rob` is the accuracy on the UQ
+#   attack's PGD examples (random start; was a separate pass without one), every
+#   part starts from seed 0, and budgets are the studies' [0.1, 0.15].
+# `clean_flagged`: the clean test flag rate at the 5th-percentile tau from valid.
 EXPECTED = {
-    "nat": {"objective": 0.093104, "acc": 1.00, "dis_loss": 0.058333,
-            "rob": 0.56, "detection": 0.13, "purified_acc": 0.63},
-    "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.321820,
-           "rob": 0.66, "detection": 0.09, "purified_acc": 0.65},
+    "nat": {"objective": 0.093104, "acc": 1.00, "dis_loss": 0.058333, "rob": 0.51,
+            "detection": 0.17, "clean_flagged": 0.08, "purified_acc": 0.61},
+    "at": {"objective": 0.703004, "acc": 0.87, "dis_loss": 0.321820, "rob": 0.66,
+           "detection": 0.04, "clean_flagged": 0.03, "purified_acc": 0.66},
 }
 
 # Training curves, pinned tightly (runs are bit-for-bit deterministic on CPU). They

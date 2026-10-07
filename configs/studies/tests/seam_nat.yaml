@@ -13,3 +13,10 @@ config:
   trainer.optimizer.kwargs.lr: 1e-2
   tracking.mode: disabled
 hpo: null
+budgets: [0.1, 0.15]
+analysis:
+  attack_steps: 10
+  joint_attack: false
+  rob_ceiling: false
+  percentiles: [5]
+  purify_steps: 10
