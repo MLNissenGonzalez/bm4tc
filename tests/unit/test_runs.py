@@ -100,6 +100,34 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
     assert cfg.trainer.optimizer.kwargs.lr == 3e-3 and cfg.trainer.clean_weight == 0.4
 
 
+def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
+    monkeypatch.setattr(runs, "HPARAMS", tmp_path)
+    study = Study("jem_mnist12_at")
+    cell = next(c for c in study.cells() if c.alpha == 1e-2 and c.arch == "d3r20")
+    (tmp_path / "jem_mnist12_nat.yaml").write_text(
+        "raw/d3r20/a0.01:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
+        "  jem.sampler.step_size: 0.02\n  jem.sampler.noise_std: 0.003\n"
+        "  jem.sampler.num_steps: 40\n")
+    (tmp_path / "jem_mnist12_at.yaml").write_text(
+        f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-4\n  trainer.clean_weight: 0.5\n")
+    cfg = Job(study, cell, 1).compose()
+    assert (cfg.jem.sampler.step_size, cfg.jem.sampler.noise_std, cfg.jem.sampler.num_steps) \
+        == (0.02, 0.003, 40)
+    assert cfg.trainer.optimizer.kwargs.lr == 3e-4      # its own, not NAT's
+    assert cfg.jem.energy_l2 == 1e-4                    # not named in hparams_from
+    assert cfg.model == "jem" and cfg.jem.model.match_bond_dim == 20
+
+
+def test_jem_study_needs_the_raw_embedding(tmp_path, monkeypatch):
+    (tmp_path / "studies").mkdir()
+    (tmp_path / "defaults.yaml").write_text((runs.CONFIGS / "defaults.yaml").read_text())
+    (tmp_path / "studies" / "x.yaml").write_text("dataset: mnist12\nmodel: jem\nregime: nat\n"
+                                                 "grid: {arch: [d3r20]}\n")
+    monkeypatch.setattr(runs, "CONFIGS", tmp_path)
+    with pytest.raises(ValueError, match="raw"):
+        Study("x")
+
+
 def test_study_without_hpo_needs_no_hparams():
     assert Study("tests/seam_nat").hparams(Cell("legendre", "d4r3", 0.0)) == {}
 
