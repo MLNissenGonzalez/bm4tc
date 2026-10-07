@@ -262,9 +262,9 @@ class ConditionalBornMachine(tk.models.MPS):
         # self.bond_dim — inherited property from tk.models.MPS
         # self.n_features — inherited property from tk.models.MPS
         self.device = device
-        # Detached log Z snapshot for purification (constant w.r.t. params); set
-        # by cache_log_Z(), read by marginal_log_probability.
-        self._log_Z: float | None = None
+        # Detached log Z for analysis (constant w.r.t. params), stamped with
+        # _params_key() like the caches below; read through log_normalizer().
+        self._log_Z: tuple | None = None            # (params key, log Z)
         # Per-forward with-gradient log Z + detached log|amp|² stats, populated
         # by mixed_nll each training forward, each stamped with _params_key() so
         # it is never served for other parameter values (no caller invalidates).
@@ -624,6 +624,7 @@ class ConditionalBornMachine(tk.models.MPS):
         """Drop the per-forward norm/amplitude caches after a tensor mutation."""
         self._log_Z_cache = None
         self._amp_diag_cache = None
+        self._log_Z = None
 
     @torch.no_grad()
     def _cache_amp_diag(self, log_abs_sq: torch.Tensor) -> None:
@@ -650,15 +651,27 @@ class ConditionalBornMachine(tk.models.MPS):
         self.reset()
         with torch.no_grad():
             log_Z = self.log_partition_function()
-        self._log_Z = float(log_Z.detach().cpu())
-        logger.info(f"[CBM] Cached log Z = {self._log_Z:.6f}")
-        return self._log_Z
+        self._log_Z = (self._params_key(), float(log_Z.detach().cpu()))
+        logger.info(f"[CBM] Cached log Z = {self._log_Z[1]:.6f}")
+        return self._log_Z[1]
+
+    # ── The analysis interface (bm4tc.core.interface, D69) ──────────────────
+
+    def log_joint(self, data: torch.Tensor) -> torch.Tensor:
+        """log p(x, c) + log Z = log|ψ(x,c)|² -> (B, C)."""
+        return self.log_amp_sq(data)
+
+    def log_normalizer(self) -> float:
+        """log Z, detached; computed once per parameter values."""
+        if self._log_Z is None or self._log_Z[0] != self._params_key():
+            self.cache_log_Z()
+        return self._log_Z[1]
 
     def marginal_log_probability(self, data: torch.Tensor) -> torch.Tensor:
         """
         log p(x) = log Σ_c |ψ(x,c)|² - log Z  →  (B,).
 
-        Differentiable w.r.t. input data (for purification). _log_Z is a
+        Differentiable w.r.t. input data (for purification). log Z is a
         detached constant, so not differentiable w.r.t. model parameters.
 
         Always routes through the overflow-safe ``log_amp_sq`` contraction,
@@ -667,9 +680,7 @@ class ConditionalBornMachine(tk.models.MPS):
         traced path — a raw ``amplitudes()`` here would overflow to inf and
         silently corrupt every downstream log-density on overflow-prone models.
         """
-        if self._log_Z is None:
-            self.cache_log_Z()
-        return torch.logsumexp(self.log_amp_sq_accumulate(data), dim=-1) - self._log_Z
+        return torch.logsumexp(self.log_amp_sq_accumulate(data), dim=-1) - self.log_normalizer()
 
     # ======================================================================
     # Training

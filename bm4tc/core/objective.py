@@ -377,7 +377,7 @@ def evaluate(
 
         if mask is not None and bool(mask.any()):
             sub_data, sub_labels = data[mask], labels[mask]
-            adv = attack.generate(born=cbm, naturals=sub_data, labels=sub_labels,
+            adv = attack.generate(model=cbm, naturals=sub_data, labels=sub_labels,
                                   eps_abs=eps_abs, device=device)
             with torch.no_grad():
                 las_adv = cbm.log_amp_sq(adv)
@@ -430,7 +430,7 @@ def eval_rob(cbm, loader, attack, eps_abs: float, device, progress: bool = False
         dynamic_ncols=True, disable=not progress,
     ):
         data, labels = data.to(device), labels.to(device)
-        adv = attack.generate(born=cbm, naturals=data, labels=labels,
+        adv = attack.generate(model=cbm, naturals=data, labels=labels,
                               eps_abs=eps_abs, device=device)
         with torch.no_grad():
             probs = cbm.class_probabilities(adv)

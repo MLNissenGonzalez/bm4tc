@@ -1,4 +1,4 @@
-"""Evasion (adversarial) attacks against a ConditionalBornMachine.
+"""Evasion (adversarial) attacks against any GenerativeClassifier (bm4tc.core.interface).
 
 Budget convention (see "Budget vocabulary" in CLAUDE.md):
     ``eps_rel``  authored fraction of the embedding domain width ``hi - lo``. This is
@@ -13,8 +13,7 @@ import torch
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-_LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
-
+from bm4tc.core.interface import best_wrong_log_joint, nll
 
 @dataclass
 class EvasionConfig:
@@ -24,15 +23,6 @@ class EvasionConfig:
     num_steps: int = 10
     step_size: Optional[float] = None
     random_start: bool = True
-
-
-def _dis_loss(born, data: torch.Tensor, labels: torch.LongTensor) -> torch.Tensor:
-    """Discriminative NLL loss via CBM mixed_nll with alpha=0."""
-    return born.mixed_nll(data, labels, alpha=0.0)
-
-
-def _zero_grad(born) -> None:
-    born.zero_grad()
 
 
 def normalizing(x: torch.FloatTensor, norm: int | str):
@@ -97,7 +87,7 @@ class _PGD:
         self.step_size = step_size
         self.random_start = random_start
 
-    def _loss(self, born, x: torch.Tensor, labels: torch.LongTensor) -> torch.Tensor:
+    def _loss(self, model, x: torch.Tensor, labels: torch.LongTensor) -> torch.Tensor:
         raise NotImplementedError
 
     def _bounded_delta(
@@ -114,7 +104,7 @@ class _PGD:
 
     def generate(
             self,
-            born,
+            model,
             naturals: torch.Tensor,
             labels: torch.LongTensor,
             eps_abs: float = 0.1,
@@ -124,7 +114,7 @@ class _PGD:
 
         ``eps_abs`` is an absolute model-domain budget, not a fraction.
         """
-        born.to(device)
+        model.to(device)
         naturals = naturals.to(device).detach()
         labels = labels.to(device)
 
@@ -132,15 +122,15 @@ class _PGD:
 
         if self.random_start:
             delta = random_in_ball(naturals.shape, self.norm, eps_abs, device)
-            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
+            delta = self._bounded_delta(delta, naturals, eps_abs, model.input_range)
         else:
             delta = torch.zeros_like(naturals)
 
         for _ in range(self.num_steps):
             delta.requires_grad_(True)
-            loss = self._loss(born, naturals + delta, labels)
+            loss = self._loss(model, naturals + delta, labels)
 
-            _zero_grad(born)
+            model.zero_grad()
             if delta.grad is not None:
                 delta.grad.zero_()
 
@@ -148,33 +138,27 @@ class _PGD:
 
             grad = delta.grad.detach()
             delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
-            delta = self._bounded_delta(delta, naturals, eps_abs, born.input_range)
+            delta = self._bounded_delta(delta, naturals, eps_abs, model.input_range)
 
-        lo, hi = born.input_range
+        lo, hi = model.input_range
         return (naturals + delta).clamp(lo, hi).detach()
 
 
 class ProjectedGradientDescent(_PGD):
     """PGD maximising the discriminative NLL -log p(c|x)."""
 
-    def _loss(self, born, x, labels):
-        return _dis_loss(born, x, labels)
+    def _loss(self, model, x, labels):
+        return nll(model, x, labels)
 
 
 class JointProjectedGradientDescent(_PGD):
-    """PGD maximising max_{c'≠c} ln|ψ(x̃, c')|²  (joint generative attack).
+    """PGD maximising max_{c'≠c} log p(x̃, c')  (joint generative attack).
 
-    Loss per step: +mean( max_{c'≠c}  2·log|ψ(x̃, c')| )  — gradient ascent.
     The worst-case wrong class is re-selected dynamically at every gradient step.
     """
 
-    def _loss(self, born, x, labels):
-        true_class = torch.zeros(len(labels), born.out_dim, dtype=torch.bool, device=x.device)
-        true_class[torch.arange(len(labels)), labels] = True
-        _amps = born.amplitudes if hasattr(born, "amplitudes") else born.classifier.amplitudes
-        amplitudes = _amps(x)                                                # (B, K)
-        log_joint = 2 * torch.log(amplitudes.abs().clamp(min=_LOG_PROB_EPS))  # (B, K)
-        return log_joint.masked_fill(true_class, float('-inf')).max(dim=-1).values.mean()
+    def _loss(self, model, x, labels):
+        return best_wrong_log_joint(model, x, labels)
 
 
 _METHOD_MAP = {

@@ -43,7 +43,7 @@ class _ShiftAttack:
         self.shift = shift
         self.seen = []
 
-    def generate(self, born, naturals, labels, eps_abs, device):
+    def generate(self, model, naturals, labels, eps_abs, device):
         self.seen.append(naturals.detach().clone())
         return (naturals + self.shift).detach()
 
@@ -375,7 +375,7 @@ class _DecompStubCBM:
 
 
 class _OnesAttack:
-    def generate(self, born, naturals, labels, eps_abs, device):
+    def generate(self, model, naturals, labels, eps_abs, device):
         return torch.ones_like(naturals)
 
 

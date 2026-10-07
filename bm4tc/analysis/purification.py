@@ -17,6 +17,7 @@ from typing import Dict, Tuple, Optional, List
 from tqdm.auto import tqdm
 
 from bm4tc.core.attacks import normalizing, project, random_in_ball
+from bm4tc.core.interface import log_px
 
 
 @dataclass
@@ -65,7 +66,7 @@ class LikelihoodPurification:
 
     def purify(
             self,
-            born,
+            model,
             data: torch.Tensor,
             delta_abs: float,
             device: torch.device | str = "cpu",
@@ -77,7 +78,7 @@ class LikelihoodPurification:
         distribution, staying within ``delta_abs`` of the original input.
 
         Args:
-            born: ConditionalBornMachine instance (must have marginal_log_probability).
+            model: a GenerativeClassifier (bm4tc.core.interface).
             data: Input tensor of shape (batch_size, data_dim).
             delta_abs: Maximum perturbation radius, absolute in model-domain units
                 (not a fraction — convert with ``rel_to_abs`` in the caller).
@@ -89,9 +90,9 @@ class LikelihoodPurification:
                 - log_px: Marginal log-probabilities of purified inputs,
                   shape (batch_size,).
         """
-        born.to(device)
+        model.to(device)
         data = data.to(device).detach()
-        input_range = born.input_range
+        input_range = model.input_range
 
         step_size = self.step_size if self.step_size is not None else 2.5 * delta_abs / self.num_steps
 
@@ -106,9 +107,9 @@ class LikelihoodPurification:
             delta.requires_grad_(True)
             x_tilde = (data + delta).clamp(input_range[0], input_range[1])
 
-            nll = -born.marginal_log_probability(x_tilde).mean()
+            nll = -log_px(model, x_tilde).mean()
 
-            born.zero_grad()
+            model.zero_grad()
             if delta.grad is not None:
                 delta.grad.zero_()
 
@@ -127,9 +128,9 @@ class LikelihoodPurification:
 
         # Compute final log p(x) for the purified samples
         with torch.no_grad():
-            log_px = born.marginal_log_probability(purified)
+            purified_log_px = log_px(model, purified)
 
-        return purified, log_px
+        return purified, purified_log_px
 
 
 """Gibbs-sampling purification for ConditionalBornMachine (class-marginalized)."""
