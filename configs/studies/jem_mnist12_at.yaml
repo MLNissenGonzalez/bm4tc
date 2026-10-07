@@ -1,5 +1,5 @@
 # JEM PGD-AT on MNIST 12x12 (D71), warm from jem_mnist12_nat's alpha=0 runs; the
-# same attack, budgets and alpha grid as mnist12_at. alpha=0 is MLP-AT; at 1e-2 the
+# same attack, budgets and alpha grid as mnist12_at. alpha=0 is MLP-AT; at alpha>0 the
 # training SGLD is the one selected for the same jem_mnist12_nat cell (hparams_from).
 dataset: mnist12
 model: jem
@@ -8,7 +8,7 @@ init: warm
 grid:
   embedding: [raw]
   arch: [d3r20, d3r40]
-  alpha: [0, 1e-2]
+  alpha: [0, 1e-2, 1e-1]
 config:
   trainer.max_epoch: 100
   trainer.batch_size: 512

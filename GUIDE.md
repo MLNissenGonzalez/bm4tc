@@ -153,6 +153,8 @@ grid:                       # each axis overrides the default
   eps: [0.1]                # AT only; must be in budgets
 config:                     # fixed run-config values, any schema key
   trainer.max_epoch: 100
+archs:                      # per-arch run config over `config` (D82), e.g. memory
+  d3r80: {trainer.micro_batch_size: 128}
 hpo:                        # null: no HPO, the study fixes every hparam
   trials_per_param: 15      # default; a cell runs 15 trials per tuned hparam (D81)
   space:                    # merged onto defaults.yaml's (the lr)
