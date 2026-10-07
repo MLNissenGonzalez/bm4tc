@@ -1,3 +1,5 @@
+import contextlib
+import fcntl
 import sklearn.datasets
 import numpy as np
 from dataclasses import dataclass, field
@@ -352,16 +354,36 @@ def _generate_or_download(cfg: DataGenDowConfig, path: str) -> None:
     file =os.path.join(path, f"{_npz_stem(cfg)}.npz")
     if canonical in _TWO_DIM_DATA:
         X, t = _two_dim_generator(cfg)
-        np.savez(file, X=X, y=t)
+        _save_npz(file, X=X, y=t)
     elif canonical in _NIST_DATA:
         X, t = _nist_generator(cfg)
-        np.savez(file, X=X, y=t)
+        _save_npz(file, X=X, y=t)
     elif canonical in _TS_DATA:
         X, t, ucr_train_size = _ucr_ts_loader(cfg)
-        np.savez(file,
-                 X=X, y=t, ucr_train_size=np.array(ucr_train_size))
+        _save_npz(file, X=X, y=t, ucr_train_size=np.array(ucr_train_size))
     else:
         raise ValueError(f"Dataset {name} not supported.")
+
+
+def _save_npz(file: str, **arrays) -> None:
+    """Write the npz whole or not at all: a reader never sees a partial file."""
+    tmp = f"{file}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as f:
+        np.savez(f, **arrays)
+    os.replace(tmp, file)
+
+
+@contextlib.contextmanager
+def _creation_lock(dataset_file: str):
+    """One process at a time creates a dataset (parallel units of a study, or studies
+    on other nodes sharing the data root): the others wait, then load its file."""
+    os.makedirs(os.path.dirname(dataset_file), exist_ok=True)
+    with open(f"{dataset_file}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
@@ -413,8 +435,10 @@ def load_dataset(cfg: DatasetConfig) -> LabelledDataset:
     overwrite = cfg.overwrite
 
     if overwrite or not os.path.exists(dataset_file):
-        _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
-        logger.info(f"Generated dataset '{variant}' and saved to {dataset_file}")
+        with _creation_lock(dataset_file):
+            if overwrite or not os.path.exists(dataset_file):
+                _generate_or_download(cfg=cfg.gen_dow_kwargs, path=dataset_dir)
+                logger.info(f"Generated dataset '{variant}' and saved to {dataset_file}")
     else:
         logger.info(f"Loaded dataset from {dataset_file}")
     data = np.load(dataset_file)
