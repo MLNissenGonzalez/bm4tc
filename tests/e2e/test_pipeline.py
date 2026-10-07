@@ -35,12 +35,16 @@ def _python(args, root: Path) -> str:
     return proc.stdout
 
 
-def _train(root: Path, study: str) -> Path:
-    """Train the study's single job; returns its run dir (from experiments.runs)."""
-    _python(["-m", "experiments", "train", study], root)
+def _run(root: Path, study: str) -> tuple[Path, dict]:
+    """`run` the study (train, then analyse its single job); returns the run dir
+    (from experiments.runs) and the job's metrics (its row of results.csv)."""
+    _python(["-m", "experiments", "run", study], root)
     out = _python(["-c", "import sys; from experiments.runs import Study; "
                    "print(Study(sys.argv[1]).jobs()[0].run_dir)", study], root)
-    return Path(out.strip().splitlines()[-1])
+    with open(root / "outputs" / study / "results.csv") as f:
+        (row,) = csv.DictReader(f)
+    metrics = {k: float(v) for k, v in row.items() if "/" in k}
+    return Path(out.strip().splitlines()[-1]), metrics
 
 
 def _objective(run_dir: Path) -> float:
@@ -60,22 +64,13 @@ def _curves(run_dir: Path) -> dict:
     return curves
 
 
-def _analyse(root: Path, study: str) -> dict:
-    """Analyse the study's single run; returns its row of the study's results.csv."""
-    _python(["-m", "experiments", "analyse", study], root)
-    with open(root / "outputs" / study / "results.csv") as f:
-        (row,) = csv.DictReader(f)
-    return {k: float(v) for k, v in row.items() if "/" in k}
-
-
 def run_pipeline(root: Path) -> dict:
     """The harness: returns {"nat": metrics, "at": metrics} with the pinned names,
     each metrics dict holding the per-epoch "curves" too."""
-    nat = _train(root, STUDIES["nat"])
-    at = _train(root, STUDIES["at"])  # warm: finds the NAT run through its run.json
     out = {}
-    for name, run_dir in [("nat", nat), ("at", at)]:
-        r = _analyse(root, STUDIES[name])
+    # AT is warm: it finds the NAT run through its run.json.
+    for name in ("nat", "at"):
+        run_dir, r = _run(root, STUDIES[name])
         out[name] = {
             "objective": _objective(run_dir),
             "acc": r["acc/test"],

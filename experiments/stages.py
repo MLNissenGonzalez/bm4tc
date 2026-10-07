@@ -21,8 +21,10 @@ import hashlib
 import json
 import logging
 import math
+import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 import optuna
 import torch
@@ -111,6 +113,7 @@ def train(job: Job, replace: bool = False) -> Optional[float]:
 
 # ── hpo ─────────────────────────────────────────────────────────────────────
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)  # trials log their own results
 TPE_SEED = 42
 TPE_STARTUP_TRIALS = 6
 _COUNTED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.FAIL,
@@ -207,6 +210,8 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
             logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} {hparams}")
             trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number))
         trial.set_user_attr("best_epoch", trainer.best_epoch)
+        logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
+                    f"{trainer.best['objective']:.6g} (epoch {trainer.best_epoch})")
         return trainer.best["objective"]  # inf if no validation was finite
 
     while len(opt.get_trials(deepcopy=False, states=_COUNTED)) < study.cfg.hpo.n_trials:
@@ -349,3 +354,159 @@ def collect(study: Study) -> Path:
     if missing:
         logger.warning(f"{len(missing)} runs not (fully) analysed, left out: {missing}")
     return path
+
+
+# ── launching: units, lock, status (D38) ────────────────────────────────────
+
+STAGES = ("hpo", "select", "train", "analyse")
+
+
+def logs_dir(study: Study) -> Path:
+    from experiments.runs import outputs_root
+    return outputs_root() / study.name / ".logs"
+
+
+def units(study: Study, stages: Sequence[str], cells: List[Cell],
+          seeds: Optional[List[int]] = None, workers: int = 1,
+          replace: bool = False) -> List["Unit"]:
+    """The units of the given stages of a study, as subprocesses of ``_unit``.
+
+    select waits for every HPO worker, train for select, analyse for its train,
+    each only when that stage is part of the launch. Studies without HPO have no
+    hpo or select units.
+    """
+    from experiments.executor import Unit
+
+    def unit(name, *args, deps=()):
+        argv = [sys.executable, "-m", "experiments", "_unit", *args]
+        return Unit(name, argv, logs_dir(study) / f"{name}.log", list(deps))
+
+    has_hpo = study.cfg.hpo is not None
+    jobs = [j for j in study.jobs() if j.cell in cells and (not seeds or j.seed in seeds)]
+    out, hpo_names = [], []
+    if "hpo" in stages and has_hpo:
+        n = min(workers, study.cfg.hpo.n_trials)
+        for cell in cells:
+            for w in range(n):
+                hpo_names.append(f"hpo/{cell.name}/w{w}")
+                out.append(unit(hpo_names[-1], "hpo", study.name, "--cell", cell.name,
+                                "--worker", str(w)))
+    select_deps = []
+    if "select" in stages and has_hpo:
+        out.append(unit("select", "select", study.name, deps=hpo_names))
+        select_deps = ["select"]
+    for job in jobs:
+        name = f"{job.cell.name}/s{job.seed}"
+        cell_args = ("--cell", job.cell.name, "--seed", str(job.seed))
+        if "train" in stages:
+            out.append(unit(f"train/{name}", "train", study.name, *cell_args,
+                            *(["--replace"] if replace else []), deps=select_deps))
+        if "analyse" in stages:
+            deps = [f"train/{name}"] if "train" in stages else []
+            out.append(unit(f"analyse/{name}", "analyse", study.name, *cell_args, deps=deps))
+    return out
+
+
+def run_unit(study: Study, kind: str, cell: Optional[Cell], seed: Optional[int],
+             worker: int = 0, replace: bool = False) -> None:
+    """One unit, in this process (``python -m experiments _unit ...``)."""
+    if kind == "hpo":
+        hpo_worker(study, cell, worker)
+    elif kind == "select":
+        select(study)
+    elif kind in ("train", "analyse"):
+        job = Job(study, cell, seed)
+        train(job, replace) if kind == "train" else analyse(job)
+    else:
+        raise ValueError(f"unknown unit kind {kind!r}")
+
+
+@contextlib.contextmanager
+def study_lock(study: Study) -> Iterator[None]:
+    """One launch per study at a time (HPO marks stale trials failed on start)."""
+    path = logs_dir(study) / "lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        pid = int(path.read_text() or 0)
+        if _alive(pid):
+            raise RuntimeError(f"{study.name} is already being run by process {pid} "
+                               f"(lock {path}); see `status {study.name}`")
+    path.write_text(str(os.getpid()))
+    try:
+        yield
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    return pid > 0
+
+
+def launch(study: Study, stages: Sequence[str], cells: List[Cell],
+           seeds: Optional[List[int]] = None, gpus: Optional[List[str]] = None,
+           per_gpu: int = 1, replace: bool = False) -> Dict[str, str]:
+    """Run the stages of a study through the executor; returns each unit's state.
+    HPO journals are prepared here first, and results.csv is collected last."""
+    from experiments.executor import execute
+
+    with study_lock(study):
+        if "hpo" in stages and study.cfg.hpo is not None:
+            for cell in cells:
+                prepare_hpo(study, cell, replace)
+        todo = units(study, stages, cells, seeds, workers=len(gpus or [None]) * per_gpu,
+                     replace=replace)
+        states = execute(todo, gpus, per_gpu, state_file=logs_dir(study) / "status.json")
+        if "analyse" in stages:
+            collect(study)
+    return states
+
+
+def status(study: Study) -> str:
+    """Per cell: HPO trials, selection, trained and analysed seeds; then every
+    running, failed or skipped unit of the last launch with its log."""
+    seeds = study.seeds()
+    has_hpo = study.cfg.hpo is not None
+    lines = [f"{study.name}: {len(study.cells())} cells x {len(seeds)} seeds"]
+    header = f"{'cell':32} {'hpo':>7} {'sel':>4} {'trained':>8} {'analysed':>9}"
+    lines.append(header)
+    selected = {}
+    if has_hpo and study.hparams_path.exists():
+        selected = OmegaConf.to_container(OmegaConf.load(study.hparams_path))
+    for cell in study.cells():
+        hpo_col, sel_col = "-", "-"
+        if has_hpo:
+            journal = study.hpo_dir(cell) / "journal.log"
+            n = 0
+            if journal.exists():
+                n = sum(t.state in (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.FAIL)
+                        for t in _optuna_study(study, cell).get_trials(deepcopy=False))
+            hpo_col = f"{n}/{study.cfg.hpo.n_trials}"
+            sel_col = "yes" if cell.name in selected else "no"
+        jobs = [Job(study, cell, s) for s in seeds]
+        trained = sum((j.run_dir / "run.json").exists() for j in jobs)
+        done = sum(analysed(j) is not None for j in jobs)
+        lines.append(f"{cell.name:32} {hpo_col:>7} {sel_col:>4} "
+                     f"{trained:>5}/{len(seeds):<2} {done:>6}/{len(seeds):<2}")
+
+    state_file = logs_dir(study) / "status.json"
+    if state_file.exists():
+        last = json.loads(state_file.read_text())
+        live = _alive(last["pid"])
+        counts: Dict[str, int] = {}
+        for s in last["units"].values():
+            counts[s["state"]] = counts.get(s["state"], 0) + 1
+        lines.append("")
+        lines.append(f"last launch (process {last['pid']}, "
+                     f"{'running' if live else 'ended'}): "
+                     + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())))
+        for name, s in last["units"].items():
+            state = s["state"]
+            if state == "running" and not live:
+                state = "interrupted"
+            if state in ("running", "failed", "interrupted"):
+                lines.append(f"  {state:11} {name}  {s['log']}")
+    return "\n".join(lines)
