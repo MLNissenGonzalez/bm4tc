@@ -12,8 +12,7 @@ config:
   trainer.max_epoch: 100
   trainer.batch_size: 512
   trainer.patience: 30
-hpo:
-  n_trials: 30
+hpo:                           # five hparams: 75 trials (D81)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
     jem.energy_l2: {log: [1e-6, 1e-3]}

@@ -15,11 +15,18 @@ embeddings:
     born.init_kwargs.init_method: canonical
 
 hpo:
-  n_trials: 30
+  trials_per_param: 15         # a cell runs 15 trials per tuned hparam (D81)
   # key: {log: [lo, hi]} | [lo, hi] (uniform) | {choice: [...]}. weight_decay is
   # 0 and not tuned (OptimizerConfig): norm control does a similar job.
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-1]}
+  # Median pruning (D81): once startup_trials are finished, a trial stops at a
+  # validation where its best objective/valid is worse than the finished trials'
+  # median at that epoch; never before warmup x trainer.max_epoch.
+  pruning:
+    enabled: true
+    warmup: 0.5
+    startup_trials: 6
 
 # One radius grid (fractions of the input range) for robustness, detection and
 # purification (D3, D20).

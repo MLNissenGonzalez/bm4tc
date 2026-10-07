@@ -57,7 +57,8 @@ One objective for both regimes and both models (`bm4tc/core/objective.py`,
 - **NAT** (natural training): no attack, so L = (1 − α) · L_dis(x) + α · L_gen(x).
   α = 0 is a plain discriminative classifier, α = 1 a pure density model.
 - **AT** (adversarial training): x_adv from PGD at radius ε (`trainer.evasion`);
-  cw = `trainer.clean_weight`. The generative term always sees clean data. Training
+  cw = `trainer.clean_weight`, 0 in every study (plain PGD-AT, not tuned: D80).
+  The generative term always sees clean data. Training
   it on adversarial points would teach p(x) to like them, which defeats detection
   and purification (D18; kept in mind as an ablation). AT runs start from the
   selected α = 0 NAT run of the same cell and seed (warm start, D19). The radius ramps
@@ -153,10 +154,10 @@ grid:                       # each axis overrides the default
 config:                     # fixed run-config values, any schema key
   trainer.max_epoch: 100
 hpo:                        # null: no HPO, the study fixes every hparam
-  n_trials: 20
-  space:
-    trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-1]}
-    trainer.clean_weight: [0.0, 1.0]
+  trials_per_param: 15      # default; a cell runs 15 trials per tuned hparam (D81)
+  space:                    # merged onto defaults.yaml's (the lr)
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}
+  pruning: {enabled: true, warmup: 0.5, startup_trials: 6}   # the defaults (D81)
 hparams_from: {study: jem_mnist12_nat, params: [jem.sampler.step_size]}   # optional (D74)
 analysis:
   sweep_purify: {enabled: true}
@@ -191,7 +192,11 @@ goes on. Only one launch per study runs at a time (a lock file). Every stage res
 after a crash or a closed terminal, because finished work is recognised on disk:
 
 - **HPO**: one Optuna study per cell in `{cell}/hpo/journal.log`. A relaunch continues
-  until `n_trials` are finished (D62).
+  until `trials_per_param` × tuned hparams are finished (D62, D81). A trial reports
+  `objective/valid` at each validation; after `warmup` of `max_epoch`, and once
+  `startup_trials` are finished, it stops (PRUNED) when its best value is worse
+  than the finished trials' median at that epoch. Pruned trials count as finished
+  and are never selected.
 - **train**: a run is finished when it has `run.json`. A relaunch skips it if its
   config hash is unchanged, restarts it if it never finished, and refuses to touch it
   if the config changed, unless `--replace` moves the old run to

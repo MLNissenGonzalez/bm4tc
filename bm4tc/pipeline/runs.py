@@ -65,9 +65,18 @@ class GridConfig:
 
 
 @dataclass
+class PruningConfig:
+    """Median pruning of HPO trials (D81)."""
+    enabled: bool = MISSING
+    warmup: float = MISSING          # no pruning before this fraction of trainer.max_epoch
+    startup_trials: int = MISSING    # finished trials before the pruner acts
+
+
+@dataclass
 class HPOConfig:
-    n_trials: int = MISSING
+    trials_per_param: int = MISSING  # n_trials = trials_per_param x tuned hparams (D81)
     space: Dict[str, Any] = field(default_factory=dict)
+    pruning: PruningConfig = field(default_factory=PruningConfig)
 
 
 @dataclass
@@ -236,6 +245,11 @@ class Study:
     def hpo_job(self, cell: Cell) -> "Job":
         """The job whose config and warm start every HPO trial of the cell uses."""
         return Job(self, cell, self.seeds()[0])
+
+    @property
+    def n_trials(self) -> int:
+        """Trials per cell: ``trials_per_param`` for each tuned hparam (D81)."""
+        return self.cfg.hpo.trials_per_param * len(self.cfg.hpo.space)
 
     def hpo_dir(self, cell: Cell) -> Path:
         return outputs_root() / self.name / cell.name / "hpo"
