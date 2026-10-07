@@ -8,8 +8,6 @@ import csv
 
 import pytest
 
-from tests.e2e.test_pipeline import _python
-
 STUDIES = {"nat": "tests/seam_jem_nat", "at": "tests/seam_jem_at"}
 LOSS_TOL = 1e-3
 RATE_TOL = 0.02
@@ -35,11 +33,10 @@ EXPECTED = {
 
 
 @pytest.fixture(scope="module")
-def rows(tmp_path_factory):
-    root = tmp_path_factory.mktemp("jem_seam")
+def rows(seam):
     out = {}
     for regime, study in STUDIES.items():   # AT is warm: NAT first
-        _python(["-m", "bm4tc", "run", study], root)
+        root = seam(study)
         with open(root / "outputs" / study / "results.csv") as f:
             for row in csv.DictReader(f):
                 out[(regime, float(row["alpha"]))] = row
