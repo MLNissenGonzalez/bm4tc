@@ -164,6 +164,9 @@ class Study:
             raise ValueError(f"{name}: init must be cold or warm, got {self.cfg.init!r}")
         if self.cfg.regime == "at" and self.cfg.init != "warm":
             raise ValueError(f"{name}: AT runs are always warm (D19); set init: warm")
+        if self.cfg.regime == "at" and not set(self.cfg.grid.eps) <= set(self.cfg.budgets):
+            raise ValueError(f"{name}: training radii {list(self.cfg.grid.eps)} must be in "
+                             f"budgets {list(self.cfg.budgets)}: one radius grid (D3)")
 
     @property
     def regime(self) -> str:
