@@ -42,11 +42,11 @@ import torch
 from omegaconf import OmegaConf
 
 from analysis.utils import find_model_checkpoint, get_best_run, load_run_config
-from src.analysis.purification import LikelihoodPurification
-from src.datahandler import DataHandler
-from src.model import ConditionalBornMachine
-from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
-from src.utils.evasion import ProjectedGradientDescent
+from bm4tc.analysis.purification import LikelihoodPurification
+from bm4tc.pipeline.data import DataHandler
+from bm4tc.core.model import ConditionalBornMachine
+from bm4tc.core.embeddings import fmt_budget, range_size_of, rel_to_abs
+from bm4tc.core.attacks import ProjectedGradientDescent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

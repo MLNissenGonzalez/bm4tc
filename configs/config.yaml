@@ -1,5 +1,5 @@
-# The config of one training run. experiments/runs.py composes it per job (Hydra
-# compose API) on the schema in experiments/config.py, whose dataclass defaults
+# The config of one training run. bm4tc/pipeline/runs.py composes it per job (Hydra
+# compose API) on the schema in bm4tc/pipeline/config.py, whose dataclass defaults
 # hold every model and trainer constant (D25). This file only picks group options;
 # a study (configs/studies/) picks the dataset and the regime, and its grid cell,
 # hparams and seed fill in the rest.

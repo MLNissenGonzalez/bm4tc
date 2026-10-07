@@ -1,18 +1,18 @@
 """The pipeline stages of a study: hpo, select, train (D21, D22, D23).
 
-    python -m experiments hpo    <study> [--cell C] [--replace]
-    python -m experiments select <study>
-    python -m experiments train  <study> [--cell C] [--seed S] [--replace]
-    python -m experiments analyse <study> [--cell C] [--seed S]
+    python -m bm4tc hpo    <study> [--cell C] [--replace]
+    python -m bm4tc select <study>
+    python -m bm4tc train  <study> [--cell C] [--seed S] [--replace]
+    python -m bm4tc analyse <study> [--cell C] [--seed S]
 
 ``hpo`` runs one Optuna study per grid cell (TPE, no pruning) whose trials save
 no checkpoint; ``select`` writes each cell's best trial (argmin
 ``objective/valid``, D8) to ``configs/hparams/<study>.yaml``; ``train`` runs the
 seed runs with those hparams; ``analyse`` evaluates each finished run on test
-(:mod:`experiments.analyse`) into its ``analysis.json`` and collects the study's
+(:mod:`bm4tc.pipeline.analyse`) into its ``analysis.json`` and collects the study's
 ``results.csv``. Every stage resumes: finished trials and runs are
 kept, and a changed config is refused unless ``--replace`` archives the old
-results (:meth:`experiments.runs.Job.claim`). Warm studies need their
+results (:meth:`bm4tc.pipeline.runs.Job.claim`). Warm studies need their
 ``warm_from`` study trained first.
 """
 import contextlib
@@ -31,12 +31,12 @@ import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from experiments.runs import Cell, Job, RunConflict, Study, _git_version, archive
-from experiments.tracking import init_wandb, log_dataset_viz, make_logger
-from src.datahandler import DataHandler
-from src.model import ConditionalBornMachine
-from src.train import Trainer
-from src.utils import set_seed
+from bm4tc.pipeline.runs import Cell, Job, RunConflict, Study, _git_version, archive
+from bm4tc.pipeline.tracking import init_wandb, log_dataset_viz, make_logger
+from bm4tc.pipeline.data import DataHandler
+from bm4tc.core.model import ConditionalBornMachine
+from bm4tc.core.train import Trainer
+from bm4tc.core.objective import set_seed
 
 logger = logging.getLogger(__name__)
 _FORMAT = "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
@@ -273,11 +273,11 @@ def analyse(job: Job) -> Dict[str, float]:
     """Analyse one finished run; returns its metrics.
 
     ``{run}/analysis.json`` holds each part's results under the hash of what they
-    depend on (:func:`experiments.analyse.part_hash`). A part with a matching hash
+    depend on (:func:`bm4tc.pipeline.analyse.part_hash`). A part with a matching hash
     is kept, so a failed or extended analysis resumes; a part the settings no
     longer ask for stays in the file (Gibbs is expensive) but is not returned.
     """
-    from experiments import analyse as parts_
+    from bm4tc.pipeline import analyse as parts_
 
     manifest_path = job.run_dir / "run.json"
     if not manifest_path.exists():
@@ -313,7 +313,7 @@ def analyse(job: Job) -> Dict[str, float]:
 
 def analysed(job: Job) -> Optional[Dict[str, float]]:
     """The run's metrics if every part the study asks for is up to date, else None."""
-    from experiments import analyse as parts_
+    from bm4tc.pipeline import analyse as parts_
 
     manifest, path = job.run_dir / "run.json", job.run_dir / "analysis.json"
     if not (manifest.exists() and path.exists()):
@@ -335,7 +335,7 @@ def collect(study: Study) -> Path:
     to date (identity, selected hparams, best objective/valid, metrics), plus the
     analysis settings next to it (D20)."""
     import pandas as pd
-    from experiments.runs import outputs_root
+    from bm4tc.pipeline.runs import outputs_root
 
     space = sorted(study.cfg.hpo.space) if study.cfg.hpo is not None else []
     rows, missing = [], []
@@ -375,7 +375,7 @@ def prune_plan(study: Study, mode: str) -> List[Path]:
     - ``keep-one``: all but the first seed's in each cell (kept for visualisation);
     - ``old``: the archived runs and HPOs in ``.replaced/`` (D58), entirely.
     """
-    from experiments.runs import outputs_root
+    from bm4tc.pipeline.runs import outputs_root
 
     if mode == "old":
         replaced = outputs_root() / study.name / ".replaced"
@@ -421,7 +421,7 @@ STAGES = ("hpo", "select", "train", "analyse")
 
 
 def logs_dir(study: Study) -> Path:
-    from experiments.runs import outputs_root
+    from bm4tc.pipeline.runs import outputs_root
     return outputs_root() / study.name / ".logs"
 
 
@@ -434,10 +434,10 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
     each only when that stage is part of the launch. Studies without HPO have no
     hpo or select units.
     """
-    from experiments.executor import Unit
+    from bm4tc.pipeline.executor import Unit
 
     def unit(name, *args, deps=()):
-        argv = [sys.executable, "-m", "experiments", "_unit", *args]
+        argv = [sys.executable, "-m", "bm4tc", "_unit", *args]
         return Unit(name, argv, logs_dir(study) / f"{name}.log", list(deps))
 
     has_hpo = study.cfg.hpo is not None
@@ -468,7 +468,7 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
 
 def run_unit(study: Study, kind: str, cell: Optional[Cell], seed: Optional[int],
              worker: int = 0, replace: bool = False) -> None:
-    """One unit, in this process (``python -m experiments _unit ...``)."""
+    """One unit, in this process (``python -m bm4tc _unit ...``)."""
     if kind == "hpo":
         hpo_worker(study, cell, worker)
     elif kind == "select":
@@ -510,7 +510,7 @@ def launch(study: Study, stages: Sequence[str], cells: List[Cell],
            per_gpu: int = 1, replace: bool = False) -> Dict[str, str]:
     """Run the stages of a study through the executor; returns each unit's state.
     HPO journals are prepared here first, and results.csv is collected last."""
-    from experiments.executor import execute
+    from bm4tc.pipeline.executor import execute
 
     with study_lock(study):
         if "hpo" in stages and study.cfg.hpo is not None:

@@ -42,7 +42,7 @@ class and log p(x) (JOINT_PGD) instead of PGD.
 """
 from typing import Mapping, Optional
 
-from src.utils.embeddings import fmt_budget
+from bm4tc.core.embeddings import fmt_budget
 
 SELECTION = "objective/valid"  # selection = argmin over validation events (D8)
 

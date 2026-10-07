@@ -11,7 +11,7 @@ import torch
 from torch.nn import functional as F
 from tqdm import tqdm
 
-from src.utils.train import OptimizerConfig, optimizer
+from bm4tc.core.objective import OptimizerConfig, optimizer
 
 from .attacks import PGDConfig, pgd_classification
 from .model import JEMMLP

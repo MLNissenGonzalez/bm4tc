@@ -52,8 +52,8 @@ def _cls_cmap(class_idx: int):
         f"cls{class_idx}", ["white", palette[class_idx % 2]]
     )
 from analysis.utils import load_run_config, find_model_checkpoint
-from src.model import ConditionalBornMachine
-from src.datahandler import DataHandler
+from bm4tc.core.model import ConditionalBornMachine
+from bm4tc.pipeline.data import DataHandler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-"""Data-only robust-accuracy ceiling (src/analysis/margin.py).
+"""Data-only robust-accuracy ceiling (bm4tc/analysis/ceiling.py).
 
 The ceiling is what makes an impossible `rob` visible: no classifier can exceed it, so a
 measured robust accuracy above it proves the attack under-searched.
@@ -7,7 +7,7 @@ measured robust accuracy above it proves the attack under-searched.
 import numpy as np
 import pytest
 
-from src.analysis.margin import conflict_pairs, robust_accuracy_ceiling
+from bm4tc.analysis.ceiling import conflict_pairs, robust_accuracy_ceiling
 
 
 def test_separated_classes_have_no_conflicts():
@@ -89,7 +89,7 @@ def test_spirals_ceiling_is_below_the_reported_at_robustness():
     """
     from omegaconf import OmegaConf
 
-    from src.datahandler import DataHandler
+    from bm4tc.pipeline.data import DataHandler
 
     cfg = OmegaConf.load("configs/dataset/spirals.yaml")
     OmegaConf.update(cfg, "overwrite", True, force_add=True)

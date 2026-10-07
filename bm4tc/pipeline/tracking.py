@@ -8,8 +8,8 @@ from typing import Any, Callable, Dict, Optional
 import wandb
 from omegaconf import OmegaConf
 
-from experiments.config import Config
-from experiments.metrics import flatten_epoch
+from bm4tc.pipeline.config import Config
+from bm4tc.pipeline.metrics import flatten_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]
     """
     Returns an on_epoch_end callback that writes epoch metrics to log.json
     and optionally forwards them to a W&B run. The trainer passes plain names per
-    split; the logged keys come from :mod:`experiments.metrics`.
+    split; the logged keys come from :mod:`bm4tc.pipeline.metrics`.
     """
     log_path = output_dir / "log.json"
     records = []
@@ -35,7 +35,7 @@ def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]
 
 def init_wandb(cfg: Config, run_dir: Path, names: Dict[str, str]) -> wandb.Run:
     """Start a W&B run in ``run_dir``; ``names`` (group, name, job_type) come from
-    :meth:`experiments.runs.Job.wandb` (D47)."""
+    :meth:`bm4tc.pipeline.runs.Job.wandb` (D47)."""
     return wandb.init(
         project=cfg.tracking.project,
         entity=cfg.tracking.entity,
@@ -53,7 +53,7 @@ def log_dataset_viz(datahandler) -> None:
         logger.info(f"Skipping dataset viz for data_dim={datahandler.data_dim} (only 2D supported)")
         return
 
-    from src.analysis.viz import visualise_samples
+    from bm4tc.analysis.viz import visualise_samples
     import torch
 
     all_data = torch.cat([datahandler.data[s] for s in ("train", "valid", "test")], dim=0)

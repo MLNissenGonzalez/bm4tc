@@ -1,7 +1,7 @@
 import pytest
 import torch
 from tests.conftest import DATA_DIM
-from src.analysis.purification import GibbsPurification
+from bm4tc.analysis.purification import GibbsPurification
 
 pytestmark = pytest.mark.slow
 
@@ -228,7 +228,7 @@ def test_gibbs_stable_when_amplitudes_overflow(step_radius):
     so sampling ran backwards. The log-domain path (log_amp_sq + logsumexp) has no
     such regime. Guards against a *backwards* sampler, not just NaN.
     """
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     data_dim = 60
     cbm = ConditionalBornMachine(
@@ -276,7 +276,7 @@ def test_gibbs_numeric_regression():
     which values are reachable, so the previous goldens
     ({3: (-4.5714287758, -10.9865303040), 4: (-2.0, -9.3423662186)}) no longer apply.
     """
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     def make_cbm():
         torch.manual_seed(0)

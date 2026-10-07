@@ -27,7 +27,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 from torch.utils.data import DataLoader
 
-from src.utils.evasion import ProjectedGradientDescent
+from bm4tc.core.attacks import ProjectedGradientDescent
 
 logger = logging.getLogger(__name__)
 

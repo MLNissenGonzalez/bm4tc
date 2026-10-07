@@ -10,8 +10,8 @@ import optuna
 import pytest
 import yaml
 
-from experiments import runs, stages
-from experiments.runs import RunConflict, Study
+from bm4tc.pipeline import runs, stages
+from bm4tc.pipeline.runs import RunConflict, Study
 
 
 @pytest.fixture
@@ -145,7 +145,7 @@ def test_run_in_parallel_then_status(scratch):
     nat = Study("tests/stages_nat")
     path = runs.CONFIGS / "hparams" / "tests" / "stages_nat.yaml"
     try:
-        proc = subprocess.run([sys.executable, "-m", "experiments", "run", "tests/stages_nat",
+        proc = subprocess.run([sys.executable, "-m", "bm4tc", "run", "tests/stages_nat",
                                "--per-gpu", "2"], cwd=runs.REPO, env=env,
                               capture_output=True, text=True)
         assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]

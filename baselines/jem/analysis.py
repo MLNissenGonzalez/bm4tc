@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from src.datahandler import DataHandler
+from bm4tc.pipeline.data import DataHandler
 
 from .attacks import PGDConfig, pgd_classification, pgd_likelihood_aware
 from .device import resolve_device

@@ -7,7 +7,7 @@ Budget convention (see "Budget vocabulary" in CLAUDE.md):
                    ``rel_to_abs``.
 
 ``delta`` is the *defense* budget (how far purification may move an input), as opposed
-to ``eps``, the *attacker* budget in ``src/utils/evasion.py``.
+to ``eps``, the *attacker* budget in ``bm4tc/core/attacks.py``.
 """
 
 import torch
@@ -16,7 +16,7 @@ from typing import Dict, Tuple, Optional, List
 
 from tqdm.auto import tqdm
 
-from src.utils.evasion import normalizing, project, random_in_ball
+from bm4tc.core.attacks import normalizing, project, random_in_ball
 
 
 @dataclass
@@ -137,8 +137,8 @@ class LikelihoodPurification:
 import torch
 from typing import Optional, Tuple
 
-from src.model import draw_from_grid_log
-from src.utils.embeddings import rel_to_abs
+from bm4tc.core.model import draw_from_grid_log
+from bm4tc.core.embeddings import rel_to_abs
 
 
 class GibbsPurification:
@@ -377,39 +377,3 @@ class GibbsPurification:
                 chunk = x_purified[i:i + self.gibbs_batch_size].to(device)
                 log_px_chunks.append(born.marginal_log_probability(chunk).cpu())
         return torch.cat(log_px_chunks)
-
-
-if __name__ == "__main__":
-    import sys
-    import torch
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    from src.utils.embeddings import range_size_of
-
-    device = torch.device("cpu")
-    cbm = ConditionalBornMachine(
-        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
-        data_dim=2, num_classes=2, device=device,
-    )
-    cbm.prepare(device=device)
-    cbm.eval()
-    cbm.cache_log_Z()
-
-    x_adv = torch.zeros(4, 2)
-    # Authored relative; converted once, as every caller must.
-    delta_rel = 0.05
-    delta_abs = rel_to_abs(delta_rel, range_size_of(cbm))  # legendre: 0.05 * 2.0 = 0.1
-
-    purifier = LikelihoodPurification(norm="inf", num_steps=5)
-    x_pur, log_px = purifier.purify(cbm, x_adv, delta_abs=delta_abs, device=device)
-    assert x_pur.shape == x_adv.shape, "LikelihoodPurification: shape mismatch"
-    assert log_px.isfinite().all(), "LikelihoodPurification: non-finite log_px"
-    assert (x_pur - x_adv).abs().max().item() <= delta_abs + 1e-6, "purify: left the ball"
-    print(f"  LikelihoodPurification  shape={tuple(x_pur.shape)}  log_px_mean={log_px.mean().item():.4f}")
-
-    gibbs = GibbsPurification(num_bins=20, gibbs_batch_size=4, step_delta_rel=delta_rel)
-    x_g, log_px_g = gibbs.purify(cbm, x_adv, n_sweeps=1, device=device)
-    assert x_g.shape == x_adv.shape, "GibbsPurification: shape mismatch"
-    print(f"  GibbsPurification       shape={tuple(x_g.shape)}  log_px_mean={log_px_g.mean().item():.4f}")
-
-    print("purification.py smoke test passed.")

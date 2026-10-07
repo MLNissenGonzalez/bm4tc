@@ -14,7 +14,7 @@ import math
 import numpy as np
 import pytest
 
-from src.analysis.uq import detection_metrics
+from bm4tc.analysis.uq import detection_metrics
 
 PCTS = [1, 5, 10, 20]
 N = 1000

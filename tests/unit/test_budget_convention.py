@@ -9,12 +9,12 @@ embedding-dependent cases were only ever correct by accident on legendre.
 import pytest
 import torch
 
-from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.train.trainer import Trainer, TrainConfig
-from experiments.metrics import key
-from src.utils.evasion import EvasionConfig, ProjectedGradientDescent
-from src.utils.embeddings import fmt_budget, range_size_of, rel_to_abs
-from src.analysis.purification import LikelihoodPurification, GibbsPurification
+from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from bm4tc.core.train import Trainer, TrainConfig
+from bm4tc.pipeline.metrics import key
+from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent
+from bm4tc.core.embeddings import fmt_budget, range_size_of, rel_to_abs
+from bm4tc.analysis.purification import LikelihoodPurification, GibbsPurification
 
 DATA_DIM = 3
 NUM_CLASSES = 2

@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.utils.embeddings import (
+from bm4tc.core.embeddings import (
     FourierEmbedding,
     LegendreEmbedding,
     HermiteEmbedding,

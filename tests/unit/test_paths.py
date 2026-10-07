@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.utils.paths import data_root, _PROJECT_ROOT
+from bm4tc.pipeline.paths import data_root, _PROJECT_ROOT
 
 
 def test_default_is_project_root(monkeypatch):

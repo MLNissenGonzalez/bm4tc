@@ -5,8 +5,8 @@ import torch
 import tensorkrowch as tk
 from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
-from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
-from src.utils.train import evaluate
+from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from bm4tc.core.objective import evaluate
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
@@ -165,7 +165,7 @@ def test_mixed_nll_logZ_cache_only_when_alpha_positive():
 
 def test_regularizer_reuses_mixed_nll_contraction():
     """alpha>0: mixed_nll + NormRegularizer contract the norm once, total."""
-    from src.utils.train import NormRegularizer
+    from bm4tc.core.objective import NormRegularizer
     cbm = _tiny_cbm()
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
     reg = NormRegularizer(strength=1.0, log_target=0.0)
@@ -216,7 +216,7 @@ def test_condition_on_class_last_position():
     # out_position at the last site uses the left-merge path
     cbm = _tiny_cbm(data_dim=2, num_classes=2)
     # out_position defaults to n_features // 2 = 1; test with forced last position
-    from src.model import CBMConfig
+    from bm4tc.core.model import CBMConfig
     cfg_dc = CBMConfig(embedding="fourier",
                        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, out_position=2,
                                                  std=1e-3, dtype="float32"))
@@ -897,7 +897,7 @@ def test_accumulate_cfg_sync_persists_override(tmp_path):
 
     cbm = ConditionalBornMachine.load(p)
     cbm.accumulate = True
-    # mirror experiments/stages.py: persist the override into the model config
+    # mirror bm4tc/pipeline/stages.py: persist the override into the model config
     OmegaConf.set_struct(cbm.cfg, False)
     cbm.cfg.accumulate = cbm.accumulate
     OmegaConf.set_struct(cbm.cfg, True)

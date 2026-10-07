@@ -6,12 +6,12 @@ import math
 import pytest
 import torch
 
-from experiments.metrics import flatten_epoch, key
-from src.datahandler import DataHandler, DatasetConfig, DataGenDowConfig
-from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.train.trainer import Trainer, TrainConfig
-from src.utils.evasion import EvasionConfig
-from src.utils.train import NormControlConfig, OptimizerConfig
+from bm4tc.pipeline.metrics import flatten_epoch, key
+from bm4tc.pipeline.data import DataHandler, DatasetConfig, DataGenDowConfig
+from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from bm4tc.core.train import Trainer, TrainConfig
+from bm4tc.core.attacks import EvasionConfig
+from bm4tc.core.objective import NormControlConfig, OptimizerConfig
 
 pytestmark = pytest.mark.slow
 

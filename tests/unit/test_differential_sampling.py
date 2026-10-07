@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.model import draw_from_grid, draw_from_grid_log
+from bm4tc.core.model import draw_from_grid, draw_from_grid_log
 
 BATCH = 8
 BINS = 20

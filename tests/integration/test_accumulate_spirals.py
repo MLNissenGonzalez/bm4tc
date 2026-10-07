@@ -8,11 +8,11 @@ evaluation, the loss and its gradients, and a short training run.
 import pytest
 import torch
 
-from experiments.metrics import flatten_epoch
-from src.datahandler import DataHandler, DatasetConfig, DataGenDowConfig
-from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.train.trainer import Trainer, TrainConfig
-from src.utils.train import OptimizerConfig, evaluate
+from bm4tc.pipeline.metrics import flatten_epoch
+from bm4tc.pipeline.data import DataHandler, DatasetConfig, DataGenDowConfig
+from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from bm4tc.core.train import Trainer, TrainConfig
+from bm4tc.core.objective import OptimizerConfig, evaluate
 
 pytestmark = pytest.mark.slow
 

@@ -1,8 +1,8 @@
-"""experiments/executor.py: the job pool (D38), with trivial subprocesses."""
+"""bm4tc/pipeline/executor.py: the job pool (D38), with trivial subprocesses."""
 import json
 import sys
 
-from experiments.executor import Unit, execute, slots
+from bm4tc.pipeline.executor import Unit, execute, slots
 
 
 def _unit(tmp_path, name, code, deps=()):

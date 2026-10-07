@@ -1,7 +1,7 @@
 import pytest
 import torch
 import numpy as np
-from src.analysis.uq import (
+from bm4tc.analysis.uq import (
     UQConfig,
     UQResults,
     UQEvaluation,
@@ -257,7 +257,7 @@ def test_uq_eval_batch_size_completes(cbm, clean_loader):
 def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
     # A failure (e.g. OOM) inside Gibbs purification must not discard the
     # detection and gradient-purification results computed earlier.
-    from src.analysis import purification as purif_mod
+    from bm4tc.analysis import purification as purif_mod
 
     def boom(self, *args, **kwargs):
         raise RuntimeError("simulated OOM")
@@ -294,7 +294,7 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
 
 def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
     # If the attack raises for one eps, the other eps must still produce results.
-    from src.utils import evasion as evasion_mod
+    from bm4tc.core import attacks as evasion_mod
     real_generate = evasion_mod._PGD.generate
 
     def selective(self, born, data, labels, eps, device, *a, **k):

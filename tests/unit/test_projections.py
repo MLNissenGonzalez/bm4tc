@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.utils.evasion import normalizing, project, random_in_ball
+from bm4tc.core.attacks import normalizing, project, random_in_ball
 
 CPU = torch.device("cpu")
 

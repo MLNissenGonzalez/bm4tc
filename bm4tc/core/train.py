@@ -10,7 +10,7 @@ generative term always sees clean data (D18): fitting p(x) to adversarial points
 would work against detection and purification.
 
 Every ``eval_every`` epochs the trainer validates the same objective on the
-validation set (:func:`src.utils.train.evaluate`) and keeps the epoch with the
+validation set (:func:`bm4tc.core.objective.evaluate`) and keeps the epoch with the
 lowest ``objective`` (D8). ``patience`` counts validation events, not epochs.
 """
 
@@ -25,10 +25,10 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from src.model import ConditionalBornMachine
-from src.utils.embeddings import range_size_of, rel_to_abs
-from src.utils.evasion import EvasionConfig, ProjectedGradientDescent, build_attack
-from src.utils.train import (
+from bm4tc.core.model import ConditionalBornMachine
+from bm4tc.core.embeddings import range_size_of, rel_to_abs
+from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
+from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
     NormTracker,

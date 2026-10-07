@@ -1,6 +1,6 @@
 # Study-level defaults: every study (configs/studies/*.yaml) is merged onto this
 # file, so a constant lives here once and a study states only what differs.
-# Run-level constants (model, trainer) are the schema defaults in experiments/config.py.
+# Run-level constants (model, trainer) are the schema defaults in bm4tc/pipeline/config.py.
 
 seeds: 5                       # D29: seeds 1..5; a study may list seeds instead
 

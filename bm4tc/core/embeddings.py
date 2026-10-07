@@ -137,7 +137,7 @@ class ChebyshevT1Embedding:
     measure and diverges at x = ±1.  Restricting the data range to ±0.99
     bounds the weight to at most (1−0.99²)^{−1/4} ≈ 2.24, preventing the
     Born Machine from placing artificially high probability mass at the
-    boundaries due to the embedding magnitude alone.  See src/utils/GUIDE.md
+    boundaries due to the embedding magnitude alone.  See the embeddings section of GUIDE.md
     "Chebyshev T1 boundary artefact" for a full explanation.
     """
     def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
@@ -319,25 +319,3 @@ def fmt_budget(value: float) -> str:
     so keys emitted by different entry points always agree.
     """
     return f"{float(value):g}"
-
-
-if __name__ == "__main__":
-    import torch
-
-    x = torch.linspace(-1.0, 1.0, 8).unsqueeze(1).expand(8, 2)  # (8, 2) in legendre range
-
-    classes = {
-        "legendre":   LegendreEmbedding,
-        "fourier":    FourierEmbedding,
-        "hermite":    HermiteEmbedding,
-        "chebychev1": ChebyshevT1Embedding,
-        "chebychev2": ChebyshevT2Embedding,
-        "poly":       PolyEmbedding,
-    }
-    for name, cls in classes.items():
-        emb = cls(dim=2)
-        out = emb(x)
-        assert out.shape[0] == 8 and out.shape[1] == 2
-        print(f"  {name:12s}  input {tuple(x.shape)}  →  output {tuple(out.shape)}  finite={out.isfinite().all().item()}")
-
-    print("embeddings.py smoke test passed.")

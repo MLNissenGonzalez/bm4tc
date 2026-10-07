@@ -316,7 +316,7 @@ def evaluate(
     """Validation (or test) metrics, and the training objective mirrored on them.
 
     Without an attack, ``objective = mix(L_dis, L_gen, α)``. With one, it mirrors
-    the AT objective of :class:`src.train.trainer.Trainer`:
+    the AT objective of :class:`bm4tc.core.train.Trainer`:
 
         objective = (1-α)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
                         +    cw ·mean_{S_cln} L_dis(x)     ]

@@ -35,12 +35,12 @@ from typing import Any, Dict, List, Optional
 from hydra import compose, initialize_config_dir
 from omegaconf import MISSING, DictConfig, OmegaConf, open_dict
 
-from experiments.config import register
-from src.utils.paths import data_root
+from bm4tc.pipeline.config import register
+from bm4tc.pipeline.paths import data_root
 
 logger = logging.getLogger(__name__)
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 CONFIGS = REPO / "configs"
 HPARAMS = CONFIGS / "hparams"          # written by `select` only (D34)
 REGIMES = ("nat", "at")
