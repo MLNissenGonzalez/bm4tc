@@ -1,0 +1,31 @@
+# tests/e2e/test_pipeline.py: the JEM seam, NAT, on the MPS seam's tiny spirals.
+# JEM sized to d4r3 (7 hidden units per layer); alpha 0 and 0.5 (SGLD).
+dataset: spirals
+model: jem
+regime: nat
+seeds: [42]
+grid:
+  embedding: [raw]
+  arch: [d4r3]
+  alpha: [0, 0.5]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  trainer.max_epoch: 10
+  trainer.batch_size: 64
+  trainer.patience: 10
+  trainer.optimizer.kwargs.lr: 1e-2
+  jem.sampler.num_steps: 5
+  jem.sampler.buffer_size: 128
+  jem.valid_sampler.num_steps: 5
+  jem.valid_sampler.buffer_size: 64
+  jem.valid_sampler.batch_size: 32
+  jem.valid_sampler.num_batches: 2
+  tracking.mode: disabled
+hpo: null
+budgets: [0.1, 0.15]
+analysis:
+  attack_steps: 10
+  rob_ceiling: false
+  percentiles: [5]
+  purify_steps: 10
+  sweep_purify: {enabled: true, sweeps: [1, 2], subsample: 50, sgld: {steps: 5}}

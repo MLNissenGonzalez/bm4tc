@@ -10,21 +10,22 @@ Names, with what they mean on a split:
 
     objective   the training objective (what selection minimises on valid); on train
                 it excludes the norm penalty, so it compares with valid
-    penalty     the norm-control penalty (train only)
+    penalty     the norm-control penalty (train only; JEM: the energy penalty)
     loss_dis    -log p(c|x) on clean data
-    loss_gen    -log p(x, c) on clean data
+    loss_gen    -log p(x, c) on clean data (JEM: its contrastive estimate, with log Z
+                estimated by a standardized SGLD chain; nan at alpha=0)
     loss_adv    -log p(c|x_adv) on the attacked samples (AT only)
     acc         clean accuracy
     rob         robust accuracy, keyed by relative budget
     n_rob       number of attacked validation samples behind `rob`
     eps_rel     attack budget used for training this epoch (follows the curriculum)
 
-`norm/*` diagnostics pass through unchanged.
+Diagnostics (`norm/*` for the MPS, `sgld/*` for JEM) pass through unchanged.
 
 Analysis (`analyse`, on test) uses the same rule. Budget 0 is clean data, so a
 curve over budgets starts at the clean value; the last part names the defence
 setting: q{percentile} (detection threshold, calibrated on valid, D2),
-d{radius} (likelihood purification), k{sweeps} (Gibbs purification):
+d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
 
     acc, loss_dis, loss_gen              clean, on the full test split
     rob_ceiling/test/{eps}               data-only bound on robust accuracy (two classes)
@@ -34,8 +35,11 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs purification):
     err_detected, err_passed             error rate among flagged / passed examples
     purify/test/{eps}/d{r}               accuracy after likelihood purification (0: clean)
     recovery/test/{eps}/d{r}             fraction of misclassified examples fixed by it
-    purify_gibbs, recovery_gibbs         the same for Gibbs purification, /k{n}, on a
-                                         fixed test subsample
+    purify_gibbs, recovery_gibbs         the same for Gibbs purification (MPS), /k{n},
+                                         on a fixed test subsample
+    purify_sgld, recovery_sgld           the same for SGLD purification (JEM)
+
+JEM has no loss_gen on test (no exact log Z), and its log_px is unnormalised.
 
 `_joint` on a name (`rob_joint`, `detect_joint`, ...) means the joint attack on
 class and log p(x) (JOINT_PGD) instead of PGD.
@@ -69,10 +73,10 @@ def flatten(split: str, values: Mapping) -> dict:
 
 
 def flatten_epoch(record: Mapping) -> dict:
-    """An epoch record ``{"train": {...}, "valid": {...}, "norm": {...}}`` as logged keys."""
+    """An epoch record ``{"train": {...}, "valid": {...}, "diagnostics": {...}}`` as logged keys."""
     out = {}
     for split, values in record.items():
-        if split == "norm":
+        if split == "diagnostics":
             out.update(values)
         else:
             out.update(flatten(split, values))

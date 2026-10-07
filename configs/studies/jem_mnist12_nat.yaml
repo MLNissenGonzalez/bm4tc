@@ -1,0 +1,24 @@
+# JEM baseline on MNIST 12x12, NAT, the default alpha ladder, cold (D35). arch is
+# the MPS each JEM is sized to: two hidden layers, real parameter count nearest to
+# the MPS's real degrees of freedom (D70). HPO space from the rebuttal's JEM HPO
+# (lr, energy penalty, training SGLD); at alpha=0 the SGLD knobs are unused.
+dataset: mnist12
+model: jem
+regime: nat
+grid:
+  embedding: [raw]
+  arch: [d3r20, d3r40]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 30
+hpo:
+  n_trials: 30
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
+    jem.energy_l2: {log: [1e-6, 1e-3]}
+    jem.sampler.step_size: {log: [1e-3, 3e-1]}
+    jem.sampler.noise_std: {log: [1e-3, 3e-2]}
+    jem.sampler.num_steps: {choice: [20, 40]}
+analysis:
+  sweep_purify: {enabled: true}   # SGLD purification is cheap for an MLP

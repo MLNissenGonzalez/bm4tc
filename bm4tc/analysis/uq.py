@@ -71,19 +71,20 @@ class UQConfig:
     eps_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
     attack_num_steps: int = 20
 
-    # Gibbs purification params
-    run_gibbs: bool = False
-    gibbs_n_sweeps: List[int] = field(default_factory=lambda: [1, 3, 5])
+    # Sweep purification (Gibbs for the MPS by default; JEM passes its SGLD
+    # purifier to evaluate()): snapshots after each count in `sweeps`
+    run_sweeps: bool = False
+    sweeps: List[int] = field(default_factory=lambda: [1, 3, 5])
     gibbs_num_bins: int = 200
     gibbs_batch_size: int = 8
     # Per-sweep L∞ step, as a fraction of the input range; None = unrestricted.
     # NOT a global budget: the window re-centres each sweep, so after k sweeps the
-    # envelope is k*gibbs_step_delta_rel*(hi-lo). Strength is set by gibbs_n_sweeps.
+    # envelope is k*gibbs_step_delta_rel*(hi-lo). Strength is set by sweeps.
     gibbs_step_delta_rel: Optional[float] = 0.1
-    # Gibbs is ~99% of UQ cost and reduces to a mean over the test set, so it runs on a
+    # Sweeps are ~99% of UQ cost and reduce to a mean over the test set, so it runs on a
     # fixed random subsample (cheap metrics keep the full set). None = full set.
-    gibbs_subsample: Optional[int] = None
-    gibbs_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/alphas (paired)
+    sweep_subsample: Optional[int] = None
+    sweep_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/alphas (paired)
 
     # Memory control
     eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch
@@ -311,13 +312,13 @@ class UQResults:
     adv_accuracies: Dict[float, float]
     detection_rates: Dict[Tuple[float, float], float]
     purification_results: Dict[Tuple[float, float], PurificationMetrics]
-    gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = field(
+    sweep_purification_results: Dict[Tuple[float, int], PurificationMetrics] = field(
         default_factory=dict
     )
     clean_purification_results: Dict[float, PurificationMetrics] = field(
         default_factory=dict
     )
-    clean_gibbs_purification_results: Dict[int, PurificationMetrics] = field(
+    clean_sweep_purification_results: Dict[int, PurificationMetrics] = field(
         default_factory=dict
     )
     err_rate_detected: Dict[Tuple[float, float], float] = field(default_factory=dict)
@@ -397,6 +398,7 @@ class UQEvaluation:
         device: torch.device,
         *,
         calib_loader: DataLoader,
+        sweep_purifier=None,
     ) -> UQResults:
         """Run the full UQ evaluation pipeline.
 
@@ -714,40 +716,41 @@ class UQEvaluation:
                 )
                 _recover_after_failure(model)
 
-        # 6. Gibbs purification
-        gibbs_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
-        clean_gibbs_purification_results: Dict[int, PurificationMetrics] = {}
+        # 6. Sweep purification: anything with purify_snapshots(model, x, sweep_points,
+        #    device) -> {k: (x_k, log_px_k)}; Gibbs (MPS) unless one is given
+        sweep_purification_results: Dict[Tuple[float, int], PurificationMetrics] = {}
+        clean_sweep_purification_results: Dict[int, PurificationMetrics] = {}
 
-        if cfg.run_gibbs:
+        if cfg.run_sweeps:
             from bm4tc.analysis.purification import GibbsPurification
 
-            gibbs_purifier = GibbsPurification(
+            purifier = sweep_purifier or GibbsPurification(
                 num_bins=cfg.gibbs_num_bins,
                 gibbs_batch_size=cfg.gibbs_batch_size,
                 step_delta_rel=cfg.gibbs_step_delta_rel,
             )
-            sweep_points = sorted(set(cfg.gibbs_n_sweeps))
+            sweep_points = sorted(set(cfg.sweeps))
 
-            def _gibbs_subsample(*tensors):
+            def _sweep_subsample(*tensors):
                 """Take a fixed random subsample (shared across model-seeds) of inputs.
 
-                Gibbs is ~99% of cost and only feeds a mean over the test set; estimating
+                Sweeps are ~99% of cost and only feed a mean over the test set; estimating
                 that mean on a fixed ~1k subsample keeps the statistic within ~±1.5%.
                 """
                 n = len(tensors[0])
-                if cfg.gibbs_subsample is None or cfg.gibbs_subsample >= n:
+                if cfg.sweep_subsample is None or cfg.sweep_subsample >= n:
                     return tensors
-                rng = np.random.default_rng(cfg.gibbs_subsample_seed)
-                idx = torch.from_numpy(rng.permutation(n)[: cfg.gibbs_subsample])
+                rng = np.random.default_rng(cfg.sweep_subsample_seed)
+                idx = torch.from_numpy(rng.permutation(n)[: cfg.sweep_subsample])
                 return tuple(t[idx] for t in tensors)
 
             for eps_rel in tqdm(
-                cfg.eps_rel, desc="Gibbs purify", unit="eps", dynamic_ncols=True
+                cfg.eps_rel, desc="sweep purify", unit="eps", dynamic_ncols=True
             ):
                 try:
                     all_adv = torch.cat([b[0] for b in adv_examples_cache[eps_rel]])
                     all_labels = torch.cat([b[1] for b in adv_examples_cache[eps_rel]])
-                    all_adv, all_labels = _gibbs_subsample(all_adv, all_labels)
+                    all_adv, all_labels = _sweep_subsample(all_adv, all_labels)
 
                     # Recompute misclassification + mean log p(x) on the SAME subsample so
                     # accuracy/recovery/log-px are internally consistent.
@@ -761,11 +764,11 @@ class UQEvaluation:
                         ).mean()
                     )
 
-                    snapshots = gibbs_purifier.purify_snapshots(
+                    snapshots = purifier.purify_snapshots(
                         model, all_adv, sweep_points, device
                     )
                 except Exception as e:
-                    logger.warning(f"Gibbs failed (eps_rel={eps_rel}): {e}; skipping")
+                    logger.warning(f"Sweep purification failed (eps_rel={eps_rel}): {e}; skipping")
                     _recover_after_failure(model)
                     continue
 
@@ -783,7 +786,7 @@ class UQEvaluation:
                             if misclassified_before > 0
                             else 1.0
                         )
-                        gibbs_purification_results[(eps_rel, n_sw)] = PurificationMetrics(
+                        sweep_purification_results[(eps_rel, n_sw)] = PurificationMetrics(
                             accuracy_after_purify=acc_after,
                             recovery_rate=recovery,
                             mean_log_px_before=mean_log_px_before,
@@ -796,26 +799,26 @@ class UQEvaluation:
                         )
                     except Exception as e:
                         logger.warning(
-                            f"Gibbs scoring failed (eps_rel={eps_rel}, n_sweeps={n_sw}): "
+                            f"Sweep scoring failed (eps_rel={eps_rel}, n_sweeps={n_sw}): "
                             f"{e}; skipping"
                         )
                         _recover_after_failure(model)
 
-            # Clean Gibbs purification
+            # Clean sweep purification
             all_clean = torch.cat([b for b, _ in clean_loader])
             all_clean_labels = torch.cat([lb for _, lb in clean_loader])
-            all_clean, all_clean_labels = _gibbs_subsample(all_clean, all_clean_labels)
+            all_clean, all_clean_labels = _sweep_subsample(all_clean, all_clean_labels)
             try:
                 clean_mean_log_px_before = float(
                     _batched_forward(
                         partial(log_px, model), all_clean, cfg.eval_batch_size, device
                     ).mean()
                 )
-                clean_snapshots = gibbs_purifier.purify_snapshots(
+                clean_snapshots = purifier.purify_snapshots(
                     model, all_clean, sweep_points, device
                 )
             except Exception as e:
-                logger.warning(f"Clean Gibbs failed: {e}; skipping")
+                logger.warning(f"Clean sweep purification failed: {e}; skipping")
                 _recover_after_failure(model)
                 clean_snapshots = {}
                 clean_mean_log_px_before = float("nan")
@@ -826,17 +829,17 @@ class UQEvaluation:
                         partial(class_probabilities, model), x_purified, cfg.eval_batch_size, device
                     ).argmax(dim=1)
                     acc = (pur_preds == all_clean_labels).float().mean().item()
-                    clean_gibbs_purification_results[n_sw] = PurificationMetrics(
+                    clean_sweep_purification_results[n_sw] = PurificationMetrics(
                         accuracy_after_purify=acc,
                         recovery_rate=float("nan"),
                         mean_log_px_before=clean_mean_log_px_before,
                         mean_log_px_after=float(log_px_after.mean()),
                         rejection_rate=0.0,
                     )
-                    logger.info(f"  sweeps={n_sw}: clean_gibbs_acc={acc:.4f}")
+                    logger.info(f"  sweeps={n_sw}: clean_sweep_acc={acc:.4f}")
                 except Exception as e:
                     logger.warning(
-                        f"Clean Gibbs scoring failed (n_sweeps={n_sw}): {e}; skipping"
+                        f"Clean sweep scoring failed (n_sweeps={n_sw}): {e}; skipping"
                     )
                     _recover_after_failure(model)
 
@@ -851,7 +854,7 @@ class UQEvaluation:
             err_rate_detected=err_rate_detected,
             err_rate_passed=err_rate_passed,
             purification_results=purification_results,
-            gibbs_purification_results=gibbs_purification_results,
+            sweep_purification_results=sweep_purification_results,
             clean_purification_results=clean_purification_results,
-            clean_gibbs_purification_results=clean_gibbs_purification_results,
+            clean_sweep_purification_results=clean_sweep_purification_results,
         )

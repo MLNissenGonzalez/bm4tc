@@ -18,7 +18,7 @@ def test_flatten_epoch_passes_norm_through():
     record = {
         "train": {"objective": 2.0, "penalty": 0.1},
         "valid": {"acc": 0.9},
-        "norm": {"norm/log_Z_mean": 0.3},
+        "diagnostics": {"norm/log_Z_mean": 0.3},
     }
     assert flatten_epoch(record) == {
         "objective/train": 2.0, "penalty/train": 0.1,

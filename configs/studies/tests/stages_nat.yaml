@@ -19,4 +19,4 @@ analysis:
   attack_steps: 2
   purify_steps: 2
   percentiles: [10]
-  gibbs: {enabled: true, sweeps: [1], num_bins: 4, subsample: 10}
+  sweep_purify: {enabled: true, sweeps: [1], subsample: 10, gibbs: {num_bins: 4}}

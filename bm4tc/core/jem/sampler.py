@@ -1,4 +1,5 @@
-"""Persistent SGLD sampling used for JEM training and generation."""
+"""Persistent SGLD on the JEM score: training negatives, validation, generation and
+purification."""
 
 from __future__ import annotations
 

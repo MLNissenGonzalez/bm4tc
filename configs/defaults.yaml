@@ -35,10 +35,16 @@ analysis:
   purify_delta: [0.1]          # likelihood-purification radius (fraction of the input range)
   purify_steps: 40
   batch_size: 256              # forward chunk size; bounds GPU memory on MNIST
-  gibbs:                       # Gibbs purification: ~99% of the analysis cost
+  sweep_purify:                # Gibbs (MPS) / SGLD (JEM) purification (D72); Gibbs is ~99% of the cost
     enabled: false
     sweeps: [1, 3, 6, 10]
-    num_bins: 96               # candidate values per feature
     step: 0.05                 # per-sweep Linf move (fraction of the range), not a budget
-    batch_size: 24             # memory: batch_size x num_bins per forward
     subsample: 250             # test points (fixed subset, seed 0); null = all
+    gibbs:
+      num_bins: 96             # candidate values per feature
+      batch_size: 24           # memory: batch_size x num_bins per forward
+    sgld:
+      steps: 20                # SGLD transitions per sweep
+      step_size: 0.01          # fixed for every model (not the training sampler's)
+      noise_std: 0.005
+      batch_size: 256

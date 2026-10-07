@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from hydra.core.config_store import ConfigStore
 
 from bm4tc.pipeline.data import DatasetConfig
+from bm4tc.core.jem.train import JEMConfig
 from bm4tc.core.model import CBMConfig
 from bm4tc.core.train import TrainConfig
 
@@ -23,9 +24,12 @@ class TrackingConfig:
 
 @dataclass
 class Config:
-    """The configuration of one training run."""
+    """The configuration of one training run. ``model`` picks the model: ``mps``
+    reads ``born``, ``jem`` reads ``jem``; ``trainer`` is shared."""
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    model: str = "mps"
     born: CBMConfig = field(default_factory=CBMConfig)
+    jem: JEMConfig = field(default_factory=JEMConfig)
     trainer: TrainConfig = field(default_factory=TrainConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
 

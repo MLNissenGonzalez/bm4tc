@@ -282,7 +282,10 @@ already gone; `analysis/{visualize,utils,outputs}` wait for Phase 7.
 *Exit:* `python -m bm4tc run studies/<seam>` reproduces the seam numbers, except the
 detection numbers, which change by design (D2).
 
-### Phase 6: JEM into the pipeline (D24)
+### Phase 6: JEM into the pipeline (D24) — in progress (D69–D73)
+
+*2026-10-07:* interface (D69) and JEM in the pipeline (D73) done; studies
+`jem_mnist12_{nat,at}`; `baselines/jem` reduced to its CSV plots/tables (Phase 7).
 
 - `core/jem/` keeps its own SGLD trainer and SGLD purifier (D35). After training,
   JEM goes through the same `analysis/` code via the narrow model interface

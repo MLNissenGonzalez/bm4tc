@@ -44,6 +44,8 @@ REPO = Path(__file__).resolve().parents[2]
 CONFIGS = REPO / "configs"
 HPARAMS = CONFIGS / "hparams"          # written by `select` only (D34)
 REGIMES = ("nat", "at")
+MODELS = ("mps", "jem")
+RAW = "raw"                            # the embedding axis of a JEM study: none
 
 register()
 
@@ -70,12 +72,27 @@ class HPOConfig:
 
 @dataclass
 class GibbsConfig:
+    num_bins: int = MISSING
+    batch_size: int = MISSING
+
+
+@dataclass
+class SGLDPurifyConfig:
+    steps: int = MISSING
+    step_size: float = MISSING
+    noise_std: float = MISSING
+    batch_size: int = MISSING
+
+
+@dataclass
+class SweepPurifyConfig:
+    """Sweep purification: Gibbs for the MPS, SGLD for JEM (D72)."""
     enabled: bool = MISSING
     sweeps: List[int] = MISSING
-    num_bins: int = MISSING
     step: float = MISSING
-    batch_size: int = MISSING
     subsample: Optional[int] = MISSING
+    gibbs: GibbsConfig = field(default_factory=GibbsConfig)
+    sgld: SGLDPurifyConfig = field(default_factory=SGLDPurifyConfig)
 
 
 @dataclass
@@ -88,15 +105,16 @@ class AnalysisConfig:
     purify_delta: List[float] = MISSING
     purify_steps: int = MISSING
     batch_size: int = MISSING
-    gibbs: GibbsConfig = field(default_factory=GibbsConfig)
+    sweep_purify: SweepPurifyConfig = field(default_factory=SweepPurifyConfig)
 
 
 @dataclass
 class StudyConfig:
     dataset: str = MISSING             # an option of configs/dataset/
     regime: str = MISSING              # nat | at
+    model: str = "mps"                 # mps | jem (JEM: embedding axis [raw], D70)
     init: str = "cold"                 # cold | warm; AT is always warm (D19)
-    warm_from: Optional[str] = None    # the study holding the alpha=0 NAT runs; default {dataset}_nat
+    warm_from: Optional[str] = None    # the study holding the alpha=0 NAT runs; default [jem_]{dataset}_nat
     seeds: Any = MISSING               # n (seeds 1..n) or a list of seeds
     grid: GridConfig = field(default_factory=GridConfig)
     embeddings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -132,15 +150,17 @@ class Cell:
         name = f"{self.embedding}/{self.arch}/a{self.alpha:g}"
         return name if self.eps is None else f"{name}/eps{self.eps:g}"
 
-    def values(self) -> Dict[str, Any]:
-        """The run-config values this cell fixes."""
+    def values(self, model: str = "mps") -> Dict[str, Any]:
+        """The run-config values this cell fixes. For JEM the arch is the MPS it
+        is sized to (D70)."""
         in_dim, bond_dim = parse_arch(self.arch)
-        values = {
-            "born.embedding": self.embedding,
-            "born.init_kwargs.in_dim": in_dim,
-            "born.init_kwargs.bond_dim": bond_dim,
-            "trainer.alpha": self.alpha,
-        }
+        if model == "jem":
+            values = {"jem.model.match_in_dim": in_dim, "jem.model.match_bond_dim": bond_dim}
+        else:
+            values = {"born.embedding": self.embedding, "born.init_kwargs.in_dim": in_dim,
+                      "born.init_kwargs.bond_dim": bond_dim}
+        values["model"] = model
+        values["trainer.alpha"] = self.alpha
         if self.eps is not None:
             values["trainer.evasion.eps_rel"] = [self.eps]
         return values
@@ -161,6 +181,11 @@ class Study:
             OmegaConf.load(CONFIGS / "defaults.yaml"),
             OmegaConf.load(path),
         )
+        if self.cfg.model not in MODELS:
+            raise ValueError(f"{name}: model must be one of {MODELS}, got {self.cfg.model!r}")
+        if (self.cfg.model == "jem") != (list(self.cfg.grid.embedding) == [RAW]):
+            raise ValueError(f"{name}: a JEM study, and only a JEM study, has grid.embedding "
+                             f"[{RAW}] (got {list(self.cfg.grid.embedding)})")
         if self.cfg.regime not in REGIMES:
             raise ValueError(f"{name}: regime must be one of {REGIMES}, got {self.cfg.regime!r}")
         if self.cfg.init not in ("cold", "warm"):
@@ -181,7 +206,8 @@ class Study:
 
     @property
     def warm_from(self) -> str:
-        return self.cfg.warm_from or f"{self.cfg.dataset}_nat"
+        prefix = "jem_" if self.cfg.model == "jem" else ""
+        return self.cfg.warm_from or f"{prefix}{self.cfg.dataset}_nat"
 
     def seeds(self) -> List[int]:
         seeds = self.cfg.seeds
@@ -248,7 +274,8 @@ class Job:
     def identity(self) -> Dict[str, Any]:
         c = self.cell
         return {"study": self.study.name, "dataset": self.study.cfg.dataset,
-                "regime": self.study.regime, "embedding": c.embedding, "arch": c.arch,
+                "model": self.study.cfg.model, "regime": self.study.regime,
+                "embedding": c.embedding, "arch": c.arch,
                 "alpha": c.alpha, "eps": c.eps, "seed": self.seed}
 
     def wandb(self, trial: Optional[int] = None) -> Dict[str, str]:
@@ -265,7 +292,7 @@ class Job:
         if hparams is None:
             hparams = self.study.hparams(self.cell)
         values = {
-            **self.cell.values(),
+            **self.cell.values(self.study.cfg.model),
             **self.study.cfg.embeddings.get(self.cell.embedding, {}),
             **self.study.cfg.config,
             **hparams,
@@ -307,7 +334,7 @@ class Job:
         if not self.study.warm:
             return None
         want = {"study": self.study.warm_from, "dataset": self.study.cfg.dataset,
-                "regime": "nat", "embedding": self.cell.embedding,
+                "model": self.study.cfg.model, "regime": "nat", "embedding": self.cell.embedding,
                 "arch": self.cell.arch, "alpha": 0.0, "seed": self.seed}
         found = find_runs(**want)
         if len(found) != 1:

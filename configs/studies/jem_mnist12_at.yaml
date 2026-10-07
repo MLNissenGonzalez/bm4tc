@@ -1,0 +1,21 @@
+# JEM PGD-AT on MNIST 12x12 (D71), warm from jem_mnist12_nat's alpha=0 runs; the
+# same attack, budgets and alpha grid as mnist12_at. alpha=0 is MLP-AT; at 1e-2 the
+# generative term uses the default training SGLD.
+dataset: mnist12
+model: jem
+regime: at
+init: warm
+grid:
+  embedding: [raw]
+  arch: [d3r20, d3r40]
+  alpha: [0, 1e-2]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 10         # validations (eval_every 5): 50 epochs
+hpo:
+  n_trials: 20
+  space:
+    trainer.clean_weight: [0.2, 1.0]
+analysis:
+  sweep_purify: {enabled: true}

@@ -26,8 +26,8 @@ def test_uq_config_defaults():
 
 def test_uq_config_gibbs_fields():
     cfg = UQConfig()
-    assert cfg.run_gibbs is False
-    assert isinstance(cfg.gibbs_n_sweeps, list)
+    assert cfg.run_sweeps is False
+    assert isinstance(cfg.sweeps, list)
     assert cfg.gibbs_num_bins > 0
     assert cfg.gibbs_batch_size > 0
 
@@ -54,7 +54,7 @@ def test_uq_results_gibbs_default_empty():
         detection_rates={},
         purification_results={},
     )
-    assert results.gibbs_purification_results == {}
+    assert results.sweep_purification_results == {}
 
 
 def test_uq_results_new_det_fields_default_empty():
@@ -188,11 +188,11 @@ def test_uq_gibbs_empty_when_disabled(cbm, clean_loader):
         percentiles=[10],
         attack_num_steps=2,
         num_steps=2,
-        run_gibbs=False,
+        run_sweeps=False,
     )
     evaluator = UQEvaluation(cfg)
     results = evaluator.evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
-    assert results.gibbs_purification_results == {}
+    assert results.sweep_purification_results == {}
 
 
 def test_uq_err_rate_detected_range(cbm, clean_loader):
@@ -265,12 +265,12 @@ def test_uq_fault_isolation_gibbs_failure(cbm, clean_loader, monkeypatch):
     monkeypatch.setattr(purif_mod.GibbsPurification, "purify_snapshots", boom)
     cfg = UQConfig(
         eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
-        attack_num_steps=2, num_steps=2, run_gibbs=True, gibbs_n_sweeps=[1],
+        attack_num_steps=2, num_steps=2, run_sweeps=True, sweeps=[1],
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert len(results.detection_rates) > 0          # detection survived
     assert len(results.purification_results) > 0     # gradient purify survived
-    assert results.gibbs_purification_results == {}  # gibbs skipped, not fatal
+    assert results.sweep_purification_results == {}  # gibbs skipped, not fatal
 
 
 def test_uq_gibbs_subsample_runs(cbm, clean_loader):
@@ -280,16 +280,16 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
     cfg = UQConfig(
         eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,
-        run_gibbs=True, gibbs_n_sweeps=[1, 2], gibbs_num_bins=8,
+        run_sweeps=True, sweeps=[1, 2], gibbs_num_bins=8,
         gibbs_batch_size=3,          # forces multiple Gibbs batches on the subsample
-        gibbs_subsample=8, gibbs_subsample_seed=0,
+        sweep_subsample=8, sweep_subsample_seed=0,
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
-    assert {(0.1, 1), (0.1, 2)} <= set(results.gibbs_purification_results.keys())
-    for m in results.gibbs_purification_results.values():
+    assert {(0.1, 1), (0.1, 2)} <= set(results.sweep_purification_results.keys())
+    for m in results.sweep_purification_results.values():
         assert 0.0 <= m.accuracy_after_purify <= 1.0
         assert math.isfinite(m.mean_log_px_after)
-    assert set(results.clean_gibbs_purification_results.keys()) == {1, 2}
+    assert set(results.clean_sweep_purification_results.keys()) == {1, 2}
 
 
 def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):

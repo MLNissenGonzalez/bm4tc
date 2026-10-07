@@ -76,6 +76,25 @@ def evasion_config(raw) -> EvasionConfig:
     return OmegaConf.to_object(merged)
 
 
+def attacked_subset(n: int, clean_weight: float) -> set:
+    """The validation samples AT validation attacks: (1 - cw)·n positions in the
+    valid loader's order (stable: only the train split is shuffled), drawn once
+    from a constant seed so the rob curve is not perturbed by resampling."""
+    k = min(n, max(0, int(round((1.0 - clean_weight) * n))))
+    gen = torch.Generator().manual_seed(_ADV_SUBSET_SEED)
+    return set(torch.randperm(n, generator=gen)[:k].tolist())
+
+
+def curriculum_eps(cfg: TrainConfig, epoch: int, start_abs: float, full_abs: float) -> float:
+    """Training radius at ``epoch``: the linear ramp from ``start_abs`` to
+    ``full_abs`` at epoch ``curriculum_end·max_epoch``, or ``full_abs``."""
+    if not cfg.curriculum:
+        return full_abs
+    end_epoch = cfg.curriculum_end * cfg.max_epoch
+    progress = min(1.0, epoch / end_epoch)
+    return start_abs + progress * (full_abs - start_abs)
+
+
 class Trainer:
     """Fits a ConditionalBornMachine and keeps the best epoch on ``objective/valid``."""
 
@@ -141,13 +160,9 @@ class Trainer:
                 "valid samples are attacked, so 'rob' is never reported."
             )
 
-        # The validation attack subset: (1 - cw)·n positions in the valid loader's
-        # order (stable: only the train split is shuffled), drawn once from a
-        # constant seed so the rob curve is not perturbed by resampling.
         n = len(self.valid_loader.dataset)
-        k = min(n, max(0, int(round((1.0 - cfg.clean_weight) * n))))
-        gen = torch.Generator().manual_seed(_ADV_SUBSET_SEED)
-        self.adv_indices = set(torch.randperm(n, generator=gen)[:k].tolist())
+        self.adv_indices = attacked_subset(n, cfg.clean_weight)
+        k = len(self.adv_indices)
         logger.info(
             f"Attacking {k}/{n} valid samples every {cfg.eval_every} epoch(s); "
             f"patience={cfg.patience} valid events (~{cfg.patience * cfg.eval_every} epochs)."
@@ -155,11 +170,7 @@ class Trainer:
 
     def _eps_abs(self, epoch: int) -> float:
         """Training radius at ``epoch`` (the curriculum ramp, or the full radius)."""
-        if not self.cfg.curriculum:
-            return self.eps_abs
-        end_epoch = self.cfg.curriculum_end * self.cfg.max_epoch
-        progress = min(1.0, epoch / end_epoch)
-        return self._curriculum_start_abs + progress * (self.eps_abs - self._curriculum_start_abs)
+        return curriculum_eps(self.cfg, epoch, self._curriculum_start_abs, self.eps_abs)
 
     # ------------------------------------------------------------------
     # Objective
@@ -396,7 +407,7 @@ class Trainer:
     ):
         """Run the training loop.
 
-        ``on_epoch_end(epoch, record)`` gets ``{"train": {...}, "norm": {...}}``
+        ``on_epoch_end(epoch, record)`` gets ``{"train": {...}, "diagnostics": {...}}``
         every epoch, plus ``"valid": {...}`` on validation epochs, with plain metric
         names (``rob`` as ``{eps_rel: value}``).
         """
@@ -432,7 +443,7 @@ class Trainer:
 
             record = {
                 "train": {"objective": self._train_objective, "penalty": self._train_penalty},
-                "norm": self._norm_stats,
+                "diagnostics": self._norm_stats,
             }
             postfix = {
                 "loss": f"{self._train_objective:.4f}",
