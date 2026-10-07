@@ -5,7 +5,8 @@ from tests.conftest import DATA_DIM, NUM_CLASSES
 from src.utils.evasion import (
     JointProjectedGradientDescent,
     ProjectedGradientDescent,
-    RobustnessEvaluation,
+    EvasionConfig,
+    build_attack,
 )
 from src.utils.embeddings import range_size_of, rel_to_abs
 
@@ -125,18 +126,13 @@ def test_pgd_projects_onto_input_domain_and_linf_ball(cbm_attack, labels, attack
     assert (adversarials - naturals).abs().max().item() <= strength + 1e-6
 
 
-# ---- RobustnessEvaluation with JOINT_PGD ----
+# ---- build_attack with JOINT_PGD ----
 
-def test_robustness_eval_joint_pgd_runs(cbm_attack, attack_loader):
-    """RobustnessEvaluation dispatches JOINT_PGD and respects the absolute budget.
-
-    ``eps_rel`` is carried for provenance; ``generate`` takes ``eps_abs``, which the
-    caller derives via ``rel_to_abs``. On fourier (width 1.0) the two coincide.
-    """
-    eval_ = RobustnessEvaluation(
-        method="JOINT_PGD", norm="inf", eps_rel=[STRENGTH_FRACTION],
-        num_steps=5, random_start=False,
-    )
+def test_build_attack_joint_pgd_runs(cbm_attack, attack_loader):
+    """build_attack dispatches JOINT_PGD, which respects the absolute budget
+    ``generate`` takes (the caller derives it via ``rel_to_abs``)."""
+    eval_ = build_attack(EvasionConfig(method="JOINT_PGD", norm="inf", num_steps=5,
+                                       random_start=False))
     eps_abs = rel_to_abs(STRENGTH_FRACTION, range_size_of(cbm_attack))
 
     naturals, labels = next(iter(attack_loader))

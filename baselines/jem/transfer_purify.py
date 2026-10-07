@@ -130,7 +130,7 @@ def _load_model(path: str, device: torch.device):
 def _test_loader(cfg, model: JEMMLP, batch_size: int):
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(model)
+    datahandler.split_and_rescale(model.input_range)
     datahandler.get_classification_loaders(batch_size=batch_size)
     return datahandler.classification["test"]
 

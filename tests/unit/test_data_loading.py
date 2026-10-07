@@ -39,7 +39,7 @@ def test_handler_spirals_small():
     lo, hi = -1.0, 1.0  # legendre range
     bm, dh = _make_spirals_handler()
     dh.load()
-    dh.split_and_rescale(bm)
+    dh.split_and_rescale(bm.input_range)
     dh.get_classification_loaders(batch_size=4)
 
     assert dh.classification is not None

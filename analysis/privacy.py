@@ -28,7 +28,6 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from torch.utils.data import DataLoader
 
 from src.utils.evasion import ProjectedGradientDescent
-from src.utils.train import CriterionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +150,6 @@ def membership_inference(
     if adv_eps_abs is not None:
         pgd = ProjectedGradientDescent(
             norm=adv_norm,
-            criterion=CriterionConfig(name="nll", kwargs=None),
             num_steps=adv_num_steps,
             step_size=None,
             random_start=True,

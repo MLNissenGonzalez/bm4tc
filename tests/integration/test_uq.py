@@ -295,14 +295,14 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
 def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
     # If the attack raises for one eps, the other eps must still produce results.
     from src.utils import evasion as evasion_mod
-    real_generate = evasion_mod.RobustnessEvaluation.generate
+    real_generate = evasion_mod._PGD.generate
 
     def selective(self, born, data, labels, eps, device, *a, **k):
         if eps == 0.2:
             raise RuntimeError("simulated OOM")
         return real_generate(self, born, data, labels, eps, device, *a, **k)
 
-    monkeypatch.setattr(evasion_mod.RobustnessEvaluation, "generate", selective)
+    monkeypatch.setattr(evasion_mod._PGD, "generate", selective)
     cfg = UQConfig(
         eps_rel=[0.1, 0.2], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,

@@ -79,7 +79,7 @@ def _load(run_dir: Path, device):
     model, extra = JEMMLP.load(_checkpoint(run_dir), device=device)
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(model)
+    datahandler.split_and_rescale(model.input_range)
     datahandler.get_classification_loaders(batch_size=256)
     sgld_cfg = SGLDConfig(**OmegaConf.to_container(cfg.sampler, resolve=True))
     buffer = ReplayBuffer(

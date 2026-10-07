@@ -38,7 +38,7 @@ def dh():
         overwrite=True,
     ))
     handler.load()
-    handler.split_and_rescale(_cbm())
+    handler.split_and_rescale(_cbm().input_range)
     handler.get_classification_loaders(batch_size=8)
     return handler
 

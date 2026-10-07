@@ -14,7 +14,6 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from math import ceil
 
-from src.model import ConditionalBornMachine
 
 
 @dataclass
@@ -537,23 +536,13 @@ class DataHandler:
         self.scaler = scaler_cls(feature_range=self.input_range, clip=True)
 
 
-    def split_and_rescale(
-            self,
-            bornmachine: ConditionalBornMachine,
-            scaler_name: str = None   # None → read from self.cfg.scaler
-    ):
-        """
-        Split data into train/valid/test and rescale to embedding range.
-
-        Args:
-            bornmachine: ConditionalBornMachine (used to determine input range from embedding).
-            scaler_name: Scaler type ("minmax" or "linear"). If None, reads from self.cfg.scaler.
-        """
-        # Check that data is already loaded to handler, otherwise, load it:
+    def split_and_rescale(self, input_range: Tuple[float, float]):
+        """Split data into train/valid/test and rescale it to ``input_range``, the
+        embedding's domain (``cbm.input_range``), with the configured scaler fitted
+        on train."""
         if self.data is None:
-            self.load(self.cfg)
-        # Final input range depends on the embedding chosen for the Born-Machine.
-        self.input_range = bornmachine.input_range
+            self.load()
+        self.input_range = input_range
         # Initalize dictionaries
         data = {}
         labels = {}
@@ -590,9 +579,7 @@ class DataHandler:
                                                 random_state=self.cfg.split_seed
                                             )
         # Fit scaler to training data to avoid data leakage.
-        if scaler_name is None:
-            scaler_name = self.cfg.scaler
-        self._get_scaler(scaler_name)
+        self._get_scaler(self.cfg.scaler)
         data["train"] = self.scaler.fit_transform(data["train"])
         # Transform validation and test sets using the scaler fitted on training data
         data["valid"] = self.scaler.transform(data["valid"])
@@ -693,41 +680,3 @@ class DataHandler:
             int(round(ratios[1] * num_spc)),
             int(round(ratios[2] * num_spc))
         ]
-
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
-
-    # --- load_dataset smoke test ---
-    ds_cfg = DatasetConfig(
-        name="spirals",
-        gen_dow_kwargs=DataGenDowConfig(name="spirals", size=32, seed=42, noise=0.1),
-        overwrite=True,
-    )
-    ds = load_dataset(ds_cfg)
-    assert ds.X.shape == (64, 2), f"Unexpected shape: {ds.X.shape}"
-    assert ds.num_cls == 2, f"Unexpected num_cls: {ds.num_cls}"
-    assert ds.X.dtype in (np.float32, np.float64), f"Unexpected dtype: {ds.X.dtype}"
-    print(f"  spirals  shape={ds.X.shape}  classes={ds.num_cls}  dtype={ds.X.dtype}")
-    print("load_dataset smoke test passed.")
-
-    # --- DataHandler smoke test ---
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-    device = torch.device("cpu")
-    bm = ConditionalBornMachine(
-        cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
-        data_dim=2, num_classes=2, device=device,
-    )
-    dh = DataHandler(ds_cfg)
-    dh.load()
-    dh.split_and_rescale(bm)
-    dh.get_classification_loaders(batch_size=4)
-    lo, hi = bm.input_range
-    for split, loader in dh.classification.items():
-        x_batch, y_batch = next(iter(loader))
-        assert x_batch.shape[1] == 2, f"{split}: unexpected feature dim"
-        assert x_batch.min() >= lo - 1e-5 and x_batch.max() <= hi + 1e-5, \
-            f"{split}: data out of range [{lo}, {hi}]"
-        print(f"  {split:6s}  batch={tuple(x_batch.shape)}  range=[{x_batch.min():.3f}, {x_batch.max():.3f}]")
-    print("DataHandler smoke test passed.")

@@ -77,7 +77,7 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     else:
         cbm = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
 
-    datahandler.split_and_rescale(cbm)
+    datahandler.split_and_rescale(cbm.input_range)
     log_dataset_viz(datahandler)
 
     trainer = Trainer(cbm, cfg.trainer, datahandler, device)

@@ -287,7 +287,7 @@ def visualize_from_run_dir(
     # Load and prepare data
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(cbm)
+    datahandler.split_and_rescale(cbm.input_range)
 
     # Get training data for overlay
     train_data = datahandler.data["train"] if show_data else None
@@ -353,7 +353,7 @@ def load_model_and_data():
     logger.info(f"Loading dataset: {cfg.dataset.name}")
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(cbm)
+    datahandler.split_and_rescale(cbm.input_range)
 
     return cbm, datahandler, device, cfg
 
