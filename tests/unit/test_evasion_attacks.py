@@ -2,13 +2,13 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from tests.conftest import DATA_DIM, NUM_CLASSES
-from src.utils.evasion import (
+from bm4tc.core.attacks import (
     JointProjectedGradientDescent,
     ProjectedGradientDescent,
     EvasionConfig,
     build_attack,
 )
-from src.utils.embeddings import range_size_of, rel_to_abs
+from bm4tc.core.embeddings import range_size_of, rel_to_abs
 
 BATCH = 16
 # Authored relative, as every budget is. The fixtures use fourier (width 1.0), so
@@ -24,7 +24,7 @@ STEPS = 20
 # clamp floor, but larger amplitudes still make gradient assertions more robust.)
 @pytest.fixture(scope="module")
 def cbm_attack():
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
     torch.manual_seed(42)
     cfg = CBMConfig(
         embedding="fourier",

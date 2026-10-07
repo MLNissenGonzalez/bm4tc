@@ -1,4 +1,4 @@
-"""The pipeline CLI: ``python -m experiments <verb> <study>`` (see experiments.stages).
+"""The pipeline CLI: ``python -m bm4tc <verb> <study>`` (see bm4tc.pipeline.stages).
 
     hpo | train | analyse   that stage, through the job pool
     run                     hpo -> select -> train -> analyse, skipping what is done
@@ -15,8 +15,8 @@ import logging
 import sys
 from pathlib import Path
 
-from experiments import stages
-from experiments.runs import Study
+from bm4tc.pipeline import stages
+from bm4tc.pipeline.runs import Study
 
 VERBS = ("hpo", "select", "train", "analyse", "run", "status", "prune")
 POOLED = {"hpo": ("hpo",), "train": ("train",), "analyse": ("analyse",), "run": stages.STAGES}
@@ -25,7 +25,7 @@ POOLED = {"hpo": ("hpo",), "train": ("train",), "analyse": ("analyse",), "run": 
 def _unit(argv) -> None:
     """``_unit <kind> <study> [--cell C] [--seed S] [--worker W] [--replace]``:
     one unit of the job pool, run in this process."""
-    parser = argparse.ArgumentParser(prog="python -m experiments _unit")
+    parser = argparse.ArgumentParser(prog="python -m bm4tc _unit")
     parser.add_argument("kind", choices=("hpo", "select", "train", "analyse"))
     parser.add_argument("study")
     parser.add_argument("--cell")
@@ -44,7 +44,7 @@ def main(argv=None):
     if argv[:1] == ["_unit"]:
         return _unit(argv[1:])
 
-    parser = argparse.ArgumentParser(prog="python -m experiments", description=__doc__,
+    parser = argparse.ArgumentParser(prog="python -m bm4tc", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("verb", choices=VERBS)
     parser.add_argument("study", help="a study under configs/studies/, e.g. spirals_nat")
@@ -94,7 +94,7 @@ def main(argv=None):
             print(f"\n── FAILED {name} ({log}) ──\n" + "\n".join(tail), file=sys.stderr)
         skipped = sum(s == "skipped" for s in states.values())
         print(f"{len(states) - len(failed) - skipped} done, {len(failed)} failed, "
-              f"{skipped} skipped. `python -m experiments status {study.name}`")
+              f"{skipped} skipped. `python -m bm4tc status {study.name}`")
         sys.exit(1 if failed else 0)
 
 

@@ -37,9 +37,9 @@ def _python(args, root: Path) -> str:
 
 def _run(root: Path, study: str) -> tuple[Path, dict]:
     """`run` the study (train, then analyse its single job); returns the run dir
-    (from experiments.runs) and the job's metrics (its row of results.csv)."""
-    _python(["-m", "experiments", "run", study], root)
-    out = _python(["-c", "import sys; from experiments.runs import Study; "
+    (from bm4tc.pipeline.runs) and the job's metrics (its row of results.csv)."""
+    _python(["-m", "bm4tc", "run", study], root)
+    out = _python(["-c", "import sys; from bm4tc.pipeline.runs import Study; "
                    "print(Study(sys.argv[1]).jobs()[0].run_dir)", study], root)
     with open(root / "outputs" / study / "results.csv") as f:
         (row,) = csv.DictReader(f)

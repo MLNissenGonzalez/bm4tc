@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from analysis.privacy import FEATURES, features, membership_inference, worst_case_threshold
+from bm4tc.analysis.privacy import FEATURES, features, membership_inference, worst_case_threshold
 
 
 def test_features_of_known_probabilities():

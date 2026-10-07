@@ -7,7 +7,7 @@ starts when every unit it depends on succeeded; when a unit fails, everything
 downstream of it is skipped and the rest goes on. The state of every unit is
 written to a JSON file as it changes, for ``status``.
 
-The pool knows nothing about studies: :mod:`experiments.stages` builds the units.
+The pool knows nothing about studies: :mod:`bm4tc.pipeline.stages` builds the units.
 """
 import datetime
 import json

@@ -19,8 +19,8 @@ import torch
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
-from src.train import Trainer, TrainConfig
+from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from bm4tc.core.train import Trainer, TrainConfig
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 N_FEATURES, N_CLASSES, BATCH = 144, 10, 256

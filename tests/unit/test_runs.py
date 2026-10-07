@@ -1,10 +1,10 @@
-"""experiments/runs.py: names (D14), grids, hparams, run.json (D17), warm starts (D19)."""
+"""bm4tc/pipeline/runs.py: names (D14), grids, hparams, run.json (D17), warm starts (D19)."""
 import json
 
 import pytest
 
-from experiments import runs
-from experiments.runs import Cell, Job, RunConflict, Study, find_runs, parse_arch
+from bm4tc.pipeline import runs
+from bm4tc.pipeline.runs import Cell, Job, RunConflict, Study, find_runs, parse_arch
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +181,7 @@ def test_archived_runs_are_not_found():
 # ── prune (D22) ─────────────────────────────────────────────────────────────
 
 def _finished_study(name, seeds):
-    from experiments import stages  # noqa: F401  (imports torch; only here)
+    from bm4tc.pipeline import stages  # noqa: F401  (imports torch; only here)
     study = Study(name)
     study.cfg.seeds = seeds
     for job in study.jobs():
@@ -190,7 +190,7 @@ def _finished_study(name, seeds):
 
 
 def test_prune_keeps_results_and_one_seed_per_cell(data_root):
-    from experiments import stages
+    from bm4tc.pipeline import stages
     study = _finished_study("tests/seam_nat", [1, 2, 3])
     plan = stages.prune_plan(study, "keep-one")
     assert [p.parent.name for p in plan] == ["s2", "s3"]
@@ -202,7 +202,7 @@ def test_prune_keeps_results_and_one_seed_per_cell(data_root):
 
 
 def test_pruned_run_is_skipped_unless_replaced(data_root):
-    from experiments import stages
+    from bm4tc.pipeline import stages
     study = _finished_study("tests/seam_nat", [42])
     stages.prune(study, "all", yes=True)
     job = study.jobs()[0]
@@ -214,7 +214,7 @@ def test_pruned_run_is_skipped_unless_replaced(data_root):
 
 
 def test_prune_old_deletes_the_archive(data_root):
-    from experiments import stages
+    from bm4tc.pipeline import stages
     study = _finished_study("tests/seam_nat", [42])
     study.jobs()[0].claim("h2", replace=True)
     assert stages.prune_plan(study, "old") == [data_root / "outputs/tests/seam_nat/.replaced"]

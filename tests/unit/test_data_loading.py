@@ -3,9 +3,9 @@ import torch
 
 
 def _make_spirals_handler():
-    from src.datahandler import DatasetConfig, DataGenDowConfig
-    from src.datahandler import DataHandler
-    from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig
+    from bm4tc.pipeline.data import DataHandler
+    from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 
     bm = ConditionalBornMachine(
         cfg=CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, std=1e-3)),
@@ -22,7 +22,7 @@ def _make_spirals_handler():
 
 def test_spirals_small():
     import numpy as np
-    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="spirals",
@@ -55,7 +55,7 @@ def test_handler_spirals_small():
 @pytest.mark.requires_download
 def test_mnist_loading():
     import numpy as np
-    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="mnist",
@@ -72,7 +72,7 @@ def test_mnist_loading():
 @pytest.mark.requires_download
 def test_mnist_resize():
     import numpy as np
-    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
 
     resize = 12
     ds_cfg = DatasetConfig(
@@ -92,7 +92,7 @@ def test_mnist_resize():
 @pytest.mark.requires_download
 def test_italy_power_demand_loading():
     import numpy as np
-    from src.datahandler import DatasetConfig, DataGenDowConfig, load_dataset
+    from bm4tc.pipeline.data import DatasetConfig, DataGenDowConfig, load_dataset
 
     ds_cfg = DatasetConfig(
         name="italypowerdemand",

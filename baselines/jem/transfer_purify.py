@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src.datahandler import DataHandler
+from bm4tc.pipeline.data import DataHandler
 
 from .analysis import load_run_config
 from .attacks import PGDConfig, pgd_classification

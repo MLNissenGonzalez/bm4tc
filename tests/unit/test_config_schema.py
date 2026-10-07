@@ -3,8 +3,8 @@ import pytest
 from omegaconf import OmegaConf
 from omegaconf.errors import ConfigAttributeError, MissingMandatoryValue
 
-from experiments.runs import CONFIGS, Job, Study
-from src.train.trainer import evasion_config
+from bm4tc.pipeline.runs import CONFIGS, Job, Study
+from bm4tc.core.train import evasion_config
 
 STUDIES = sorted(p.relative_to(CONFIGS / "studies").with_suffix("").as_posix()
                  for p in (CONFIGS / "studies").rglob("*.yaml"))
@@ -42,7 +42,7 @@ def test_unknown_key_is_rejected():
 
 
 def test_unknown_study_key_is_rejected():
-    from experiments import runs
+    from bm4tc.pipeline import runs
     with pytest.raises(Exception, match="nonsense"):
         OmegaConf.merge(OmegaConf.structured(runs.StudyConfig), {"nonsense": 1})
 

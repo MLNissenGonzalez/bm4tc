@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 from omegaconf import OmegaConf
 
-from src.utils.paths import data_root
+from bm4tc.pipeline.paths import data_root
 
 from .analysis import analyze_run, load_run_config
 from .report import write_summary

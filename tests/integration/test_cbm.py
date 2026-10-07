@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 
 pytestmark = pytest.mark.slow
 

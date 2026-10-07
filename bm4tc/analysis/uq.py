@@ -421,9 +421,9 @@ class UQEvaluation:
         Returns:
             UQResults with all evaluation metrics.
         """
-        from src.utils.evasion import EvasionConfig, build_attack
-        from src.analysis.purification import LikelihoodPurification
-        from src.utils.embeddings import range_size_of, rel_to_abs
+        from bm4tc.core.attacks import EvasionConfig, build_attack
+        from bm4tc.analysis.purification import LikelihoodPurification
+        from bm4tc.core.embeddings import range_size_of, rel_to_abs
 
         cfg = self.config
         born.to(device)
@@ -716,7 +716,7 @@ class UQEvaluation:
         clean_gibbs_purification_results: Dict[int, PurificationMetrics] = {}
 
         if cfg.run_gibbs:
-            from src.analysis.purification import GibbsPurification
+            from bm4tc.analysis.purification import GibbsPurification
 
             gibbs_purifier = GibbsPurification(
                 num_bins=cfg.gibbs_num_bins,

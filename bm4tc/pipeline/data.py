@@ -55,7 +55,7 @@ class LabelledDataset:
 # -----------------------------
 # Dataset directories
 # -----------------------------
-from src.utils.paths import data_root as _data_root
+from bm4tc.pipeline.paths import data_root as _data_root
 _DATA_DIR = str(_data_root() / ".datasets")
 
 # -----------------------------

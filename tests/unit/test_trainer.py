@@ -7,10 +7,10 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from experiments.metrics import flatten_epoch, key
-from src.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from src.train.trainer import Trainer, TrainConfig
-from src.utils.train import (
+from bm4tc.pipeline.metrics import flatten_epoch, key
+from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from bm4tc.core.train import Trainer, TrainConfig
+from bm4tc.core.objective import (
     NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate, mix,
 )
 

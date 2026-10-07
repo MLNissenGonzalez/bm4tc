@@ -2,15 +2,15 @@
 
 Every model and trainer constant is a dataclass default here or in the module that
 owns it (D25); ``configs/config.yaml`` only picks group options. Call register()
-once per process before composing (experiments/runs.py does).
+once per process before composing (bm4tc/pipeline/runs.py does).
 """
 from dataclasses import dataclass, field
 
 from hydra.core.config_store import ConfigStore
 
-from src.datahandler import DatasetConfig
-from src.model import CBMConfig
-from src.train.trainer import TrainConfig
+from bm4tc.pipeline.data import DatasetConfig
+from bm4tc.core.model import CBMConfig
+from bm4tc.core.train import TrainConfig
 
 
 @dataclass

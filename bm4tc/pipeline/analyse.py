@@ -1,7 +1,7 @@
 """Post-hoc analysis of one finished run, on its test split (D20).
 
 Each part loads nothing and writes nothing: it takes the model, the data and the
-study's analysis settings and returns metric keys (:mod:`experiments.metrics`).
+study's analysis settings and returns metric keys (:mod:`bm4tc.pipeline.metrics`).
 Every part starts from the same seed, so its numbers do not depend on which
 parts ran before it (a resumed analysis reproduces them).
 
@@ -18,13 +18,13 @@ from typing import Callable, Dict, List
 import torch
 from omegaconf import OmegaConf
 
-from experiments.metrics import key
-from src.analysis.margin import robust_accuracy_ceiling
-from src.analysis.uq import UQConfig, UQEvaluation, UQResults
-from src.datahandler import DataHandler
-from src.model import ConditionalBornMachine
-from src.utils.embeddings import range_size_of, rel_to_abs
-from src.utils.train import evaluate, set_seed
+from bm4tc.pipeline.metrics import key
+from bm4tc.analysis.ceiling import robust_accuracy_ceiling
+from bm4tc.analysis.uq import UQConfig, UQEvaluation, UQResults
+from bm4tc.pipeline.data import DataHandler
+from bm4tc.core.model import ConditionalBornMachine
+from bm4tc.core.embeddings import range_size_of, rel_to_abs
+from bm4tc.core.objective import evaluate, set_seed
 
 SEED = 0
 SPLIT = "test"

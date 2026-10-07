@@ -9,8 +9,8 @@ import hydra
 import wandb
 from omegaconf import DictConfig, OmegaConf
 
-from src.datahandler import DataHandler
-from src.utils.train import OptimizerConfig, set_seed
+from bm4tc.pipeline.data import DataHandler
+from bm4tc.core.objective import OptimizerConfig, set_seed
 
 from .device import resolve_device
 from .model import JEMMLP, JEMMLPConfig, mps_parameter_count

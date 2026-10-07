@@ -1,5 +1,5 @@
-"""Metric keys (experiments/metrics.py, D48)."""
-from experiments.metrics import SELECTION, flatten, flatten_epoch, key
+"""Metric keys (bm4tc/pipeline/metrics.py, D48)."""
+from bm4tc.pipeline.metrics import SELECTION, flatten, flatten_epoch, key
 
 
 def test_key_rule():
