@@ -151,6 +151,21 @@ def test_norm_regularizer_invalid_target():
         NormRegularizer(strength=1.0, log_target=float("inf"))
 
 
+def test_log_target_resolves_float_expression_and_pretrained():
+    """The three forms of NormControlConfig.log_target: a number, an expression in
+    the model's sizes (the pilot's n·ln d / 2), and None = the model's own log Z."""
+    from bm4tc.core.objective import resolve_log_target
+    cbm = _tiny_cbm()                                  # 2 data sites + the class site
+    assert resolve_log_target(cbm, NormControlConfig(log_target=0.0)) == 0.0
+    half = resolve_log_target(cbm, NormControlConfig(log_target="n_features * log(in_dim) / 2"))
+    assert half == pytest.approx(cbm.n_features * math.log(cbm.in_dim) / 2)
+    assert cbm.n_features == 3
+    own = resolve_log_target(cbm, NormControlConfig(log_target=None))
+    assert own == pytest.approx(cbm.log_partition_function().item())
+    with pytest.raises(ValueError, match="could not evaluate"):
+        resolve_log_target(cbm, NormControlConfig(log_target="n_sites * 2"))
+
+
 # ── Collapse diagnostics ───────────────────────────────────────────────────
 
 def test_diagnostics_uses_caches_without_recontracting():
