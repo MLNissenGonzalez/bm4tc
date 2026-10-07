@@ -94,10 +94,10 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
     (tmp_path / "spirals_at.yaml").write_text(  # as `select spirals_at` writes it
         f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-3\n"
         "  trainer.clean_weight: 0.4\n  extra: 1\n")
-    assert study.hparams(cell) == {"trainer.clean_weight": 0.4,
-                                   "trainer.optimizer.kwargs.lr": 3e-3}
+    # only the study's search space is read: the lr (clean_weight is fixed at 0, D80)
+    assert study.hparams(cell) == {"trainer.optimizer.kwargs.lr": 3e-3}
     cfg = Job(study, cell, 1).compose()
-    assert cfg.trainer.optimizer.kwargs.lr == 3e-3 and cfg.trainer.clean_weight == 0.4
+    assert cfg.trainer.optimizer.kwargs.lr == 3e-3 and cfg.trainer.clean_weight == 0.0
 
 
 def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):

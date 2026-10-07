@@ -13,5 +13,4 @@ config:
   trainer.norm_control.log_target: null
 hpo:
   n_trials: 20
-  space:
-    trainer.clean_weight: [0.2, 1.0]
+  # space: only the lr from defaults.yaml; clean_weight stays 0 (D80)
