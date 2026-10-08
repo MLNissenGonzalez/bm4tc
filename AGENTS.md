@@ -80,9 +80,9 @@ not for git).
    with Martin whether AT's clean accuracy is acceptable (levers in the 2026-10-08
    discussion: capacity, a fixed cw = 0.5, TRADES); also whether the AT α grid should
    move to small values (α = 0.1 is almost purely generative on MNIST, D84).
-2. **Review the β plan critically, then implement it** ("Planned: β" in
-   `docs/plan.md`): one dimension-corrected parameter replaces α everywhere. Start
-   with its six review questions (measure the gradient-norm ratio first).
+2. **β: reviewed, to decide** ("Planned: beta" in `docs/plan.md`, theory in
+   `docs/interpolation.md`): the loss scale (C, rescaled, vs C'), then E0 (pilot A's
+   valid/test L_gen gap of ~45 nats) and E2 (β knee pilots), then implement.
 3. Before the big studies: cap HPO workers per cell; let `select`/`run --cell` work on
    a subset of cells; the Gibbs O(n²) rework and the per-step overhead (Phase 9 track);
    a multi-study launcher.
