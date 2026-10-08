@@ -71,7 +71,7 @@ small-α ladder; seam tests force AVX2 CPU kernels.
 
 Cluster: G21G01 is set up (env, clone, worktree `runs/87663bc3`). It is ≈ 2.4× slower
 per unit than the laptop (CPU-bound), and `/ceph` is ceph over NFSv4.2. Martin's notes
-`docs/hpc_*.md` and the pilot CSVs in `pilots/` are untracked on purpose (personal,
+`docs/hpc_*.md`, `docs/interpolation.md` and the pilot CSVs in `pilots/` are untracked on purpose (personal,
 not for git).
 
 **Next:**
@@ -81,7 +81,7 @@ not for git).
    discussion: capacity, a fixed cw = 0.5, TRADES); also whether the AT α grid should
    move to small values (α = 0.1 is almost purely generative on MNIST, D84).
 2. **β: reviewed, to decide** ("Planned: beta" in `docs/plan.md`, theory in
-   `docs/interpolation.md`): the loss scale (C, rescaled, vs C'), then E0 (pilot A's
+   the untracked note `docs/interpolation.md`): the loss scale (C, rescaled, vs C'), then E0 (pilot A's
    valid/test L_gen gap of ~45 nats) and E2 (β knee pilots), then implement.
 3. Before the big studies: cap HPO workers per cell; let `select`/`run --cell` work on
    a subset of cells; the Gibbs O(n²) rework and the per-step overhead (Phase 9 track);

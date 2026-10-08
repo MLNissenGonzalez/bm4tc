@@ -58,7 +58,7 @@ Still to provide for Phase 8:
 
 Martin's choice (2026-10-08): replace $\alpha$ by **one** parameter $\beta$ everywhere
 (studies, trainers, metrics, figures). The theory, with the formulas and the units, is
-in [interpolation.md](interpolation.md); this section holds the review, the evidence,
+in Martin's notes (`docs/interpolation.md`, untracked on purpose); this section holds the review, the evidence,
 the open decisions, the experiments and the implementation. Record the outcome as a
 D-number.
 
@@ -67,7 +67,7 @@ D-number.
 1. **Is per-feature normalisation the right balance?** Yes as a prior, for a better
    reason than gradient norms: $\alpha$ is an exact exchange rate, and the curvatures of
    the $n$ per-feature terms add, so the switch points scale like $1/n$
-   (interpolation.md §3–4). $\sqrt n$ is the scale of the gradient noise, which moves the
+   (the theory note §3–4). $\sqrt n$ is the scale of the gradient noise, which moves the
    optimiser but not the optimum. The planned measurement (gradient-norm ratios) cannot
    decide it (§4.3); E2 below does. $\beta$ corrects for $n$, not for capacity or data
    (§4.4).
@@ -82,7 +82,7 @@ D-number.
 4. **JEM:** same map. Its $L_\text{gen}$ has no normaliser, so its per-variable values
    are known up to a constant. Whether its knees sit at the MPS's $\beta$ is a result to
    report.
-5. **The paper:** one sentence (below) and the translation table of interpolation.md §7.
+5. **The paper:** one sentence (below) and the translation table of the theory note §7.
 6. **Ladder:** expect two knees (§4.2): the density catches up at small $\beta$, the
    accuracy drops at large $\beta$. The ladder $\{0, 0.01, 0.1, 0.5, 0.9, 0.99, 1\}$ is
    too coarse between 0.5 and 0.9, where the MNIST 12×12 accuracy knee lies. Fix the
@@ -114,7 +114,7 @@ unmeasured. TPM's whole MNIST sweep sat at $\beta \ge 0.59$.
 The two forms have the same minimisers and differ by $c(\beta) = 1 - \beta + \beta/N$.
 
 - **C, the rescaled loss:** the code optimises $L_\beta$. One formula from paper to code,
-  no $\alpha$ anywhere, and every logged loss in **nats per variable** (interpolation.md
+  no $\alpha$ anywhere, and every logged loss in **nats per variable** (the theory note,
   §6): the objective is a weighted mean of $L_\text{dis}$ (nats per label) and
   $\bar\ell$ (nats per feature), so curves of every cell and dataset share one axis.
   One-time costs: re-pin all seams with $\beta > 0$; re-check the norm-penalty strength
@@ -167,7 +167,7 @@ full MNIST ($\beta = 0.89$) is at or past the accuracy knee.
 
 **E1 (optional, for the paper).** On E2 checkpoints, the per-sample ratio
 $\mathbb{E}\lVert\nabla \log p(x)\rVert^2 / \mathbb{E}\lVert\nabla \log p(c \mid x)\rVert^2$
-for 12×12 and 28×28 (interpolation.md §4.1 predicts ×5.4); depends on the MPS gauge, so
+for 12×12 and 28×28 (the theory note §4.1 predicts ×5.4); depends on the MPS gauge, so
 supporting only.
 
 ### Implementation (option C)
