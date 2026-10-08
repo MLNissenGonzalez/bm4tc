@@ -927,3 +927,46 @@ def test_accumulate_cfg_sync_persists_override(tmp_path):
     cbm.save(p)
 
     assert ConditionalBornMachine.load(p).accumulate is True
+
+
+# ── Boundary vectors (D87) ───────────────────────────────────────────────────
+
+def _numeric_log_Z(cbm, grid=401):
+    """log ∫ Σ_c |ψ(x, c)|² dx over the 2-D input square (trapezoid rule)."""
+    lo, hi = cbm.input_range
+    g = torch.linspace(lo, hi, grid)
+    with torch.no_grad():
+        lse = torch.logsumexp(cbm.log_joint(torch.cartesian_prod(g, g)), dim=1).double()
+    w = torch.ones(grid, dtype=torch.float64)
+    w[0] = w[-1] = 0.5
+    weights = torch.outer(w, w).reshape(-1) * ((hi - lo) / (grid - 1)) ** 2
+    return torch.logsumexp(lse + weights.log(), 0).item()
+
+
+def test_boundaries_are_fixed_and_shared_with_norm_net():
+    cbm = _tiny_cbm(embedding="legendre", dtype="complex64", bond_dim=3)
+    for name in ("_left_node", "_right_node"):
+        node, aux = getattr(cbm, name), getattr(cbm.norm_net, name)
+        assert not node.tensor.requires_grad and not aux.tensor.requires_grad
+        assert torch.equal(node.tensor, aux.tensor)
+    cbm.initialize(tensors=[t.detach().clone() for t in cbm.tensors])
+    for name in ("_left_node", "_right_node"):
+        assert torch.equal(getattr(cbm, name).tensor, getattr(cbm.norm_net, name).tensor)
+        assert not getattr(cbm, name).tensor.requires_grad
+
+
+def test_log_Z_stays_the_normaliser_of_psi_during_training():
+    """D87: training at β = 1 used to move the model's and norm_net's boundary
+    vectors apart, so log Z stopped normalising ψ and the generative loss had a
+    free direction. The contracted log Z must equal the integral of Σ_c |ψ|²."""
+    torch.manual_seed(5)
+    cbm = _tiny_cbm(embedding="legendre", dtype="complex64", bond_dim=3, std=1e-2)
+    cbm.prepare(device=torch.device("cpu"))
+    opt = torch.optim.Adam(cbm.parameters(), lr=0.05)
+    x, y = torch.rand(64, 2) * 2 - 1, torch.randint(0, 2, (64,))
+    for _ in range(30):
+        opt.zero_grad()
+        cbm.mixed_nll(x, y, beta=1.0).backward()
+        opt.step()
+    log_Z = float(cbm.log_partition_function())
+    assert abs(log_Z - _numeric_log_Z(cbm)) < 1e-3
