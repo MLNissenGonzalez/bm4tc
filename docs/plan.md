@@ -60,7 +60,7 @@ Implemented on 2026-10-08 (D86): the code optimises
 $L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$ in nats per variable,
 logs `loss_dis` [nats/label], `loss_x` [nats/feature], `log_px` per feature, the
 `norm/*` diagnostics per site, and divides the norm penalty by $N$. The theory is in
-Martin's notes (`docs/interpolation.md`, untracked on purpose). What is left: E0, the
+Martin's notes (`docs/interpolation.md`, untracked on purpose). What is left (E0 done): the
 beta pilots (E2), then the Phase 8 ladder and AT grid from them.
 
 Paper sentence (the translation table is in the theory note, §7):
@@ -86,7 +86,15 @@ unmeasured. TPM's whole MNIST sweep sat at $\beta \ge 0.59$.
 
 ### Experiments
 
-**E0. The valid/test gap of pilot A (before E2).** Martin (2026-10-08): the seed runs
+**E0. Done (2026-10-08, G21G01): the gap is the evaluation path, i.e. D87.** One
+checkpoint evaluated with one code path gives train, valid and test within 0.7 nat
+(α = 1: −143.3 / −142.8 / −142.6), whatever the batch size or `to()`/`prepare()`; no
+cross-split duplicates, matching pixel and label statistics, medians within 1 nat of
+the means. At α = 0 the logged-vs-recomputed valid L_gen gap (2.89) equals the
+training-time log Z minus the checkpoint's (79.65 − 76.76). At α = 1 the gap is 50
+nats against a checkpoint log Z of 120.8; the per-step log Z logged that epoch
+(75–85) leaves 4–9 nats unexplained, not chased since D87 removed the cause. The
+original question, kept for the record: Martin (2026-10-08): the seed runs
 converged; `objective/valid` and the train objective sit near their asymptote of about
 -16 at $\alpha = 0.1$. But the test objective of the same runs is about -13.1, and at
 $\alpha = 1$ valid $L_\text{gen}$ is -182 to -193 while test is -137 to -143: a gap of
@@ -159,7 +167,33 @@ Measured in [compute.md](compute.md).
       renormalised every 8 sites: 3.6× (d3r20) to 14× (d3r40) slower, because
       backward through the slices of one large tensor writes a full-size gradient
       per slice.
-  - **To try, in order:**
+  - **CUDA graphs + MPS, measured** (scratch prototypes `pilots/graph_*.py`, untracked;
+    2026-10-08). A whole step (AT: random start, PGD-K, both objectives, backward,
+    Adam with `capturable=True`, micro-batches) captured once and replayed:
+    - Bit-identical to the eager step (losses and parameters after 30 steps) for NAT
+      β ∈ {0, 0.5, 1}, d3r20/d3r40, 144 and 784 sites, micro-batched, and AT PGD-5/10
+      with a fixed start. With the random start the draws differ (graph RNG offsets).
+    - Per unit: G21G01 8.7× (NAT d3r20), 9.9× (AT PGD-10); laptop 3.9× / 4.5×;
+      full MNIST (laptop) 4.0× NAT d3r20, 3.7× NAT d3r40 (micro 128), 3.3× AT d3r20.
+      Capture 0.3–8 s once.
+    - A graphed unit alone saturates the GPU (tiny kernels in sequence). With NVIDIA
+      MPS (no code change) units run concurrently. G21G01, steps/s per GPU at
+      1/2/4/6/8 units: NAT graph 20.5/36.5/58.4/77.6/88.3 (eager 2.4/5.0/10.0/13.2/16.8);
+      AT PGD-10 graph 3.6/5.7/7.8/8.9/9.5 (eager 0.4/0.8/1.4/2.0/2.6). So **≈ 5–6× NAT,
+      ≈ 4–5× AT per GPU** against today's 6 eager units. MPS gotcha: start the daemon
+      with the physical `CUDA_VISIBLE_DEVICES`, clients then use `CUDA_VISIBLE_DEVICES=0`
+      (indices are relative to the MPS server).
+    - What is left per step is GPU time: NAT d3r20 10.5k kernels (30 ms) + 15 ms gaps;
+      AT 58k kernels (242 ms) + 22 ms gaps. The largest single cost (≈ 1/3) is the
+      complex ÷ real division of the renormalisation (chain `[B, r] / [B, 1]`, log Z's
+      tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
+      (7.3 µs). Casting the divisor to complex does not help; multiplying a real view by
+      1/n halves it but is not bit-identical (≈ 1e-7).
+    - Integration (to design with Martin, then a D-number): the graph in the Trainer;
+      static batch (last batch); diagnostics, non-finite check and `.item()`s outside
+      the captured step; eps of the curriculum as a device scalar; the random start's
+      RNG (re-pin); MPS daemon per GPU in the launch. Then re-estimate compute.md.
+  - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward
        saves the per-site vectors and norms, the backward is one hand-written
        reverse sweep. Removes the autograd graph of norm/divide/guard per site
@@ -168,10 +202,13 @@ Measured in [compute.md](compute.md).
     2. Fewer operations per site in the forward: renormalise every k sites instead
        of every site (k bounded by overflow: the growth per site is bounded),
        drop the `where`/`masked_fill` guards where the norm cannot be zero.
-    3. CUDA graphs over a whole training step: needs static shapes (one batch size,
-       the last batch dropped or padded) and no host syncs inside the step (the
-       non-finite check in `mixed_nll`, `.item()` in the diagnostics and caches).
-       `torch.compile` is not an option on torch 2.1 with complex tensors.
+    3. The renormalising division on a real view times 1/n (above): ≈ 2× on that
+       kernel, not bit-identical. `torch.compile` is not an option on torch 2.1 with
+       complex tensors.
+    A custom Function works on raw tensors, outside tensorkrowch's nodes: under D30
+    it belongs in tensorkrowch, as the renormalize-that-returns-log-norm operation
+    (tk's `renormalize` keeps gradients but discards the norm, so log Z computes
+    each norm twice), unless Martin makes an exception.
   - **The bar** (D30, Phase 9 track): the new contraction matches the current
     log|ψ|², log Z and their gradients on random models (overflowing ones
     included) to float tolerance; the seams re-pin in their own commit; the gain
