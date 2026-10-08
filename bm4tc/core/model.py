@@ -219,6 +219,7 @@ class ConditionalBornMachine(tk.models.MPS):
         for _bn in (self.norm_net._left_node, self.norm_net._right_node):
             if _bn is not None:
                 _bn.set_tensor(_bn.tensor.to(dtype=_dtype, device=_core_device))
+        self._freeze_boundaries()
 
         # ── randn_eye phi_0 rescaling ─────────────────────────────────────
         # randn_eye sets T[:,0,:] ≈ I; initial amplitude ≈ phi_0^n_sites.
@@ -296,7 +297,25 @@ class ConditionalBornMachine(tk.models.MPS):
         super().initialize(tensors=tensors, **kwargs)
         if hasattr(self, "norm_net"):
             self._sync_norm_net()
+            self._freeze_boundaries()
         self._invalidate_log_Z_cache()
+
+    def _freeze_boundaries(self) -> None:
+        """Fix the obc boundary vectors, and give norm_net the model's own.
+
+        tensorkrowch makes them ParamNodes (trainable), and ``copy(share_tensors=
+        True)`` gives norm_net a separate pair, so training moved the two pairs
+        apart and log Z stopped being the normaliser of ψ (D87). They carry no
+        freedom of their own (a boundary vector times the edge core is another edge
+        core): fixed, as tensorkrowch initialises them, and equal in both networks.
+        tensorkrowch's ``initialize`` resets them, so this runs after it too."""
+        if self._boundary != "obc":
+            return
+        for name in ("_left_node", "_right_node"):
+            node, aux = getattr(self, name), getattr(self.norm_net, name)
+            node.tensor.requires_grad_(False)
+            aux.set_tensor(node.tensor.detach().clone())
+            aux.tensor.requires_grad_(False)
 
     # ======================================================================
     # Inference

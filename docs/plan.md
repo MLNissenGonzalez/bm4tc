@@ -156,6 +156,8 @@ non-finished sampling implementation on tensorkrowch on the develop branch
 - look at the code, compare it with the sampling implementation in ConditionalBornMachine.
 - create a comparison, what one code is capable of what the other does not.
 - then discussion with questions on what to adapt from the tensorkrowch code and what not to 
+
+fork: https://github.com/MLNissenGonzalez/tensorkrowch/tree/develop
 ## Phase 9 (separate track): tensorkrowch
 
 Verify each upstream candidate in [decisions.md](decisions.md#tensorkrowch-upstream-candidates-tensorkrowch-116)
@@ -165,6 +167,11 @@ core (`ConditionalBornMachine` contractions, `log_partition_function`, accumulat
 sampling) happen here and nowhere else (D30).
 
 ## Open items
+
+- **randn_eye rescale misses the edge cores:** `ConditionalBornMachine.__init__` multiplies
+  `self.tensors` by 1/φ₀, but the two edge entries are contracted copies (tensorkrowch
+  candidates in decisions.md), so ψ is rescaled by φ₀^−(n−2), not φ₀^−n. Harmless (the norm
+  penalty absorbs a constant); fixing it changes every initialisation, so it needs a re-pin.
 
 - **Time series** (D6): datasets, grids and studies (NAT and AT; JEM if wanted).
 - **Study settings** were copied from the old sweeps (epochs, patience, HPO spaces);
