@@ -14,10 +14,9 @@ Run the studies on the lab HPC, then `python -m bm4tc figures paper`.
 
 Order (warm studies need their `warm_from` study trained):
 
-1. Pilots that set defaults (D83): `pilot_norm_zero` + `pilot_norm_half` (the
-   norm-control target, D59), then `pilot_pgd10` + `pilot_pgd5` (warm from
-   `pilot_norm_zero`; PGD-5 vs 10, D43). Apply the verdicts to
-   `configs/studies/mnist*_nat.yaml` (target) and `configs/trainer/at.yaml` (steps).
+1. Pilots that set defaults (D83). Pilot A done: n·ln d / 2 (D84, applied). Pilot B
+   (`pilot_pgd10` + `pilot_pgd5`, PGD-5 vs 10, D43) running; apply its verdict to
+   `configs/trainer/at.yaml`, and decide the AT clean-accuracy question with it.
 2. `spirals_nat`, `spirals_capacity`, `spirals_embedding`, `mnist12_nat`,
    `mnist_capacity`, `jem_mnist12_nat` (independent; cold).
 3. `spirals_at`, `mnist12_at`, `jem_mnist12_at` (warm).
@@ -49,17 +48,14 @@ Still to provide for Phase 8:
   (e.g. at ~1/3 of the trials) before Phase 8; until then, give a study ~8 slots.
 - `run <study> --cell X` stops at `select`, which needs every cell's HPO. Let
   select (and run) work on the launched cells only.
-- **Cluster checks (2026-10-08), pilots running on G21G01 since 2026-10-07:**
-  1. The AT seam fails on G21G01 (CPU; objective/train differs from epoch 1), the
-     NAT seam passes to 1e-6. Suspected: float summation order (40 cores vs the
-     laptop's 8) amplified by PGD's sign(). Run `tests/e2e/test_pipeline.py` with
-     `OMP_NUM_THREADS=8 MKL_NUM_THREADS=8`, then also `MKL_CBWR=AVX2`; record the
-     cause and pin seams per machine (or loosen the AT curve check).
-  2. `python -m tests.bench.bench_train_step` on a cluster GPU: the suite took 8 min
-     there vs 3 on the laptop, so the cluster may be ~2x slower per thread, which
-     stretches every estimate in compute.md.
-  3. D78 and the notes say "CephFS locks": /ceph is ceph served over NFSv4.2
-     (`local_lock=none`, so flock is cluster-wide); fix the wording.
+- **AT seam on the cluster:** fails on G21G01 (CPU; objective/train differs from
+  epoch 1, deterministic there), the NAT seam passes to 1e-6. Not the thread count
+  (identical numbers with `OMP_NUM_THREADS=8`). Suspected: G21G01's AVX-512 kernels
+  vs the laptop's AVX2 (Core Ultra 7 265H), amplified by PGD's sign(). Check with
+  `ATEN_CPU_CAPABILITY=avx2 MKL_CBWR=AVX2`; then pin the AT seam per instruction set.
+- **Cluster speed:** `bench_train_step` on G21G01 (GPU shared with 4 pilot units, busy
+  node): 440 ms per NAT step vs ≈ 180 on the laptop, so ≈ 2.4x slower per unit;
+  mostly the CPU (single-thread bound). Double the wall times in compute.md.
 - Time one probe on a cluster node first. Training is limited by CPU speed, and
   the cluster's CPU threads may be slower than the laptop's.
 

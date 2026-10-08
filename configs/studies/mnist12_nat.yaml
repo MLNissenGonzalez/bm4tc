@@ -1,5 +1,4 @@
-# MNIST 12x12, NAT, the default alpha ladder, cold. The norm-control target for
-# cold MNIST runs (0 or n·ln d / 2) is open until an HPC pilot; 0 for now.
+# MNIST 12x12, NAT, the default alpha ladder, cold; log Z pulled to n·ln d / 2 (D84).
 dataset: mnist12
 regime: nat
 grid:
@@ -8,3 +7,4 @@ config:
   trainer.max_epoch: 100
   trainer.batch_size: 512
   trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
