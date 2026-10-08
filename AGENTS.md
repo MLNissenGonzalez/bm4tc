@@ -56,36 +56,58 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-08)
+## State (2026-10-08, evening)
 
 Branch `ousterhout` (pushed to GitHub up to the pilot commit `87663bc3`; later commits
 are local): Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) has started with the
 pilots; `docs/plan.md` has the details, `docs/compute.md` the cost estimates.
 
-Done on 2026-10-07/08 (D78–D85): dataset cache lock + atomic write; micro-batches
-(`trainer.micro_batch_size`, per-arch `archs:` block, analysis chunks follow); AT with
-cw = 0 and lr-only HPO; 15 trials per tuned hparam with median pruning; AT α grid; four
-pilot studies; pilot A verdict (log Z target n·ln d / 2 for cold MNIST) and a denser
-small-α ladder; seam tests force AVX2 CPU kernels.
+Done on 2026-10-07/08 (D78–D87):
+- D78–D85: dataset cache lock; micro-batches; AT with cw = 0 and lr-only HPO; 15 trials
+  per tuned hparam with median pruning; four pilot studies; pilot A verdict (log Z
+  target n·ln d / 2 for cold MNIST); seam tests force AVX2 CPU kernels.
+- **D86, β replaces α:** the code optimises L_β = (1−β)·L_dis + β·L_gen/N, N = n + 1
+  (features and class), a weighted mean of per-variable NLLs. Logged: `loss_dis` [nats
+  per label], `loss_x` = −log p(x)/n [nats per feature] (replaces `loss_gen`), `log_px`
+  per feature, `norm/*` per site (headroom absolute); norm penalty ÷N. Cells `b<β>`;
+  figures plot β at ln(β/(1−β)). Placeholder ladder {0, 0.01, 0.1, 0.5, 0.9, 0.99, 1}
+  for every dataset, AT grid {0, 0.1, 0.5}, `paper.yaml` β values are placeholders:
+  all revisited after the β pilots. Translation: β/(1−β) = N·α/(1−α). The theory is
+  Martin's untracked note `docs/interpolation.md`. "TPM" = the TPM 2026 paper
+  (`_paper/main.tex`).
+- **D87, a core bug found by E0:** tensorkrowch's obc boundary vectors were trainable
+  and norm_net had its own pair, so during training log Z was not the normaliser of ψ
+  (pilot A's ~45-nat valid/test L_gen gap). Every β > 0 run trained before D87 (pilot A,
+  likely TPM) optimised and selected on a corrupted objective; test numbers were exact
+  for the saved models. Fixed (`_freeze_boundaries`), regression-tested against a
+  numerical integral, seams re-pinned. Pilot B (β = 0) is essentially unaffected.
 
-Cluster: G21G01 is set up (env, clone, worktree `runs/87663bc3`). It is ≈ 2.4× slower
-per unit than the laptop (CPU-bound), and `/ceph` is ceph over NFSv4.2. Martin's notes
-`docs/hpc_*.md`, `docs/interpolation.md` and the pilot CSVs in `pilots/` are untracked on purpose (personal,
-not for git).
+Cluster: G21G01 is set up (env, clone, worktree `runs/87663bc3` = pre-D86 code, where
+pilot B runs). It is ≈ 2.4× slower per unit than the laptop (CPU-bound), and `/ceph` is
+ceph over NFSv4.2. New studies need a new worktree at the current commit; runs from
+before D86 (cells `a…`, column `alpha`) cannot be warm-start sources. Martin's notes
+`docs/hpc_*.md`, `docs/interpolation.md`, the pilot CSVs and `pilots/e0_valid_test_gap.py`
+in `pilots/` are untracked on purpose (personal, not for git).
 
-**Next:**
-1. Read pilot B (`pilot_pgd5` due 2026-10-08 evening, `pilot_pgd10` 2026-10-09
-   morning): the PGD step count goes to `configs/trainer/at.yaml` (D43 rule). Decide
-   with Martin whether AT's clean accuracy is acceptable (levers in the 2026-10-08
-   discussion: capacity, a fixed cw = 0.5, TRADES); also whether the AT α grid should
-   move to small values (α = 0.1 is almost purely generative on MNIST, D84).
-2. **β: reviewed, to decide** ("Planned: beta" in `docs/plan.md`, theory in
-   the untracked note `docs/interpolation.md`): the loss scale (C, rescaled, vs C'), then E0 (pilot A's
-   valid/test L_gen gap of ~45 nats) and E2 (β knee pilots), then implement.
-3. Before the big studies: cap HPO workers per cell; let `select`/`run --cell` work on
-   a subset of cells; the Gibbs O(n²) rework and the per-step overhead (Phase 9 track);
-   a multi-study launcher.
+**Next (in this order):**
+1. With Martin: pilot B's results (`pilot_pgd5` due 2026-10-08 evening, `pilot_pgd10`
+   2026-10-09 morning): the PGD step count goes to `configs/trainer/at.yaml` (D43
+   rule), and whether AT's clean accuracy is acceptable (levers: capacity, a fixed
+   cw = 0.5, TRADES). E0 on the cluster (`pilots/e0_valid_test_gap.py`, run from the
+   `runs/87663bc3` worktree): it should show pilot A's gap equals the log Z drift.
+2. **Efficiency and compute cost, before any new pilot** (Martin's order):
+   - the per-step overhead (plan.md "Efficiency": measured, two prototypes ruled out;
+     next a custom autograd Function for the renormalised chain and the log Z
+     zip-up, then fewer operations per site, then CUDA graphs; D30's bar);
+   - cap HPO workers per cell; let `select`/`run --cell` work on a subset of cells; a
+     multi-study launcher; the Gibbs O(n²) rework;
+   - then re-estimate the cost of the β pilots and of Phase 8 (`docs/compute.md`).
+3. Plan the β pilots with Martin (plan.md "Beta", E2: knees on MNIST 12×12, full MNIST
+   and spirals; they set the ladder, the AT grid and re-check D84's target), then run
+   them.
+4. Not urgent: the sampling comparison with the fork's `develop` branch (plan.md,
+   "Sampling"; Martin clones it first).
 
 Other open items (time series, adaptive attacks, notes on the other laptop) are in
 `docs/plan.md`.
