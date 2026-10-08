@@ -1,6 +1,6 @@
 """Seam test: the whole pipeline on a tiny problem, pinned to fixed numbers.
 
-NAT (alpha=0) -> warm-started AT (alpha=0.01) -> post-hoc analysis of both, on CPU,
+NAT (beta=0) -> warm-started AT (beta=0.01) -> post-hoc analysis of both, on CPU,
 with tiny spirals and legendre d4r3. Every phase of the `ousterhout` refactor keeps
 this green, or changes an expected number on purpose and says why in the commit.
 
@@ -17,7 +17,7 @@ from tests.e2e.conftest import python
 
 # The two runs are the studies configs/studies/tests/seam_{nat,at}.yaml: tiny
 # spirals (400 points: 200 train, 100 valid, 100 test), legendre d4r3, seed 42.
-# NAT alpha=0, 40 epochs; AT warm from it, alpha=0.01, cw=0.5, PGD-5 Linf eps_rel
+# NAT beta=0, 40 epochs; AT warm from it, beta=0.01, cw=0.5, PGD-5 Linf eps_rel
 # 0.15, 5 epochs.
 STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 

@@ -50,20 +50,26 @@ defence is SGLD purification, the counterpart of the MPS's Gibbs purification.
 ## 2. Training
 
 One objective for both regimes and both models (`bm4tc/core/objective.py`,
-`bm4tc/core/train.py`, D15, D18, D71):
+`bm4tc/core/train.py`, D15, D18, D71, D86):
 
-    L = (1 − α) · [(1 − cw) · L_dis(x_adv) + cw · L_dis(x)] + α · L_gen(x)
+    L = (1 − β) · [(1 − cw) · L_dis(x_adv) + cw · L_dis(x)] + (β / N) · L_gen(x)
 
-- **NAT** (natural training): no attack, so L = (1 − α) · L_dis(x) + α · L_gen(x).
-  α = 0 is a plain discriminative classifier, α = 1 a pure density model.
+N = n + 1 counts the modelled variables (the n features and the class), so L_gen / N
+is the generative loss per variable and L is a weighted mean of per-variable NLLs:
+every loss is in **nats per variable** (D86).
+
+- **NAT** (natural training): no attack, so L = (1 − β) · L_dis(x) + (β / N) · L_gen(x)
+  = (1 − s) · L_dis + s · L_x with s = β·n/N and L_x = −log p(x) / n (nats per feature).
+  β = 0 is a plain discriminative classifier, β = 1 a pure density model. The
+  pre-D86 α (TPM) is the same objective up to a factor: β/(1−β) = N·α/(1−α).
 - **AT** (adversarial training): x_adv from PGD at radius ε (`trainer.evasion`);
   cw = `trainer.clean_weight`, 0 in every study (plain PGD-AT, not tuned: D80).
   The generative term always sees clean data. Training
   it on adversarial points would teach p(x) to like them, which defeats detection
   and purification (D18; kept in mind as an ablation). AT runs start from the
-  selected α = 0 NAT run of the same cell and seed (warm start, D19). The radius ramps
+  selected β = 0 NAT run of the same cell and seed (warm start, D19). The radius ramps
   up over the first 70% of epochs (curriculum, D40, D61).
-- **Norm control** (MPS): a soft penalty strength · (log Z − target)² keeps log Z
+- **Norm control** (MPS): a soft penalty strength · (log Z − target)² / N keeps log Z
   near a target, so the amplitudes stay in float range (`trainer.norm_control`;
   optional hard rescaling every k steps).
 - **Selection** (D8): every `eval_every` epochs the same objective is evaluated on the
@@ -76,14 +82,14 @@ One objective for both regimes and both models (`bm4tc/core/objective.py`,
 | Term | Meaning |
 |---|---|
 | `nat`, `at` | the regimes above (D10) |
-| α | weight of the generative term |
+| β | weight of the generative term per variable (D86); α in the TPM paper |
 | ε, δ, budget | attack radius ε, purification radius δ: **relative**, a fraction of the input range (legendre: [−1, 1], so ε = 0.1 is 0.2 in input units). One grid, `budgets` in `configs/defaults.yaml`, serves AT training, attacks, detection and purification (D3) |
 | study | `configs/studies/<name>.yaml`: a dataset, a regime, a model, a grid, seeds, an HPO space |
-| cell | one grid point: `legendre/d3r40/a0.01[/eps0.1]` |
+| cell | one grid point: `legendre/d3r40/b0.5[/eps0.1]` |
 | run | one (cell, seed): `outputs/<study>/<cell>/s<seed>/` |
 | paper | `configs/papers/<name>.yaml`: figures and tables drawn from studies |
 
-Names hold identity axes only, as prefix + value (`d3r40`, `a0.01`, `eps0.1`, `s3`).
+Names hold identity axes only, as prefix + value (`d3r40`, `b0.5`, `eps0.1`, `s3`).
 Learning rates and other hyperparameters never appear in names (D14).
 
 ## 4. Code map
@@ -124,7 +130,7 @@ neither `analysis` nor `pipeline`; `analysis` imports only `core`.
 ```
 configs/
   config.yaml        the run config: picks dataset, trainer preset, tracking
-  defaults.yaml      study-level defaults: seeds (5), α ladder, AT radius, HPO space,
+  defaults.yaml      study-level defaults: seeds (5), β ladder, AT radius, HPO space,
                      budgets, the analysis settings
   studies/           one file per study; studies/tests/ holds the seam studies
   hparams/           <study>.yaml, written by `select` only (D34)
@@ -149,7 +155,7 @@ init: warm                  # cold | warm; AT is always warm
 warm_from: mnist12_nat      # default [jem_]{dataset}_nat
 grid:                       # each axis overrides the default
   arch: [d3r20, d3r40]
-  alpha: [0, 1e-2]
+  beta: [0, 0.1, 0.5]
   eps: [0.1]                # AT only; must be in budgets
 config:                     # fixed run-config values, any schema key
   trainer.max_epoch: 100
@@ -182,7 +188,7 @@ python -m bm4tc prune   <study> --keep-one | --all | --old [--yes]
 python -m bm4tc figures <paper> [--item NAME]
 ```
 
-Options: `--cell legendre/d3r40/a0.01` and `--seed 3` (repeatable) narrow a stage;
+Options: `--cell legendre/d3r40/b0.5` and `--seed 3` (repeatable) narrow a stage;
 `--gpus 0,1 --per-gpu 2` runs units in parallel (each pinned to a GPU via
 `CUDA_VISIBLE_DEVICES`); `--replace` archives finished results whose config changed
 and redoes them.
@@ -212,7 +218,7 @@ in that order. The warm-start source of every run is recorded in its `run.json`.
 **Run directory:**
 
 ```
-outputs/<study>/<embedding>/<arch>/a<alpha>[/eps<eps>]/
+outputs/<study>/<embedding>/<arch>/b<beta>[/eps<eps>]/
   hpo/journal.log, hpo/t<n>/       trials (curves only)
   s<seed>/
     run.json                       identity, warm start, git sha, times, result, config + hash
@@ -253,8 +259,8 @@ mnist_headline:
   kind: table
   eps: 0.1                                  # fills {eps}; a list gives one output per budget
   models:                                   # each must select exactly one grid cell
-    - {study: mnist_nat, where: {alpha: 0.01}, label: "MPS $\\alpha=0.01$"}
-    - {study: jem_mnist_nat, where: {alpha: 0.01}, label: "JEM $\\alpha=0.01$"}
+    - {study: mnist_nat, where: {beta: 0.5}, label: "MPS $\\beta=0.5$"}
+    - {study: jem_mnist_nat, where: {beta: 0.5}, label: "JEM $\\beta=0.5$"}
   metrics:
     - {key: acc/test, label: Clean, best: max}
     - {key: "purify/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain}
@@ -262,7 +268,7 @@ mnist_headline:
 
 | Kind | Draws | From |
 |---|---|---|
-| `curve` | a metric against `x`: `alpha`, `bond_dim`, or `{x}` inside the key (ε, sweeps) | results.csv |
+| `curve` | a metric against `x`: `beta` (at ln(β/(1−β)), D86), `bond_dim`, or `{x}` inside the key (ε, sweeps) | results.csv |
 | `bars` | models × metrics at one budget | results.csv |
 | `coverage` | accuracy on passed examples vs fraction passed, over q | results.csv |
 | `table` | models × metrics, mean ± std, booktabs `.tex` | results.csv |

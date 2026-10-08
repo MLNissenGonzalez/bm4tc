@@ -52,22 +52,22 @@ def pair():
 def test_evaluate_agrees(dh, pair):
     off, on = pair
     for split in ("valid", "test"):
-        a = evaluate(off, dh.classification[split], CPU, alpha=0.5)
-        b = evaluate(on, dh.classification[split], CPU, alpha=0.5)
-        for k in ("objective", "loss_dis", "loss_gen", "acc"):
+        a = evaluate(off, dh.classification[split], CPU, beta=0.5)
+        b = evaluate(on, dh.classification[split], CPU, beta=0.5)
+        for k in ("objective", "loss_dis", "loss_x", "acc"):
             assert b[k] == pytest.approx(a[k], rel=1e-5), (split, k)
 
 
-@pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
-def test_loss_and_gradients_agree(dh, pair, alpha):
+@pytest.mark.parametrize("beta", [0.0, 0.5, 1.0])
+def test_loss_and_gradients_agree(dh, pair, beta):
     """Matched by name (the two models register parameters in different orders);
-    a missing grad (the norm net's boundaries at alpha=0) counts as zero."""
+    a missing grad (the norm net's boundaries at beta=0) counts as zero."""
     off, on = pair
     x, y = next(iter(dh.classification["train"]))
     losses, grads = [], []
     for m in (off, on):
         m.zero_grad()
-        loss = m.mixed_nll(x, y, alpha=alpha)
+        loss = m.mixed_nll(x, y, beta=beta)
         loss.backward()
         losses.append(loss.item())
         grads.append({n: p.grad if p.grad is not None else torch.zeros_like(p)
@@ -80,7 +80,7 @@ def test_loss_and_gradients_agree(dh, pair, alpha):
 
 
 def test_training_curves_agree(dh, pair):
-    """Five NAT epochs at alpha=0.5 from the same tensors and seed.
+    """Five NAT epochs at beta=0.5 from the same tensors and seed.
 
     lr=1e-3 on purpose: the boundary nodes' gradients are ~1e-7, the size of the
     float noise between the two contractions, and Adam rescales every element to
@@ -90,7 +90,7 @@ def test_training_curves_agree(dh, pair):
     curves = []
     for m in pair:
         torch.manual_seed(1)
-        cfg = TrainConfig(alpha=0.5, max_epoch=5, batch_size=64,
+        cfg = TrainConfig(beta=0.5, max_epoch=5, batch_size=64,
                           optimizer=OptimizerConfig(kwargs={"lr": 1e-3}))
         logged = []
         Trainer(m, cfg, dh.classification["train"], dh.classification["valid"], CPU).train(

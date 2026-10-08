@@ -60,7 +60,7 @@ def test_hpo_select_train(scratch):
         assert manifest["config"]["trainer"]["optimizer"]["kwargs"]["lr"] == \
             selected[job.cell.name]["trainer.optimizer.kwargs.lr"]
 
-    # AT HPO warm-starts every trial from the seed's alpha=0 NAT run.
+    # AT HPO warm-starts every trial from the seed's beta=0 NAT run.
     at = Study("tests/stages_at")
     stages.hpo(at, at.cells())
     stages.select(at)
@@ -130,7 +130,7 @@ def test_analyse_caches_each_part(scratch):
     stages.collect(nat)                                            # one run analysed
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == 1 and rows[0]["alpha"] == "0.0"
+    assert len(rows) == 1 and rows[0]["beta"] == "0.0"
     assert "trainer.optimizer.kwargs.lr" in rows[0] and "rob/test/0.1" in rows[0]
 
 
@@ -158,7 +158,7 @@ def test_run_in_parallel_then_status(scratch):
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:
         assert len(list(csv.DictReader(f))) == 2
     report = stages.status(nat)
-    assert "legendre/d4r3/a0" in report and "3/3" in report and "failed" not in report
+    assert "legendre/d4r3/b0" in report and "3/3" in report and "failed" not in report
 
 
 def test_pruner_follows_the_config():

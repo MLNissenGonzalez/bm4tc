@@ -221,6 +221,14 @@ Measured in [compute.md](compute.md).
   `Detection/attack failed: ; skipping` at every budget (`bm4tc/analysis/uq.py:556`:
   `next(iter(det.values()))` on empty percentiles). Harmless; guard it.
 
+### Sampling code
+Ask Martin to clone fork of tensorkrowch with development branch into 0git/. 
+non-finished sampling implementation on tensorkrowch on the develop branch
+- maybe resuse that implementation in tensorkrowch/models/mps/... sampling
+- it tries to be general and apply to fully sample form the learned distribution to conditional sampling for things like imputation or purification. 
+- look at the code, compare it with the sampling implementation in ConditionalBornMachine.
+- create a comparison, what one code is capable of what the other does not.
+- then discussion with questions on what to adapt from the tensorkrowch code and what not to 
 ## Phase 9 (separate track): tensorkrowch
 
 Verify each upstream candidate in [decisions.md](decisions.md#tensorkrowch-upstream-candidates-tensorkrowch-116)

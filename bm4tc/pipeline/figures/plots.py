@@ -2,7 +2,7 @@
 error bar. Each kind takes the item's spec and the output path without suffix,
 and returns the files it wrote.
 
-    curve      metric vs one axis: alpha, bond_dim, or {x} in the key (eps, sweeps)
+    curve      metric vs one axis: beta, bond_dim, or {x} in the key (eps, sweeps)
     bars       metrics (groups) x models (bars), at one budget
     coverage   accuracy on passed examples vs fraction passed, over the detection
                percentiles q (one curve per model)
@@ -21,7 +21,7 @@ from bm4tc.pipeline.figures.results import (Metric, Model, cell_stats, curve as 
 
 STYLE = {"font.size": 10, "axes.grid": True, "grid.alpha": 0.3, "legend.fontsize": 8,
          "figure.dpi": 150, "savefig.bbox": "tight", "pdf.fonttype": 42}
-XLABELS = {"alpha": r"$\alpha$", "bond_dim": "bond dimension $r$", "eps": r"$\varepsilon$",
+XLABELS = {"beta": r"$\beta$", "bond_dim": "bond dimension $r$", "eps": r"$\varepsilon$",
            "sweeps": "sweeps $k$", "q": "detection percentile $q$"}
 
 
@@ -33,12 +33,20 @@ def save(fig, out: Path) -> List[Path]:
     return [path]
 
 
-def _alpha_axis(ax, xs):
-    nonzero = sorted(x for x in xs if x > 0)
-    if nonzero:
-        ax.set_xscale("symlog", linthresh=nonzero[0], linscale=0.5)
-    ax.set_xticks(sorted(set(xs)))
-    ax.set_xticklabels([f"{x:g}" for x in sorted(set(xs))])
+def _beta_positions(betas) -> Dict[float, float]:
+    """Where each β sits on the x axis: at its log weight ratio ln(β/(1-β)) (D86),
+    so a ladder of equal ratio steps is evenly spaced; 0 and 1 one ladder step
+    (ln 10) beyond the outermost interior values."""
+    inner = {b: float(np.log(b / (1 - b))) for b in set(betas) if 0 < b < 1}
+    lo, hi = (min(inner.values()), max(inner.values())) if inner else (0.0, 0.0)
+    step = float(np.log(10))
+    return {**inner, 0.0: lo - step, 1.0: hi + step}
+
+
+def _beta_axis(ax, positions: Dict[float, float], betas):
+    ticks = sorted(set(betas))
+    ax.set_xticks([positions[b] for b in ticks])
+    ax.set_xticklabels([f"{b:g}" for b in ticks])
     ax.minorticks_off()
 
 
@@ -50,10 +58,14 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=spec.get("size", (4.5, 3.2)))
         right = None
-        xs = []
-        for i, s in enumerate(spec["series"]):
-            model, metric = Model.parse(s, spec.get("where")), Metric.parse(s)
-            c = curve_of(model, metric, x, **subs)
+        series = [(s, curve_of(Model.parse(s, spec.get("where")), Metric.parse(s), x, **subs))
+                  for s in spec["series"]]
+        xs = [v for _, c in series for v in c.x]
+        positions = _beta_positions(xs) if x == "beta" else None
+        for i, (s, c) in enumerate(series):
+            metric = Metric.parse(s)
+            if positions is not None:
+                c = c.assign(x=[positions[v] for v in c.x])
             if s.get("axis") == "right":
                 right = right or ax.twinx()
             target = right if s.get("axis") == "right" else ax
@@ -62,9 +74,8 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
                         ls=s.get("style", "-"), label=s.get("label", metric.key))
             target.fill_between(c.x, c["mean"] - c["std"], c["mean"] + c["std"],
                                 color=color, alpha=0.15, lw=0)
-            xs += list(c.x)
-        if x == "alpha":
-            _alpha_axis(ax, xs)
+        if positions is not None:
+            _beta_axis(ax, positions, xs)
         ax.set_xlabel(spec.get("xlabel", XLABELS.get(x, x)))
         ax.set_ylabel(spec.get("ylabel", ""))
         if "ylim" in spec:

@@ -20,7 +20,7 @@ def test_every_item_is_drawn(root):
     stdout = python(["-m", "bm4tc", "figures", "tests/seam"], root)
     assert "0 failed" in stdout
     names = {p.name for p in (root / "figures").iterdir()}
-    assert names == {"purify_vs_eps.pdf", "jem_alpha.pdf", "jem_sweeps.pdf",
+    assert names == {"purify_vs_eps.pdf", "jem_beta.pdf", "jem_sweeps.pdf",
                      "defenses_eps0.1.pdf", "defenses_eps0.15.pdf", "coverage.pdf",
                      "headline.tex", "density.pdf", "samples.pdf"}
     tex = (root / "figures" / "headline.tex").read_text()
@@ -35,7 +35,7 @@ def test_transfer_examples(root, monkeypatch):
     r = transfer_examples({
         "eps": 0.15, "delta": 0.1, "attack_steps": 5, "purify_steps": 5, "max_attack": 100,
         "models": [{"study": "tests/seam_nat"}, {"study": "tests/seam_at", "source": True},
-                   {"study": "tests/seam_jem_nat", "where": {"alpha": 0.5}}]})
+                   {"study": "tests/seam_jem_nat", "where": {"beta": 0.75}}]})
     keep, labels = r["keep"], r["labels"]
     assert r["source"] == 1 and len(keep) > 0
     assert float(r["clean"].min()) >= 0 and float(r["clean"].max()) <= 1

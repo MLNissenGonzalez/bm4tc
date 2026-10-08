@@ -129,7 +129,10 @@ class NormControlConfig:
 class NormRegularizer(nn.Module):
     """
     Partition-function norm regularization penalty (trainer-level).
-    Computes  strength * (log Z - log_target)²  where log Z = cbm.log_Z().
+    Computes  strength * (log Z - log_target)² / N  where log Z = cbm.log_Z() and
+    N = cbm.n_features. The /N matches the per-variable objective (D86): it gives
+    each site the same restoring force on every dataset, and at β=1 the loss is
+    exactly the α=1 loss of before (pilot A) divided by N.
 
     Parameters
     ----------
@@ -149,9 +152,9 @@ class NormRegularizer(nn.Module):
     def forward(self, cbm) -> torch.Tensor:
         # recompute=False reuses the with-gradient log Z from the same step's
         # mixed_nll forward (one norm contraction/step instead of two). Falls
-        # back to a fresh contraction if nothing is cached (e.g. alpha=0).
+        # back to a fresh contraction if nothing is cached (e.g. beta=0).
         log_Z: torch.Tensor = cbm.log_Z(recompute=False)
-        return self.strength * (log_Z - self.log_target) ** 2
+        return self.strength * (log_Z - self.log_target) ** 2 / cbm.n_features
 
 
 def resolve_log_target(cbm, nc: NormControlConfig) -> float:
@@ -216,18 +219,20 @@ def resolve_log_target(cbm, nc: NormControlConfig) -> float:
 
 class NormTracker:
     """Accumulate per-step training-side norm (log Z) and mean-amplitude
-    (log|ψ|²) statistics over one epoch, then emit one ``norm/*`` metric dict.
+    (log|ψ|²) statistics over one epoch, then emit one ``norm/*`` metric dict:
+    per site (divided by N = ``n_features``, D86), except ``norm/log_Z_headroom``,
+    which is absolute because overflow is.
 
     Reads ``cbm.forward_stats()``: the amplitude stats ``mixed_nll`` always
     forms, and the log Z the forward or the ``NormRegularizer`` forms when
-    ``alpha>0`` or ``soft_strength>0``, so it adds no contraction in the common
+    ``beta>0`` or ``soft_strength>0``, so it adds no contraction in the common
     cases. Call :meth:`record_amp` / :meth:`record_logZ` per step *before*
     ``optimizer.step()`` changes the parameters, then :meth:`finalize` once.
 
     Running max/min are kept alongside the mean so an intra-epoch explosion (a
     spike) survives aggregation instead of being smeared by the mean. ``log Z``
     is taken only from finite cache values; if it is never cached during the
-    epoch (``alpha=0`` with no soft norm control), :meth:`finalize` falls back to
+    epoch (``beta=0`` with no soft norm control), :meth:`finalize` falls back to
     a single post-epoch ``log_partition_function()`` snapshot.
     """
 
@@ -266,7 +271,7 @@ class NormTracker:
 
     def finalize(self, cbm) -> Dict[str, float]:
         if self._logZ_n == 0:
-            # alpha=0 without soft norm control never forms log Z during the
+            # beta=0 without soft norm control never forms log Z during the
             # step; take one post-epoch snapshot so norm/log_Z is still reported.
             with torch.no_grad():
                 try:
@@ -278,10 +283,11 @@ class NormTracker:
                 self._logZ_max = self._logZ_min = v
 
         out: Dict[str, float] = {}
+        n = cbm.n_features
         if self._logZ_n:
-            out["norm/log_Z_mean"] = self._logZ_sum / self._logZ_n
-            out["norm/log_Z_max"] = self._logZ_max
-            out["norm/log_Z_min"] = self._logZ_min
+            out["norm/log_Z_mean"] = self._logZ_sum / self._logZ_n / n
+            out["norm/log_Z_max"] = self._logZ_max / n
+            out["norm/log_Z_min"] = self._logZ_min / n
             # Amplitudes overflow once ‖ψ‖ = exp(log_Z/2) crosses the dtype max,
             # i.e. log_Z > 2·log(finfo.max) (≈177.45 for float32/complex64).
             ceiling = 2.0 * math.log(torch.finfo(cbm.dtype).max)
@@ -289,40 +295,47 @@ class NormTracker:
         # Emit each amp stat on its own guard: a step can contribute a finite
         # max/min even if its mean was non-finite (and vice versa).
         if self._amp_n:
-            out["norm/log_amp_sq_mean"] = self._amp_sum / self._amp_n
+            out["norm/log_amp_sq_mean"] = self._amp_sum / self._amp_n / n
         if math.isfinite(self._amp_max):
-            out["norm/log_amp_sq_max"] = self._amp_max
+            out["norm/log_amp_sq_max"] = self._amp_max / n
         if math.isfinite(self._amp_min):
-            out["norm/log_amp_sq_min"] = self._amp_min
+            out["norm/log_amp_sq_min"] = self._amp_min / n
         return out
 
 
-def mix(dis: float, gen: float, alpha: float) -> float:
-    """``(1-α)·dis + α·gen``, gated exactly as in :meth:`CBM.mixed_nll`.
+def n_vars(data: torch.Tensor) -> int:
+    """N, the number of modelled variables of a batch: its features and the class
+    (D86). The MPS's ``n_features`` is the same number."""
+    return data[0].numel() + 1
+
+
+def mix(dis: float, gen: float, beta: float, n: int) -> float:
+    """``(1-β)·dis + β·gen/N`` for N = ``n`` modelled variables (D86): the
+    objective in nats per variable, gated exactly as in :meth:`CBM.mixed_nll`.
 
     Each term is dropped rather than multiplied by a zero weight, so an endpoint
-    alpha never turns a non-finite half (a nan ``gen`` from a diverged ``log_Z``)
+    beta never turns a non-finite half (a nan ``gen`` from a diverged ``log_Z``)
     into a nan mix.
     """
-    out = (1.0 - alpha) * dis if alpha < 1.0 else 0.0
-    if alpha > 0.0:
-        out += alpha * gen
+    out = (1.0 - beta) * dis if beta < 1.0 else 0.0
+    if beta > 0.0:
+        out += beta * gen / n
     return out
 
 
 def evaluate(
     cbm, loader, device, *, log_Z=None,
-    alpha: float = 0.0, attack=None, eps_abs: float = 0.0,
+    beta: float = 0.0, attack=None, eps_abs: float = 0.0,
     clean_weight: float = 1.0, adv_indices=(), progress: bool = False,
 ) -> dict:
     """Validation (or test) metrics, and the training objective mirrored on them.
 
-    Without an attack, ``objective = mix(L_dis, L_gen, α)``. With one, it mirrors
-    the AT objective of :class:`bm4tc.core.train.Trainer`:
+    Without an attack, ``objective = mix(L_dis, L_gen, β, N)``. With one, it
+    mirrors the AT objective of :class:`bm4tc.core.train.Trainer`:
 
-        objective = (1-α)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
+        objective = (1-β)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
                         +    cw ·mean_{S_cln} L_dis(x)     ]
-                +   α ·mean_{all} L_gen(x)
+                +  (β/N)·mean_{all} L_gen(x)
 
     ``S_adv`` is the fixed sample subset given by ``adv_indices`` (positions in the
     loader's iteration order; non-train splits are built with ``shuffle=False``,
@@ -330,27 +343,27 @@ def evaluate(
     ``|S_adv| = (1-cw)·n`` makes the two weighted means reconstruct a single pass
     over the set while attacking only a ``(1-cw)`` fraction of it.
 
-    Every mean is over samples. ``loss_dis``/``loss_gen``/``acc`` are clean and
-    over the full set. With an attack, ``n_rob`` is ``|S_adv|``, and ``loss_adv``
+    Every mean is over samples. ``loss_dis``, ``loss_x`` and ``acc`` are clean and
+    over the full set; ``loss_x = -log p(x) / n`` is in nats per feature (D86). With an attack, ``n_rob`` is ``|S_adv|``, and ``loss_adv``
     (mean L_dis on x_adv) and ``rob`` are over ``S_adv``, omitted when it is empty
     (``clean_weight == 1``).
 
     Any model of :mod:`bm4tc.core.interface` (``cbm`` is its ``log_joint``):
     ``L_gen = log Z - log_joint(x)[y]``. ``log_Z`` None computes the MPS's exact
     one; JEM passes its SGLD estimate, or nan when there is no generative term
-    (then ``loss_gen`` is nan and the objective drops it).
+    (then ``loss_x`` is nan and the objective drops the generative term).
     """
     cbm.eval()
     if log_Z is None:
         with torch.no_grad():
             log_Z = cbm.log_partition_function()
         if not math.isfinite(log_Z.item()):
-            logger.warning(f"log_Z is non-finite ({log_Z.item()}); gen_loss will be nan.")
+            logger.warning(f"log_Z is non-finite ({log_Z.item()}); loss_x will be nan.")
     gen_finite = math.isfinite(float(log_Z))
 
     adv_indices = set(adv_indices) if attack is not None else set()
     offset = 0
-    dis_sum = gen_sum = 0.0      # clean, full set
+    dis_sum = gen_sum = marg_sum = 0.0      # clean, full set
     dis_adv_sum = 0.0            # adversarial, S_adv
     dis_cln_sum = 0.0            # clean, S_cln
     correct = total = 0
@@ -382,6 +395,7 @@ def evaluate(
             dis_cln_sum += dis[~mask].sum().item() if mask is not None else dis.sum().item()
             if gen_finite:
                 gen_sum += (log_Z - log_sq_obs).sum().item()
+                marg_sum += (log_Z - torch.logsumexp(las, dim=1)).sum().item()
 
         if mask is not None and bool(mask.any()):
             sub_data, sub_labels = data[mask], labels[mask]
@@ -399,11 +413,13 @@ def evaluate(
         return s / n if n else float("nan")
 
     dis_loss = _mean(dis_sum, total)
+    n = n_vars(data) if total else 1
     gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
-    out = {"loss_dis": dis_loss, "loss_gen": gen_loss, "acc": _mean(correct, total)}
+    loss_x = _mean(marg_sum, total) / (n - 1) if gen_finite else float("nan")
+    out = {"loss_dis": dis_loss, "loss_x": loss_x, "acc": _mean(correct, total)}
 
     if attack is None:
-        out["objective"] = mix(dis_loss, gen_loss, alpha)
+        out["objective"] = mix(dis_loss, gen_loss, beta, n)
         return out
 
     # Weighted means use the realised subset sizes, so a rounded |S_adv| stays
@@ -414,7 +430,7 @@ def evaluate(
         dis_term += (1.0 - clean_weight) * _mean(dis_adv_sum, n_adv)
     if n_cln:
         dis_term += clean_weight * _mean(dis_cln_sum, n_cln)
-    out["objective"] = mix(dis_term, gen_loss, alpha)
+    out["objective"] = mix(dis_term, gen_loss, beta, n)
     out["n_rob"] = n_adv
     if n_adv:
         out["loss_adv"] = dis_adv_sum / n_adv

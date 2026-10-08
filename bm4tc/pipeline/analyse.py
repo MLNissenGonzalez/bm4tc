@@ -82,10 +82,10 @@ def parts(analysis, model: str = "mps") -> Dict[str, Callable]:
 
 
 def clean(cbm, datahandler, analysis, budgets: List[float], device) -> Dict[str, float]:
-    jem = isinstance(cbm, JEMMLP)   # no exact log Z: no loss_gen on test
+    jem = isinstance(cbm, JEMMLP)   # no exact log Z: no loss_x on test
     m = evaluate(cbm, datahandler.classification[SPLIT], device,
                  log_Z=float("nan") if jem else None)
-    names = ("acc", "loss_dis") if jem else ("acc", "loss_dis", "loss_gen")
+    names = ("acc", "loss_dis") if jem else ("acc", "loss_dis", "loss_x")
     out = {key(name, SPLIT): m[name] for name in names}
     if analysis.rob_ceiling:
         X = datahandler.data[SPLIT].detach().cpu().numpy()
@@ -122,11 +122,16 @@ def _evaluate(cbm, datahandler, cfg: UQConfig, device, sweep_purifier=None) -> U
     return r
 
 
-def _attack_keys(r: UQResults, suffix: str = "") -> Dict[str, float]:
+def _n_features(datahandler) -> int:
+    return datahandler.data[SPLIT][0].numel()
+
+
+def _attack_keys(r: UQResults, n_features: int, suffix: str = "") -> Dict[str, float]:
+    """``log_px`` is per feature (D86), like ``loss_x``."""
     out = {}
     for eps, acc in r.adv_accuracies.items():
         out[key(f"rob{suffix}", SPLIT, eps)] = acc
-        out[key(f"log_px{suffix}", SPLIT, eps)] = float(r.adv_log_px[eps].mean())
+        out[key(f"log_px{suffix}", SPLIT, eps)] = float(r.adv_log_px[eps].mean()) / n_features
     for (pct, eps), rate in r.detection_rates.items():
         q = f"q{pct:g}"
         out[key(f"detect{suffix}", SPLIT, eps, q)] = rate
@@ -141,8 +146,9 @@ def _attack_keys(r: UQResults, suffix: str = "") -> Dict[str, float]:
 
 def uq(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     r = _evaluate(cbm, datahandler, _uq_config(analysis, budgets), device)
-    out = _attack_keys(r)
-    out[key("log_px", SPLIT, 0)] = float(r.clean_log_px.mean())
+    n = _n_features(datahandler)
+    out = _attack_keys(r, n)
+    out[key("log_px", SPLIT, 0)] = float(r.clean_log_px.mean()) / n
     for pct, rate in r.clean_flagged.items():
         out[key("detect", SPLIT, 0, f"q{pct:g}")] = rate
     for delta, m in r.clean_purification_results.items():
@@ -152,7 +158,8 @@ def uq(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
 
 def uq_joint(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     cfg = _uq_config(analysis, budgets, attack_method="JOINT_PGD")
-    return _attack_keys(_evaluate(cbm, datahandler, cfg, device), "_joint")
+    return _attack_keys(_evaluate(cbm, datahandler, cfg, device), _n_features(datahandler),
+                        "_joint")
 
 
 def _sweep(name: str, cbm, datahandler, analysis, budgets, device, purifier=None):

@@ -84,7 +84,7 @@ class UQConfig:
     # Sweeps are ~99% of UQ cost and reduce to a mean over the test set, so it runs on a
     # fixed random subsample (cheap metrics keep the full set). None = full set.
     sweep_subsample: Optional[int] = None
-    sweep_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/alphas (paired)
+    sweep_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/betas (paired)
 
     # Memory control
     eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch

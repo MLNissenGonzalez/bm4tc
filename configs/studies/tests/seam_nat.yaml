@@ -4,7 +4,7 @@ regime: nat
 seeds: [42]
 grid:
   arch: [d4r3]
-  alpha: [0]
+  beta: [0]
 config:
   dataset.gen_dow_kwargs.size: 200
   trainer.max_epoch: 40

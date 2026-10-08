@@ -1,10 +1,10 @@
-# MNIST 28x28, PGD-AT (D43, D46), warm from mnist_nat's alpha=0 runs.
+# MNIST 28x28, PGD-AT (D43, D46), warm from mnist_nat's beta=0 runs.
 dataset: mnist
 regime: at
 init: warm
 grid:
   arch: ???                    # the rank mnist_capacity selects (D44)
-  alpha: [0, 1e-2, 1e-1]
+  beta: [0, 0.1, 0.5]           # D86, revisit after the β pilots
 config:
   trainer.max_epoch: 100
   trainer.batch_size: 512

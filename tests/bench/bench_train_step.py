@@ -52,10 +52,10 @@ def bench(regime: str, steps: int, epochs: int, device: torch.device) -> list[fl
     cbm = ConditionalBornMachine(born, N_FEATURES, N_CLASSES, device)
     dh = _datahandler(cbm, steps)
     if regime == "nat":
-        cfg = _config(CONFIGS / "trainer/nat.yaml", alpha=0.0, max_epoch=epochs, save=False)
+        cfg = _config(CONFIGS / "trainer/nat.yaml", beta=0.0, max_epoch=epochs, save=False)
     else:
         cfg = _config(CONFIGS / "trainer/at.yaml",
-                      alpha=0.0, max_epoch=epochs, eval_every=1, save=False)
+                      beta=0.0, max_epoch=epochs, eval_every=1, save=False)
     trainer = Trainer(cbm, cfg, dh.classification["train"], dh.classification["valid"], device)
 
     times = []

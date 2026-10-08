@@ -70,7 +70,7 @@ def _ready(t, *, norm_regularizer=None, log_target=0.0):
 
 def test_train_config_defaults():
     cfg = TrainConfig()
-    assert cfg.alpha == 0.0
+    assert cfg.beta == 0.0
     assert cfg.evasion is None  # NAT
     assert cfg.eval_every == 1
     assert cfg.patience == 250
@@ -132,7 +132,7 @@ def test_curriculum_reaches_the_full_radius_at_its_end_fraction():
 def test_norm_regularizer_zero_at_target():
     log_target = math.log(2.5)
     reg = NormRegularizer(strength=1.0, log_target=log_target)
-    cbm = MagicMock()
+    cbm = MagicMock(n_features=5)
     cbm.log_Z.return_value = torch.tensor(log_target)
     penalty = reg(cbm)
     cbm.log_Z.assert_called_once_with(recompute=False)
@@ -140,10 +140,11 @@ def test_norm_regularizer_zero_at_target():
 
 
 def test_norm_regularizer_nonzero_off_target():
+    """strength·(log Z − target)²/N: per site (D86)."""
     reg = NormRegularizer(strength=3.0, log_target=0.0)
-    cbm = MagicMock()
+    cbm = MagicMock(n_features=4)
     cbm.log_Z.return_value = torch.tensor(2.0)
-    assert reg(cbm).item() == pytest.approx(3.0 * 2.0 ** 2, rel=1e-5)
+    assert reg(cbm).item() == pytest.approx(3.0 * 2.0 ** 2 / 4, rel=1e-5)
 
 
 def test_norm_regularizer_invalid_target():
@@ -171,10 +172,10 @@ def test_log_target_resolves_float_expression_and_pretrained():
 def test_diagnostics_uses_caches_without_recontracting():
     """When mixed_nll has populated the caches, _diagnostics reads them and does
     not contract the norm again."""
-    t = _trainer(TrainConfig(alpha=1.0))
+    t = _trainer(TrainConfig(beta=1.0))
     cbm = t.cbm
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
-    cbm.mixed_nll(x, y, alpha=1.0)            # populates both caches
+    cbm.mixed_nll(x, y, beta=1.0)            # populates both caches
     with patch.object(cbm, "log_partition_function",
                       wraps=cbm.log_partition_function) as mock_logZ:
         diag = t._diagnostics(x)
@@ -185,7 +186,7 @@ def test_diagnostics_uses_caches_without_recontracting():
 
 
 def test_diagnostics_falls_back_when_cache_empty():
-    t = _trainer(TrainConfig(alpha=1.0))
+    t = _trainer(TrainConfig(beta=1.0))
     assert t.cbm.forward_stats() == {}
     diag = t._diagnostics(torch.rand(4, 2))
     assert math.isfinite(diag["log_Z"])
@@ -227,7 +228,7 @@ def test_nonfinite_loss_collapses_after_one_retry(evasion):
     assert t._collapsed
     assert m_reset.called
     assert t.step == 1
-    # alpha=0, cw=0: one forward per objective (AT: the adversarial one only)
+    # beta=0, cw=0: one forward per objective (AT: the adversarial one only)
     assert m.call_count == 2  # the first try and one retry
 
 
@@ -243,10 +244,10 @@ def test_runtime_error_collapses_but_oom_is_raised():
 
 # ── Norm control in the epoch loop ─────────────────────────────────────────
 
-def test_alpha0_skips_per_step_log_partition_function():
-    """NAT alpha=0 without norm control contracts the norm once per epoch: the
+def test_beta0_skips_per_step_log_partition_function():
+    """NAT beta=0 without norm control contracts the norm once per epoch: the
     NormTracker's end-of-epoch snapshot, not once per step."""
-    t = _ready(_trainer(TrainConfig(alpha=0.0, norm_control=NO_NORM)))  # 4 steps
+    t = _ready(_trainer(TrainConfig(beta=0.0, norm_control=NO_NORM)))  # 4 steps
     with patch.object(t.cbm, "log_partition_function",
                       wraps=t.cbm.log_partition_function) as mock_logZ:
         t._train_epoch(eps_abs=0.0)
@@ -255,14 +256,14 @@ def test_alpha0_skips_per_step_log_partition_function():
 
 
 @pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
-def test_alpha0_soft_norm_control_multistep_backward(evasion):
-    """Regression: alpha=0 + soft norm control trains across several steps.
+def test_beta0_soft_norm_control_multistep_backward(evasion):
+    """Regression: beta=0 + soft norm control trains across several steps.
 
     The regularizer reads the with-grad log Z via recompute=False and mixed_nll
-    never refreshes it at alpha=0; without per-step invalidation the second step
+    never refreshes it at beta=0; without per-step invalidation the second step
     backwards through the first step's freed graph."""
     nc = NormControlConfig(hard_every=0, soft_strength=1.0, log_target=0.0)
-    t = _ready(_trainer(TrainConfig(alpha=0.0, evasion=evasion, norm_control=nc)),
+    t = _ready(_trainer(TrainConfig(beta=0.0, evasion=evasion, norm_control=nc)),
                norm_regularizer=NormRegularizer(strength=1.0, log_target=0.0))
     t._train_epoch(eps_abs=0.1)
     assert not t._collapsed
@@ -290,7 +291,7 @@ def test_hard_renorm_called_every_step():
 def test_norm_stats_populated_after_epoch():
     t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=NO_NORM)))
     t._train_epoch(eps_abs=0.1)
-    # alpha=0 / no soft → log_Z via the end-of-epoch snapshot; amp from the adv forward.
+    # beta=0 / no soft → log_Z via the end-of-epoch snapshot; amp from the adv forward.
     for k in ("norm/log_Z_mean", "norm/log_Z_max", "norm/log_amp_sq_mean"):
         assert math.isfinite(t._norm_stats[k]), k
 
@@ -298,8 +299,10 @@ def test_norm_stats_populated_after_epoch():
 # ── NormTracker ─────────────────────────────────────────────────────────────
 
 class _FakeNormCBM:
-    """Minimal cbm exposing what NormTracker reads: forward_stats() and dtype."""
-    def __init__(self, dtype=torch.complex64, snapshot=3.0):
+    """Minimal cbm exposing what NormTracker reads: forward_stats(), dtype and
+    n_features (1: the per-site values equal the absolute ones)."""
+    def __init__(self, dtype=torch.complex64, snapshot=3.0, n_features=1):
+        self.n_features = n_features
         self.log_Z = None
         self.amp = {}
         self.dtype = dtype
@@ -336,6 +339,23 @@ def test_norm_tracker_aggregates_mean_max_min():
     assert out["norm/log_Z_headroom"] == pytest.approx(ceiling - 5.0)
 
 
+def test_norm_tracker_reports_per_site_but_headroom_absolute():
+    """norm/log_Z_* and norm/log_amp_sq_* are divided by N; the headroom is not
+    (overflow happens at an absolute log Z, D86)."""
+    t = NormTracker()
+    cbm = _FakeNormCBM(n_features=4)
+    cbm.log_Z = 8.0
+    cbm.amp = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
+    t.record_amp(cbm)
+    t.record_logZ(cbm)
+    out = t.finalize(cbm)
+    assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 2.0
+    assert (out["norm/log_amp_sq_mean"], out["norm/log_amp_sq_max"],
+            out["norm/log_amp_sq_min"]) == (-0.5, -0.25, -0.75)
+    ceiling = 2.0 * math.log(torch.finfo(torch.complex64).max)
+    assert out["norm/log_Z_headroom"] == pytest.approx(ceiling - 8.0)
+
+
 def test_norm_tracker_logZ_snapshot_fallback():
     t = NormTracker()
     cbm = _FakeNormCBM(snapshot=3.0)
@@ -367,12 +387,14 @@ def test_norm_tracker_ignores_nonfinite():
 # from the clean one (tag 0.0) purely from the returned loss.
 _L_DIS = {0.0: 2.0, 1.0: 3.0}
 _L_GEN = {0.0: 7.0, 1.0: 8.0}
+_N = 3   # modelled variables of the stub
 
 
 class _DecompStubCBM:
     """Stub whose mixed_nll decomposes exactly like the real one:
-    ``mixed_nll(x, y, a) = (1-a)*L_dis(x) + a*L_gen(x)``, with L_dis/L_gen keyed off
-    a per-batch tag, so the weighting can be checked in closed form."""
+    ``mixed_nll(x, y, b) = (1-b)*L_dis(x) + (b/N)*L_gen(x)``, with L_dis/L_gen keyed
+    off a per-batch tag, so the weighting can be checked in closed form."""
+    n_features = _N
 
     def __init__(self):
         self.param = torch.nn.Parameter(torch.zeros(1))
@@ -382,11 +404,11 @@ class _DecompStubCBM:
     def eval(self): pass
     def forward_stats(self): return {}
 
-    def mixed_nll(self, data, labels, alpha, debug=False):
+    def mixed_nll(self, data, labels, beta, debug=False):
         tag = float(data[0, 0])
-        self.calls.append((tag, alpha))
+        self.calls.append((tag, beta))
         # param keeps the result a graph leaf so backward() works in _train_epoch
-        return self.param.sum() + (1 - alpha) * _L_DIS[tag] + alpha * _L_GEN[tag]
+        return self.param.sum() + (1 - beta) * _L_DIS[tag] + beta / _N * _L_GEN[tag]
 
 
 class _OnesAttack:
@@ -394,11 +416,11 @@ class _OnesAttack:
         return torch.ones_like(naturals)
 
 
-def _stub_trainer(alpha, cw, *, attack=True):
+def _stub_trainer(beta, cw, *, attack=True):
     """Trainer wired with just what _objective / _train_epoch touch."""
     cbm = _DecompStubCBM()
     t = Trainer.__new__(Trainer)
-    t.cfg = TrainConfig(alpha=alpha, clean_weight=cw, norm_control=NO_NORM)
+    t.cfg = TrainConfig(beta=beta, clean_weight=cw, norm_control=NO_NORM)
     t.cbm = cbm
     t.device = CPU
     t.step = 0
@@ -416,46 +438,46 @@ def _objective(t):
     return t._objective(torch.zeros(4, 2), torch.zeros(4, dtype=torch.long), 0.1, NormTracker())
 
 
-def _naive_at_loss(alpha, cw):
+def _naive_at_loss(beta, cw):
     """The three-term form the two-call implementation must reproduce."""
-    return (1 - alpha) * ((1 - cw) * _L_DIS[1.0] + cw * _L_DIS[0.0]) + alpha * _L_GEN[0.0]
+    return (1 - beta) * ((1 - cw) * _L_DIS[1.0] + cw * _L_DIS[0.0]) + beta / _N * _L_GEN[0.0]
 
 
 def test_at_objective_matches_naive_three_term_form():
-    for alpha, cw in [(0.5, 0.3), (0.1, 0.0), (0.9, 0.7), (0.25, 1.0), (0.0, 0.4)]:
-        t, _ = _stub_trainer(alpha, cw)
-        assert _objective(t).item() == pytest.approx(_naive_at_loss(alpha, cw), abs=1e-6)
+    for beta, cw in [(0.5, 0.3), (0.1, 0.0), (0.9, 0.7), (0.25, 1.0), (0.0, 0.4)]:
+        t, _ = _stub_trainer(beta, cw)
+        assert _objective(t).item() == pytest.approx(_naive_at_loss(beta, cw), abs=1e-6)
 
 
-def test_at_objective_uses_two_forwards_with_rescaled_alpha():
-    alpha, cw = 0.5, 0.3
-    t, cbm = _stub_trainer(alpha, cw)
+def test_at_objective_uses_two_forwards_with_rescaled_beta():
+    beta, cw = 0.5, 0.3
+    t, cbm = _stub_trainer(beta, cw)
     _objective(t)
-    s = (1 - alpha) * cw + alpha
+    s = (1 - beta) * cw + beta
     assert len(cbm.calls) == 2, cbm.calls
     assert cbm.calls[0] == (1.0, 0.0)           # adversarial batch, discriminative
     assert cbm.calls[1][0] == 0.0               # clean batch
-    assert cbm.calls[1][1] == pytest.approx(alpha / s)
+    assert cbm.calls[1][1] == pytest.approx(beta / s)
 
 
-def test_at_objective_at_alpha0_cw0_is_adversarial_dis_loss():
+def test_at_objective_at_beta0_cw0_is_adversarial_dis_loss():
     t, cbm = _stub_trainer(0.0, 0.0)
     assert _objective(t).item() == pytest.approx(_L_DIS[1.0])
     assert cbm.calls == [(1.0, 0.0)]
 
 
-def test_at_objective_at_alpha1_drops_the_adversarial_term():
+def test_at_objective_at_beta1_drops_the_adversarial_term():
     t, cbm = _stub_trainer(1.0, 0.3)
-    assert _objective(t).item() == pytest.approx(_L_GEN[0.0])
+    assert _objective(t).item() == pytest.approx(_L_GEN[0.0] / _N)
     assert cbm.calls == [(0.0, 1.0)]
 
 
-@pytest.mark.parametrize("alpha", [0.0, 0.01, 0.5, 1.0])
-def test_nat_objective_is_one_mixed_nll_at_alpha(alpha):
-    """No attack: exactly mixed_nll(x, alpha), not a rescaled call."""
-    t, cbm = _stub_trainer(alpha, 0.3, attack=False)
-    assert _objective(t).item() == pytest.approx((1 - alpha) * 2.0 + alpha * 7.0)
-    assert cbm.calls == [(0.0, alpha)]
+@pytest.mark.parametrize("beta", [0.0, 0.01, 0.5, 1.0])
+def test_nat_objective_is_one_mixed_nll_at_beta(beta):
+    """No attack: exactly mixed_nll(x, beta), not a rescaled call."""
+    t, cbm = _stub_trainer(beta, 0.3, attack=False)
+    assert _objective(t).item() == pytest.approx((1 - beta) * 2.0 + beta * 7.0 / _N)
+    assert cbm.calls == [(0.0, beta)]
 
 
 def test_train_epoch_routes_through_the_objective():
@@ -485,27 +507,44 @@ def _ready_cbm():
 def test_evaluate_is_per_sample_not_per_batch():
     """A short last batch is not over-weighted: batching does not change the means."""
     cbm = _ready_cbm()
-    whole = evaluate(cbm, _valid_loader(n=20, batch_size=20), CPU, alpha=0.5)
-    ragged = evaluate(cbm, _valid_loader(n=20, batch_size=6), CPU, alpha=0.5)
-    for k in ("loss_dis", "loss_gen", "acc", "objective"):
+    whole = evaluate(cbm, _valid_loader(n=20, batch_size=20), CPU, beta=0.5)
+    ragged = evaluate(cbm, _valid_loader(n=20, batch_size=6), CPU, beta=0.5)
+    for k in ("loss_dis", "loss_x", "acc", "objective"):
         assert ragged[k] == pytest.approx(whole[k], rel=1e-5), k
 
 
 def test_evaluate_without_attack_is_the_clean_mix():
     cbm = _ready_cbm()
-    out = evaluate(cbm, _valid_loader(), CPU, alpha=0.3)
-    assert set(out) == {"objective", "loss_dis", "loss_gen", "acc"}
-    assert out["objective"] == mix(out["loss_dis"], out["loss_gen"], 0.3)
+    out = evaluate(cbm, _valid_loader(), CPU, beta=0.3)
+    assert set(out) == {"objective", "loss_dis", "loss_x", "acc"}
+    assert out["objective"] == pytest.approx(_clean_mix(out, 0.3, n=2), rel=1e-6)
+
+
+def _clean_mix(out, beta, n):
+    """(1-s)·loss_dis + s·loss_x, s = β·n/N: the objective as a weighted mean of
+    nats per label and nats per feature (D86)."""
+    s = beta * n / (n + 1)
+    return (1 - s) * out["loss_dis"] + s * out["loss_x"]
+
+
+def test_evaluate_loss_x_is_the_marginal_nll_per_feature():
+    cbm = _ready_cbm()
+    loader = _valid_loader()
+    out = evaluate(cbm, loader, CPU)
+    xs = torch.cat([x for x, _ in loader])
+    with torch.no_grad():
+        ref = -cbm.marginal_log_probability(xs).mean().item() / xs.shape[1]
+    assert out["loss_x"] == pytest.approx(ref, abs=1e-5)
 
 
 def test_evaluate_clean_metrics_do_not_depend_on_the_attack():
-    """acc/loss_dis/loss_gen are clean and over the full set."""
+    """acc/loss_dis/loss_x are clean and over the full set."""
     cbm = _ready_cbm()
     loader = _valid_loader()
-    out = evaluate(cbm, loader, CPU, alpha=0.5, attack=_ShiftAttack(), eps_abs=0.1,
+    out = evaluate(cbm, loader, CPU, beta=0.5, attack=_ShiftAttack(), eps_abs=0.1,
                    clean_weight=0.3, adv_indices={0, 1, 2})
-    clean = evaluate(cbm, loader, CPU, alpha=0.5)
-    for k in ("loss_dis", "loss_gen", "acc"):
+    clean = evaluate(cbm, loader, CPU, beta=0.5)
+    for k in ("loss_dis", "loss_x", "acc"):
         assert out[k] == pytest.approx(clean[k], rel=1e-6), k
 
 
@@ -515,7 +554,7 @@ def test_evaluate_attacks_only_the_given_subset():
     all_x = torch.cat([x for x, _ in loader])
     adv_indices = {1, 5, 6, 13, 19}
     attack = _ShiftAttack()
-    out = evaluate(cbm, loader, CPU, alpha=0.5, attack=attack, eps_abs=0.1,
+    out = evaluate(cbm, loader, CPU, beta=0.5, attack=attack, eps_abs=0.1,
                    clean_weight=0.75, adv_indices=adv_indices)
     assert out["n_rob"] == len(adv_indices)
     attacked = torch.cat(attack.seen)
@@ -524,7 +563,7 @@ def test_evaluate_attacks_only_the_given_subset():
 
 def test_evaluate_rob_absent_when_no_samples_attacked():
     """clean_weight=1 => empty subset => 'rob' omitted rather than nan."""
-    out = evaluate(_ready_cbm(), _valid_loader(), CPU, alpha=0.5, attack=_ShiftAttack(),
+    out = evaluate(_ready_cbm(), _valid_loader(), CPU, beta=0.5, attack=_ShiftAttack(),
                    eps_abs=0.1, clean_weight=1.0, adv_indices=set())
     assert "rob" not in out
     assert out["n_rob"] == 0
@@ -542,10 +581,10 @@ def test_evaluate_objective_matches_hand_computed_reference():
     """The objective reproduces the AT training objective, sample by sample."""
     cbm = _ready_cbm()
     loader = _valid_loader(n=20, batch_size=6)
-    alpha, cw, shift = 0.4, 0.35, 0.05
+    beta, cw, shift = 0.4, 0.35, 0.05
     adv_indices = {0, 3, 4, 9, 11, 15, 17}
 
-    out = evaluate(cbm, loader, CPU, alpha=alpha, attack=_ShiftAttack(shift),
+    out = evaluate(cbm, loader, CPU, beta=beta, attack=_ShiftAttack(shift),
                    eps_abs=0.1, clean_weight=cw, adv_indices=adv_indices)
 
     xs = torch.cat([x for x, _ in loader])
@@ -563,13 +602,13 @@ def test_evaluate_objective_matches_hand_computed_reference():
     with torch.no_grad():
         las_all = cbm.log_amp_sq(xs)
     gen_all = (log_Z - las_all[range(len(ys)), ys]).mean().item()
-    ref = (1 - alpha) * (
+    ref = (1 - beta) * (
         (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)
-    ) + alpha * gen_all
+    ) + beta * gen_all / (xs.shape[1] + 1)
 
     assert out["objective"] == pytest.approx(ref, abs=1e-4)
-    # The clean alpha-mix is not the objective: it never sees x_adv.
-    assert abs(out["objective"] - mix(out["loss_dis"], out["loss_gen"], alpha)) > 1e-6
+    # The clean beta-mix is not the objective: it never sees x_adv.
+    assert abs(out["objective"] - _clean_mix(out, beta, n=xs.shape[1])) > 1e-6
 
 
 # ── Selection ───────────────────────────────────────────────────────────────
@@ -613,7 +652,7 @@ def test_nonfinite_objective_is_never_selected():
 @pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
 def test_validates_every_eval_every_epochs(evasion):
     """Valid metrics appear on eval epochs only; patience counts valid events."""
-    t = _trainer(TrainConfig(alpha=0.5, evasion=evasion, clean_weight=0.5, max_epoch=9,
+    t = _trainer(TrainConfig(beta=0.5, evasion=evasion, clean_weight=0.5, max_epoch=9,
                              eval_every=3, norm_control=NO_NORM), n=20, batch_size=5)
     logged = []
     t.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
@@ -655,7 +694,7 @@ def test_micro_batches_take_the_full_batch_step(evasion):
     tensors = []
     for micro in (None, 2):
         torch.manual_seed(1)
-        cfg = TrainConfig(alpha=0.5, evasion=evasion, micro_batch_size=micro,
+        cfg = TrainConfig(beta=0.5, evasion=evasion, micro_batch_size=micro,
                           norm_control=NO_NORM)
         t = Trainer(_tiny_cbm(), cfg, *loaders, CPU)
         _ready(t, norm_regularizer=NormRegularizer(strength=1e-2, log_target=0.0))

@@ -1,7 +1,7 @@
-# JEM baseline on MNIST 12x12, NAT, the default alpha ladder, cold (D35). arch is
+# JEM baseline on MNIST 12x12, NAT, the default beta ladder, cold (D35). arch is
 # the MPS each JEM is sized to: two hidden layers, real parameter count nearest to
 # the MPS's real degrees of freedom (D70). HPO space from the rebuttal's JEM HPO
-# (lr, energy penalty, training SGLD); at alpha=0 the SGLD knobs are unused.
+# (lr, energy penalty, training SGLD); at beta=0 the SGLD knobs are unused.
 dataset: mnist12
 model: jem
 regime: nat

@@ -17,7 +17,7 @@ def _data(cbm, n=8):
 def test_mps_derived_quantities_are_its_own(cbm):
     x, y = _data(cbm)
     assert torch.equal(class_probabilities(cbm, x), cbm.class_probabilities(x))
-    assert torch.equal(nll(cbm, x, y), cbm.mixed_nll(x, y, alpha=0.0))
+    assert torch.equal(nll(cbm, x, y), cbm.mixed_nll(x, y, beta=0.0))
     if cbm.accumulate:
         assert torch.equal(log_px(cbm, x), cbm.marginal_log_probability(x))
     else:
@@ -27,7 +27,7 @@ def test_mps_derived_quantities_are_its_own(cbm):
 def test_nll_gradient_matches_mixed_nll(cbm):
     x, y = _data(cbm)
     grads = []
-    for loss in (lambda d: nll(cbm, d, y), lambda d: cbm.mixed_nll(d, y, alpha=0.0)):
+    for loss in (lambda d: nll(cbm, d, y), lambda d: cbm.mixed_nll(d, y, beta=0.0)):
         d = x.clone().requires_grad_(True)
         loss(d).backward()
         grads.append(d.grad)

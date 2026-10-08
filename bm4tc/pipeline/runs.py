@@ -1,14 +1,14 @@
 """Studies, jobs and runs: the one owner of run names, run directories and run.json.
 
 A study (``configs/studies/<name>.yaml``, merged onto ``configs/defaults.yaml``)
-is a grid of cells (embedding x arch x alpha [x eps for AT]) times seeds. Each
+is a grid of cells (embedding x arch x beta [x eps for AT]) times seeds. Each
 (cell, seed) is a :class:`Job`; :meth:`Job.compose` builds its run config with the
 Hydra compose API on the schema (D25).
 
 Names follow D14: identity axes only, as prefix + value (``d3r40``, ``a0.01``,
 ``eps0.1``, ``s3``). A run lives at::
 
-    {data root}/outputs/{study}/{embedding}/{arch}/a{alpha}[/eps{eps}]/s{seed}/
+    {data root}/outputs/{study}/{embedding}/{arch}/b{beta}[/eps{eps}]/s{seed}/
 
 and is finished when it holds ``run.json`` (D17): identity, warm-start source,
 git sha, launch time, the resolved config and its hash. Nothing parses run paths;
@@ -60,7 +60,7 @@ def outputs_root() -> Path:
 class GridConfig:
     embedding: List[str] = MISSING
     arch: List[str] = MISSING          # d{in_dim}r{bond_dim}, e.g. d3r40
-    alpha: List[float] = MISSING
+    beta: List[float] = MISSING        # weight of the generative term per variable (D86)
     eps: List[float] = MISSING         # AT training radius (eps_rel); NAT ignores it
 
 
@@ -82,7 +82,7 @@ class HPOConfig:
 @dataclass
 class HparamsFromConfig:
     """Selected hparams taken from another study's matching cell (same embedding,
-    arch, alpha): e.g. JEM-AT's SGLD settings from the JEM NAT study."""
+    arch, beta): e.g. JEM-AT's SGLD settings from the JEM NAT study."""
     study: str = MISSING
     params: List[str] = MISSING
 
@@ -131,7 +131,7 @@ class StudyConfig:
     regime: str = MISSING              # nat | at
     model: str = "mps"                 # mps | jem (JEM: embedding axis [raw], D70)
     init: str = "cold"                 # cold | warm; AT is always warm (D19)
-    warm_from: Optional[str] = None    # the study holding the alpha=0 NAT runs; default [jem_]{dataset}_nat
+    warm_from: Optional[str] = None    # the study holding the beta=0 NAT runs; default [jem_]{dataset}_nat
     seeds: Any = MISSING               # n (seeds 1..n) or a list of seeds
     grid: GridConfig = field(default_factory=GridConfig)
     embeddings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -160,13 +160,13 @@ def parse_arch(arch: str) -> tuple[int, int]:
 class Cell:
     embedding: str
     arch: str
-    alpha: float
+    beta: float
     eps: Optional[float] = None        # AT only
 
     @property
     def name(self) -> str:
-        """``legendre/d3r40/a0.01[/eps0.1]``: the cell's path below its study."""
-        name = f"{self.embedding}/{self.arch}/a{self.alpha:g}"
+        """``legendre/d3r40/b0.5[/eps0.1]``: the cell's path below its study."""
+        name = f"{self.embedding}/{self.arch}/b{self.beta:g}"
         return name if self.eps is None else f"{name}/eps{self.eps:g}"
 
     def values(self, model: str = "mps") -> Dict[str, Any]:
@@ -179,7 +179,7 @@ class Cell:
             values = {"born.embedding": self.embedding, "born.init_kwargs.in_dim": in_dim,
                       "born.init_kwargs.bond_dim": bond_dim}
         values["model"] = model
-        values["trainer.alpha"] = self.alpha
+        values["trainer.beta"] = self.beta
         if self.eps is not None:
             values["trainer.evasion.eps_rel"] = [self.eps]
         return values
@@ -235,8 +235,8 @@ class Study:
     def cells(self) -> List[Cell]:
         g = self.cfg.grid
         eps = list(g.eps) if self.regime == "at" else [None]
-        return [Cell(e, a, float(al), None if ep is None else float(ep))
-                for e, a, al, ep in itertools.product(g.embedding, g.arch, g.alpha, eps)]
+        return [Cell(e, a, float(b), None if ep is None else float(ep))
+                for e, a, b, ep in itertools.product(g.embedding, g.arch, g.beta, eps)]
 
     def jobs(self) -> List["Job"]:
         return [Job(self, cell, seed) for cell in self.cells() for seed in self.seeds()]
@@ -284,7 +284,7 @@ class Study:
         if source is None:
             return {}
         other = Study(source.study)
-        selected = other.hparams(Cell(cell.embedding, cell.arch, cell.alpha))
+        selected = other.hparams(Cell(cell.embedding, cell.arch, cell.beta))
         missing = set(source.params) - set(selected)
         if missing:
             raise LookupError(f"{self.name}: hparams_from {source.study} has no "
@@ -315,7 +315,7 @@ class Job:
         return {"study": self.study.name, "dataset": self.study.cfg.dataset,
                 "model": self.study.cfg.model, "regime": self.study.regime,
                 "embedding": c.embedding, "arch": c.arch,
-                "alpha": c.alpha, "eps": c.eps, "seed": self.seed}
+                "beta": c.beta, "eps": c.eps, "seed": self.seed}
 
     def wandb(self, trial: Optional[int] = None) -> Dict[str, str]:
         """W&B grouping (D47): one group per grid cell, its seeds (or HPO trials)
@@ -369,14 +369,14 @@ class Job:
     # ── Warm start (D19) ────────────────────────────────────────────────────
 
     def warm_source(self) -> Optional[Dict[str, str]]:
-        """The finished alpha=0 NAT run of the same dataset/embedding/arch/seed in
+        """The finished beta=0 NAT run of the same dataset/embedding/arch/seed in
         the study's ``warm_from`` study, as ``{"run": dir, "hash": config hash}``;
         None for a cold job."""
         if not self.study.warm:
             return None
         want = {"study": self.study.warm_from, "dataset": self.study.cfg.dataset,
                 "model": self.study.cfg.model, "regime": "nat", "embedding": self.cell.embedding,
-                "arch": self.cell.arch, "alpha": 0.0, "seed": self.seed}
+                "arch": self.cell.arch, "beta": 0.0, "seed": self.seed}
         found = find_runs(**want)
         if len(found) != 1:
             raise LookupError(

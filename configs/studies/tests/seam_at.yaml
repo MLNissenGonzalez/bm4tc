@@ -6,7 +6,7 @@ warm_from: tests/seam_nat
 seeds: [42]
 grid:
   arch: [d4r3]
-  alpha: [0.01]
+  beta: [0.03]
   eps: [0.15]
 config:
   dataset.gen_dow_kwargs.size: 200

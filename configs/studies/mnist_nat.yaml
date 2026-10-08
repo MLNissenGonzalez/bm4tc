@@ -1,4 +1,4 @@
-# MNIST 28x28, NAT, the default alpha ladder, cold.
+# MNIST 28x28, NAT, the default beta ladder, cold.
 dataset: mnist
 regime: nat
 grid:
