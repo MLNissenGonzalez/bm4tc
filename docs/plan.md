@@ -54,41 +54,16 @@ Still to provide for Phase 8:
 - Time one probe on a cluster node first. Training is limited by CPU speed, and
   the cluster's CPU threads may be slower than the laptop's.
 
-## Planned: beta, a dimension-corrected objective (reviewed; to decide, then implement)
+## Beta, the dimension-corrected objective (implemented, D86; pilots to plan)
 
-Martin's choice (2026-10-08): replace $\alpha$ by **one** parameter $\beta$ everywhere
-(studies, trainers, metrics, figures). The theory, with the formulas and the units, is
-in Martin's notes (`docs/interpolation.md`, untracked on purpose); this section holds the review, the evidence,
-the open decisions, the experiments and the implementation. Record the outcome as a
-D-number.
+Implemented on 2026-10-08 (D86): the code optimises
+$L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$ in nats per variable,
+logs `loss_dis` [nats/label], `loss_x` [nats/feature], `log_px` per feature, the
+`norm/*` diagnostics per site, and divides the norm penalty by $N$. The theory is in
+Martin's notes (`docs/interpolation.md`, untracked on purpose). What is left: E0, the
+beta pilots (E2), then the Phase 8 ladder and AT grid from them.
 
-### Review of the first version of this plan (2026-10-08)
-
-1. **Is per-feature normalisation the right balance?** Yes as a prior, for a better
-   reason than gradient norms: $\alpha$ is an exact exchange rate, and the curvatures of
-   the $n$ per-feature terms add, so the switch points scale like $1/n$
-   (the theory note §3–4). $\sqrt n$ is the scale of the gradient noise, which moves the
-   optimiser but not the optimum. The planned measurement (gradient-norm ratios) cannot
-   decide it (§4.3); E2 below does. $\beta$ corrects for $n$, not for capacity or data
-   (§4.4).
-2. **$N$ or $n$:** $N$. Then the per-variable weights sum to one and $L_\beta$ is a mean
-   (§5); the difference matters only on spirals.
-3. **Scale:** see the open decision below. Scale-free in the code already: selection,
-   patience (a count, strict <), median pruning and HPO (within a cell), the lr ranges
-   (Adam), the collapse checks; the MPS trainer has no clipping and no weight decay.
-   Scale-dependent: the norm penalty, Adam's $\epsilon$ against the ~1e-7 boundary-core
-   gradients (D60), JEM's `grad_clip` 10 and `energy_l2` (`core/jem/train.py:59`), the
-   logged values, the seam pins.
-4. **JEM:** same map. Its $L_\text{gen}$ has no normaliser, so its per-variable values
-   are known up to a constant. Whether its knees sit at the MPS's $\beta$ is a result to
-   report.
-5. **The paper:** one sentence (below) and the translation table of the theory note §7.
-6. **Ladder:** expect two knees (§4.2): the density catches up at small $\beta$, the
-   accuracy drops at large $\beta$. The ladder $\{0, 0.01, 0.1, 0.5, 0.9, 0.99, 1\}$ is
-   too coarse between 0.5 and 0.9, where the MNIST 12×12 accuracy knee lies. Fix the
-   ladder after E2.
-
-Paper sentence:
+Paper sentence (the translation table is in the theory note, §7):
 
 > We weight the two terms by $\beta \in [0, 1]$,
 > $L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$, where $N = n + 1$ counts the
@@ -108,29 +83,6 @@ Paper sentence:
 
 So the MNIST 12×12 accuracy knee lies in $\beta \in (0.59, 0.94)$. The density knee is
 unmeasured. TPM's whole MNIST sweep sat at $\beta \ge 0.59$.
-
-### Open decision: the scale of the loss
-
-The two forms have the same minimisers and differ by $c(\beta) = 1 - \beta + \beta/N$.
-
-- **C, the rescaled loss:** the code optimises $L_\beta$. One formula from paper to code,
-  no $\alpha$ anywhere, and every logged loss in **nats per variable** (the theory note,
-  §6): the objective is a weighted mean of $L_\text{dis}$ (nats per label) and
-  $\bar\ell$ (nats per feature), so curves of every cell and dataset share one axis.
-  One-time costs: re-pin all seams with $\beta > 0$; re-check the norm-penalty strength
-  at $\beta = 1$ (relative to the NLL it is $N$ times stronger than pilot A's $\alpha = 1$
-  runs; E2's $\beta = 1$ cell against pilot A is that check); JEM's clip and energy
-  penalty (the energy penalty is tuned by the JEM HPO; check whether the clip still
-  triggers); Adam's $\epsilon$ damps the near-zero boundary-core gradients at
-  $\beta \gtrsim 0.9$ (D60 called the steps they took float noise).
-- **C', the normalised loss:** the code optimises $(1-w)\,L_\text{dis} + w\,L_\text{gen}$
-  with $w = \alpha(\beta)$ from one mapping function; per-variable metrics are logged
-  beside it. Every calibration and pin carries over, but the code optimises a quantity
-  the paper does not write, through a mapping, and the objective curves have no common
-  unit.
-
-Leaning C (simplicity, and one unit everywhere); the calibrations C' preserves are a
-one-time cost.
 
 ### Experiments
 
@@ -169,31 +121,6 @@ full MNIST ($\beta = 0.89$) is at or past the accuracy knee.
 $\mathbb{E}\lVert\nabla \log p(x)\rVert^2 / \mathbb{E}\lVert\nabla \log p(c \mid x)\rVert^2$
 for 12×12 and 28×28 (the theory note §4.1 predicts ×5.4); depends on the MPS gauge, so
 supporting only.
-
-### Implementation (option C)
-
-A clean break (D12): `alpha` disappears from code, configs, names and keys. The pilots
-stay as they are ($\alpha$ runs).
-
-1. `ConditionalBornMachine.mixed_nll(x, y, beta)`:
-   $L_\beta = -(1-\beta+\beta/N)\log\lvert\psi(x,c)\rvert^2 + (1-\beta)\log\sum_c\lvert\psi(x,c)\rvert^2 + (\beta/N)\log Z$,
-   keeping the endpoint gating ($\beta = 0$ never calls $\log Z$; $\beta = 1$ drops the
-   $\sum_c$ term).
-2. `objective.mix(dis, gen, beta)` = $(1-\beta)\,\text{dis} + \beta\,\text{gen}/N$; `evaluate`
-   and the logged `objective/*` follow. Metric keys (`pipeline/metrics.py`): per-variable
-   `loss_gen` ($L_\text{gen}/N$) or a per-feature $\bar\ell$; decide which.
-3. MPS `Trainer` AT path: the two-forward trick in $\beta$ (the same algebra as in
-   $\alpha$: the clean terms fold into one call).
-4. JEM (`core/jem/train.py`, `mix`): the same form; $N$ = `data_dim + 1` for both models.
-5. `TrainConfig.beta`, `Cell.beta`, cell names `b0.5` (D14), grids, `defaults.yaml`
-   ladder, AT grids, `paper.yaml` (`x: beta`, `where: {beta: ...}`), `results.csv`,
-   figure axis labels.
-6. Norm control: the penalty stays as it is; checked by E2's $\beta = 1$ cell.
-7. Tests: every $\alpha$ in tests (~150, mostly `test_trainer.py`, `test_cbm.py`,
-   `test_figures.py`); a unit test that $L_\beta = c(\beta)\,L(\alpha(\beta))$ on a batch
-   and the endpoints. **Re-pin the seams** in a commit of its own.
-8. Docs: GUIDE (objective, vocabulary), README formula; decisions superseded: D45/D84
-   ladder, D82 AT grid, D71 JEM objective form, D80 objective form.
 
 ## Efficiency (before the expensive studies; Phase 9 track, D30)
 
