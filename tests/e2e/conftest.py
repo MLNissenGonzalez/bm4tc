@@ -11,8 +11,13 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def python(args, root: Path) -> str:
-    """``python <args>`` in the repo, on CPU, with ``root`` as the data root."""
-    env = {**os.environ, "BM4TC_DATA_ROOT": str(root), "CUDA_VISIBLE_DEVICES": ""}
+    """``python <args>`` in the repo, on CPU, with ``root`` as the data root.
+
+    The CPU kernels are fixed to AVX2 (torch and MKL): AVX-512 kernels round
+    differently, and PGD's sign() steps turn that into different AT curves, so the
+    pinned numbers would hold only on the CPU they were pinned on (D85)."""
+    env = {**os.environ, "BM4TC_DATA_ROOT": str(root), "CUDA_VISIBLE_DEVICES": "",
+           "ATEN_CPU_CAPABILITY": "avx2", "MKL_CBWR": "AVX2"}
     proc = subprocess.run(
         [sys.executable, *args], cwd=REPO, env=env, capture_output=True, text=True
     )

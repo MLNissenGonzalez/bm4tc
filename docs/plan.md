@@ -48,11 +48,6 @@ Still to provide for Phase 8:
   (e.g. at ~1/3 of the trials) before Phase 8; until then, give a study ~8 slots.
 - `run <study> --cell X` stops at `select`, which needs every cell's HPO. Let
   select (and run) work on the launched cells only.
-- **AT seam on the cluster:** fails on G21G01 (CPU; objective/train differs from
-  epoch 1, deterministic there), the NAT seam passes to 1e-6. Not the thread count
-  (identical numbers with `OMP_NUM_THREADS=8`). Suspected: G21G01's AVX-512 kernels
-  vs the laptop's AVX2 (Core Ultra 7 265H), amplified by PGD's sign(). Check with
-  `ATEN_CPU_CAPABILITY=avx2 MKL_CBWR=AVX2`; then pin the AT seam per instruction set.
 - **Cluster speed:** `bench_train_step` on G21G01 (GPU shared with 4 pilot units, busy
   node): 440 ms per NAT step vs ≈ 180 on the laptop, so ≈ 2.4x slower per unit;
   mostly the CPU (single-thread bound). Double the wall times in compute.md.
