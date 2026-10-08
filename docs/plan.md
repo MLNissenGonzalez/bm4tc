@@ -138,26 +138,70 @@ Measured in [compute.md](compute.md).
   - It is tensor-network maths, so it belongs in `ConditionalBornMachine` on
     tensorkrowch nodes. It must reproduce the current snapshots bit for bit (or to
     floating-point tolerance, with the seam re-pinned).
-- **Python overhead dominates training and analysis.** Epoch time does not depend
+- **Per-step overhead dominates training and analysis.** Epoch time does not depend
   on the bond dimension; it grows with the number of sites × steps. One unit
   keeps one CPU core busy and leaves the GPU mostly idle (6 units per GPU = 4×
-  throughput). Candidates: fewer, larger kernels per step (tensorkrowch
-  stacking, CUDA graphs, `torch.compile`), and a larger `analysis.batch_size`
-  (changes PGD's random draws, so it needs a re-pin).
+  throughput; the cluster is ≈ 2.4× slower per unit, CPU-bound).
+  - **Measured** (`python -m tests.bench.profile_train_step`, laptop RTX 2080, 144
+    sites, d3r20, batch 512, β = 0.5, 2026-10-08): 170 ms per step, of which the
+    log|ψ|² forward is 54 ms, log Z 25 ms, forward + backward 167 ms, Adam 3 ms.
+    Per step ≈ 9,900 kernel launches and 34,000 aten calls; the GPU is busy 74 ms
+    of the 170, on tiny (r × r) kernels: `bmm`, `div`, `vector_norm`, `where`,
+    `masked_fill` once per site in the forward and again in the backward. Launching
+    alone costs ≈ 44 ms of CPU per step. The bottleneck is the number of small
+    operations per site, not arithmetic.
+  - **Ruled out by prototypes** (scratch code, 2026-10-08; both match the current
+    log|ψ|² to float32 precision, ≈ 2e-6 relative):
+    - a log-depth (tree) contraction with per-level renormalisation: 1.5× faster at
+      d3r20 but 2.6× slower at d3r40, because it multiplies matrices (r³) where the
+      chain multiplies a vector by a matrix (r²);
+    - all transfer matrices from one einsum, then a per-site matvec chain
+      renormalised every 8 sites: 3.6× (d3r20) to 14× (d3r40) slower, because
+      backward through the slices of one large tensor writes a full-size gradient
+      per slice.
+  - **To try, in order:**
+    1. A custom `torch.autograd.Function` for the renormalised chain: the forward
+       saves the per-site vectors and norms, the backward is one hand-written
+       reverse sweep. Removes the autograd graph of norm/divide/guard per site
+       (most of the backward's launches); same algorithm, so it should match the
+       current numbers to float rounding. The same for the log Z zip-up.
+    2. Fewer operations per site in the forward: renormalise every k sites instead
+       of every site (k bounded by overflow: the growth per site is bounded),
+       drop the `where`/`masked_fill` guards where the norm cannot be zero.
+    3. CUDA graphs over a whole training step: needs static shapes (one batch size,
+       the last batch dropped or padded) and no host syncs inside the step (the
+       non-finite check in `mixed_nll`, `.item()` in the diagnostics and caches).
+       `torch.compile` is not an option on torch 2.1 with complex tensors.
+  - **The bar** (D30, Phase 9 track): the new contraction matches the current
+    log|ψ|², log Z and their gradients on random models (overflowing ones
+    included) to float tolerance; the seams re-pin in their own commit; the gain
+    is measured with `tests.bench.bench_train_step` and `profile_train_step`
+    before and after, from a `git worktree` of HEAD.
 - Minor: the Gibbs/SGLD analysis part logs a spurious
   `Detection/attack failed: ; skipping` at every budget (`bm4tc/analysis/uq.py:556`:
   `next(iter(det.values()))` on empty percentiles). Harmless; guard it.
 
-### Sampling code
-Ask Martin to clone fork of tensorkrowch with development branch into 0git/. 
-non-finished sampling implementation on tensorkrowch on the develop branch
-- maybe resuse that implementation in tensorkrowch/models/mps/... sampling
-- it tries to be general and apply to fully sample form the learned distribution to conditional sampling for things like imputation or purification. 
-- look at the code, compare it with the sampling implementation in ConditionalBornMachine.
-- create a comparison, what one code is capable of what the other does not.
-- then discussion with questions on what to adapt from the tensorkrowch code and what not to 
+### Sampling: compare with tensorkrowch's develop branch
 
-fork: https://github.com/MLNissenGonzalez/tensorkrowch/tree/develop
+Martin's fork of tensorkrowch has an unfinished, general sampling implementation on
+its `develop` branch (`tensorkrowch/models/mps...`): full sampling from the learned
+distribution and conditional sampling (imputation, purification). Before Phase 9
+touches sampling in `ConditionalBornMachine`:
+
+1. Martin clones the fork next to bm4tc (read only; the bm4tc env keeps
+   tensorkrowch 1.1.6):
+
+   ```bash
+   cd ~/0git && git clone -b develop https://github.com/MLNissenGonzalez/tensorkrowch.git
+   ```
+
+2. Read both implementations and write a comparison: what each one can do that the
+   other cannot (full and conditional sampling, which variables can be fixed, batch
+   handling, the class site, embeddings and their inverse, numerical safety on long
+   chains, speed), and how each would serve Gibbs purification.
+3. Discuss with Martin, as questions: what to adopt from the tensorkrowch code, what
+   to keep from bm4tc, and whether the shared part belongs upstream (Phase 9).
+
 ## Phase 9 (separate track): tensorkrowch
 
 Verify each upstream candidate in [decisions.md](decisions.md#tensorkrowch-upstream-candidates-tensorkrowch-116)
