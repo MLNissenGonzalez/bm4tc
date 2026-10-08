@@ -60,7 +60,9 @@ Martin's choice (2026-10-08): replace α by **one** parameter β everywhere (stu
 trainers, metrics, figures), with the generative term in **nats per feature**. Written
 up for a fresh session to **critically assess the reasoning first** (the open
 questions at the end), then implement. Nothing below is decided until that review;
-record the outcome as a D-number.
+record the outcome as a D-number. **Reviewed 2026-10-08 in [beta.md](beta.md):** the
+verdict on the six questions, an alternative to the rescaled loss (C′), and the
+experiments E0–E2 that fix the ladder.
 
 ### Why α is not comparable across datasets
 
