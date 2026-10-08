@@ -6,7 +6,7 @@ seeds: 5                       # D29: seeds 1..5; a study may list seeds instead
 
 grid:                          # a study's grid overrides these axes one by one
   embedding: [legendre]
-  alpha: [0, 1e-3, 1e-2, 1e-1, 0.5, 1]   # D45
+  alpha: [0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]   # D84: dense where L_gen and L_dis balance on MNIST
   eps: [0.1]                   # AT training radius (fraction of the input range); NAT ignores it
 
 # Model settings per embedding, applied to every cell with that embedding.
