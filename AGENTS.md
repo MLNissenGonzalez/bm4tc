@@ -56,10 +56,10 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-08, evening)
+## State (2026-10-08, night)
 
-Branch `ousterhout` (pushed to GitHub up to the pilot commit `87663bc3`; later commits
-are local): Phases 0–7 of the refactor are done; `main` is untouched and the local tag
+Branch `ousterhout` (pushed to GitHub up to `c6436b72`; `c122225c` and this handoff are
+local): Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) has started with the
 pilots; `docs/plan.md` has the details, `docs/compute.md` the cost estimates.
 
@@ -83,31 +83,62 @@ Done on 2026-10-07/08 (D78–D87):
   for the saved models. Fixed (`_freeze_boundaries`), regression-tested against a
   numerical integral, seams re-pinned. Pilot B (β = 0) is essentially unaffected.
 
-Cluster: G21G01 is set up (env, clone, worktree `runs/87663bc3` = pre-D86 code, where
-pilot B runs). It is ≈ 2.4× slower per unit than the laptop (CPU-bound), and `/ceph` is
-ceph over NFSv4.2. New studies need a new worktree at the current commit; runs from
-before D86 (cells `a…`, column `alpha`) cannot be warm-start sources. Martin's notes
-`docs/hpc_*.md`, `docs/interpolation.md`, the pilot CSVs and `pilots/e0_valid_test_gap.py`
-in `pilots/` are untracked on purpose (personal, not for git).
+Done on 2026-10-08 (no D-number yet, results in plan.md, commit `c122225c`):
+- **E0 confirmed D87.** Pilot A's valid/test gap is the evaluation path, not the data:
+  one checkpoint through one code path gives train/valid/test within 0.7 nat; at α = 0
+  the gap (2.89) equals the training-time minus the checkpoint log Z exactly.
+- **CUDA graphs + NVIDIA MPS, prototyped and measured** (plan.md "Efficiency"). A whole
+  training step (NAT, or AT with PGD-K; micro-batches; Adam `capturable=True`) captured
+  once and replayed is **bit-identical** to the eager step and 9–10× faster per unit on
+  G21G01. With MPS, 8 graphed units per GPU give 88 NAT / 9.5 AT PGD-10 steps/s against
+  14.2 / 2.0 for today's 6 eager units: **≈ 5–6× NAT, 4–5× AT per GPU**. What is left is
+  GPU time, a third of it the renormalisation's complex ÷ real division. tensorkrowch's
+  `renormalize` keeps gradients but discards the norm (log Z computes each norm twice);
+  a custom autograd Function would sit outside tk nodes (D30), so it belongs in tk.
+- Prototypes (untracked, `pilots/`): `graph_bench.py` (eager vs graph, `--mode both|eager|
+  graph`, `--regime nat|at`, `--micro`), `graph_throughput.sh` (1…N units per GPU),
+  `graph_kernels.py` (GPU kernels per step by kind). Cluster logs in `pilots/cluster/`.
+- **MPS gotcha:** start the daemon with the physical `CUDA_VISIBLE_DEVICES=<gpu>` and
+  `CUDA_MPS_PIPE_DIRECTORY`/`CUDA_MPS_LOG_DIRECTORY` set; clients then use
+  `CUDA_VISIBLE_DEVICES=0` (relative to the MPS server). Stop it with
+  `echo quit | nvidia-cuda-mps-control`. MPS makes eager units slower: graphs only.
+
+Cluster: G21G01 is set up (env, clone; worktrees `runs/87663bc3` = pre-D86 code, where
+pilot B runs, and `runs/c6436b72` for the graph benches). Eager units are ≈ 2.4× slower
+than the laptop (CPU-bound); graphed ones are as fast. `/ceph` is ceph over NFSv4.2. New
+studies need a new worktree at the current commit; runs from before D86 (cells `a…`,
+column `alpha`) cannot be warm-start sources. Martin's notes `docs/hpc_*.md`,
+`docs/interpolation.md`, the pilot CSVs and the scripts and logs in `pilots/` are
+untracked on purpose (personal, not for git).
+
+Laptop: the eGPU (RTX 2080 in a Thunderbolt enclosure) is away until Tuesday
+2026-10-13; until then GPU checks are commands for Martin to run on the cluster. Its
+drop on 2026-10-08 was an Xid 79 (fell off the bus, Thunderbolt link), not load; a
+driver crash like that needs a reboot, replugging does not help.
 
 **Next (in this order):**
-1. With Martin: pilot B's results (`pilot_pgd5` due 2026-10-08 evening, `pilot_pgd10`
-   2026-10-09 morning): the PGD step count goes to `configs/trainer/at.yaml` (D43
-   rule), and whether AT's clean accuracy is acceptable (levers: capacity, a fixed
-   cw = 0.5, TRADES). E0 on the cluster (`pilots/e0_valid_test_gap.py`, run from the
-   `runs/87663bc3` worktree): it should show pilot A's gap equals the log Z drift.
-2. **Efficiency and compute cost, before any new pilot** (Martin's order):
-   - the per-step overhead (plan.md "Efficiency": measured, two prototypes ruled out;
-     next a custom autograd Function for the renormalised chain and the log Z
-     zip-up, then fewer operations per site, then CUDA graphs; D30's bar);
-   - cap HPO workers per cell; let `select`/`run --cell` work on a subset of cells; a
-     multi-study launcher; the Gibbs O(n²) rework;
-   - then re-estimate the cost of the β pilots and of Phase 8 (`docs/compute.md`).
-3. Plan the β pilots with Martin (plan.md "Beta", E2: knees on MNIST 12×12, full MNIST
+1. With Martin: pilot B's results (`pilot_pgd5` seeds were training, `pilot_pgd10` HPO
+   at 8/15 on 2026-10-08 evening): the PGD step count goes to
+   `configs/trainer/at.yaml` (D43 rule), and whether AT's clean accuracy is acceptable
+   (levers: capacity, a fixed cw = 0.5, TRADES).
+2. **Design the CUDA-graph + MPS integration with Martin** (show each option with a
+   code sketch and its effect on pinned numbers first, then a D-number): the graph in
+   the `Trainer` (opt-in or always; also for analysis/attacks?); the static batch (the
+   last batch); the non-finite check, `_cache_amp_diag`, `loss.item()` and
+   `renormalize_` outside the captured step (every N steps / per epoch); ε of the
+   curriculum as a device scalar; the AT random start (graph RNG changes seeded draws:
+   re-pin AT seams); a recapture on lr or shape changes; the launch running one MPS
+   daemon per GPU and `--per-gpu` ≈ 8. Then implement, re-pin in its own commit, and
+   re-estimate `docs/compute.md`. Open check: full MNIST d3r40 with micro-batch 256
+   ran out of memory on the laptop's 8 GB; verify on the cluster.
+3. The rest of the efficiency list (plan.md): cap HPO workers per cell; `select`/`run
+   --cell` on a subset of cells; a multi-study launcher; the Gibbs O(n²) rework; then
+   the GPU-time cuts (custom backward, fewer ops per site, the faster division).
+4. Plan the β pilots with Martin (plan.md "Beta", E2: knees on MNIST 12×12, full MNIST
    and spirals; they set the ladder, the AT grid and re-check D84's target), then run
    them.
-4. Not urgent: the sampling comparison with the fork's `develop` branch (plan.md,
-   "Sampling"; Martin clones it first).
+5. Not urgent: the sampling comparison with the fork's `develop` branch (plan.md,
+   "Sampling"; the clone is at `~/0git/tensorkrowch`, branch `develop`).
 
 Other open items (time series, adaptive attacks, notes on the other laptop) are in
 `docs/plan.md`.
