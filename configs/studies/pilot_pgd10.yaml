@@ -1,5 +1,6 @@
 # Pilot B (D43, D83): PGD-10 vs PGD-5 (pilot_pgd5) training attacks, mnist12 d3r40
-# α=0, cw=0, warm from pilot_norm_zero's α=0 runs. If PGD-5 loses more than ~1 point
+# β=0, cw=0, warm from pilot_norm_zero's α=0 runs (ran before D86: the code at
+# 87663bc3; this file is the record, it no longer finds its warm start). If PGD-5 loses more than ~1 point
 # of robust test accuracy under PGD-40 at ε=0.1, keep 10 steps; otherwise
 # configs/trainer/at.yaml gets num_steps: 5. Also shows whether cw=0 AT is stable.
 dataset: mnist12
@@ -9,7 +10,7 @@ warm_from: pilot_norm_zero
 seeds: 3
 grid:
   arch: [d3r40]
-  alpha: [0]
+  beta: [0]
 config:
   trainer.max_epoch: 100
   trainer.batch_size: 512

@@ -57,11 +57,11 @@ def _train(dh, cbm=None, **cfg):
 
 # ── NAT ─────────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("alpha", [0.0, 0.5, 1.0])
-def test_nat_logs_every_epoch(dh, alpha):
+@pytest.mark.parametrize("beta", [0.0, 0.5, 1.0])
+def test_nat_logs_every_epoch(dh, beta):
     expected = {"objective/train", "penalty/train", "objective/valid",
-                "loss_dis/valid", "loss_gen/valid", "acc/valid"}
-    _, logged = _train(dh, alpha=alpha, max_epoch=2)
+                "loss_dis/valid", "loss_x/valid", "acc/valid"}
+    _, logged = _train(dh, beta=beta, max_epoch=2)
     assert [ep for ep, _ in logged] == [1, 2]
     for _, m in logged:
         assert expected <= m.keys(), f"missing keys: {expected - m.keys()}"
@@ -74,7 +74,7 @@ def test_early_stopping(dh):
     not an improvement, so training ends after epoch 2.
     """
     trainer = Trainer(_cbm(), TrainConfig(
-        alpha=0.0, max_epoch=20, batch_size=8, patience=0,
+        beta=0.0, max_epoch=20, batch_size=8, patience=0,
         optimizer=OptimizerConfig(kwargs={"lr": 0.0}),
         norm_control=NormControlConfig(soft_strength=0.0),
     ), *_loaders(dh), CPU)
@@ -102,7 +102,7 @@ def test_best_tensors_restored(dh):
 def test_at_run_completes_and_selects_a_model(dh):
     """AT trains end to end, validates every eval_every epochs and restores the best."""
     cbm = _cbm()
-    trainer, logged = _train(dh, cbm, alpha=0.5, evasion=PGD, clean_weight=0.3,
+    trainer, logged = _train(dh, cbm, beta=0.5, evasion=PGD, clean_weight=0.3,
                              max_epoch=6, eval_every=2)
 
     assert [ep for ep, _ in logged] == [1, 2, 3, 4, 5, 6]

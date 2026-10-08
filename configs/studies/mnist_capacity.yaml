@@ -5,7 +5,7 @@ dataset: mnist
 regime: nat
 grid:
   arch: [d3r10, d3r20, d3r40, d3r80]
-  alpha: [0, 1]
+  beta: [0, 1]
 config:
   trainer.max_epoch: 100
   trainer.batch_size: 512

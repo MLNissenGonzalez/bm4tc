@@ -1,10 +1,8 @@
-# Spirals, NAT, cold. Its own alpha ladder: in 2-D, L_gen and L_dis have similar
-# scales, so the MNIST ladder's small values would all be discriminative (D84).
+# Spirals, NAT, cold, the default beta ladder (D86).
 dataset: spirals
 regime: nat
 grid:
   arch: [d10r6]
-  alpha: [0, 1e-3, 1e-2, 1e-1, 0.5, 1]
 config:
   trainer.max_epoch: 300
   trainer.batch_size: 256

@@ -3,7 +3,7 @@ model (one grid cell) or to a curve over one axis, as mean and std over seeds.
 
 A *model* in a paper item is a study plus a filter on its identity columns::
 
-    {study: mnist_nat, where: {alpha: 0.01, arch: d3r40}, label: "MPS $\\alpha=0.01$"}
+    {study: mnist_nat, where: {beta: 0.5, arch: d3r40}, label: "MPS $\\beta=0.5$"}
 
 and must select exactly one grid cell; the seeds of that cell are what the mean
 and std are over. A *metric* is a key of :mod:`bm4tc.pipeline.metrics` in which
@@ -22,7 +22,7 @@ import pandas as pd
 from bm4tc.core.embeddings import fmt_budget
 from bm4tc.pipeline.runs import outputs_root, parse_arch
 
-CELL = ("study", "embedding", "arch", "alpha", "eps")   # identity minus the seed
+CELL = ("study", "embedding", "arch", "beta", "eps")   # identity minus the seed
 
 
 @dataclass
@@ -129,7 +129,7 @@ def cell_stats(model: Model, metric: Metric, **subs) -> Tuple[float, float, int]
 
 # ── Curves ──────────────────────────────────────────────────────────────────
 
-AXES = {"alpha": "alpha", "bond_dim": "arch", "arch": "arch"}   # x from an identity column
+AXES = {"beta": "beta", "bond_dim": "arch", "arch": "arch"}   # x from an identity column
 
 
 def _x_value(axis: str, raw) -> float:
@@ -138,7 +138,7 @@ def _x_value(axis: str, raw) -> float:
 
 def curve(model: Model, metric: Metric, x: str, **subs) -> pd.DataFrame:
     """Columns x, mean, std, n: the metric over ``x``. x is an identity column
-    (alpha, bond_dim) grouped over cells, or a placeholder ``{x}`` in the metric key
+    (beta, bond_dim) grouped over cells, or a placeholder ``{x}`` in the metric key
     (``purify_gibbs/test/{eps}/k{x}``, ``rob/test/{x}``) read off one cell's columns."""
     df = rows(model)
     out = []

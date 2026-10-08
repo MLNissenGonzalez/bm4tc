@@ -1,10 +1,10 @@
-# Spirals, PGD-AT at the reduced budget (D43), warm from spirals_nat's alpha=0 runs.
+# Spirals, PGD-AT at the reduced budget (D43), warm from spirals_nat's beta=0 runs.
 dataset: spirals
 regime: at
 init: warm
 grid:
   arch: [d10r6]
-  alpha: [0, 1e-2, 1e-1]
+  beta: [0, 0.1, 0.5]           # D86, revisit after the β pilots
 config:
   trainer.max_epoch: 200
   trainer.batch_size: 256

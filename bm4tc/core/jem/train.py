@@ -2,12 +2,13 @@
 
 For a training batch x with labels y and SGLD negatives x⁻ (persistent chains),
 
-    L = (1-α)·[(1-cw)·CE(x_adv) + cw·CE(x)] + α·L_gen(x)      (+ energy penalty)
+    L = (1-β)·[(1-cw)·CE(x_adv) + cw·CE(x)] + (β/N)·L_gen(x)      (+ energy penalty)
     L_gen(x) = -f_y(x) + mean logsumexp_c f(x⁻)
 
 L_gen is the contrastive estimate of -log p(x, y): the negatives' mean score
 stands in for log Z, so its gradient is the JEM gradient. NAT is ``evasion:
-null`` (the bracket is CE(x)); α=0 needs no negatives. x_adv is the shared PGD.
+null`` (the bracket is CE(x)); β=0 needs no negatives. x_adv is the shared PGD.
+N = ``n_vars(x)``, the features and the class, as for the MPS (D86).
 
 Validation and selection are the MPS's (:func:`bm4tc.core.objective.evaluate`,
 argmin ``objective``, D8), with log Z estimated by a standardized, seeded SGLD
@@ -30,7 +31,7 @@ from bm4tc.core.attacks import build_attack
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.jem.model import JEMMLP, JEMModelConfig
 from bm4tc.core.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
-from bm4tc.core.objective import evaluate, mix, optimizer
+from bm4tc.core.objective import evaluate, mix, n_vars, optimizer
 from bm4tc.core.train import TrainConfig, attacked_subset, curriculum_eps, evasion_config
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class ValidSamplerConfig:
 @dataclass
 class JEMConfig:
     """Everything JEM-specific in a run config (the ``jem:`` node); the shared
-    knobs (alpha, epochs, optimizer, attack, ...) are the ``trainer:`` node."""
+    knobs (beta, epochs, optimizer, attack, ...) are the ``trainer:`` node."""
     model: JEMModelConfig = field(default_factory=JEMModelConfig)
     sampler: SGLDConfig = field(default_factory=SGLDConfig)
     valid_sampler: ValidSamplerConfig = field(default_factory=ValidSamplerConfig)
@@ -108,13 +109,13 @@ class JEMTrainer:
 
     def _objective(self, data, labels, eps_abs):
         """(objective, penalty) on one batch (module docstring)."""
-        cfg, alpha, cw = self.cfg, self.cfg.alpha, self.clean_weight
+        cfg, beta, cw = self.cfg, self.cfg.beta, self.clean_weight
         positives = data
         if self.jem.input_noise_std > 0:
             positives = (data + self.jem.input_noise_std * torch.randn_like(data)).clamp(
                 *self.model.input_range)
         negatives = None
-        if alpha > 0:
+        if beta > 0:
             negatives = self.sampler.sample_training(self.model, len(data), self.device)
 
         logits = self.model(positives)
@@ -135,14 +136,14 @@ class JEMTrainer:
                 pos_score = torch.logsumexp(logits, dim=-1)
                 penalty = self.jem.energy_l2 * (pos_score.square().mean()
                                                 + neg_score.square().mean())
-        return mix(dis, gen, alpha), penalty
+        return mix(dis, gen, beta, n_vars(data)), penalty
 
     # ── Validation ──────────────────────────────────────────────────────────
 
     def _log_Z(self, epoch: int) -> float:
         """The validation estimate of log Z: the mean score of a standardized SGLD
-        chain, seeded per epoch apart from the training randomness. nan at α=0."""
-        if self.cfg.alpha <= 0:
+        chain, seeded per epoch apart from the training randomness. nan at β=0."""
+        if self.cfg.beta <= 0:
             return float("nan")
         v = self.jem.valid_sampler
         devices = []
@@ -164,7 +165,7 @@ class JEMTrainer:
     def _validate(self, epoch: int) -> dict:
         return evaluate(
             self.model, self.valid_loader, self.device,
-            log_Z=self._log_Z(epoch), alpha=self.cfg.alpha, attack=self.attack,
+            log_Z=self._log_Z(epoch), beta=self.cfg.beta, attack=self.attack,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
             clean_weight=self.clean_weight, adv_indices=self.adv_indices,
         )
@@ -193,7 +194,7 @@ class JEMTrainer:
             self.optimizer.step()
             objectives.append(objective.item())
             penalties.append(0.0 if penalty is None else penalty.item())
-            if self.cfg.alpha > 0 and self.jem.sampler.track_diagnostics:
+            if self.cfg.beta > 0 and self.jem.sampler.track_diagnostics:
                 diagnostics.append(self.sampler.last_diagnostics)
         n = len(objectives)
         self._diagnostics = {f"sgld/{k}": sum(d[k] for d in diagnostics) / len(diagnostics)
@@ -206,7 +207,7 @@ class JEMTrainer:
         self.optimizer = optimizer(self.model.parameters(), cfg.optimizer)
         patience = 0
         regime = "JEM-AT" if self.attack is not None else "JEM"
-        logger.info(f"{regime} training begins (alpha={cfg.alpha:.3g}, "
+        logger.info(f"{regime} training begins (beta={cfg.beta:.3g}, "
                     f"{self.model.count_parameters()} parameters).")
         pbar = tqdm(range(1, cfg.max_epoch + 1), desc=regime, unit="ep", dynamic_ncols=True)
         for epoch in pbar:

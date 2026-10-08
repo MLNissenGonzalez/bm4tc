@@ -1,4 +1,4 @@
-# tests/e2e/test_stages.py: warm AT HPO from tests/stages_nat's alpha=0 run.
+# tests/e2e/test_stages.py: warm AT HPO from tests/stages_nat's beta=0 run.
 dataset: spirals
 regime: at
 init: warm
@@ -6,7 +6,7 @@ warm_from: tests/stages_nat
 seeds: [7]
 grid:
   arch: [d4r3]
-  alpha: [0]
+  beta: [0]
   eps: [0.1]
 config:
   dataset.gen_dow_kwargs.size: 200

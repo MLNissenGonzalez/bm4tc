@@ -1,5 +1,5 @@
 """The JEM seam: `run` the studies tests/seam_jem_{nat,at} (tiny spirals, JEM sized
-to d4r3, alpha 0 and 0.5, AT warm from NAT) and pin their results.csv rows.
+to d4r3, beta 0 and 0.75, AT warm from NAT) and pin their results.csv rows.
 
 Pinned at Phase 6 (D69-D72), when JEM joined the pipeline; later phases keep them
 or change them on purpose, as the MPS seam (tests/e2e/test_pipeline.py).
@@ -17,7 +17,7 @@ EXPECTED = {
                    "rob/test/0.1": 0.62, "rob_joint/test/0.1": 0.62, "detect/test/0.1/q5": 0.02,
                    "purify/test/0.1/d0.1": 0.61, "purify_sgld/test/0.1/k2": 0.54,
                    "purify_sgld/test/0/k1": 0.64},
-    ("nat", 0.5): {"objective/valid": 0.611876, "acc/test": 0.72, "loss_dis/test": 0.564802,
+    ("nat", 0.75): {"objective/valid": 0.611876, "acc/test": 0.72, "loss_dis/test": 0.564802,
                    "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.0,
                    "purify/test/0.1/d0.1": 0.59, "purify_sgld/test/0.1/k2": 0.54,
                    "purify_sgld/test/0/k1": 0.64},
@@ -25,7 +25,7 @@ EXPECTED = {
                   "rob/test/0.1": 0.63, "rob_joint/test/0.1": 0.63, "detect/test/0.1/q5": 0.01,
                   "purify/test/0.1/d0.1": 0.56, "purify_sgld/test/0.1/k2": 0.5,
                   "purify_sgld/test/0/k1": 0.62},
-    ("at", 0.5): {"objective/valid": 0.631959, "acc/test": 0.71, "loss_dis/test": 0.529748,
+    ("at", 0.75): {"objective/valid": 0.631959, "acc/test": 0.71, "loss_dis/test": 0.529748,
                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.01,
                   "purify/test/0.1/d0.1": 0.56, "purify_sgld/test/0.1/k2": 0.52,
                   "purify_sgld/test/0/k1": 0.62},
@@ -39,7 +39,7 @@ def rows(seam):
         root = seam(study)
         with open(root / "outputs" / study / "results.csv") as f:
             for row in csv.DictReader(f):
-                out[(regime, float(row["alpha"]))] = row
+                out[(regime, float(row["beta"]))] = row
     return out
 
 
@@ -48,7 +48,7 @@ def test_jem_rows(rows):
     assert set(rows) == set(EXPECTED)
     row = rows[("nat", 0.0)]
     assert row["model"] == "jem" and row["embedding"] == "raw"
-    assert "loss_gen/test" not in row          # no exact log Z for JEM
+    assert "loss_x/test" not in row          # no exact log Z for JEM
     assert not any(k.startswith("purify_gibbs") for k in row)
 
 

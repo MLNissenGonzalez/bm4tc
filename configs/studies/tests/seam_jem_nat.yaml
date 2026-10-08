@@ -1,5 +1,5 @@
 # tests/e2e/test_pipeline.py: the JEM seam, NAT, on the MPS seam's tiny spirals.
-# JEM sized to d4r3 (7 hidden units per layer); alpha 0 and 0.5 (SGLD).
+# JEM sized to d4r3 (7 hidden units per layer); beta 0 and 0.75 (SGLD).
 dataset: spirals
 model: jem
 regime: nat
@@ -7,7 +7,7 @@ seeds: [42]
 grid:
   embedding: [raw]
   arch: [d4r3]
-  alpha: [0, 0.5]
+  beta: [0, 0.75]
 config:
   dataset.gen_dow_kwargs.size: 200
   trainer.max_epoch: 10

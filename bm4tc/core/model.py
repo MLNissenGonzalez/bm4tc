@@ -607,7 +607,7 @@ class ConditionalBornMachine(tk.models.MPS):
         """Stats of the most recent forward on the current parameters, at no
         contraction cost; empty once the parameters change.
 
-        ``log_Z`` when that forward formed it (``mixed_nll`` at alpha > 0, or the
+        ``log_Z`` when that forward formed it (``mixed_nll`` at beta > 0, or the
         norm penalty), and the log|ψ|² summary of the last ``mixed_nll`` batch:
         ``log_amp_sq_mean``/``_min``/``_max``, ``amp_nonfinite_count``,
         ``amp_nan_count``.
@@ -690,16 +690,17 @@ class ConditionalBornMachine(tk.models.MPS):
         self,
         data: torch.Tensor,
         labels: torch.Tensor,
-        alpha: float,
+        beta: float,
         debug: bool = False,
     ) -> torch.Tensor:
         """
-        Mixed NLL loss interpolating between discriminative (α=0) and generative (α=1).
+        The objective (1-β)·L_dis + β·L_gen/N, in nats per variable (D86), with
+        N = ``n_features`` (the data sites and the class site):
 
-        L = -log|ψ(x,c)|² + (1-α)·log Σ_c |ψ(x,c)|² + α·log Z
+        L = -(1-β+β/N)·log|ψ(x,c)|² + (1-β)·log Σ_c |ψ(x,c)|² + (β/N)·log Z
 
-        α=0  →  -log p(c|x)   (pure discriminative; log_partition_function not called)
-        α=1  →  -log p(x,c)   (pure generative)
+        β=0  →  -log p(c|x)       (discriminative; log_partition_function not called)
+        β=1  →  -log p(x,c) / N   (generative)
 
         debug=True: log per-term NaN/inf stats inside the grad-tracked forward.
         Non-finite log_Z is logged rather than raised so all terms are visible.
@@ -720,22 +721,23 @@ class ConditionalBornMachine(tk.models.MPS):
                 f"  [mixed_nll/grad] log|ψ|²: max={las.max().item():.4g} nonfinite={nf_las}"
             )
 
-        term1 = -las[torch.arange(B), labels]
+        n_vars = self.n_features
+        term1 = -(1.0 - beta + beta / n_vars) * las[torch.arange(B), labels]
 
         if debug:
-            logger.warning(f"  [mixed_nll/grad] term1(-log|ψ(x,c)|²): {_stats(term1)}")
+            logger.warning(f"  [mixed_nll/grad] term1(-(1-β+β/N)·log|ψ(x,c)|²): {_stats(term1)}")
 
-        # Guard: skip when alpha=1 since it contributes nothing.
-        if alpha < 1.0:
-            term2 = (1.0 - alpha) * torch.logsumexp(las, dim=-1)
+        # Guard: skip when beta=1 since it contributes nothing.
+        if beta < 1.0:
+            term2 = (1.0 - beta) * torch.logsumexp(las, dim=-1)
             if debug:
-                logger.warning(f"  [mixed_nll/grad] term2((1-α)·log Σ|ψ|²): {_stats(term2)}")
+                logger.warning(f"  [mixed_nll/grad] term2((1-β)·log Σ|ψ|²): {_stats(term2)}")
         else:
             term2 = torch.zeros(B, device=data.device)
             if debug:
-                logger.warning("  [mixed_nll/grad] term2=0 (α=1, not computed)")
+                logger.warning("  [mixed_nll/grad] term2=0 (β=1, not computed)")
 
-        if alpha > 0.0:
+        if beta > 0.0:
             log_Z = self.log_Z(recompute=True)
             if not torch.isfinite(log_Z):
                 if debug:
@@ -746,8 +748,8 @@ class ConditionalBornMachine(tk.models.MPS):
                         "MPS has collapsed or exploded."
                     )
             elif debug:
-                logger.warning(f"  [mixed_nll/grad] term3(α·log_Z): log_Z={log_Z.item():.4g}")
-            term3 = alpha * log_Z
+                logger.warning(f"  [mixed_nll/grad] term3(β/N·log_Z): log_Z={log_Z.item():.4g}")
+            term3 = (beta / n_vars) * log_Z
         else:
             term3 = 0.0
 
@@ -767,9 +769,9 @@ class ConditionalBornMachine(tk.models.MPS):
             if not torch.isfinite(log_Z):
                 return
             n = len(self._mats_env)
-            alpha = math.exp((log_target - log_Z.item()) / (2 * n))
+            scale = math.exp((log_target - log_Z.item()) / (2 * n))
             for node in self._mats_env:
-                node.tensor.data.mul_(alpha)
+                node.tensor.data.mul_(scale)
         self._invalidate_log_Z_cache()
 
     # ======================================================================

@@ -22,10 +22,10 @@ def test_parse_arch():
 
 
 @pytest.mark.parametrize("cell, name", [
-    (Cell("legendre", "d3r40", 0.0), "legendre/d3r40/a0"),
-    (Cell("legendre", "d3r40", 0.001), "legendre/d3r40/a0.001"),
-    (Cell("fourier", "d10r6", 1.0), "fourier/d10r6/a1"),
-    (Cell("legendre", "d3r40", 0.01, 0.1), "legendre/d3r40/a0.01/eps0.1"),
+    (Cell("legendre", "d3r40", 0.0), "legendre/d3r40/b0"),
+    (Cell("legendre", "d3r40", 0.001), "legendre/d3r40/b0.001"),
+    (Cell("fourier", "d10r6", 1.0), "fourier/d10r6/b1"),
+    (Cell("legendre", "d3r40", 0.01, 0.1), "legendre/d3r40/b0.01/eps0.1"),
 ])
 def test_cell_names(cell, name):
     assert cell.name == name
@@ -33,8 +33,8 @@ def test_cell_names(cell, name):
 
 def test_run_dir_is_study_rooted(data_root):
     job = Study("spirals_capacity").jobs()[0]
-    assert job.run_dir == data_root / "outputs/spirals_capacity/legendre/d4r3/a0/s1"
-    assert job.wandb() == {"group": "spirals_capacity/legendre/d4r3/a0", "name": "s1",
+    assert job.run_dir == data_root / "outputs/spirals_capacity/legendre/d4r3/b0/s1"
+    assert job.wandb() == {"group": "spirals_capacity/legendre/d4r3/b0", "name": "s1",
                            "job_type": "train"}
 
 
@@ -43,14 +43,14 @@ def test_run_dir_is_study_rooted(data_root):
 def test_defaults_fill_the_grid():
     study = Study("mnist12_nat")
     assert study.seeds() == [1, 2, 3, 4, 5]                      # D29
-    assert sorted({c.alpha for c in study.cells()}) == [0, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]  # D84
+    assert sorted({c.beta for c in study.cells()}) == [0, 0.01, 0.1, 0.5, 0.9, 0.99, 1]  # D86
     assert all(c.eps is None for c in study.cells())             # NAT has no radius
-    assert [c.alpha for c in Study("spirals_nat").cells()] == [0, 1e-3, 1e-2, 1e-1, 0.5, 1]
+    assert [c.beta for c in Study("spirals_nat").cells()] == [0, 0.01, 0.1, 0.5, 0.9, 0.99, 1]
 
 
 def test_at_cells_carry_the_radius():
     cells = Study("spirals_at").cells()
-    assert [(c.alpha, c.eps) for c in cells] == [(0.0, 0.1), (0.01, 0.1), (0.1, 0.1)]
+    assert [(c.beta, c.eps) for c in cells] == [(0.0, 0.1), (0.1, 0.1), (0.5, 0.1)]
 
 
 def test_embedding_settings_apply_per_cell():
@@ -61,11 +61,11 @@ def test_embedding_settings_apply_per_cell():
     assert Job(study, legendre, 1).compose(hparams={}).born.init_kwargs.init_method == "randn_eye"
 
 
-def test_cell_sets_the_model_and_alpha():
+def test_cell_sets_the_model_and_beta():
     study = Study("mnist12_at")
     cfg = Job(study, Cell("legendre", "d3r20", 0.01, 0.1), 2).compose(hparams={})
     assert (cfg.born.init_kwargs.in_dim, cfg.born.init_kwargs.bond_dim) == (3, 20)
-    assert cfg.trainer.alpha == 0.01
+    assert cfg.trainer.beta == 0.01
     assert list(cfg.trainer.evasion.eps_rel) == [0.1]
     assert cfg.tracking.seed == 2
     assert cfg.dataset.name == "mnist_full_r12"
@@ -104,9 +104,9 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
 def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
     monkeypatch.setattr(runs, "HPARAMS", tmp_path)
     study = Study("jem_mnist12_at")
-    cell = next(c for c in study.cells() if c.alpha == 1e-2 and c.arch == "d3r20")
+    cell = next(c for c in study.cells() if c.beta == 0.1 and c.arch == "d3r20")
     (tmp_path / "jem_mnist12_nat.yaml").write_text(
-        "raw/d3r20/a0.01:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
+        "raw/d3r20/b0.1:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
         "  jem.sampler.step_size: 0.02\n  jem.sampler.noise_std: 0.003\n"
         "  jem.sampler.num_steps: 40\n")
     (tmp_path / "jem_mnist12_at.yaml").write_text(
@@ -255,5 +255,5 @@ def test_arch_settings_apply_to_their_arch_only():
     """``archs:`` sets run config per arch, over the study's ``config`` (D79)."""
     study = Study("mnist_capacity")
     micro = {c.arch: Job(study, c, 1).compose(hparams={}).trainer.micro_batch_size
-             for c in study.cells() if c.alpha == 0}
+             for c in study.cells() if c.beta == 0}
     assert micro == {"d3r10": None, "d3r20": None, "d3r40": 256, "d3r80": 128}

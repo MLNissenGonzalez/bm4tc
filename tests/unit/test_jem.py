@@ -74,10 +74,10 @@ def _loaders():
     return train, valid
 
 
-def _trainer(alpha, evasion=None, clean_weight=0.0, max_epoch=3, save=False):
+def _trainer(beta, evasion=None, clean_weight=0.0, max_epoch=3, save=False):
     train, valid = _loaders()
     model = small()
-    cfg = TrainConfig(alpha=alpha, max_epoch=max_epoch, batch_size=16, patience=10,
+    cfg = TrainConfig(beta=beta, max_epoch=max_epoch, batch_size=16, patience=10,
                       evasion=evasion, clean_weight=clean_weight, save=save,
                       optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2, "weight_decay": 0.0}))
     jem = JEMConfig(
@@ -88,7 +88,7 @@ def _trainer(alpha, evasion=None, clean_weight=0.0, max_epoch=3, save=False):
     return JEMTrainer(model, cfg, jem, train, valid, CPU, seed=0)
 
 
-# alpha 0.5, 3 epochs: (objective + penalty on train, loss_dis/valid,
+# beta 0.5, 3 epochs: (objective + penalty on train, loss_dis/valid,
 # objective/valid, acc/valid). Epoch 1 is the old NaturalTrainer's (nll/train,
 # dis_loss/valid, mixed_loss/valid, acc/valid). Later epochs differ from it on
 # purpose: validation is now the shared evaluate(), whose disabled tqdm around the
@@ -113,11 +113,11 @@ def test_natural_epochs_are_pinned():
         assert v["acc"] == acc
 
 
-def test_alpha_zero_has_no_generative_term():
+def test_beta_zero_has_no_generative_term():
     log = []
     _trainer(0.0, max_epoch=2).train(on_epoch_end=lambda e, r: log.append(r))
     v = log[-1]["valid"]
-    assert v["loss_gen"] != v["loss_gen"]          # nan: no SGLD at alpha 0
+    assert v["loss_x"] != v["loss_x"]          # nan: no SGLD at beta 0
     assert v["objective"] == v["loss_dis"]
     assert log[-1]["train"]["penalty"] == 0.0
 

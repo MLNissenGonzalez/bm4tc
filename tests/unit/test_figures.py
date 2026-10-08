@@ -12,10 +12,10 @@ from bm4tc.pipeline.figures.results import Metric, Model
 SEEDS = (1, 2, 3)
 
 
-def _row(arch, alpha, seed):
+def _row(arch, beta, seed):
     r = {"study": "toy", "dataset": "spirals", "model": "mps", "regime": "nat",
-         "embedding": "legendre", "arch": arch, "alpha": alpha, "eps": np.nan, "seed": seed}
-    base = 0.9 - alpha / 2 + (0.05 if arch == "d3r40" else 0) + 0.01 * seed
+         "embedding": "legendre", "arch": arch, "beta": beta, "eps": np.nan, "seed": seed}
+    base = 0.9 - beta / 2 + (0.05 if arch == "d3r40" else 0) + 0.01 * seed
     r["acc/test"] = base
     for eps in (0.1, 0.2):
         r[f"rob/test/{eps:g}"] = base - eps
@@ -38,7 +38,7 @@ def toy(tmp_path, monkeypatch):
 
 
 def test_cell_stats_is_over_the_seeds(toy):
-    mean, std, n = results.cell_stats(Model("toy", where={"arch": "d3r20", "alpha": 0.01}),
+    mean, std, n = results.cell_stats(Model("toy", where={"arch": "d3r20", "beta": 0.01}),
                                       Metric("rob/test/{eps}"), eps=0.1)
     assert n == 3
     assert mean == pytest.approx(0.9 - 0.005 + 0.02 - 0.1)
@@ -47,33 +47,33 @@ def test_cell_stats_is_over_the_seeds(toy):
 
 def test_minus_is_per_run(toy):
     mean, std, _ = results.cell_stats(
-        Model("toy", where={"arch": "d3r20", "alpha": 0}),
+        Model("toy", where={"arch": "d3r20", "beta": 0}),
         Metric("purify/test/{eps}/d0.1", minus="rob/test/{eps}"), eps=0.2)
     assert (mean, std) == pytest.approx((0.1, 0.0))
 
 
 def test_several_cells_are_refused(toy):
     with pytest.raises(LookupError, match="2 grid cells"):
-        results.cell_stats(Model("toy", where={"alpha": 0}), Metric("acc/test"))
+        results.cell_stats(Model("toy", where={"beta": 0}), Metric("acc/test"))
 
 
 def test_missing_study_and_column(toy):
     with pytest.raises(FileNotFoundError, match="run `python -m bm4tc run nope`"):
         results.load("nope")
     with pytest.raises(KeyError, match="no column"):
-        results.cell_stats(Model("toy", where={"arch": "d3r20", "alpha": 0}), Metric("x/test"))
+        results.cell_stats(Model("toy", where={"arch": "d3r20", "beta": 0}), Metric("x/test"))
 
 
 def test_curve_over_an_identity_column(toy):
-    c = results.curve(Model("toy", where={"arch": "d3r40"}), Metric("acc/test"), "alpha")
+    c = results.curve(Model("toy", where={"arch": "d3r40"}), Metric("acc/test"), "beta")
     assert list(c.x) == [0, 0.01, 1]
     assert c["mean"].tolist() == pytest.approx([0.97, 0.965, 0.47])
-    c = results.curve(Model("toy", where={"alpha": 0}), Metric("acc/test"), "bond_dim")
+    c = results.curve(Model("toy", where={"beta": 0}), Metric("acc/test"), "bond_dim")
     assert list(c.x) == [20, 40]
 
 
 def test_curve_over_a_key_placeholder(toy):
-    model = Model("toy", where={"arch": "d3r20", "alpha": 0})
+    model = Model("toy", where={"arch": "d3r20", "beta": 0})
     c = results.curve(model, Metric("purify_gibbs/test/{eps}/k{x}"), "sweeps", eps=0.1)
     assert list(c.x) == [1, 3]
     c = results.curve(model, Metric("rob/test/{x}"), "eps")
@@ -83,7 +83,7 @@ def test_curve_over_a_key_placeholder(toy):
 
 def test_table(toy, tmp_path):
     spec = {"eps": 0.1, "where": {"arch": "d3r40"},
-            "models": [{"study": "toy", "where": {"alpha": a}, "label": f"a{a}"} for a in (0, 1)],
+            "models": [{"study": "toy", "where": {"beta": a}, "label": f"a{a}"} for a in (0, 1)],
             "metrics": [{"key": "acc/test", "label": "Clean", "best": "max"},
                         {"key": "purify/test/{eps}/d0.1", "minus": "rob/test/{eps}",
                          "label": "Gain"}]}
@@ -95,9 +95,9 @@ def test_table(toy, tmp_path):
 
 
 def test_manifest_draws_every_item_and_reports_failures(toy, tmp_path, monkeypatch):
-    model = {"study": "toy", "where": {"arch": "d3r20", "alpha": 0}, "label": "M"}
+    model = {"study": "toy", "where": {"arch": "d3r20", "beta": 0}, "label": "M"}
     paper = {"items": {
-        "alpha": {"kind": "curve", "x": "alpha", "eps": 0.1, "where": {"arch": "d3r20"},
+        "beta": {"kind": "curve", "x": "beta", "eps": 0.1, "where": {"arch": "d3r20"},
                   "series": [{"study": "toy", "key": "acc/test"},
                              {"study": "toy", "key": "rob/test/{eps}", "axis": "right"}]},
         "bars": {"kind": "bars", "eps": [0.1, 0.2], "models": [model],

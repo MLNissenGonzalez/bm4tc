@@ -2,10 +2,10 @@
 
 The objective, for a training batch x with labels y, is
 
-    L = (1-α)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + α·L_gen(x)      (+ norm penalty)
+    L = (1-β)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + (β/N)·L_gen(x)      (+ norm penalty)
 
 where x_adv is a PGD attack on x. NAT is the no-attack case (``evasion: null``):
-then cw is irrelevant and the bracket is L_dis(x), so L = mixed_nll(x, α). The
+then cw is irrelevant and the bracket is L_dis(x), so L = mixed_nll(x, β). The
 generative term always sees clean data (D18): fitting p(x) to adversarial points
 would work against detection and purification.
 
@@ -49,7 +49,7 @@ _ADV_SUBSET_SEED = 0
 
 @dataclass
 class TrainConfig:
-    alpha: float = 0.0  # weight of the generative term
+    beta: float = 0.0  # weight of the generative term per variable (D86)
     max_epoch: int = 100
     batch_size: int = 64
     # Memory only (D79): compute each batch in chunks of this many samples and take
@@ -153,9 +153,9 @@ class Trainer:
             f"(input range width {self.range_size:g})"
         )
 
-        if cfg.alpha >= 1.0:
+        if cfg.beta >= 1.0:
             logger.warning(
-                "alpha=1 with an attack: the discriminative term vanishes, so training "
+                "beta=1 with an attack: the discriminative term vanishes, so training "
                 "is clean generative NLL and the adversarial examples are discarded."
             )
         if cfg.clean_weight >= 1.0:
@@ -183,25 +183,25 @@ class Trainer:
     def _objective(self, data, labels, eps_abs, tracker: NormTracker) -> torch.Tensor:
         """The training objective on one batch (module docstring).
 
-        ``mixed_nll(x, y, a) = (1-a)·L_dis + a·L_gen`` decomposes exactly, so both
-        clean terms fold into one call at a rescaled alpha: with
-        ``s = (1-a)·cw + a`` and ``a' = a/s``,
+        ``mixed_nll(x, y, b) = (1-b)·L_dis + (b/N)·L_gen`` is linear in b, so both
+        clean terms fold into one call at a rescaled beta: with
+        ``s = (1-b)·cw + b`` and ``b' = b/s``,
 
-            s · mixed_nll(x, y, a') = (1-a)·cw·L_dis(x) + a·L_gen(x)
+            s · mixed_nll(x, y, b') = (1-b)·cw·L_dis(x) + (b/N)·L_gen(x)
 
         which keeps an AT step at two forwards (one log Z) rather than three. At
         least one of the two weights is positive. Without an attack the objective
-        is ``mixed_nll(x, y, a)``, computed directly: ``s = (1-a) + a`` need not be
+        is ``mixed_nll(x, y, b)``, computed directly: ``s = (1-b) + b`` need not be
         exactly 1.0 in floating point.
         """
-        alpha, cw = self.cfg.alpha, self.clean_weight
+        beta, cw = self.cfg.beta, self.clean_weight
         if self.attack is None:
-            nll = self.cbm.mixed_nll(data, labels, alpha, debug=self._nc.debug)
+            nll = self.cbm.mixed_nll(data, labels, beta, debug=self._nc.debug)
             tracker.record_amp(self.cbm)
             return nll
 
-        adv_w = (1.0 - alpha) * (1.0 - cw)
-        s = (1.0 - alpha) * cw + alpha
+        adv_w = (1.0 - beta) * (1.0 - cw)
+        s = (1.0 - beta) * cw + beta
 
         terms = []
         if adv_w > 0.0:
@@ -211,12 +211,12 @@ class Trainer:
                 device=self.device,
             )
             self.cbm.train()
-            terms.append(adv_w * self.cbm.mixed_nll(adv_data, labels, alpha=0.0))
+            terms.append(adv_w * self.cbm.mixed_nll(adv_data, labels, beta=0.0))
             # Amplitudes explode on the adversarial batch; record before the clean
             # forward overwrites the cache.
             tracker.record_amp(self.cbm)
         if s > 0.0:
-            terms.append(s * self.cbm.mixed_nll(data, labels, alpha=alpha / s,
+            terms.append(s * self.cbm.mixed_nll(data, labels, beta=beta / s,
                                                 debug=self._nc.debug))
             if adv_w <= 0.0:
                 tracker.record_amp(self.cbm)
@@ -230,7 +230,7 @@ class Trainer:
     def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
         """log_Z and log|amp|² stats. Prefers the failing mixed_nll forward's
         stats (no extra contraction); falls back to a fresh no-grad recompute when
-        it did not form them (e.g. alpha=0 leaves log_Z out)."""
+        it did not form them (e.g. beta=0 leaves log_Z out)."""
         result: Dict[str, float] = self.cbm.forward_stats()
         _tiny = float(torch.finfo(torch.float32).tiny)
 
@@ -366,7 +366,7 @@ class Trainer:
                     if self.norm_regularizer is not None:
                         penalty = self.norm_regularizer(self.cbm)
                         loss = loss + penalty
-                    # log Z is formed by mixed_nll (alpha>0) or the regularizer;
+                    # log Z is formed by mixed_nll (beta>0) or the regularizer;
                     # read it before optimizer.step() changes the parameters.
                     tracker.record_logZ(self.cbm)
                 loss.backward()
@@ -389,7 +389,7 @@ class Trainer:
     def _validate(self) -> dict:
         return evaluate(
             self.cbm, self.valid_loader, self.device,
-            alpha=self.cfg.alpha,
+            beta=self.cfg.beta,
             attack=self.attack,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
             clean_weight=self.clean_weight,
@@ -451,7 +451,7 @@ class Trainer:
         self.optimizer = optimizer(self.cbm.parameters(), cfg.optimizer)
 
         regime = "AT" if self.attack is not None else "NAT"
-        logger.info(f"{regime} training begins (alpha={cfg.alpha:.3g}).")
+        logger.info(f"{regime} training begins (beta={cfg.beta:.3g}).")
 
         pbar = tqdm(range(cfg.max_epoch), desc=regime, unit="ep", dynamic_ncols=True)
         for epoch in pbar:

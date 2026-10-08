@@ -9,9 +9,10 @@ trained model gives a classifier p(c | x), an exact log-likelihood log p(x), and
 gradients of both. The code trains such models on a continuum between discriminative
 and generative training,
 
-    L = (1 − α) · L_dis + α · L_gen,     L_dis = −log p(c | x),  L_gen = −log p(x, c),
+    L = (1 − β) · L_dis + β · L_gen / N,     L_dis = −log p(c | x),  L_gen = −log p(x, c),
 
-optionally with adversarial training, and evaluates what the density buys against
+with N = n + 1 the number of modelled variables (n features and the class), so every
+loss is in nats per variable, optionally with adversarial training, and evaluates what the density buys against
 adversarial examples: detection (flag inputs with low log p(x)), likelihood
 purification (gradient ascent on log p(x) within a small ball) and Gibbs purification
 (resampling features from the model's conditionals). A joint energy-based model (JEM,
@@ -32,7 +33,7 @@ writes them to `log.json`.
 
 ## Quick start
 
-A study is a grid of runs (dataset × embedding × architecture × α [× attack radius])
+A study is a grid of runs (dataset × embedding × architecture × β [× attack radius])
 times seeds, in `configs/studies/<study>.yaml`. One command trains and analyses it:
 
 ```bash

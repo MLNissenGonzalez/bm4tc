@@ -1,4 +1,4 @@
-# MNIST 12x12, NAT, the default alpha ladder, cold; log Z pulled to n·ln d / 2 (D84).
+# MNIST 12x12, NAT, the default beta ladder, cold; log Z pulled to n·ln d / 2 (D84).
 dataset: mnist12
 regime: nat
 grid:

@@ -5,9 +5,9 @@ says how to draw it::
 
     out: figures/journal          # output directory, under the repository root
     items:
-      mnist_alpha_acc:            # -> figures/journal/mnist_alpha_acc.pdf
+      mnist_beta_acc:             # -> figures/journal/mnist_beta_acc.pdf
         kind: curve
-        x: alpha
+        x: beta
         eps: 0.1
         where: {arch: d3r40}
         series:
