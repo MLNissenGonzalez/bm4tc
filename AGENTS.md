@@ -56,9 +56,36 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-07)
+## State (2026-10-08)
 
-Branch `ousterhout`: Phases 0–7 of the refactor are done; `main` is untouched and the
-local tag `pre-ousterhout` marks it. Next is Phase 8, running the journal studies on
-the HPC (docs/plan.md). `CLAUDE.md`, `DEFERRED.md` and `.claude/` on Martin's other
-laptop may hold older notes and an issue list to reconcile.
+Branch `ousterhout` (pushed to GitHub up to the pilot commit `87663bc3`; later commits
+are local): Phases 0–7 of the refactor are done; `main` is untouched and the local tag
+`pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) has started with the
+pilots; `docs/plan.md` has the details, `docs/compute.md` the cost estimates.
+
+Done on 2026-10-07/08 (D78–D85): dataset cache lock + atomic write; micro-batches
+(`trainer.micro_batch_size`, per-arch `archs:` block, analysis chunks follow); AT with
+cw = 0 and lr-only HPO; 15 trials per tuned hparam with median pruning; AT α grid; four
+pilot studies; pilot A verdict (log Z target n·ln d / 2 for cold MNIST) and a denser
+small-α ladder; seam tests force AVX2 CPU kernels.
+
+Cluster: G21G01 is set up (env, clone, worktree `runs/87663bc3`). It is ≈ 2.4× slower
+per unit than the laptop (CPU-bound), and `/ceph` is ceph over NFSv4.2. Martin's notes
+`docs/hpc_*.md` and the pilot CSVs in `pilots/` are untracked on purpose (personal,
+not for git).
+
+**Next:**
+1. Read pilot B (`pilot_pgd5` due 2026-10-08 evening, `pilot_pgd10` 2026-10-09
+   morning): the PGD step count goes to `configs/trainer/at.yaml` (D43 rule). Decide
+   with Martin whether AT's clean accuracy is acceptable (levers in the 2026-10-08
+   discussion: capacity, a fixed cw = 0.5, TRADES); also whether the AT α grid should
+   move to small values (α = 0.1 is almost purely generative on MNIST, D84).
+2. **Review the β plan critically, then implement it** ("Planned: β" in
+   `docs/plan.md`): one dimension-corrected parameter replaces α everywhere. Start
+   with its six review questions (measure the gradient-norm ratio first).
+3. Before the big studies: cap HPO workers per cell; let `select`/`run --cell` work on
+   a subset of cells; the Gibbs O(n²) rework and the per-step overhead (Phase 9 track);
+   a multi-study launcher.
+
+Other open items (time series, adaptive attacks, notes on the other laptop) are in
+`docs/plan.md`.
