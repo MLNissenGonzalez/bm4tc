@@ -74,7 +74,8 @@ def test_graphs_share_one_pool_and_return_copies():
 @needs_cuda
 def test_warm_up_calls_reuse_one_streams_memory():
     """Three warm-up calls reserve one call's memory, not three (the allocator
-    caches per stream)."""
+    caches per stream). One call peaks at 128 MiB: the repeat and its double,
+    64 MiB each, are alive together; a new stream per call reserved 384 MiB."""
     graphs = Graphs(enabled=True)
     doubled = graphs.wrap(lambda x: (x.repeat(16, 1) * 2).sum(0), warmup_calls=3)
     x = torch.ones(2**20, device=CUDA)               # 4 MiB; the repeat is 64 MiB
@@ -85,7 +86,7 @@ def test_warm_up_calls_reuse_one_streams_memory():
     for _ in range(3):
         doubled(x)
     torch.cuda.synchronize()
-    assert torch.cuda.max_memory_reserved() - before < 2 * 64 * 2**20
+    assert torch.cuda.max_memory_reserved() - before < 2 * 128 * 2**20
 
 
 HOST_SYNC_CAPTURE = """
