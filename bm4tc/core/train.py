@@ -2,11 +2,10 @@
 
 The objective, for a training batch x with labels y, is
 
-    L = (1-β)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + (β/N)·L_gen(x)      (+ norm penalty)
+    L = (1-β)·L_dis(x_adv) + (β/N)·L_gen(x)      (+ norm penalty)
 
-where x_adv is a PGD attack on x. NAT is the no-attack case (``evasion: null``):
-then cw is irrelevant and the bracket is L_dis(x), so L = mixed_nll(x, β). The
-generative term always sees clean data (D18): fitting p(x) to adversarial points
+where x_adv is a PGD attack on x (plain PGD-AT, D80, D91). NAT is the no-attack
+case (``evasion: null``): L = mixed_nll(x, β). The generative term always sees clean data (D18): fitting p(x) to adversarial points
 would work against detection and purification.
 
 Every ``eval_every`` epochs the trainer validates the same objective on the
@@ -45,11 +44,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Constant (not the run seed) so every seed in a sweep attacks the same validation
-# samples, keeping cross-seed rob comparisons clean.
-_ADV_SUBSET_SEED = 0
-
-
 @dataclass
 class TrainConfig:
     beta: float = 0.0  # weight of the generative term per variable (D86)
@@ -66,7 +60,6 @@ class TrainConfig:
     # OmegaConf 2.3 cannot merge a preset into an Optional[dataclass] field that
     # is None under Hydra; the Trainer checks it against EvasionConfig instead.
     evasion: Optional[Dict[str, Any]] = None
-    clean_weight: float = 0.0  # cw above; AT only
     # Linear ramp of the training radius from curriculum_eps_start_rel to the full
     # radius, reached at epoch curriculum_end·max_epoch. Validation always attacks
     # at the full radius. AT only.
@@ -85,15 +78,6 @@ def evasion_config(raw) -> EvasionConfig:
     """``TrainConfig.evasion`` as an EvasionConfig; an unknown key raises."""
     merged = OmegaConf.merge(OmegaConf.structured(EvasionConfig), raw)
     return OmegaConf.to_object(merged)
-
-
-def attacked_subset(n: int, clean_weight: float) -> set:
-    """The validation samples AT validation attacks: (1 - cw)·n positions in the
-    valid loader's order (stable: only the train split is shuffled), drawn once
-    from a constant seed so the rob curve is not perturbed by resampling."""
-    k = min(n, max(0, int(round((1.0 - clean_weight) * n))))
-    gen = torch.Generator().manual_seed(_ADV_SUBSET_SEED)
-    return set(torch.randperm(n, generator=gen)[:k].tolist())
 
 
 def curriculum_eps(cfg: TrainConfig, epoch: int, start_abs: float, full_abs: float) -> float:
@@ -122,7 +106,7 @@ class Trainer:
         self.cbm = cbm
         self.cfg = cfg
         self.train_loader = train_loader
-        self.valid_loader = valid_loader  # not shuffled: adv_indices are positions in it
+        self.valid_loader = valid_loader
         self.device = device
 
         self.best = {"objective": float("inf")}
@@ -135,8 +119,6 @@ class Trainer:
         self._graphed_train_step = Graphed(self._train_step, enabled=False)
 
         self.attack: ProjectedGradientDescent | None = None
-        self.adv_indices: set[int] = set()
-        self.clean_weight = 1.0  # without an attack the bracket is the clean term
         if cfg.evasion is not None:
             self._init_attack()
 
@@ -150,7 +132,6 @@ class Trainer:
         if evasion.method != "PGD":
             raise ValueError(f"Training supports the PGD attack only, got {evasion.method!r}")
         self.attack = build_attack(evasion)
-        self.clean_weight = cfg.clean_weight
 
         # The rel -> abs boundary for training: configs author eps_rel, the attack
         # is driven by absolute model-domain budgets.
@@ -168,17 +149,8 @@ class Trainer:
                 "beta=1 with an attack: the discriminative term vanishes, so training "
                 "is clean generative NLL and the adversarial examples are discarded."
             )
-        if cfg.clean_weight >= 1.0:
-            logger.warning(
-                "clean_weight=1: no adversarial examples enter the objective and no "
-                "valid samples are attacked, so 'rob' is never reported."
-            )
-
-        n = len(self.valid_loader.dataset)
-        self.adv_indices = attacked_subset(n, cfg.clean_weight)
-        k = len(self.adv_indices)
         logger.info(
-            f"Attacking {k}/{n} valid samples every {cfg.eval_every} epoch(s); "
+            f"Attacking every valid sample every {cfg.eval_every} epoch(s); "
             f"patience={cfg.patience} valid events (~{cfg.patience * cfg.eval_every} epochs)."
         )
 
@@ -195,24 +167,15 @@ class Trainer:
         log|ψ|² of the forward the norm statistics describe: the adversarial one
         when there is one (its amplitudes explode first), else the clean one.
 
-        ``mixed_nll(x, y, b) = (1-b)·L_dis + (b/N)·L_gen`` is linear in b, so both
-        clean terms fold into one call at a rescaled beta: with
-        ``s = (1-b)·cw + b`` and ``b' = b/s``,
-
-            s · mixed_nll(x, y, b') = (1-b)·cw·L_dis(x) + (b/N)·L_gen(x)
-
-        which keeps an AT step at two forwards (one log Z) rather than three. At
-        least one of the two weights is positive. Without an attack the objective
-        is ``mixed_nll(x, y, b)``, computed directly: ``s = (1-b) + b`` need not be
-        exactly 1.0 in floating point.
+        AT is two forwards, each dropped at an endpoint β: ``mixed_nll`` at β = 0
+        on x_adv weighted by 1-β, and at β = 1 on x weighted by β, since
+        ``mixed_nll(x, y, 1) = L_gen(x)/N``.
         """
-        beta, cw = self.cfg.beta, self.clean_weight
+        beta = self.cfg.beta
         if self.attack is None:
             return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug)
 
-        adversarial_weight = (1.0 - beta) * (1.0 - cw)
-        clean_weight = (1.0 - beta) * cw + beta
-
+        adversarial_weight = 1.0 - beta
         objective = None
         if adversarial_weight > 0.0:
             self.cbm.eval()
@@ -223,11 +186,11 @@ class Trainer:
             self.cbm.train()
             adversarial_objective, log_amp_sq = self.cbm.mixed_nll(adversarials, labels, beta=0.0)
             objective = adversarial_weight * adversarial_objective
-        if clean_weight > 0.0:
-            clean_objective, clean_log_amp_sq = self.cbm.mixed_nll(
-                inputs, labels, beta=beta / clean_weight, debug=self._nc.debug)
-            clean_term = clean_weight * clean_objective
-            objective = clean_term if objective is None else objective + clean_term
+        if beta > 0.0:
+            generative_objective, clean_log_amp_sq = self.cbm.mixed_nll(
+                inputs, labels, beta=1.0, debug=self._nc.debug)
+            generative_term = beta * generative_objective
+            objective = generative_term if objective is None else objective + generative_term
             if adversarial_weight <= 0.0:
                 log_amp_sq = clean_log_amp_sq
         return objective, log_amp_sq
@@ -375,8 +338,6 @@ class Trainer:
             beta=self.cfg.beta,
             attack=self.attack,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
-            clean_weight=self.clean_weight,
-            adv_indices=self.adv_indices,
         )
 
     def _update(self, valid: dict):
@@ -473,8 +434,7 @@ class Trainer:
                 postfix["acc"] = f"{valid['acc']:.4f}"
                 logged = dict(valid)
                 if "rob" in valid:
-                    # At the full radius, so the key is constant within a run; a
-                    # subset estimator over n_rob samples.
+                    # At the full radius, so the key is constant within a run.
                     postfix["rob"] = f"{valid['rob']:.4f}"
                     logged["rob"] = {self.eps_rel: valid["rob"]}
                 record["valid"] = logged

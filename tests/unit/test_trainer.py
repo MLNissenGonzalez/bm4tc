@@ -39,14 +39,12 @@ def _loaders(n=16, batch_size=4):
 
 
 class _ShiftAttack:
-    """Deterministic stand-in for PGD; records which samples it was handed."""
+    """Deterministic stand-in for PGD."""
 
     def __init__(self, shift=0.05):
         self.shift = shift
-        self.seen = []
 
     def generate(self, model, naturals, labels, eps_abs, device):
-        self.seen.append(naturals.detach().clone())
         return (naturals + self.shift).detach()
 
 
@@ -95,7 +93,6 @@ def test_norm_control_config_defaults():
 def test_nat_trainer_constructs_without_attack():
     t = _trainer(TrainConfig())
     assert t.attack is None
-    assert t.adv_indices == set()
     assert t.norm_regularizer is None
     assert len(t.best_tensors) == len(t.cbm.tensors)
 
@@ -110,14 +107,9 @@ def test_unknown_evasion_key_fails_at_construction():
         _trainer(TrainConfig(evasion={"method": "PGD", "eps": 0.1}))
 
 
-def test_attack_budget_and_valid_subset():
-    """The subset is (1-cw)·n_valid positions, drawn from a constant seed."""
-    cfg = TrainConfig(evasion=PGD, clean_weight=0.4)
-    t = _trainer(cfg, n=20, batch_size=5)
+def test_attack_budget():
+    t = _trainer(TrainConfig(evasion=PGD), n=20, batch_size=5)
     assert t.eps_rel == 0.1
-    assert len(t.adv_indices) == round(0.6 * 20)
-    again = _trainer(cfg, n=20, batch_size=5)
-    assert t.adv_indices == again.adv_indices  # constant seed, not the run seed
 
 
 def test_curriculum_reaches_the_full_radius_at_its_end_fraction():
@@ -397,18 +389,17 @@ class _OnesAttack:
         return torch.ones_like(naturals)
 
 
-def _stub_trainer(beta, cw, *, attack=True):
+def _stub_trainer(beta, *, attack=True):
     """Trainer wired with just what _objective / _train_epoch touch."""
     cbm = _DecompStubCBM()
     t = Trainer.__new__(Trainer)
-    t.cfg = TrainConfig(beta=beta, clean_weight=cw, norm_control=NO_NORM)
+    t.cfg = TrainConfig(beta=beta, norm_control=NO_NORM)
     t.cbm = cbm
     t.device = CPU
     t.step = 0
     t._nc = t.cfg.norm_control
     t.norm_regularizer = None
     t.attack = _OnesAttack() if attack else None
-    t.clean_weight = cw if attack else 1.0
     clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
     t.train_loader = [clean]
     t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
@@ -421,36 +412,32 @@ def _objective(t):
     return objective
 
 
-def _naive_at_loss(beta, cw):
-    """The three-term form the two-call implementation must reproduce."""
-    return (1 - beta) * ((1 - cw) * _L_DIS[1.0] + cw * _L_DIS[0.0]) + beta / _N * _L_GEN[0.0]
+def _naive_at_loss(beta):
+    """The two-term form the implementation must reproduce."""
+    return (1 - beta) * _L_DIS[1.0] + beta / _N * _L_GEN[0.0]
 
 
-def test_at_objective_matches_naive_three_term_form():
-    for beta, cw in [(0.5, 0.3), (0.1, 0.0), (0.9, 0.7), (0.25, 1.0), (0.0, 0.4)]:
-        t, _ = _stub_trainer(beta, cw)
-        assert _objective(t).item() == pytest.approx(_naive_at_loss(beta, cw), abs=1e-6)
+def test_at_objective_matches_naive_two_term_form():
+    for beta in [0.5, 0.1, 0.9, 0.25]:
+        t, _ = _stub_trainer(beta)
+        assert _objective(t).item() == pytest.approx(_naive_at_loss(beta), abs=1e-6)
 
 
-def test_at_objective_uses_two_forwards_with_rescaled_beta():
-    beta, cw = 0.5, 0.3
-    t, cbm = _stub_trainer(beta, cw)
+def test_at_objective_uses_two_forwards_at_endpoint_betas():
+    t, cbm = _stub_trainer(0.5)
     _objective(t)
-    s = (1 - beta) * cw + beta
-    assert len(cbm.calls) == 2, cbm.calls
-    assert cbm.calls[0] == (1.0, 0.0)           # adversarial batch, discriminative
-    assert cbm.calls[1][0] == 0.0               # clean batch
-    assert cbm.calls[1][1] == pytest.approx(beta / s)
+    assert cbm.calls == [(1.0, 0.0),            # adversarial batch, discriminative
+                         (0.0, 1.0)]            # clean batch, generative
 
 
-def test_at_objective_at_beta0_cw0_is_adversarial_dis_loss():
-    t, cbm = _stub_trainer(0.0, 0.0)
+def test_at_objective_at_beta0_is_adversarial_dis_loss():
+    t, cbm = _stub_trainer(0.0)
     assert _objective(t).item() == pytest.approx(_L_DIS[1.0])
     assert cbm.calls == [(1.0, 0.0)]
 
 
 def test_at_objective_at_beta1_drops_the_adversarial_term():
-    t, cbm = _stub_trainer(1.0, 0.3)
+    t, cbm = _stub_trainer(1.0)
     assert _objective(t).item() == pytest.approx(_L_GEN[0.0] / _N)
     assert cbm.calls == [(0.0, 1.0)]
 
@@ -458,17 +445,17 @@ def test_at_objective_at_beta1_drops_the_adversarial_term():
 @pytest.mark.parametrize("beta", [0.0, 0.01, 0.5, 1.0])
 def test_nat_objective_is_one_mixed_nll_at_beta(beta):
     """No attack: exactly mixed_nll(x, beta), not a rescaled call."""
-    t, cbm = _stub_trainer(beta, 0.3, attack=False)
+    t, cbm = _stub_trainer(beta, attack=False)
     assert _objective(t).item() == pytest.approx((1 - beta) * 2.0 + beta * 7.0 / _N)
     assert cbm.calls == [(0.0, beta)]
 
 
 def test_train_epoch_routes_through_the_objective():
-    t, cbm = _stub_trainer(0.5, 0.3)
+    t, cbm = _stub_trainer(0.5)
     t._train_epoch(eps_abs=0.1)
     assert len(cbm.calls) == 2  # one training step in the stub loader
     assert cbm.calls[0][1] == 0.0
-    assert t._train_objective == pytest.approx(_naive_at_loss(0.5, 0.3))
+    assert t._train_objective == pytest.approx(_naive_at_loss(0.5))
 
 
 # ── evaluate ────────────────────────────────────────────────────────────────
@@ -524,39 +511,16 @@ def test_evaluate_clean_metrics_do_not_depend_on_the_attack():
     """acc/loss_dis/loss_x are clean and over the full set."""
     cbm = _ready_cbm()
     loader = _valid_loader()
-    out = evaluate(cbm, loader, CPU, beta=0.5, attack=_ShiftAttack(), eps_abs=0.1,
-                   clean_weight=0.3, adv_indices={0, 1, 2})
+    out = evaluate(cbm, loader, CPU, beta=0.5, attack=_ShiftAttack(), eps_abs=0.1)
     clean = evaluate(cbm, loader, CPU, beta=0.5)
     for k in ("loss_dis", "loss_x", "acc"):
         assert out[k] == pytest.approx(clean[k], rel=1e-6), k
 
 
-def test_evaluate_attacks_only_the_given_subset():
+def test_evaluate_rob_matches_eval_rob():
     cbm = _ready_cbm()
     loader = _valid_loader(n=20, batch_size=6)
-    all_x = torch.cat([x for x, _ in loader])
-    adv_indices = {1, 5, 6, 13, 19}
-    attack = _ShiftAttack()
-    out = evaluate(cbm, loader, CPU, beta=0.5, attack=attack, eps_abs=0.1,
-                   clean_weight=0.75, adv_indices=adv_indices)
-    assert out["n_rob"] == len(adv_indices)
-    attacked = torch.cat(attack.seen)
-    assert torch.allclose(attacked, all_x[sorted(adv_indices)])
-
-
-def test_evaluate_rob_absent_when_no_samples_attacked():
-    """clean_weight=1 => empty subset => 'rob' omitted rather than nan."""
-    out = evaluate(_ready_cbm(), _valid_loader(), CPU, beta=0.5, attack=_ShiftAttack(),
-                   eps_abs=0.1, clean_weight=1.0, adv_indices=set())
-    assert "rob" not in out
-    assert out["n_rob"] == 0
-
-
-def test_evaluate_rob_matches_eval_rob_when_every_sample_is_attacked():
-    cbm = _ready_cbm()
-    loader = _valid_loader(n=20, batch_size=6)
-    out = evaluate(cbm, loader, CPU, attack=_ShiftAttack(), eps_abs=0.1,
-                   clean_weight=0.0, adv_indices=set(range(20)))
+    out = evaluate(cbm, loader, CPU, attack=_ShiftAttack(), eps_abs=0.1)
     assert out["rob"] == pytest.approx(eval_rob(cbm, loader, _ShiftAttack(), 0.1, CPU))
 
 
@@ -564,11 +528,9 @@ def test_evaluate_objective_matches_hand_computed_reference():
     """The objective reproduces the AT training objective, sample by sample."""
     cbm = _ready_cbm()
     loader = _valid_loader(n=20, batch_size=6)
-    beta, cw, shift = 0.4, 0.35, 0.05
-    adv_indices = {0, 3, 4, 9, 11, 15, 17}
+    beta, shift = 0.4, 0.05
 
-    out = evaluate(cbm, loader, CPU, beta=beta, attack=_ShiftAttack(shift),
-                   eps_abs=0.1, clean_weight=cw, adv_indices=adv_indices)
+    out = evaluate(cbm, loader, CPU, beta=beta, attack=_ShiftAttack(shift), eps_abs=0.1)
 
     xs = torch.cat([x for x, _ in loader])
     ys = torch.cat([y for _, y in loader])
@@ -580,16 +542,14 @@ def test_evaluate_objective_matches_hand_computed_reference():
             las = cbm.log_amp_sq(x.unsqueeze(0))
         return (torch.logsumexp(las, dim=1) - las[0, y]).item()
 
-    dis_adv = [_dis(xs[i] + shift, ys[i]) for i in sorted(adv_indices)]
-    dis_cln = [_dis(xs[i], ys[i]) for i in range(len(xs)) if i not in adv_indices]
+    dis_adv = [_dis(xs[i] + shift, ys[i]) for i in range(len(xs))]
     with torch.no_grad():
         las_all = cbm.log_amp_sq(xs)
     gen_all = (log_Z - las_all[range(len(ys)), ys]).mean().item()
-    ref = (1 - beta) * (
-        (1 - cw) * sum(dis_adv) / len(dis_adv) + cw * sum(dis_cln) / len(dis_cln)
-    ) + beta * gen_all / (xs.shape[1] + 1)
+    ref = (1 - beta) * sum(dis_adv) / len(dis_adv) + beta * gen_all / (xs.shape[1] + 1)
 
     assert out["objective"] == pytest.approx(ref, abs=1e-4)
+    assert out["loss_adv"] == pytest.approx(sum(dis_adv) / len(dis_adv), abs=1e-4)
     # The clean beta-mix is not the objective: it never sees x_adv.
     assert abs(out["objective"] - _clean_mix(out, beta, n=xs.shape[1])) > 1e-6
 
@@ -635,7 +595,7 @@ def test_nonfinite_objective_is_never_selected():
 @pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
 def test_validates_every_eval_every_epochs(evasion):
     """Valid metrics appear on eval epochs only; patience counts valid events."""
-    t = _trainer(TrainConfig(beta=0.5, evasion=evasion, clean_weight=0.5, max_epoch=9,
+    t = _trainer(TrainConfig(beta=0.5, evasion=evasion, max_epoch=9,
                              eval_every=3, norm_control=NO_NORM), n=20, batch_size=5)
     logged = []
     t.train(on_epoch_end=lambda ep, m: logged.append((ep, flatten_epoch(m))))
@@ -647,11 +607,10 @@ def test_validates_every_eval_every_epochs(evasion):
         if "objective/valid" not in m:
             continue
         if evasion is None:
-            assert not any(k.startswith(("rob/", "n_rob/", "loss_adv/")) for k in m)
+            assert not any(k.startswith(("rob/", "loss_adv/")) for k in m)
         else:
             rob = key("rob", "valid", t.eps_rel)
-            assert {rob, "loss_adv/valid", "n_rob/valid", "eps_rel/train"} <= set(m)
-            assert m["n_rob/valid"] == len(t.adv_indices)
+            assert {rob, "loss_adv/valid", "eps_rel/train"} <= set(m)
 
 
 def test_nat_logs_norm_metrics_every_epoch():

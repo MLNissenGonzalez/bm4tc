@@ -2,12 +2,12 @@
 
 For a training batch x with labels y and SGLD negatives x⁻ (persistent chains),
 
-    L = (1-β)·[(1-cw)·CE(x_adv) + cw·CE(x)] + (β/N)·L_gen(x)      (+ energy penalty)
+    L = (1-β)·CE(x_adv) + (β/N)·L_gen(x)      (+ energy penalty)
     L_gen(x) = -f_y(x) + mean logsumexp_c f(x⁻)
 
 L_gen is the contrastive estimate of -log p(x, y): the negatives' mean score
 stands in for log Z, so its gradient is the JEM gradient. NAT is ``evasion:
-null`` (the bracket is CE(x)); β=0 needs no negatives. x_adv is the shared PGD.
+null``: CE(x) in place of CE(x_adv); β=0 needs no negatives. x_adv is the shared PGD.
 N = ``n_vars(x)``, the features and the class, as for the MPS (D86).
 
 Validation and selection are the MPS's (:func:`bm4tc.core.objective.evaluate`,
@@ -32,7 +32,7 @@ from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.jem.model import JEMMLP, JEMModelConfig
 from bm4tc.core.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
 from bm4tc.core.objective import evaluate, mix, n_vars, optimizer
-from bm4tc.core.train import TrainConfig, attacked_subset, curriculum_eps, evasion_config
+from bm4tc.core.train import TrainConfig, curriculum_eps, evasion_config
 
 logger = logging.getLogger(__name__)
 
@@ -87,19 +87,15 @@ class JEMTrainer:
             ReplayBuffer(v.buffer_size, model.data_dim, lo_hi, seed=v.seed))
 
         self.attack = None
-        self.clean_weight = 1.0
-        self.adv_indices: set = set()
         if cfg.evasion is not None:
             evasion = evasion_config(cfg.evasion)
             if evasion.method != "PGD":
                 raise ValueError(f"Training supports the PGD attack only, got {evasion.method!r}")
             self.attack = build_attack(evasion)
-            self.clean_weight = cfg.clean_weight
             self.range_size = range_size_of(model)
             self.eps_rel = float(evasion.eps_rel[0] if evasion.eps_rel else 0.1)
             self.eps_abs = rel_to_abs(self.eps_rel, self.range_size)
             self._start_abs = rel_to_abs(cfg.curriculum_eps_start_rel, self.range_size)
-            self.adv_indices = attacked_subset(len(valid_loader.dataset), cfg.clean_weight)
 
         self.best = {"objective": float("inf")}
         self.best_epoch = 0
@@ -109,7 +105,7 @@ class JEMTrainer:
 
     def _objective(self, data, labels, eps_abs):
         """(objective, penalty) on one batch (module docstring)."""
-        cfg, beta, cw = self.cfg, self.cfg.beta, self.clean_weight
+        cfg, beta = self.cfg, self.cfg.beta
         positives = data
         if self.jem.input_noise_std > 0:
             positives = (data + self.jem.input_noise_std * torch.randn_like(data)).clamp(
@@ -121,12 +117,12 @@ class JEMTrainer:
         logits = self.model(positives)
         ce = F.cross_entropy(logits, labels)
         dis = ce
-        if self.attack is not None and cw < 1.0:
+        if self.attack is not None:
             self.model.eval()
             adv = self.attack.generate(model=self.model, naturals=data, labels=labels,
                                        eps_abs=eps_abs, device=self.device)
             self.model.train()
-            dis = (1.0 - cw) * F.cross_entropy(self.model(adv), labels) + cw * ce
+            dis = F.cross_entropy(self.model(adv), labels)
 
         gen = penalty = None
         if negatives is not None:
@@ -167,7 +163,6 @@ class JEMTrainer:
             self.model, self.valid_loader, self.device,
             log_Z=self._log_Z(epoch), beta=self.cfg.beta, attack=self.attack,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
-            clean_weight=self.clean_weight, adv_indices=self.adv_indices,
         )
 
     # ── Loop ────────────────────────────────────────────────────────────────

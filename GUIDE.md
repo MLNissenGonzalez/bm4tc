@@ -52,7 +52,7 @@ defence is SGLD purification, the counterpart of the MPS's Gibbs purification.
 One objective for both regimes and both models (`bm4tc/core/objective.py`,
 `bm4tc/core/train.py`, D15, D18, D71, D86):
 
-    L = (1 − β) · [(1 − cw) · L_dis(x_adv) + cw · L_dis(x)] + (β / N) · L_gen(x)
+    L = (1 − β) · L_dis(x_adv) + (β / N) · L_gen(x)
 
 N = n + 1 counts the modelled variables (the n features and the class), so L_gen / N
 is the generative loss per variable and L is a weighted mean of per-variable NLLs:
@@ -62,9 +62,8 @@ every loss is in **nats per variable** (D86).
   = (1 − s) · L_dis + s · L_x with s = β·n/N and L_x = −log p(x) / n (nats per feature).
   β = 0 is a plain discriminative classifier, β = 1 a pure density model. The
   pre-D86 α (TPM) is the same objective up to a factor: β/(1−β) = N·α/(1−α).
-- **AT** (adversarial training): x_adv from PGD at radius ε (`trainer.evasion`);
-  cw = `trainer.clean_weight`, 0 in every study (plain PGD-AT, not tuned: D80).
-  The generative term always sees clean data. Training
+- **AT** (adversarial training): x_adv from PGD at radius ε (`trainer.evasion`),
+  plain PGD-AT (D80, D91). The generative term always sees clean data. Training
   it on adversarial points would teach p(x) to like them, which defeats detection
   and purification (D18; kept in mind as an ablation). AT runs start from the
   selected β = 0 NAT run of the same cell and seed (warm start, D19). The radius ramps

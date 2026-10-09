@@ -95,10 +95,11 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
     (tmp_path / "spirals_at.yaml").write_text(  # as `select spirals_at` writes it
         f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-3\n"
         "  trainer.clean_weight: 0.4\n  extra: 1\n")
-    # only the study's search space is read: the lr (clean_weight is fixed at 0, D80)
+    # only the study's search space is read: the lr (a stale clean_weight from
+    # before D91 is ignored)
     assert study.hparams(cell) == {"trainer.optimizer.kwargs.lr": 3e-3}
     cfg = Job(study, cell, 1).compose()
-    assert cfg.trainer.optimizer.kwargs.lr == 3e-3 and cfg.trainer.clean_weight == 0.0
+    assert cfg.trainer.optimizer.kwargs.lr == 3e-3 and "clean_weight" not in cfg.trainer
 
 
 def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
@@ -110,7 +111,7 @@ def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
         "  jem.sampler.step_size: 0.02\n  jem.sampler.noise_std: 0.003\n"
         "  jem.sampler.num_steps: 40\n")
     (tmp_path / "jem_mnist12_at.yaml").write_text(
-        f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-4\n  trainer.clean_weight: 0.5\n")
+        f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-4\n")
     cfg = Job(study, cell, 1).compose()
     assert (cfg.jem.sampler.step_size, cfg.jem.sampler.noise_std, cfg.jem.sampler.num_steps) \
         == (0.02, 0.003, 40)

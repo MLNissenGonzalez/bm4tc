@@ -17,6 +17,6 @@ config:
   trainer.evasion.num_steps: 2
   tracking.mode: disabled
 hpo:
-  trials_per_param: 1          # lr and clean_weight: 2 trials
+  trials_per_param: 2          # one hparam: 2 trials
   space:
-    trainer.clean_weight: [0.2, 1.0]
+    trainer.optimizer.kwargs.lr: {log: [1e-3, 1e-1]}

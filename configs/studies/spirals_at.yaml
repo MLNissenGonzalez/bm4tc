@@ -9,6 +9,6 @@ config:
   trainer.max_epoch: 200
   trainer.batch_size: 256
   trainer.patience: 20         # validations (eval_every 5): 100 epochs
-hpo:                           # the lr only; clean_weight stays 0 (D80)
+hpo:                           # the lr only (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)
