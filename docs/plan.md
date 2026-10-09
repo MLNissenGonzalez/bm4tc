@@ -211,14 +211,19 @@ Measured in [compute.md](compute.md).
          allocated (≈ 3 × the eager peak; d3r80 likewise). E2a (`--per-gpu 8`, about
          3.4 GiB per unit at start) lost 61 of 73 HPO trials to out-of-memory errors
          at startup; E2c (spirals) was unaffected and finished.
-      3. Done in code (D91, D92), to check on G21G01: validation captured in the
-         training step's pool (`Graphs`, `Evaluation`; cw is gone, so AT validation
-         attacks whole batches), one warm-up stream per `Graphs`, and the analysis
-         stage's per-batch work captured (PGD, joint PGD, likelihood purification,
-         log p(x), prediction; Gibbs stays eager). An HPO trial that runs out of GPU
-         memory is retried, not counted. Checks: `pytest tests/unit/test_graphs.py`,
-         the bench's peak reserved memory (E2a's shape, d3r80 micro 128), and
-         `tests.bench.bench_analysis` (eager vs captured).
+      3. Done (D91–D93; G21G01, 2026-10-09, late): validation captured
+         (`Graphs`, `Evaluation`; cw is gone, so AT validation attacks whole
+         batches), one warm-up stream per `Graphs` (MNIST12 d3r40: 2.96 GiB reserved
+         instead of 5.79), and the analysis stage's per-batch work captured (PGD,
+         joint PGD, likelihood purification, log p(x), prediction; Gibbs stays
+         eager): ≈ 7× per batch once captured (`tests.bench.bench_analysis`).
+         **Each graph has its own memory pool:** validation sharing the training
+         step's pool crashed the next training replay (illegal memory access) at
+         MNIST12 d3r40 batch 512 and at d3r80; the relaunched E2a lost 56 trials to
+         it. A trial ending in any CUDA error is retried, not counted (D93).
+         **Open:** full-MNIST d3r80 micro 128 does not fit (validation needs ≈ 4.8
+         GiB beside the step's 16 GiB pool): smaller validation chunks or micro 64,
+         decided with `mnist_capacity`.
       4. Re-estimate compute.md.
   - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward

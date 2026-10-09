@@ -7,9 +7,10 @@ to the eager step), and with NVIDIA MPS several units share a GPU.
 
 :class:`Graphed` hides what capture needs: eager warm-up calls on a side stream,
 one graph per tuple of input shapes and dtypes, and static input buffers.
-:class:`Graphs` groups the functions whose graphs never run at the same time (a
-training step and its validation, D92): they share one memory pool, so the
-validation reuses the training step's memory instead of reserving its own.
+:class:`Graphs` groups the graphed functions of one task (a training step and its
+validation; an analysis part), D92. Each graph has a memory pool of its own:
+sharing one between the training step and its validation corrupted the training
+graph (an illegal memory access at its next replay, on G21G01).
 """
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
@@ -33,20 +34,17 @@ class _Capture:
 
 
 class Graphs:
-    """CUDA graphs of functions that never run at the same time, in one memory
-    pool; all eager when disabled (on CPU, or with ``trainer.cuda_graph`` off).
+    """The CUDA graphs of one task's functions; all eager when disabled (on CPU,
+    or with ``trainer.cuda_graph`` off).
 
-    One pool is safe because no two of the graphs run at once and each call's
-    outputs are copies (:class:`Graphed`): a replay may overwrite another graph's
-    intermediates, never a tensor the caller holds. The eager warm-up calls all
-    run on one side stream: the allocator caches freed memory per stream, so a
-    new stream per call would reserve the function's peak memory once per call
-    (three warm-up steps held three steps' memory, D92).
+    The eager warm-up calls all run on one side stream: the allocator caches
+    freed memory per stream, so a new stream per call would reserve the
+    function's peak memory once per call (three warm-up steps held three steps'
+    memory, D92). Each graph captures into a memory pool of its own.
     """
 
     def __init__(self, enabled: bool):
         self.enabled = enabled
-        self._pool = None           # set by the first capture
         self._warmup_stream = None  # created on the first warm-up call
 
     def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
@@ -61,7 +59,8 @@ class Graphed:
     (``.item()``, boolean-mask indexing, Python branches on tensor values), the
     same operations for the same input shapes, and state that lives across calls
     (parameters, gradients, optimizer state) updated in place. A replayed call
-    returns copies of the graph's outputs, which the caller may keep.
+    returns copies of the graph's outputs, which the caller may keep (the next
+    replay overwrites the graph's own).
 
     Per input shape, the first ``warmup_calls`` calls run eagerly on a side
     stream (capture needs the library handles and autograd's streams set up),
@@ -114,10 +113,8 @@ class Graphed:
         static_inputs = tuple(x.clone() for x in inputs)
         graph = torch.cuda.CUDAGraph()
         try:
-            with torch.cuda.graph(graph, pool=self.graphs._pool):
+            with torch.cuda.graph(graph):
                 outputs = self.function(*static_inputs)
         except RuntimeError as e:
             raise GraphCaptureError(f"CUDA graph capture failed: {e}") from e
-        if self.graphs._pool is None:
-            self.graphs._pool = graph.pool()
         return _Capture(graph, static_inputs, outputs)

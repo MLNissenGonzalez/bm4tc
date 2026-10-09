@@ -106,11 +106,14 @@ Done on 2026-10-09, late (CPU-tested; CUDA parts unchecked):
 - **D91:** `clean_weight` deleted; AT is `(1-β)·L_dis(x_adv) + (β/N)·L_gen(x)`, AT
   validation attacks every sample, no `n_rob`. The AT seams were re-pinned at cw = 0
   first, then reproduced exactly.
-- **D92, captured evaluation:** `Graphs` (one pool for graphs that never run together;
-  replays return copies; one warm-up stream), `Evaluation` (the
-  Trainer validates in its step's graphs), and the analysis's per-batch work (PGD, joint
-  PGD, likelihood purification, log p(x), prediction) captured for the MPS on CUDA.
-  Gibbs and JEM stay eager.
+- **D92, captured evaluation:** `Graphs` (one pool per graph: a pool shared with
+  validation crashed the training graph; replays return copies; one warm-up stream),
+  `Evaluation` (the Trainer's validation, captured), and the analysis's per-batch work
+  (PGD, joint PGD, likelihood purification, log p(x), prediction) captured for the MPS
+  on CUDA. Gibbs and JEM stay eager. d3r80 (micro 128) does not fit yet.
+- **D93:** an HPO trial that ends in a CUDA error is retried, not counted, and stops its
+  worker. E2a's two launches were lost (out of memory, then the shared pool); it
+  relaunches with `--replace`.
 
 **Next (in this order):**
 1. **Martin, on G21G01** (needs a push and a worktree at the new head):

@@ -154,17 +154,26 @@ TPE_STARTUP_TRIALS = 6
 _FINISHED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED,
              optuna.trial.TrialState.FAIL)
 _COUNTED = _FINISHED + (optuna.trial.TrialState.RUNNING,)
-OUT_OF_MEMORY = "out_of_memory"  # trial user attribute (D93)
+CUDA_FAILURE = "cuda_failure"  # trial user attribute (D93)
 
 
 def _counted(trials, states=_COUNTED) -> list:
     """The trials in ``states`` that count towards the budget: all but those that
-    ran out of GPU memory, which say nothing about their hparams (D93)."""
-    return [t for t in trials if t.state in states and not t.user_attrs.get(OUT_OF_MEMORY)]
+    ended in a CUDA error, which says nothing about their hparams (D93)."""
+    return [t for t in trials if t.state in states and not t.user_attrs.get(CUDA_FAILURE)]
 
 
-class OutOfGPUMemory(RuntimeError):
-    """An HPO trial ran out of GPU memory; its worker stops (D93)."""
+def _cuda_failure(error: BaseException) -> bool:
+    """A CUDA error rather than an outcome of the trial: out of memory
+    (torch.cuda.OutOfMemoryError, or torch 2.1's "CUDA error: out of memory"),
+    an illegal memory access, a capture that failed on one of them. The
+    process's CUDA context may be broken after it."""
+    message = str(error).lower()
+    return "out of memory" in message or "cuda error" in message
+
+
+class CUDAFailure(RuntimeError):
+    """An HPO trial ended in a CUDA error; its worker stops (D93)."""
 
 
 def suggest(trial: optuna.Trial, key: str, spec: Any) -> Any:
@@ -258,15 +267,16 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
     Several workers may run at once on the same journal. A trial reports
     objective/valid at each validation and stops when the pruner says so (D81).
 
-    A trial that runs out of GPU memory is marked and not counted, so another
-    worker, or the next launch, runs it again; this worker then stops with
-    :class:`OutOfGPUMemory`, which frees its share of the GPU (the GPU was
-    overcommitted, or the failed allocation broke a graph capture) (D93)."""
+    A trial that ends in a CUDA error (:func:`_cuda_failure`) is marked and not
+    counted, so another worker, or the next launch, runs it again; this worker
+    then stops with :class:`CUDAFailure`: its CUDA context may be broken, and an
+    overcommitted GPU sheds a unit (D93). A persistent bug thus shows as failed
+    workers in the launch summary instead of using up the budget."""
     job = study.hpo_job(cell)
     init = job.warm_source()
     space = _space(study)
     opt = _optuna_study(study, cell, worker, pruner=_pruner(study, cell))
-    out_of_memory: List[int] = []   # the trial this worker lost to GPU memory
+    cuda_failures: List[int] = []   # the trial this worker lost to a CUDA error
 
     def objective(trial: optuna.Trial) -> float:
         hparams = {key: suggest(trial, key, spec) for key, spec in space.items()}
@@ -288,11 +298,9 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
             try:
                 trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number), report)
             except Exception as error:
-                # torch.cuda.OutOfMemoryError, torch 2.1's "CUDA error: out of
-                # memory" outside the allocator, or a capture that failed on it
-                if "out of memory" in str(error).lower():
-                    trial.set_user_attr(OUT_OF_MEMORY, True)
-                    out_of_memory.append(trial.number)
+                if _cuda_failure(error):
+                    trial.set_user_attr(CUDA_FAILURE, True)
+                    cuda_failures.append(trial.number)
                 raise
         trial.set_user_attr("best_epoch", trainer.best_epoch)
         logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
@@ -301,10 +309,11 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
 
     while len(_counted(opt.get_trials(deepcopy=False))) < study.n_trials:
         opt.optimize(objective, n_trials=1, catch=(Exception,))
-        if out_of_memory:
-            raise OutOfGPUMemory(
-                f"{study.name}/{cell.name}: trial {out_of_memory[0]} ran out of GPU memory; "
-                "it will be run again. This worker stops; if many do, lower --per-gpu.")
+        if cuda_failures:
+            raise CUDAFailure(
+                f"{study.name}/{cell.name}: trial {cuda_failures[0]} ended in a CUDA error "
+                "(see its train.log); it will be run again. This worker stops; if many "
+                "do, lower --per-gpu (out of memory) or look for a bug.")
 
 
 def hpo(study: Study, cells: List[Cell], replace: bool = False) -> None:

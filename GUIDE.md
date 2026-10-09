@@ -100,7 +100,7 @@ bm4tc/core/        the maths; no files, no configs
   interface.py       the model interface for analysis (D69)
   objective.py       losses, mixed objective, norm control, Evaluation / evaluate()
   train.py           Trainer (MPS, NAT and AT); step and validation captured as CUDA graphs (D90, D92)
-  graphs.py          Graphs / Graphed: functions replayed from CUDA graphs, one memory pool
+  graphs.py          Graphs / Graphed: functions replayed from CUDA graphs (one pool each)
   attacks.py         PGD and the joint (class + density) PGD
   jem/               JEM: model, SGLD sampler, JEMTrainer, SGLD purifier
 bm4tc/analysis/    evaluating a trained model -> numbers; imports only core
