@@ -38,16 +38,18 @@ def _config(path: Path, **overrides):
     return OmegaConf.merge(OmegaConf.structured(TrainConfig), OmegaConf.load(path), overrides)
 
 
-def _datahandler(cbm, n_features: int, batch: int, steps: int) -> SimpleNamespace:
+def _datahandler(cbm, n_features: int, batch: int, micro_batch, steps: int) -> SimpleNamespace:
     lo, hi = cbm.input_range
 
-    def loader(n, shuffle):
+    def loader(n, batch_size, shuffle):
         inputs = lo + (hi - lo) * torch.rand(n, n_features)
         labels = torch.randint(0, N_CLASSES, (n,))
-        return DataLoader(TensorDataset(inputs, labels), batch_size=batch, shuffle=shuffle)
+        return DataLoader(TensorDataset(inputs, labels), batch_size=batch_size, shuffle=shuffle)
 
+    # validation in chunks of the micro-batch, as the pipeline builds it (D79)
     return SimpleNamespace(
-        classification={"train": loader(steps * batch, True), "valid": loader(batch, False)},
+        classification={"train": loader(steps * batch, batch, True),
+                        "valid": loader(batch, micro_batch or batch, False)},
         data_dim=n_features,
     )
 
@@ -58,7 +60,7 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int]:
     torch.manual_seed(0)
     born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=args.bond_dim))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, args.features, N_CLASSES, device)
-    dh = _datahandler(cbm, args.features, args.batch, args.steps)
+    dh = _datahandler(cbm, args.features, args.batch, args.micro_batch, args.steps)
     common = dict(beta=args.beta, max_epoch=args.epochs, batch_size=args.batch,
                   micro_batch_size=args.micro_batch, cuda_graph=not args.eager, save=False)
     if regime == "nat":
