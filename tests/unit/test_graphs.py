@@ -1,4 +1,4 @@
-"""CUDA graphs (D90): bm4tc.core.graphs.Graphed and the Trainer's captured step.
+"""CUDA graphs (D90, D92): bm4tc.core.graphs and the Trainer's captured step.
 
 The tests that capture need a GPU and are skipped without one (the seams run on
 CPU and never capture): run them on the cluster or with the eGPU,
@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from bm4tc.core.graphs import Graphed
+from bm4tc.core.graphs import Graphs
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import NormControlConfig, OptimizerConfig
 from bm4tc.core.train import TrainConfig, Trainer
@@ -27,7 +27,7 @@ PGD_RANDOM_START = {"method": "PGD", "eps_rel": [0.1], "num_steps": 3, "random_s
 
 def test_disabled_graphed_is_the_function():
     calls = []
-    graphed = Graphed(lambda x: calls.append(x) or x + 1, enabled=False)
+    graphed = Graphs(enabled=False).wrap(lambda x: calls.append(x) or x + 1)
     assert graphed(torch.ones(2)).tolist() == [2.0, 2.0]
     assert len(calls) == 1
 
@@ -41,7 +41,7 @@ def test_graphed_replays_the_function_per_input_shape():
         state.add_(x.sum())
         return state * 2
 
-    graphed = Graphed(lambda x: accumulate(total, x), enabled=True, warmup_calls=2)
+    graphed = Graphs(enabled=True).wrap(lambda x: accumulate(total, x), warmup_calls=2)
     sizes = [4] * 5 + [2] * 4 + [4] * 2
     for i, n in enumerate(sizes):
         x = torch.arange(n, dtype=torch.float32, device=CUDA) + i
@@ -49,10 +49,28 @@ def test_graphed_replays_the_function_per_input_shape():
     assert len(graphed._captures) == 2
 
 
+@needs_cuda
+def test_graphs_share_one_pool_and_return_copies():
+    """Two graphs in one pool, called alternately: an output stays valid after the
+    other graph replays, so callers may keep what a call returns."""
+    graphs = Graphs(enabled=True)
+    squares = graphs.wrap(lambda x: (x * x).cumsum(0), warmup_calls=1)
+    shifted = graphs.wrap(lambda x: (x + 1).cumsum(0), warmup_calls=1)
+    kept = []
+    for i in range(5):
+        x = torch.arange(64, dtype=torch.float32, device=CUDA) + i
+        kept.append((x, squares(x), shifted(x)))
+    for x, square_sums, shifted_sums in kept:
+        assert torch.equal(square_sums, (x * x).cumsum(0))
+        assert torch.equal(shifted_sums, (x + 1).cumsum(0))
+    (square_capture,), (shifted_capture,) = squares._captures.values(), shifted._captures.values()
+    assert square_capture.graph.pool() == shifted_capture.graph.pool()
+
+
 HOST_SYNC_CAPTURE = """
 import torch
-from bm4tc.core.graphs import GraphCaptureError, Graphed
-graphed = Graphed(lambda x: x * x.sum().item(), enabled=True, warmup_calls=0)
+from bm4tc.core.graphs import GraphCaptureError, Graphs
+graphed = Graphs(enabled=True).wrap(lambda x: x * x.sum().item(), warmup_calls=0)
 try:
     graphed(torch.ones(3, device="cuda"))
 except GraphCaptureError:

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from bm4tc.pipeline.metrics import flatten_epoch, key
 from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
-from bm4tc.core.graphs import Graphed
+from bm4tc.core.graphs import Graphs
 from bm4tc.core.train import Trainer, TrainConfig
 from bm4tc.core.objective import (
     NORM_STATISTICS, NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate,
@@ -403,7 +403,7 @@ def _stub_trainer(beta, *, attack=True):
     clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
     t.train_loader = [clean]
     t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
-    t._graphed_train_step = Graphed(t._train_step, enabled=False)
+    t._graphed_train_step = Graphs(enabled=False).wrap(t._train_step)
     return t, cbm
 
 

@@ -27,7 +27,7 @@ from tqdm import tqdm
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
-from bm4tc.core.graphs import Graphed
+from bm4tc.core.graphs import Graphs
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
@@ -116,7 +116,7 @@ class Trainer:
         self._nc_log_target: float | None = None
 
         # The training step, eager until train() knows whether to capture it.
-        self._graphed_train_step = Graphed(self._train_step, enabled=False)
+        self._graphed_train_step = Graphs(enabled=False).wrap(self._train_step)
 
         self.attack: ProjectedGradientDescent | None = None
         if cfg.evasion is not None:
@@ -400,7 +400,8 @@ class Trainer:
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
-        self._graphed_train_step = Graphed(self._train_step, enabled=cfg.cuda_graph and on_cuda)
+        graphs = Graphs(enabled=cfg.cuda_graph and on_cuda)
+        self._graphed_train_step = graphs.wrap(self._train_step)
 
         regime = "AT" if self.attack is not None else "NAT"
         logger.info(f"{regime} training begins (beta={cfg.beta:.3g}).")

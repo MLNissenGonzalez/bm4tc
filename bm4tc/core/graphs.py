@@ -6,13 +6,16 @@ the same kernels replay with one launch (≈ 9-10x per unit on G21G01, bit-ident
 to the eager step), and with NVIDIA MPS several units share a GPU.
 
 :class:`Graphed` hides what capture needs: eager warm-up calls on a side stream,
-one graph per tuple of input shapes and dtypes, static input buffers, and one
-memory pool shared by the graphs (they never run at the same time).
+one graph per tuple of input shapes and dtypes, and static input buffers.
+:class:`Graphs` groups the functions whose graphs never run at the same time (a
+training step and its validation, D92): they share one memory pool, so the
+validation reuses the training step's memory instead of reserving its own.
 """
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
 
 import torch
+from torch.utils._pytree import tree_map
 
 
 class GraphCaptureError(Exception):
@@ -29,14 +32,34 @@ class _Capture:
     outputs: Any                        # static tensors the graph writes
 
 
+class Graphs:
+    """CUDA graphs of functions that never run at the same time, in one memory
+    pool; all eager when disabled (on CPU, or with ``trainer.cuda_graph`` off).
+
+    One pool is safe because no two of the graphs run at once and each call's
+    outputs are copies (:class:`Graphed`): a replay may overwrite another graph's
+    intermediates, never a tensor the caller holds. After each capture the
+    allocator's cache is emptied, so the eager warm-up calls' memory does not
+    stay reserved next to the pool (D92).
+    """
+
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        self._pool = None   # set by the first capture
+
+    def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
+        return Graphed(function, self, warmup_calls)
+
+
 class Graphed:
-    """``function(*inputs)`` replayed from a CUDA graph; eager when disabled.
+    """``function(*inputs)`` replayed from a CUDA graph of its :class:`Graphs`;
+    eager when they are disabled.
 
     The inputs are CUDA tensors. The function must be capturable: no host syncs
     (``.item()``, boolean-mask indexing, Python branches on tensor values), the
     same operations for the same input shapes, and state that lives across calls
-    (parameters, gradients, optimizer state) updated in place. Its outputs are
-    static: each call overwrites them, so copy what must outlive the next call.
+    (parameters, gradients, optimizer state) updated in place. A replayed call
+    returns copies of the graph's outputs, which the caller may keep.
 
     Per input shape, the first ``warmup_calls`` calls run eagerly on a side
     stream (capture needs the library handles and autograd's streams set up),
@@ -45,13 +68,16 @@ class Graphed:
     calls are real calls (training steps, for a training step).
     """
 
-    def __init__(self, function: Callable, enabled: bool, warmup_calls: int = 3):
+    def __init__(self, function: Callable, graphs: Graphs, warmup_calls: int = 3):
         self.function = function
-        self.enabled = enabled
+        self.graphs = graphs
         self.warmup_calls = warmup_calls
         self._eager_calls: Dict[tuple, int] = {}
         self._captures: Dict[tuple, _Capture] = {}
-        self._pool = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.graphs.enabled
 
     def __call__(self, *inputs: torch.Tensor):
         if not self.enabled:
@@ -67,7 +93,8 @@ class Graphed:
         for static, x in zip(capture.inputs, inputs):
             static.copy_(x)
         capture.graph.replay()
-        return capture.outputs
+        return tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                        capture.outputs)
 
     def _warm_up(self, inputs):
         stream = torch.cuda.Stream()
@@ -83,10 +110,11 @@ class Graphed:
         static_inputs = tuple(x.clone() for x in inputs)
         graph = torch.cuda.CUDAGraph()
         try:
-            with torch.cuda.graph(graph, pool=self._pool):
+            with torch.cuda.graph(graph, pool=self.graphs._pool):
                 outputs = self.function(*static_inputs)
         except RuntimeError as e:
             raise GraphCaptureError(f"CUDA graph capture failed: {e}") from e
-        if self._pool is None:
-            self._pool = graph.pool()
+        if self.graphs._pool is None:
+            self.graphs._pool = graph.pool()
+        torch.cuda.empty_cache()
         return _Capture(graph, static_inputs, outputs)
