@@ -86,7 +86,7 @@ _OPTIMIZER_MAP = {
 }
 
 
-def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
+def optimizer(params, config: OptimizerConfig, **extra) -> optim.Optimizer:
     """
     Select and instantiate a PyTorch optimizer.
 
@@ -98,6 +98,9 @@ def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
         Name of the optimizer, e.g. "adam"
     config.kwargs : dict, optional
         Extra arguments passed to the optimizer, e.g. {"lr": 1e-3}
+    extra :
+        Keyword arguments set by the caller, not the config, e.g.
+        ``capturable=True`` for a CUDA-graph step (D90).
 
     Returns
     -------
@@ -111,7 +114,7 @@ def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
         raise ValueError(f"Optimizer {config.name} not recognised. "
                          f"Available: {list(_OPTIMIZER_MAP.keys())}")
 
-    return optimizer_cls(params, **config.kwargs)
+    return optimizer_cls(params, **config.kwargs, **extra)
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from bm4tc.pipeline.metrics import flatten_epoch, key
 from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+from bm4tc.core.graphs import Graphed
 from bm4tc.core.train import Trainer, TrainConfig
 from bm4tc.core.objective import (
     NORM_STATISTICS, NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate,
@@ -78,6 +79,7 @@ def test_train_config_defaults():
     assert cfg.max_epoch == 100
     assert cfg.batch_size == 64
     assert cfg.save is False
+    assert cfg.cuda_graph is True  # D90; ignored on CPU
     assert not hasattr(cfg, "stop_crit")  # selection is a fixed rule (D8)
     assert not hasattr(cfg, "acc_floor")  # D40
     assert not hasattr(cfg, "gen_on_clean")  # the split objective is the only one (D18)
@@ -410,6 +412,7 @@ def _stub_trainer(beta, cw, *, attack=True):
     clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
     t.train_loader = [clean]
     t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
+    t._graphed_train_step = Graphed(t._train_step, enabled=False)
     return t, cbm
 
 
