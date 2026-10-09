@@ -55,6 +55,8 @@ def best_wrong_log_joint(model: GenerativeClassifier, data: torch.Tensor,
     """Mean max_{c' != c} log p(x, c'): the joint attack's loss. The constant C
     does not move the gradient, so it is left out."""
     log_joint = model.log_joint(data)
-    true = torch.zeros_like(log_joint, dtype=torch.bool)
-    true[torch.arange(len(labels), device=labels.device), labels] = True
+    # A comparison, not an index assignment of True: that copies the value from
+    # the host, which a CUDA graph capture forbids (D92).
+    classes = torch.arange(log_joint.shape[-1], device=labels.device)
+    true = labels[:, None] == classes
     return log_joint.masked_fill(true, float("-inf")).max(dim=-1).values.mean()

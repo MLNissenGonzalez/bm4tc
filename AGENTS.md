@@ -107,7 +107,7 @@ Done on 2026-10-09, late (CPU-tested; CUDA parts unchecked):
   validation attacks every sample, no `n_rob`. The AT seams were re-pinned at cw = 0
   first, then reproduced exactly.
 - **D92, captured evaluation:** `Graphs` (one pool for graphs that never run together;
-  replays return copies; `empty_cache()` after each capture), `Evaluation` (the
+  replays return copies; one warm-up stream), `Evaluation` (the
   Trainer validates in its step's graphs), and the analysis's per-batch work (PGD, joint
   PGD, likelihood purification, log p(x), prediction) captured for the MPS on CUDA.
   Gibbs and JEM stay eager.

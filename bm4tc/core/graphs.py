@@ -38,14 +38,16 @@ class Graphs:
 
     One pool is safe because no two of the graphs run at once and each call's
     outputs are copies (:class:`Graphed`): a replay may overwrite another graph's
-    intermediates, never a tensor the caller holds. After each capture the
-    allocator's cache is emptied, so the eager warm-up calls' memory does not
-    stay reserved next to the pool (D92).
+    intermediates, never a tensor the caller holds. The eager warm-up calls all
+    run on one side stream: the allocator caches freed memory per stream, so a
+    new stream per call would reserve the function's peak memory once per call
+    (three warm-up steps held three steps' memory, D92).
     """
 
     def __init__(self, enabled: bool):
         self.enabled = enabled
-        self._pool = None   # set by the first capture
+        self._pool = None           # set by the first capture
+        self._warmup_stream = None  # created on the first warm-up call
 
     def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
         return Graphed(function, self, warmup_calls)
@@ -97,7 +99,9 @@ class Graphed:
                         capture.outputs)
 
     def _warm_up(self, inputs):
-        stream = torch.cuda.Stream()
+        if self.graphs._warmup_stream is None:
+            self.graphs._warmup_stream = torch.cuda.Stream()
+        stream = self.graphs._warmup_stream
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
             outputs = self.function(*inputs)
@@ -116,5 +120,4 @@ class Graphed:
             raise GraphCaptureError(f"CUDA graph capture failed: {e}") from e
         if self.graphs._pool is None:
             self.graphs._pool = graph.pool()
-        torch.cuda.empty_cache()
         return _Capture(graph, static_inputs, outputs)

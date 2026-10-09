@@ -205,16 +205,20 @@ Measured in [compute.md](compute.md).
          reserved, 1 GiB allocated) and the eager forward needs 4.8 GiB more (tk's
          input contraction stacks every site's r×r matrix for the chunk). So with
          graphs, eager evaluation does not reuse the training step's memory.
-         Pending: the first `--mps --per-gpu 8` launches (E2c running, E2a).
+         **Correction (2026-10-09, late):** the cause is the warm-up, not the pool.
+         Each of the 3 eager warm-up calls ran on a new CUDA stream, and the
+         allocator caches per stream: MNIST12 d3r40 reserved 5.79 GiB for 1.87 GiB
+         allocated (≈ 3 × the eager peak; d3r80 likewise). E2a (`--per-gpu 8`, about
+         3.4 GiB per unit at start) lost 61 of 73 HPO trials to out-of-memory errors
+         at startup; E2c (spirals) was unaffected and finished.
       3. Done in code (D91, D92), to check on G21G01: validation captured in the
          training step's pool (`Graphs`, `Evaluation`; cw is gone, so AT validation
-         attacks whole batches), `empty_cache()` after each capture (the likely fix
-         for d3r80: the warm-up's cached memory beside the pool), and the analysis
-         stage's per-batch work captured (PGD, likelihood purification, log p(x),
-         prediction; Gibbs stays eager). Checks: `pytest tests/unit/test_graphs.py`
-         (captured vs eager), the d3r80 micro 128 bench, and the time of one
-         captured analysis against an eager one (`trainer.cuda_graph` does not
-         reach the analysis: compare on the old worktree).
+         attacks whole batches), one warm-up stream per `Graphs`, and the analysis
+         stage's per-batch work captured (PGD, joint PGD, likelihood purification,
+         log p(x), prediction; Gibbs stays eager). An HPO trial that runs out of GPU
+         memory is retried, not counted. Checks: `pytest tests/unit/test_graphs.py`,
+         the bench's peak reserved memory (E2a's shape, d3r80 micro 128), and
+         `tests.bench.bench_analysis` (eager vs captured).
       4. Re-estimate compute.md.
   - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward
