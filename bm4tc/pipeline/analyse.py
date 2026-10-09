@@ -12,7 +12,9 @@ parts ran before it (a resumed analysis reproduces them).
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
 
 The model is the run's (``model: mps | jem``); every part but the sweep
-purification is the same code for both (D35, D69).
+purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
+work (forwards, PGD, likelihood purification) replays from CUDA graphs, one set
+per part (D92); JEM's stays eager.
 """
 import hashlib
 import json
@@ -30,7 +32,8 @@ from bm4tc.core.jem.model import JEMMLP
 from bm4tc.core.jem.purification import SGLDPurification
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
-from bm4tc.core.objective import evaluate, set_seed
+from bm4tc.core.graphs import Graphs
+from bm4tc.core.objective import Evaluation, set_seed
 
 SEED = 0
 SPLIT = "test"
@@ -81,10 +84,17 @@ def parts(analysis, model: str = "mps") -> Dict[str, Callable]:
     return out
 
 
+def _graphs(cbm, device) -> Graphs:
+    """A part's CUDA graphs (D92): on CUDA, for the MPS. JEM stays eager: its
+    capture has not been checked."""
+    return Graphs(enabled=torch.device(device).type == "cuda"
+                  and isinstance(cbm, ConditionalBornMachine))
+
+
 def clean(cbm, datahandler, analysis, budgets: List[float], device) -> Dict[str, float]:
     jem = isinstance(cbm, JEMMLP)   # no exact log Z: no loss_x on test
-    m = evaluate(cbm, datahandler.classification[SPLIT], device,
-                 log_Z=float("nan") if jem else None)
+    m = Evaluation(cbm, graphs=_graphs(cbm, device))(
+        datahandler.classification[SPLIT], device, log_Z=float("nan") if jem else None)
     names = ("acc", "loss_dis") if jem else ("acc", "loss_dis", "loss_x")
     out = {key(name, SPLIT): m[name] for name in names}
     if analysis.rob_ceiling:
@@ -107,7 +117,8 @@ def _uq_config(analysis, budgets, **kw) -> UQConfig:
 def _evaluate(cbm, datahandler, cfg: UQConfig, device, sweep_purifier=None) -> UQResults:
     r = UQEvaluation(cfg).evaluate(
         cbm, datahandler.classification[SPLIT], device,
-        calib_loader=datahandler.classification["valid"], sweep_purifier=sweep_purifier)
+        calib_loader=datahandler.classification["valid"], sweep_purifier=sweep_purifier,
+        graphs=_graphs(cbm, device))
     # UQEvaluation logs a failed budget and goes on; a part must not be kept with
     # a hole in it.
     expected = {

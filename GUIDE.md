@@ -98,13 +98,14 @@ bm4tc/core/        the maths; no files, no configs
   model.py           ConditionalBornMachine (MPS): log|ψ|², log Z, sampling, Gibbs conditionals
   embeddings.py      feature maps; budget conversion (rel_to_abs, fmt_budget)
   interface.py       the model interface for analysis (D69)
-  objective.py       losses, mixed objective, norm control, evaluate()
-  train.py           Trainer (MPS, NAT and AT); the step is captured as a CUDA graph (D90)
-  graphs.py          Graphed: a function replayed from a CUDA graph per input shape
+  objective.py       losses, mixed objective, norm control, Evaluation / evaluate()
+  train.py           Trainer (MPS, NAT and AT); step and validation captured as CUDA graphs (D90, D92)
+  graphs.py          Graphs / Graphed: functions replayed from CUDA graphs, one memory pool
   attacks.py         PGD and the joint (class + density) PGD
   jem/               JEM: model, SGLD sampler, JEMTrainer, SGLD purifier
 bm4tc/analysis/    evaluating a trained model -> numbers; imports only core
-  uq.py              attacks at every budget, detection, purification (UQEvaluation)
+  uq.py              attacks at every budget, detection, purification (UQEvaluation);
+                     its per-batch work captured on CUDA (D92)
   purification.py    likelihood (gradient) and Gibbs purification
   ceiling.py         data-only upper bound on robust accuracy (two-class 2-D data)
   privacy.py         membership inference, standalone, not in the pipeline (D1)

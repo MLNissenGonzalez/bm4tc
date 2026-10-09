@@ -206,10 +206,15 @@ Measured in [compute.md](compute.md).
          input contraction stacks every site's r×r matrix for the chunk). So with
          graphs, eager evaluation does not reuse the training step's memory.
          Pending: the first `--mps --per-gpu 8` launches (E2c running, E2a).
-      3. Capture the validation, in the training graph's pool (fixes the d3r80
-         memory, not only speed; AT validation is PGD on the valid subset every
-         `eval_every` epochs, an estimated +40% of a captured AT run). Then the
-         analysis stage (attacks, purification), which is eager too.
+      3. Done in code (D91, D92), to check on G21G01: validation captured in the
+         training step's pool (`Graphs`, `Evaluation`; cw is gone, so AT validation
+         attacks whole batches), `empty_cache()` after each capture (the likely fix
+         for d3r80: the warm-up's cached memory beside the pool), and the analysis
+         stage's per-batch work captured (PGD, likelihood purification, log p(x),
+         prediction; Gibbs stays eager). Checks: `pytest tests/unit/test_graphs.py`
+         (captured vs eager), the d3r80 micro 128 bench, and the time of one
+         captured analysis against an eager one (`trainer.cuda_graph` does not
+         reach the analysis: compare on the old worktree).
       4. Re-estimate compute.md.
   - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward
