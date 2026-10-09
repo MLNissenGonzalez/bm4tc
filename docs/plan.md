@@ -14,9 +14,8 @@ Run the studies on the lab HPC, then `python -m bm4tc figures paper`.
 
 Order (warm studies need their `warm_from` study trained):
 
-1. Pilots that set defaults (D83). Pilot A done: n·ln d / 2 (D84, applied). Pilot B
-   (`pilot_pgd10` + `pilot_pgd5`, PGD-5 vs 10, D43) running; apply its verdict to
-   `configs/trainer/at.yaml`, and decide the AT clean-accuracy question with it.
+1. Pilots that set defaults (D83). Pilot A done: n·ln d / 2 (D84, applied). Pilot B done:
+   PGD-5, and the MNIST AT studies train 150 epochs with patience 8 (D88, applied).
 2. `spirals_nat`, `spirals_capacity`, `spirals_embedding`, `mnist12_nat`,
    `mnist_capacity`, `jem_mnist12_nat` (independent; cold).
 3. `spirals_at`, `mnist12_at`, `jem_mnist12_at` (warm).
