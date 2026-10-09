@@ -11,6 +11,9 @@
                             archived old runs; asks first unless --yes
 
     --gpus 0,1 --per-gpu 2  four parallel units, two per GPU (default: one unit)
+    --mps                   the units of a GPU share it through its NVIDIA MPS daemon
+                            (started if needed, left running; D90): with CUDA-graph
+                            training, ~8 units per GPU
 """
 import argparse
 import logging
@@ -58,6 +61,8 @@ def main(argv=None):
     parser.add_argument("--gpus", help="comma-separated GPU ids, e.g. 0,1")
     parser.add_argument("--per-gpu", type=int, default=1,
                         help="parallel units per GPU (or in total without --gpus)")
+    parser.add_argument("--mps", action="store_true",
+                        help="run each GPU's units under its NVIDIA MPS daemon (needs --gpus)")
     parser.add_argument("--replace", action="store_true",
                         help="archive finished results whose config changed (or whose checkpoint "
                              "was pruned), then redo them")
@@ -97,7 +102,7 @@ def main(argv=None):
     else:
         gpus = args.gpus.split(",") if args.gpus else None
         states = stages.launch(study, POOLED[args.verb], cells, args.seed, gpus,
-                               args.per_gpu, args.replace)
+                               args.per_gpu, args.replace, args.mps)
         failed = [n for n, s in states.items() if s == "failed"]
         for name in failed:
             log = stages.logs_dir(study) / f"{name}.log"

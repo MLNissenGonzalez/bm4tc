@@ -2,7 +2,8 @@
 
 Each unit is a subprocess with its own log file. The pool has one slot per
 (GPU, k) for ``--gpus 0,1 --per-gpu k``; a unit's ``CUDA_VISIBLE_DEVICES`` is
-its slot's GPU. Without GPUs there are ``per_gpu`` unpinned slots. A unit
+its slot's GPU, or with ``mps`` that GPU's MPS daemon (:mod:`bm4tc.pipeline.mps`,
+started if it is not running). Without GPUs there are ``per_gpu`` unpinned slots. A unit
 starts when every unit it depends on succeeded; when a unit fails, everything
 downstream of it is skipped and the rest goes on. The state of every unit is
 written to a JSON file as it changes, for ``status``.
@@ -44,8 +45,17 @@ def _now() -> str:
 
 
 def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: int = 1,
-            state_file: Optional[Path] = None, poll: float = 0.5) -> Dict[str, str]:
+            state_file: Optional[Path] = None, poll: float = 0.5,
+            mps: bool = False) -> Dict[str, str]:
     """Run the units; returns each unit's final state (done, failed or skipped)."""
+    if mps:
+        if not gpus:
+            raise ValueError("--mps needs --gpus")
+        from bm4tc.pipeline import mps as mps_daemons
+        for gpu in dict.fromkeys(gpus):
+            started = mps_daemons.ensure_running(gpu)
+            logger.info(f"MPS daemon for GPU {gpu}: {'started' if started else 'running'} "
+                        f"({mps_daemons.pipe_directory(gpu)})")
     by_name = {u.name: u for u in units}
     for u in units:
         unknown = set(u.deps) - set(by_name)
@@ -58,7 +68,8 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
     def save():
         if state_file is not None:
             tmp = state_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"pid": os.getpid(), "units": state}, indent=2))
+            tmp.write_text(json.dumps({"pid": os.getpid(), "mps": mps, "units": state},
+                                      indent=2))
             tmp.replace(state_file)
 
     def set_state(name, value, **extra):
@@ -84,7 +95,9 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                 u.log.parent.mkdir(parents=True, exist_ok=True)
                 handle = open(u.log, "w")
                 env = dict(os.environ)
-                if gpu is not None:
+                if gpu is not None and mps:
+                    env.update(mps_daemons.client_env(gpu))
+                elif gpu is not None:
                     env["CUDA_VISIBLE_DEVICES"] = gpu
                 proc = subprocess.Popen(u.argv, stdout=handle, stderr=subprocess.STDOUT, env=env)
                 running[u.name] = (proc, gpu, handle)
