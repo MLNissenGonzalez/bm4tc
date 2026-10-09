@@ -202,3 +202,35 @@ def test_changed_pruning_is_refused(scratch, monkeypatch):
     nat.cfg.hpo.pruning.warmup = 0.3
     with pytest.raises(RunConflict, match="--replace"):
         stages.hpo(nat, [cell])
+
+
+@pytest.mark.slow
+def test_out_of_memory_trials_are_retried(scratch, monkeypatch):
+    """A trial that runs out of GPU memory is marked, not counted, and stops its
+    worker; the next launch runs the budget to the end (D93)."""
+    import torch
+    nat = Study("tests/stages_nat")
+    cell = nat.cells()[0]
+    fit = stages._fit
+    calls = []
+
+    def first_runs_out_of_memory(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB.")
+        return fit(*args, **kwargs)
+
+    monkeypatch.setattr(stages, "_fit", first_runs_out_of_memory)
+    with pytest.raises(stages.OutOfGPUMemory, match="trial 0 ran out of GPU memory"):
+        stages.hpo(nat, [cell])
+    assert "0/3" in stages.status(nat)
+
+    stages.hpo(nat, [cell])                            # the relaunch
+    trials = stages._optuna_study(nat, cell).get_trials()
+    assert trials[0].state == optuna.trial.TrialState.FAIL
+    assert trials[0].user_attrs[stages.OUT_OF_MEMORY]
+    assert [t.state for t in trials[1:]] == [optuna.trial.TrialState.COMPLETE] * nat.n_trials
+    assert "3/3" in stages.status(nat)
+    stages.hpo(nat, nat.cells()[1:])                   # select needs every cell
+    selected = yaml.safe_load(stages.select(nat).read_text())
+    assert cell.name in selected
