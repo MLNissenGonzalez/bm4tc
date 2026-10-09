@@ -1,7 +1,6 @@
 # AT: the Trainer with a PGD attack (PGD-AT). Loss
-#   (1-a)·[(1-cw)·L_dis(x_adv) + cw·L_dis(x)] + a·L_gen(x)
-# Validation attacks a fixed (1-cw) subset of valid at the full radius every
-# eval_every epochs; patience counts validations. AT runs are always warm (D19).
+#   (1-β)·L_dis(x_adv) + (β/N)·L_gen(x)          (plain PGD-AT, D80, D91)
+# Validation attacks every valid sample at the full radius every eval_every epochs; patience counts validations. AT runs are always warm (D19).
 evasion:
   method: PGD
   norm: inf

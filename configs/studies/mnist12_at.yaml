@@ -11,6 +11,6 @@ config:
   trainer.patience: 8          # validations (eval_every 5): 40 epochs (D88)
   trainer.norm_control.soft_strength: 1e-3
   trainer.norm_control.log_target: null    # the warm start's own log Z
-hpo:                           # the lr only; clean_weight stays 0 (D80)
+hpo:                           # the lr only (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)

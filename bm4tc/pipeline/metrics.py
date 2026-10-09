@@ -17,10 +17,9 @@ modelled variables (n features and the class).
     loss_dis    -log p(c|x) on clean data, nats per label
     loss_x      -log p(x) / n on clean data, nats per feature (JEM: its estimate, with
                 log Z estimated by a standardized SGLD chain; nan at beta=0)
-    loss_adv    -log p(c|x_adv) on the attacked samples (AT only)
+    loss_adv    -log p(c|x_adv) on the PGD examples (AT only)
     acc         clean accuracy
     rob         robust accuracy, keyed by relative budget
-    n_rob       number of attacked validation samples behind `rob`
     eps_rel     attack budget used for training this epoch (follows the curriculum)
 
 Diagnostics (`norm/*` for the MPS, `sgld/*` for JEM) pass through unchanged; the

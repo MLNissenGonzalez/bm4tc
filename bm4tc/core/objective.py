@@ -328,28 +328,19 @@ def mix(dis: float, gen: float, beta: float, n: int) -> float:
 
 def evaluate(
     cbm, loader, device, *, log_Z=None,
-    beta: float = 0.0, attack=None, eps_abs: float = 0.0,
-    clean_weight: float = 1.0, adv_indices=(), progress: bool = False,
+    beta: float = 0.0, attack=None, eps_abs: float = 0.0, progress: bool = False,
 ) -> dict:
     """Validation (or test) metrics, and the training objective mirrored on them.
 
     Without an attack, ``objective = mix(L_dis, L_gen, β, N)``. With one, it
-    mirrors the AT objective of :class:`bm4tc.core.train.Trainer`:
+    mirrors the AT objective of :class:`bm4tc.core.train.Trainer` (D91), every
+    sample attacked:
 
-        objective = (1-β)·[ (1-cw)·mean_{S_adv} L_dis(x_adv)
-                        +    cw ·mean_{S_cln} L_dis(x)     ]
-                +  (β/N)·mean_{all} L_gen(x)
+        objective = mix(mean L_dis(x_adv), mean L_gen(x), β, N)
 
-    ``S_adv`` is the fixed sample subset given by ``adv_indices`` (positions in the
-    loader's iteration order; non-train splits are built with ``shuffle=False``,
-    so they are stable across epochs); ``S_cln`` is its complement. Sizing
-    ``|S_adv| = (1-cw)·n`` makes the two weighted means reconstruct a single pass
-    over the set while attacking only a ``(1-cw)`` fraction of it.
-
-    Every mean is over samples. ``loss_dis``, ``loss_x`` and ``acc`` are clean and
-    over the full set; ``loss_x = -log p(x) / n`` is in nats per feature (D86). With an attack, ``n_rob`` is ``|S_adv|``, and ``loss_adv``
-    (mean L_dis on x_adv) and ``rob`` are over ``S_adv``, omitted when it is empty
-    (``clean_weight == 1``).
+    Every mean is over samples. ``loss_dis``, ``loss_x`` and ``acc`` are clean;
+    ``loss_x = -log p(x) / n`` is in nats per feature (D86). With an attack,
+    ``loss_adv`` (mean L_dis on x_adv) and ``rob`` are added.
 
     Any model of :mod:`bm4tc.core.interface` (``cbm`` is its ``log_joint``):
     ``L_gen = log Z - log_joint(x)[y]``. ``log_Z`` None computes the MPS's exact
@@ -364,13 +355,9 @@ def evaluate(
             logger.warning(f"log_Z is non-finite ({log_Z.item()}); loss_x will be nan.")
     gen_finite = math.isfinite(float(log_Z))
 
-    adv_indices = set(adv_indices) if attack is not None else set()
-    offset = 0
-    dis_sum = gen_sum = marg_sum = 0.0      # clean, full set
-    dis_adv_sum = 0.0            # adversarial, S_adv
-    dis_cln_sum = 0.0            # clean, S_cln
-    correct = total = 0
-    rob_correct = n_adv = 0
+    dis_sum = gen_sum = marg_sum = 0.0      # clean
+    dis_adv_sum = 0.0                       # adversarial
+    correct = rob_correct = total = 0
 
     for data, labels in tqdm(
         loader, desc="eval", unit="batch", leave=False,
@@ -378,14 +365,6 @@ def evaluate(
     ):
         data, labels = data.to(device), labels.to(device)
         B = len(labels)
-        mask = None
-        if adv_indices:
-            mask = torch.tensor(
-                [(offset + i) in adv_indices for i in range(B)],
-                dtype=torch.bool, device=device,
-            )
-        offset += B
-
         with torch.no_grad():
             # MPS: log|ψ|², the loss's entry point, so evaluation matches
             # training's numerics.
@@ -395,22 +374,18 @@ def evaluate(
             correct += (las.argmax(dim=1) == labels).sum().item()
             total += B
             dis_sum += dis.sum().item()
-            dis_cln_sum += dis[~mask].sum().item() if mask is not None else dis.sum().item()
             if gen_finite:
                 gen_sum += (log_Z - log_sq_obs).sum().item()
                 marg_sum += (log_Z - torch.logsumexp(las, dim=1)).sum().item()
 
-        if mask is not None and bool(mask.any()):
-            sub_data, sub_labels = data[mask], labels[mask]
-            adv = attack.generate(model=cbm, naturals=sub_data, labels=sub_labels,
+        if attack is not None:
+            adv = attack.generate(model=cbm, naturals=data, labels=labels,
                                   eps_abs=eps_abs, device=device)
             with torch.no_grad():
                 las_adv = cbm.log_joint(adv)
-                n_sub = len(sub_labels)
-                log_sq_adv = las_adv[range(n_sub), sub_labels]
+                log_sq_adv = las_adv[range(B), labels]
                 dis_adv_sum += (torch.logsumexp(las_adv, dim=1) - log_sq_adv).sum().item()
-                rob_correct += (las_adv.argmax(dim=1) == sub_labels).sum().item()
-            n_adv += n_sub
+                rob_correct += (las_adv.argmax(dim=1) == labels).sum().item()
 
     def _mean(s, n):
         return s / n if n else float("nan")
@@ -425,19 +400,10 @@ def evaluate(
         out["objective"] = mix(dis_loss, gen_loss, beta, n)
         return out
 
-    # Weighted means use the realised subset sizes, so a rounded |S_adv| stays
-    # consistent with the weight it is combined under.
-    n_cln = total - n_adv
-    dis_term = 0.0
-    if n_adv:
-        dis_term += (1.0 - clean_weight) * _mean(dis_adv_sum, n_adv)
-    if n_cln:
-        dis_term += clean_weight * _mean(dis_cln_sum, n_cln)
-    out["objective"] = mix(dis_term, gen_loss, beta, n)
-    out["n_rob"] = n_adv
-    if n_adv:
-        out["loss_adv"] = dis_adv_sum / n_adv
-        out["rob"] = rob_correct / n_adv
+    adv_loss = _mean(dis_adv_sum, total)
+    out["objective"] = mix(adv_loss, gen_loss, beta, n)
+    out["loss_adv"] = adv_loss
+    out["rob"] = _mean(rob_correct, total)
     return out
 
 

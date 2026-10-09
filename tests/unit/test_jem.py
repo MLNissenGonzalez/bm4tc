@@ -74,11 +74,11 @@ def _loaders():
     return train, valid
 
 
-def _trainer(beta, evasion=None, clean_weight=0.0, max_epoch=3, save=False):
+def _trainer(beta, evasion=None, max_epoch=3, save=False):
     train, valid = _loaders()
     model = small()
     cfg = TrainConfig(beta=beta, max_epoch=max_epoch, batch_size=16, patience=10,
-                      evasion=evasion, clean_weight=clean_weight, save=save,
+                      evasion=evasion, save=save,
                       optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2, "weight_decay": 0.0}))
     jem = JEMConfig(
         sampler=SGLDConfig(num_steps=5, step_size=0.1, noise_std=0.01, buffer_size=32),
@@ -124,11 +124,11 @@ def test_beta_zero_has_no_generative_term():
 
 def test_at_selects_on_objective_and_saves(tmp_path):
     evasion = {"method": "PGD", "eps_rel": [0.1], "num_steps": 3}
-    trainer = _trainer(0.5, evasion=evasion, clean_weight=0.5, max_epoch=2, save=True)
+    trainer = _trainer(0.5, evasion=evasion, max_epoch=2, save=True)
     log = []
     trainer.train(on_epoch_end=lambda e, r: log.append(r), output_dir=tmp_path)
     v = log[-1]["valid"]
-    assert set(v["rob"]) == {0.1} and v["n_rob"] == 8
+    assert set(v["rob"]) == {0.1} and "loss_adv" in v
     assert "eps_rel" in log[-1]["train"]
     loaded, extra = JEMMLP.load(str(tmp_path / "model"))
     for a, b in zip(loaded.state_dict().values(), trainer.model.state_dict().values()):

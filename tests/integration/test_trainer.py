@@ -102,18 +102,13 @@ def test_best_tensors_restored(dh):
 def test_at_run_completes_and_selects_a_model(dh):
     """AT trains end to end, validates every eval_every epochs and restores the best."""
     cbm = _cbm()
-    trainer, logged = _train(dh, cbm, beta=0.5, evasion=PGD, clean_weight=0.3,
+    trainer, logged = _train(dh, cbm, beta=0.5, evasion=PGD,
                              max_epoch=6, eval_every=2)
 
     assert [ep for ep, _ in logged] == [1, 2, 3, 4, 5, 6]
     assert [ep for ep, m in logged if "objective/valid" in m] == [2, 4, 6]
     rob = key("rob", "valid", trainer.eps_rel)
     assert [ep for ep, m in logged if rob in m] == [2, 4, 6]
-
-    n_valid = len(dh.classification["valid"].dataset)
-    assert len(trainer.adv_indices) == round(0.7 * n_valid)
-    assert all(m["n_rob/valid"] == len(trainer.adv_indices)
-               for _, m in logged if "n_rob/valid" in m)
 
     assert math.isfinite(trainer.best["objective"])
     assert trainer.best_epoch in (2, 4, 6)

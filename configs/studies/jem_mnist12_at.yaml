@@ -13,7 +13,7 @@ config:
   trainer.max_epoch: 150       # D88: full radius from epoch 105
   trainer.batch_size: 512
   trainer.patience: 8          # validations (eval_every 5): 40 epochs (D88)
-hpo:                           # the lr only; clean_weight stays 0 (D80)
+hpo:                           # the lr only (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}   # the jem_mnist12_nat range (D81)
 hparams_from:
