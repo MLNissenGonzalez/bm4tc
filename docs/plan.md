@@ -193,13 +193,23 @@ Measured in [compute.md](compute.md).
     - **Integrated (D90):** the Trainer captures its step (`trainer.cuda_graph`, on by
       default on CUDA) and `run ... --mps` serves each GPU's units through an MPS
       daemon. Left to do:
-      1. Run `tests/unit/test_graphs.py` on a GPU (cluster, or the eGPU from
-         2026-10-13): eager vs captured training bit for bit, the per-shape replay.
-      2. A real launch on the cluster with `--mps --per-gpu 8` (a pilot-sized study):
-         throughput per GPU, memory per unit (open: full MNIST d3r40 with micro-batch
-         256 ran out of memory on the laptop's 8 GB).
-      3. Capture the validation (AT validation stays eager: PGD on the valid subset
-         every `eval_every` epochs, an estimated +40% of a captured training run).
+      1. Done (G21G01, 2026-10-09): `tests/unit/test_graphs.py` passes (7/7). A
+         failed capture leaves torch 2.1's allocator and generator in capture mode
+         for the whole process, so that test runs in a child process.
+      2. M0, memory per unit (`tests.bench.bench_train_step`, captured, β 0.5, RTX
+         6000 22 GB, without the ≈ 0.4 GB CUDA context):
+         MNIST12 d3r40 batch 512 NAT 70 ms/step, 1.87 GiB (8 units per GPU fit);
+         full MNIST d3r40 micro 256 NAT 595 ms/step, 5.34 GiB; AT PGD-5 2.6 s/step,
+         7.58 GiB; **d3r80 micro 128 NAT runs out of memory in the eager
+         validation**: the training graph's private pool stays reserved (16 GiB
+         reserved, 1 GiB allocated) and the eager forward needs 4.8 GiB more (tk's
+         input contraction stacks every site's r×r matrix for the chunk). So with
+         graphs, eager evaluation does not reuse the training step's memory.
+         Pending: the first `--mps --per-gpu 8` launches (E2c running, E2a).
+      3. Capture the validation, in the training graph's pool (fixes the d3r80
+         memory, not only speed; AT validation is PGD on the valid subset every
+         `eval_every` epochs, an estimated +40% of a captured AT run). Then the
+         analysis stage (attacks, purification), which is eager too.
       4. Re-estimate compute.md.
   - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward
