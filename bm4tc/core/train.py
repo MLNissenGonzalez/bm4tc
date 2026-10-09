@@ -398,12 +398,9 @@ class Trainer:
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
-        # Validation shares the step's graphs: one memory pool, and captured at its
-        # first batch, as the step's warm-up has run its kernels (D92).
         graphs = Graphs(enabled=cfg.cuda_graph and on_cuda)
         self._graphed_train_step = graphs.wrap(self._train_step)
-        self._evaluation = Evaluation(self.cbm, beta=cfg.beta, attack=self.attack,
-                                      graphs=graphs, warmup_calls=0)
+        self._evaluation = Evaluation(self.cbm, beta=cfg.beta, attack=self.attack, graphs=graphs)
 
         regime = "AT" if self.attack is not None else "NAT"
         logger.info(f"{regime} training begins (beta={cfg.beta:.3g}).")

@@ -54,9 +54,10 @@ def test_graphed_replays_the_function_per_input_shape():
 
 
 @needs_cuda
-def test_graphs_share_one_pool_and_return_copies():
-    """Two graphs in one pool, called alternately: an output stays valid after the
-    other graph replays, so callers may keep what a call returns."""
+def test_graphs_have_their_own_pools_and_return_copies():
+    """Two graphs called alternately: each output stays valid after later calls,
+    so callers may keep what a call returns; each graph has a pool of its own
+    (a shared one corrupted the training graph, D92)."""
     graphs = Graphs(enabled=True)
     squares = graphs.wrap(lambda x: (x * x).cumsum(0), warmup_calls=1)
     shifted = graphs.wrap(lambda x: (x + 1).cumsum(0), warmup_calls=1)
@@ -68,7 +69,7 @@ def test_graphs_share_one_pool_and_return_copies():
         assert torch.equal(square_sums, (x * x).cumsum(0))
         assert torch.equal(shifted_sums, (x + 1).cumsum(0))
     (square_capture,), (shifted_capture,) = squares._captures.values(), shifted._captures.values()
-    assert square_capture.graph.pool() == shifted_capture.graph.pool()
+    assert square_capture.graph.pool() != shifted_capture.graph.pool()
 
 
 @needs_cuda
@@ -112,8 +113,9 @@ def test_a_host_sync_fails_capture_with_its_own_error():
 
 def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
     """Three epochs of a tiny complex MPS on CUDA, validated every epoch (two
-    batches of one shape, captured at the first); the AT radius follows the
-    curriculum (a new device scalar each epoch). Returns the logged records and the best tensors."""
+    batches of one shape: three warm-up calls, captured in the second
+    validation); the AT radius follows the curriculum (a new device scalar each
+    epoch). Returns the logged records and the best tensors."""
     torch.manual_seed(seed)
     cbm = ConditionalBornMachine(
         CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=3, bond_dim=4)),
@@ -150,6 +152,34 @@ def test_captured_training_is_bit_identical_to_eager(evasion, micro_batch_size):
     graph_records, graph_tensors = _run(True, evasion, micro_batch_size)
     assert graph_records == eager_records
     assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
+
+
+@needs_cuda
+def test_captured_training_and_validation_at_e2as_shape():
+    """MNIST12 d3r40, batch 512, β 0.5, as E2a trains it: validation (four
+    batches) captured in the first epoch, then training replays again. The tiny
+    models above did not show the crash a shared pool caused at this size (an
+    illegal memory access at the next training replay, D92)."""
+    torch.manual_seed(0)
+    cbm = ConditionalBornMachine(CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=40)),
+                                 data_dim=144, num_classes=10)
+    lo, hi = cbm.input_range
+    g = torch.Generator().manual_seed(1)
+
+    def loader(n, shuffle):
+        data = lo + (hi - lo) * torch.rand(n, 144, generator=g)
+        return DataLoader(TensorDataset(data, torch.randint(0, 10, (n,), generator=g)),
+                          batch_size=512, shuffle=shuffle)
+
+    cfg = TrainConfig(beta=0.5, max_epoch=3, eval_every=1, batch_size=512,
+                      norm_control=NormControlConfig(soft_strength=0.1, log_target=0.0),
+                      optimizer=OptimizerConfig(kwargs={"lr": 1e-3}))
+    trainer = Trainer(cbm, cfg, loader(5 * 512, True), loader(4 * 512, False), CUDA)
+    records = []
+    trainer.train(on_epoch_end=lambda epoch, record: records.append(flatten_epoch(record)))
+    assert len(records) == 3 and not trainer._collapsed
+    assert len(trainer._evaluation._clean_sums._captures) == 1
+    torch.cuda.synchronize()
 
 
 @needs_cuda

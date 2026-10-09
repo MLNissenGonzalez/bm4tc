@@ -348,26 +348,18 @@ class Evaluation:
     The work on one batch, the clean forward and the attack with its forward,
     is two functions of tensors returning per-batch sums, so in enabled
     :class:`~bm4tc.core.graphs.Graphs` each replays from a CUDA graph (D92). The
-    Trainer keeps one Evaluation across validations, in its training step's
-    Graphs: validation then shares the step's memory pool and captures once per
-    batch shape. Disabled, it is the eager evaluation, number for number.
-
-    ``warmup_calls`` (per batch shape) is 0 in the Trainer: its training step has
-    run the same forward, and the attack, eagerly already, so validation is
-    captured at its first batch and takes its memory from the step's pool. Eager
-    warm-up calls would need memory beside the pool (4.8 GiB at full-MNIST
-    d3r80, micro-batch 128, which did not fit).
+    Trainer keeps one Evaluation across validations, so validation captures once
+    per batch shape. Disabled, it is the eager evaluation, number for number.
     """
 
-    def __init__(self, cbm, *, beta: float = 0.0, attack=None, graphs: Optional[Graphs] = None,
-                 warmup_calls: int = 3):
+    def __init__(self, cbm, *, beta: float = 0.0, attack=None, graphs: Optional[Graphs] = None):
         self.cbm = cbm
         self.beta = beta
         self.attack = attack
         graphs = graphs if graphs is not None else Graphs(enabled=False)
         self._captured = graphs.enabled
-        self._clean_sums = graphs.wrap(self._clean_batch, warmup_calls)
-        self._adversarial_sums = graphs.wrap(self._adversarial_batch, warmup_calls)
+        self._clean_sums = graphs.wrap(self._clean_batch)
+        self._adversarial_sums = graphs.wrap(self._adversarial_batch)
 
     def _clean_batch(self, data, labels, log_Z) -> torch.Tensor:
         """[Σ L_dis, Σ L_gen, Σ -log p(x), Σ correct] over the batch."""
