@@ -246,6 +246,20 @@ bm4tc suite against the fork, then propose upstream. Changes to the bm4tc numeri
 core (`ConditionalBornMachine` contractions, `log_partition_function`, accumulate,
 sampling) happen here and nowhere else (D30).
 
+## Ideas for the benchmark project (not for this paper)
+
+Kept here until they move to `~/0git/tn4dd/` (benchmarking ways to train tensor
+networks generatively).
+
+- **Hard renormalisation during training.** `Trainer` had a `norm_control.hard_every`
+  option: every k optimizer steps, `cbm.renormalize_(log_target)` rescaled all cores
+  in place so log Z returned to the target (a projection, against the soft penalty
+  strength·(log Z − target)²/N). No study used it, and it does not fit a captured
+  training step (D90), so it was removed; `renormalize_` itself stays (figures use
+  it). Worth comparing as a norm-control scheme: hard projection every k steps vs
+  the soft penalty vs neither (log-space accumulation only), on overflow, stability
+  and the generative NLL.
+
 ## Open items
 
 - **randn_eye rescale misses the edge cores:** `ConditionalBornMachine.__init__` multiplies
