@@ -18,7 +18,8 @@ import torch
 class GraphCaptureError(Exception):
     """Capturing failed (the function is not capturable). Not a RuntimeError, so
     a training loop that stops on runtime errors does not mistake it for a
-    collapse."""
+    collapse. Fatal for the process: a failed capture leaves the CUDA allocator
+    and generator in capture mode (torch 2.1), so later captures fail too."""
 
 
 @dataclass
