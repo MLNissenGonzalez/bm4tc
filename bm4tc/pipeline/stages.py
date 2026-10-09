@@ -154,6 +154,17 @@ TPE_STARTUP_TRIALS = 6
 _FINISHED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED,
              optuna.trial.TrialState.FAIL)
 _COUNTED = _FINISHED + (optuna.trial.TrialState.RUNNING,)
+OUT_OF_MEMORY = "out_of_memory"  # trial user attribute (D93)
+
+
+def _counted(trials, states=_COUNTED) -> list:
+    """The trials in ``states`` that count towards the budget: all but those that
+    ran out of GPU memory, which say nothing about their hparams (D93)."""
+    return [t for t in trials if t.state in states and not t.user_attrs.get(OUT_OF_MEMORY)]
+
+
+class OutOfGPUMemory(RuntimeError):
+    """An HPO trial ran out of GPU memory; its worker stops (D93)."""
 
 
 def suggest(trial: optuna.Trial, key: str, spec: Any) -> Any:
@@ -245,11 +256,17 @@ def prepare_hpo(study: Study, cell: Cell, replace: bool = False) -> None:
 def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
     """Run trials of the cell until ``study.n_trials`` are finished or running.
     Several workers may run at once on the same journal. A trial reports
-    objective/valid at each validation and stops when the pruner says so (D81)."""
+    objective/valid at each validation and stops when the pruner says so (D81).
+
+    A trial that runs out of GPU memory is marked and not counted, so another
+    worker, or the next launch, runs it again; this worker then stops with
+    :class:`OutOfGPUMemory`, which frees its share of the GPU (the GPU was
+    overcommitted, or the failed allocation broke a graph capture) (D93)."""
     job = study.hpo_job(cell)
     init = job.warm_source()
     space = _space(study)
     opt = _optuna_study(study, cell, worker, pruner=_pruner(study, cell))
+    out_of_memory: List[int] = []   # the trial this worker lost to GPU memory
 
     def objective(trial: optuna.Trial) -> float:
         hparams = {key: suggest(trial, key, spec) for key, spec in space.items()}
@@ -268,14 +285,26 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
 
         with _log_to(trial_dir / "train.log"):
             logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} {hparams}")
-            trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number), report)
+            try:
+                trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number), report)
+            except Exception as error:
+                # torch.cuda.OutOfMemoryError, torch 2.1's "CUDA error: out of
+                # memory" outside the allocator, or a capture that failed on it
+                if "out of memory" in str(error).lower():
+                    trial.set_user_attr(OUT_OF_MEMORY, True)
+                    out_of_memory.append(trial.number)
+                raise
         trial.set_user_attr("best_epoch", trainer.best_epoch)
         logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
                     f"{trainer.best['objective']:.6g} (epoch {trainer.best_epoch})")
         return trainer.best["objective"]  # inf if no validation was finite
 
-    while len(opt.get_trials(deepcopy=False, states=_COUNTED)) < study.n_trials:
+    while len(_counted(opt.get_trials(deepcopy=False))) < study.n_trials:
         opt.optimize(objective, n_trials=1, catch=(Exception,))
+        if out_of_memory:
+            raise OutOfGPUMemory(
+                f"{study.name}/{cell.name}: trial {out_of_memory[0]} ran out of GPU memory; "
+                "it will be run again. This worker stops; if many do, lower --per-gpu.")
 
 
 def hpo(study: Study, cells: List[Cell], replace: bool = False) -> None:
@@ -302,7 +331,7 @@ def select(study: Study) -> Path:
             raise LookupError(f"{study.name}/{cell.name}: no HPO; run `hpo {study.name}` first")
         trials = _optuna_study(study, cell).get_trials(deepcopy=False)
         states = [t.state for t in trials]
-        finished = sum(s in _FINISHED for s in states)
+        finished = len(_counted(trials, _FINISHED))
         if finished < n_trials or optuna.trial.TrialState.RUNNING in states:
             raise LookupError(f"{study.name}/{cell.name}: HPO unfinished ({finished} of "
                               f"{n_trials} trials); run `hpo {study.name}`")
@@ -605,8 +634,8 @@ def status(study: Study) -> str:
             journal = study.hpo_dir(cell) / "journal.log"
             n = 0
             if journal.exists():
-                n = sum(t.state in _FINISHED
-                        for t in _optuna_study(study, cell).get_trials(deepcopy=False))
+                n = len(_counted(_optuna_study(study, cell).get_trials(deepcopy=False),
+                                 _FINISHED))
             hpo_col = f"{n}/{study.n_trials}"
             sel_col = "yes" if cell.name in selected else "no"
         jobs = [Job(study, cell, s) for s in seeds]
