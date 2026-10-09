@@ -168,19 +168,19 @@ def test_marginal_log_prob_finite(cbm, x_batch):
 
 def test_mixed_nll_beta0_finite(cbm, x_batch, y_batch):
     cbm.reset()
-    loss = cbm.mixed_nll(x_batch, y_batch, beta=0.0)
+    loss = cbm.mixed_nll(x_batch, y_batch, beta=0.0)[0]
     assert loss.ndim == 0 and loss.isfinite()
 
 
 def test_mixed_nll_beta05_finite(cbm, x_batch, y_batch):
     cbm.reset()
-    loss = cbm.mixed_nll(x_batch, y_batch, beta=0.5)
+    loss = cbm.mixed_nll(x_batch, y_batch, beta=0.5)[0]
     assert loss.ndim == 0 and loss.isfinite()
 
 
 def test_mixed_nll_beta1_finite(cbm, x_batch, y_batch):
     cbm.reset()
-    loss = cbm.mixed_nll(x_batch, y_batch, beta=1.0)
+    loss = cbm.mixed_nll(x_batch, y_batch, beta=1.0)[0]
     assert loss.ndim == 0 and loss.isfinite()
 
 

@@ -46,7 +46,7 @@ def log_px(model: GenerativeClassifier, data: torch.Tensor) -> torch.Tensor:
 def nll(model: GenerativeClassifier, data: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Mean -log p(c | x): the PGD loss."""
     log_joint = model.log_joint(data)
-    true = log_joint[torch.arange(len(labels)), labels]
+    true = log_joint[torch.arange(len(labels), device=labels.device), labels]
     return (-true + torch.logsumexp(log_joint, dim=-1)).mean()
 
 
@@ -56,5 +56,5 @@ def best_wrong_log_joint(model: GenerativeClassifier, data: torch.Tensor,
     does not move the gradient, so it is left out."""
     log_joint = model.log_joint(data)
     true = torch.zeros_like(log_joint, dtype=torch.bool)
-    true[torch.arange(len(labels)), labels] = True
+    true[torch.arange(len(labels), device=labels.device), labels] = True
     return log_joint.masked_fill(true, float("-inf")).max(dim=-1).values.mean()

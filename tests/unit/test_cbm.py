@@ -49,7 +49,7 @@ def test_mixed_nll_beta0_skips_logZ():
     x = torch.rand(4, 2)
     y = torch.randint(0, 2, (4,))
     with patch.object(cbm, "log_partition_function", wraps=cbm.log_partition_function) as mock_logZ:
-        cbm.mixed_nll(x, y, beta=0.0)
+        cbm.mixed_nll(x, y, beta=0.0)[0]
     mock_logZ.assert_not_called()
 
 
@@ -57,7 +57,7 @@ def test_mixed_nll_scalar_output():
     cbm = _tiny_cbm()
     x = torch.rand(4, 2)
     y = torch.randint(0, 2, (4,))
-    loss = cbm.mixed_nll(x, y, beta=0.0)
+    loss = cbm.mixed_nll(x, y, beta=0.0)[0]
     assert loss.ndim == 0
     assert loss.isfinite()
 
@@ -85,17 +85,26 @@ def test_log_Z_recompute_contracts_again():
     assert mock_logZ.call_count == 2
 
 
+def _contracts_log_Z(cbm) -> bool:
+    """Whether log_Z(recompute=False) contracts the norm, i.e. no log Z is cached
+    for the current parameters (it caches one either way)."""
+    with patch.object(cbm, "log_partition_function",
+                      wraps=cbm.log_partition_function) as mock_logZ:
+        cbm.log_Z(recompute=False)
+    return mock_logZ.call_count == 1
+
+
 def test_log_Z_recompute_false_computes_when_empty():
     """recompute=False with an empty cache still computes (and caches) once."""
     cbm = _tiny_cbm()
-    assert "log_Z" not in cbm.forward_stats()
+    assert cbm._log_Z_cache is None
     val = cbm.log_Z(recompute=False)
     assert torch.isfinite(val.real) and cbm.log_Z(recompute=False) is val
 
 
 def _stepped(cbm, optimizer):
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
-    loss = cbm.mixed_nll(x, y, beta=0.5)
+    loss = cbm.mixed_nll(x, y, beta=0.5)[0]
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -104,15 +113,11 @@ def _stepped(cbm, optimizer):
 @pytest.mark.parametrize("lr", [1e-3, 0.0])
 def test_optimizer_step_expires_the_caches(lr):
     """D31: no caller invalidates. After optimizer.step() (even a no-op lr=0 one)
-    log_Z(recompute=False) contracts again and forward_stats() is empty."""
+    log_Z(recompute=False) contracts again."""
     cbm = _tiny_cbm()
     cbm.prepare(device=torch.device("cpu"))
     _stepped(cbm, torch.optim.Adam(cbm.parameters(), lr=lr))
-    assert cbm.forward_stats() == {}
-    with patch.object(cbm, "log_partition_function",
-                      wraps=cbm.log_partition_function) as mock_logZ:
-        cbm.log_Z(recompute=False)
-    assert mock_logZ.call_count == 1
+    assert _contracts_log_Z(cbm)
 
 
 def test_log_Z_cache_does_not_cross_grad_modes():
@@ -126,41 +131,36 @@ def test_log_Z_cache_does_not_cross_grad_modes():
 def test_renormalize_invalidates_log_Z_cache():
     cbm = _tiny_cbm()
     cbm.log_Z(recompute=True)
-    assert "log_Z" in cbm.forward_stats()
+    assert not _contracts_log_Z(cbm)
     cbm.renormalize_(log_target=0.0)
-    assert cbm.forward_stats() == {}
+    assert _contracts_log_Z(cbm)
 
 
 def test_initialize_invalidates_log_Z_cache():
     cbm = _tiny_cbm()
     cbm.log_Z(recompute=True)
     cbm.initialize()
-    assert cbm.forward_stats() == {}
+    assert _contracts_log_Z(cbm)
 
 
-# ── amp-diag cache populated by mixed_nll ──────────────────────────────────
-
-_AMP_KEYS = {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
-             "amp_nonfinite_count", "amp_nan_count"}
-
+# ── What mixed_nll returns and caches ──────────────────────────────────────
 
 @pytest.mark.parametrize("beta", [0.0, 0.5, 1.0])
-def test_mixed_nll_populates_amp_diag_cache(beta):
+def test_mixed_nll_returns_its_log_amp_sq_detached(beta):
     cbm = _tiny_cbm()
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
-    cbm.mixed_nll(x, y, beta=beta)
-    stats = cbm.forward_stats()
-    assert _AMP_KEYS <= set(stats)
-    assert math.isfinite(stats["log_amp_sq_mean"])
+    _, log_amp_sq = cbm.mixed_nll(x, y, beta=beta)
+    assert not log_amp_sq.requires_grad
+    assert torch.equal(log_amp_sq, cbm.log_amp_sq(x).detach())
 
 
 def test_mixed_nll_logZ_cache_only_when_beta_positive():
     cbm = _tiny_cbm()
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
     cbm.mixed_nll(x, y, beta=0.0)
-    assert "log_Z" not in cbm.forward_stats()   # beta=0 never contracts the norm
+    assert _contracts_log_Z(cbm)       # beta=0 never contracts the norm
     cbm.mixed_nll(x, y, beta=1.0)
-    assert "log_Z" in cbm.forward_stats()
+    assert not _contracts_log_Z(cbm)
 
 
 def test_regularizer_reuses_mixed_nll_contraction():
@@ -171,7 +171,7 @@ def test_regularizer_reuses_mixed_nll_contraction():
     reg = NormRegularizer(strength=1.0, log_target=0.0)
     with patch.object(cbm, "log_partition_function",
                       wraps=cbm.log_partition_function) as mock_logZ:
-        loss = cbm.mixed_nll(x, y, beta=1.0) + reg(cbm)
+        loss = cbm.mixed_nll(x, y, beta=1.0)[0] + reg(cbm)
     assert mock_logZ.call_count == 1
     # Shared log_Z node receives gradient from both terms.
     loss.backward()
@@ -456,7 +456,7 @@ def test_large_amplitude_numerical_stability():
     assert log_px.isfinite().all()
 
     cbm.reset()
-    loss = cbm.mixed_nll(x, y, beta=0.5)
+    loss = cbm.mixed_nll(x, y, beta=0.5)[0]
     assert loss.isfinite()
 
 
@@ -475,7 +475,7 @@ def test_mixed_nll_term1_gradient_at_small_amplitude():
     x = torch.rand(4, 2, requires_grad=False)
     y = torch.zeros(4, dtype=torch.long)
 
-    loss = cbm.mixed_nll(x, y, beta=0.0)
+    loss = cbm.mixed_nll(x, y, beta=0.0)[0]
     assert loss.isfinite(), "loss must be finite for small-amplitude CBM"
     loss.backward()
 
@@ -587,7 +587,7 @@ def test_mixed_nll_beta0_fromlog_amp_sq():
     term1 = -las[torch.arange(5), y]
     term2 = torch.logsumexp(las, dim=-1)
     recon = (term1 + term2).mean()
-    assert torch.allclose(recon, cbm.mixed_nll(x, y, beta=0.0), atol=1e-4)
+    assert torch.allclose(recon, cbm.mixed_nll(x, y, beta=0.0)[0], atol=1e-4)
 
 
 @pytest.mark.parametrize("beta", [0.0, 0.3, 0.9, 1.0])
@@ -603,7 +603,7 @@ def test_mixed_nll_is_the_per_variable_objective(beta):
         log_Z = cbm.log_partition_function()
         l_dis = (torch.logsumexp(las, dim=-1) - las[torch.arange(5), y]).mean()
         l_gen = (log_Z - las[torch.arange(5), y]).mean()
-        loss = cbm.mixed_nll(x, y, beta=beta)
+        loss = cbm.mixed_nll(x, y, beta=beta)[0]
     n = cbm.n_features
     assert n == x.shape[1] + 1
     assert torch.allclose(loss, (1 - beta) * l_dis + beta / n * l_gen, atol=1e-4)
@@ -718,7 +718,7 @@ def test_mixed_nll_matches_raw_amplitudes():
 
     term1 = -2 * log_abs[torch.arange(5), y]
     term2 = torch.logsumexp(2 * log_abs, dim=-1)
-    assert torch.allclose(cbm.mixed_nll(x, y, beta=0.0),
+    assert torch.allclose(cbm.mixed_nll(x, y, beta=0.0)[0],
                           (term1 + term2).mean(), atol=1e-5)
 
 
@@ -735,7 +735,7 @@ def test_mixed_nll_finite_on_overflow(beta):
     _overflow_scale_(cbm, scale=1e8)
 
     assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
-    assert torch.isfinite(cbm.mixed_nll(x, y, beta=beta))
+    assert torch.isfinite(cbm.mixed_nll(x, y, beta=beta)[0])
 
 
 def test_class_probabilities_finite_on_overflow():
@@ -868,7 +868,7 @@ def test_log_Z_stays_the_normaliser_of_psi_during_training():
     x, y = torch.rand(64, 2) * 2 - 1, torch.randint(0, 2, (64,))
     for _ in range(30):
         opt.zero_grad()
-        cbm.mixed_nll(x, y, beta=1.0).backward()
+        cbm.mixed_nll(x, y, beta=1.0)[0].backward()
         opt.step()
     log_Z = float(cbm.log_partition_function())
     assert abs(log_Z - _numeric_log_Z(cbm)) < 1e-3

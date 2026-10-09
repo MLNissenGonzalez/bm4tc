@@ -11,12 +11,13 @@ from bm4tc.pipeline.metrics import flatten_epoch, key
 from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 from bm4tc.core.train import Trainer, TrainConfig
 from bm4tc.core.objective import (
-    NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate, mix,
+    NORM_STATISTICS, NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate,
+    mix, norm_statistics,
 )
 
 CPU = torch.device("cpu")
 PGD = {"method": "PGD", "eps_rel": [0.1]}
-NO_NORM = NormControlConfig(hard_every=0, soft_strength=0.0)
+NO_NORM = NormControlConfig(soft_strength=0.0)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ def test_train_config_defaults():
 def test_norm_control_config_defaults():
     nc = NormControlConfig()
     assert nc.log_target == 0.0
-    assert nc.hard_every == 0
+    assert not hasattr(nc, "hard_every")  # hard renormalisation is gone (D90)
     assert nc.soft_strength == 0.1
 
 
@@ -169,30 +170,6 @@ def test_log_target_resolves_float_expression_and_pretrained():
 
 # ── Collapse diagnostics ───────────────────────────────────────────────────
 
-def test_diagnostics_uses_caches_without_recontracting():
-    """When mixed_nll has populated the caches, _diagnostics reads them and does
-    not contract the norm again."""
-    t = _trainer(TrainConfig(beta=1.0))
-    cbm = t.cbm
-    x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
-    cbm.mixed_nll(x, y, beta=1.0)            # populates both caches
-    with patch.object(cbm, "log_partition_function",
-                      wraps=cbm.log_partition_function) as mock_logZ:
-        diag = t._diagnostics(x)
-    mock_logZ.assert_not_called()
-    assert diag["log_Z"] == pytest.approx(cbm.forward_stats()["log_Z"])
-    assert {"log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
-            "amp_nonfinite_count"} <= set(diag)
-
-
-def test_diagnostics_falls_back_when_cache_empty():
-    t = _trainer(TrainConfig(beta=1.0))
-    assert t.cbm.forward_stats() == {}
-    diag = t._diagnostics(torch.rand(4, 2))
-    assert math.isfinite(diag["log_Z"])
-    assert math.isfinite(diag["log_amp_sq_mean"])
-
-
 def test_amp_nonfinite_count_always_tagged_overflow():
     """2·log(|amp|.clamp(min=tiny)) floors underflow, so a non-finite count is
     overflow, also when the mean log|amp|² is small."""
@@ -211,6 +188,12 @@ def test_format_diagnostics_surfaces_overflow_headroom():
     assert "headroom" not in Trainer._format_diagnostics({"log_Z": 100.0})
 
 
+def test_format_diagnostics_leaves_out_a_log_Z_the_step_did_not_form():
+    report = Trainer._format_diagnostics({"log_amp_sq_mean": 1.0, "log_amp_sq_min": 0.0,
+                                          "log_amp_sq_max": 2.0, "amp_nonfinite_count": 0})
+    assert "log_Z" not in report and "norm" not in report
+
+
 def test_log_Z_overflow_ceiling_matches_float32():
     """The float32/complex64 overflow ceiling is 2·log(finfo.max) ≈ 177.45."""
     ceiling = 2.0 * math.log(torch.finfo(torch.float32).max)
@@ -218,18 +201,21 @@ def test_log_Z_overflow_ceiling_matches_float32():
 
 
 @pytest.mark.parametrize("evasion", [None, PGD], ids=["nat", "at"])
-def test_nonfinite_loss_collapses_after_one_retry(evasion):
-    """Both regimes: a loss that stays non-finite after cbm.reset() ends the epoch."""
+def test_nonfinite_loss_ends_the_epoch_without_retry(evasion):
+    """Both regimes: the first non-finite loss ends the epoch, and the warning
+    reports the failing forward's norm statistics."""
     t = _ready(_trainer(TrainConfig(evasion=evasion, norm_control=NO_NORM)))
     nan = torch.tensor(float("nan"), requires_grad=True)
-    with patch.object(t.cbm, "mixed_nll", return_value=nan) as m, \
-         patch.object(t.cbm, "reset") as m_reset:
+    log_amp_sq = torch.tensor([[0.0, float("inf")]] * 4)
+    with patch.object(t.cbm, "mixed_nll", return_value=(nan, log_amp_sq)) as m, \
+         patch("bm4tc.core.train.logger") as m_logger:
         t._train_epoch(eps_abs=0.0)
     assert t._collapsed
-    assert m_reset.called
     assert t.step == 1
     # beta=0, cw=0: one forward per objective (AT: the adversarial one only)
-    assert m.call_count == 2  # the first try and one retry
+    assert m.call_count == 1
+    warning = m_logger.warning.call_args.args[0]
+    assert "NaN/inf loss at step 1" in warning and "4 non-finite → overflow" in warning
 
 
 def test_runtime_error_collapses_but_oom_is_raised():
@@ -262,30 +248,19 @@ def test_beta0_soft_norm_control_multistep_backward(evasion):
     The regularizer reads the with-grad log Z via recompute=False and mixed_nll
     never refreshes it at beta=0; without per-step invalidation the second step
     backwards through the first step's freed graph."""
-    nc = NormControlConfig(hard_every=0, soft_strength=1.0, log_target=0.0)
+    nc = NormControlConfig(soft_strength=1.0, log_target=0.0)
     t = _ready(_trainer(TrainConfig(beta=0.0, evasion=evasion, norm_control=nc)),
                norm_regularizer=NormRegularizer(strength=1.0, log_target=0.0))
     t._train_epoch(eps_abs=0.1)
     assert not t._collapsed
     assert t.step >= 2
     assert t._train_penalty > 0.0
-    assert t.cbm.forward_stats() == {}  # expired by the final step
 
 
-def test_norm_control_off_skips_renormalize():
+def test_no_penalty_without_soft_norm_control():
     t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=NO_NORM)))
-    with patch.object(t.cbm, "renormalize_", wraps=t.cbm.renormalize_) as m_renorm:
-        t._train_epoch(eps_abs=0.1)
-    m_renorm.assert_not_called()
+    t._train_epoch(eps_abs=0.1)
     assert t._train_penalty == 0.0
-
-
-def test_hard_renorm_called_every_step():
-    nc = NormControlConfig(hard_every=1, soft_strength=0.0, log_target=0.0)
-    t = _ready(_trainer(TrainConfig(evasion=PGD, norm_control=nc)))  # 4 steps
-    with patch.object(t.cbm, "renormalize_", wraps=t.cbm.renormalize_) as m_renorm:
-        t._train_epoch(eps_abs=0.1)
-    assert m_renorm.call_count == 4
 
 
 def test_norm_stats_populated_after_epoch():
@@ -299,34 +274,36 @@ def test_norm_stats_populated_after_epoch():
 # ── NormTracker ─────────────────────────────────────────────────────────────
 
 class _FakeNormCBM:
-    """Minimal cbm exposing what NormTracker reads: forward_stats(), dtype and
-    n_features (1: the per-site values equal the absolute ones)."""
+    """Minimal cbm exposing what NormTracker.finalize reads: dtype, n_features
+    (1: the per-site values equal the absolute ones) and the log Z snapshot."""
     def __init__(self, dtype=torch.complex64, snapshot=3.0, n_features=1):
         self.n_features = n_features
-        self.log_Z = None
-        self.amp = {}
         self.dtype = dtype
         self._snapshot = snapshot
-
-    def forward_stats(self):
-        return {**self.amp, **({} if self.log_Z is None else {"log_Z": self.log_Z})}
 
     def log_partition_function(self):
         return torch.tensor(self._snapshot)
 
 
+def _statistics(mean, high, low, log_Z=float("nan")):
+    """One step's norm statistics, in NORM_STATISTICS order."""
+    return torch.tensor([mean, low, high, 0.0, 0.0, log_Z])
+
+
+def test_norm_statistics_reads_the_finite_entries():
+    log_amp_sq = torch.tensor([[1.0, float("inf")], [3.0, float("nan")]])
+    stats = dict(zip(NORM_STATISTICS, norm_statistics(log_amp_sq, None).tolist()))
+    assert (stats["log_amp_sq_mean"], stats["log_amp_sq_min"], stats["log_amp_sq_max"]) == (2.0, 1.0, 3.0)
+    assert (stats["amp_nonfinite_count"], stats["amp_nan_count"]) == (2.0, 1.0)
+    assert math.isnan(stats["log_Z"])
+    assert norm_statistics(log_amp_sq, torch.tensor(5.0))[-1] == 5.0
+
+
 def test_norm_tracker_aggregates_mean_max_min():
     t = NormTracker()
     cbm = _FakeNormCBM()
-    steps = [
-        (1.0, {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}),
-        (5.0, {"log_amp_sq_mean": -4.0, "log_amp_sq_max":  0.0, "log_amp_sq_min": -6.0}),
-    ]
-    for lz, amp in steps:
-        cbm.log_Z = lz
-        cbm.amp = amp
-        t.record_amp(cbm)
-        t.record_logZ(cbm)
+    t.add(_statistics(-2.0, -1.0, -3.0, log_Z=1.0))
+    t.add(_statistics(-4.0, 0.0, -6.0, log_Z=5.0))
     out = t.finalize(cbm)
 
     assert out["norm/log_Z_mean"] == pytest.approx(3.0)
@@ -339,15 +316,21 @@ def test_norm_tracker_aggregates_mean_max_min():
     assert out["norm/log_Z_headroom"] == pytest.approx(ceiling - 5.0)
 
 
+def test_norm_tracker_copies_what_it_is_given():
+    """A captured step overwrites its outputs on every replay (D90)."""
+    t = NormTracker()
+    statistics = _statistics(-2.0, -1.0, -3.0, log_Z=1.0)
+    t.add(statistics)
+    statistics.fill_(100.0)
+    assert t.finalize(_FakeNormCBM())["norm/log_Z_mean"] == 1.0
+
+
 def test_norm_tracker_reports_per_site_but_headroom_absolute():
     """norm/log_Z_* and norm/log_amp_sq_* are divided by N; the headroom is not
     (overflow happens at an absolute log Z, D86)."""
     t = NormTracker()
     cbm = _FakeNormCBM(n_features=4)
-    cbm.log_Z = 8.0
-    cbm.amp = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
-    t.record_amp(cbm)
-    t.record_logZ(cbm)
+    t.add(_statistics(-2.0, -1.0, -3.0, log_Z=8.0))
     out = t.finalize(cbm)
     assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 2.0
     assert (out["norm/log_amp_sq_mean"], out["norm/log_amp_sq_max"],
@@ -359,9 +342,7 @@ def test_norm_tracker_reports_per_site_but_headroom_absolute():
 def test_norm_tracker_logZ_snapshot_fallback():
     t = NormTracker()
     cbm = _FakeNormCBM(snapshot=3.0)
-    cbm.amp = {"log_amp_sq_mean": -2.0, "log_amp_sq_max": -1.0, "log_amp_sq_min": -3.0}
-    t.record_amp(cbm)
-    t.record_logZ(cbm)  # no log Z formed → skipped
+    t.add(_statistics(-2.0, -1.0, -3.0))  # no log Z formed
     out = t.finalize(cbm)
     assert out["norm/log_Z_mean"] == out["norm/log_Z_max"] == out["norm/log_Z_min"] == 3.0
     assert out["norm/log_amp_sq_mean"] == pytest.approx(-2.0)
@@ -370,11 +351,7 @@ def test_norm_tracker_logZ_snapshot_fallback():
 def test_norm_tracker_ignores_nonfinite():
     t = NormTracker()
     cbm = _FakeNormCBM()
-    cbm.log_Z = float("inf")
-    cbm.amp = {"log_amp_sq_mean": float("nan"),
-                           "log_amp_sq_max": float("inf"), "log_amp_sq_min": -5.0}
-    t.record_logZ(cbm)
-    t.record_amp(cbm)
+    t.add(_statistics(float("nan"), float("inf"), -5.0, log_Z=float("inf")))
     out = t.finalize(cbm)
     assert out["norm/log_Z_mean"] == 3.0          # from snapshot, not inf
     assert out["norm/log_amp_sq_min"] == -5.0
@@ -395,6 +372,7 @@ class _DecompStubCBM:
     ``mixed_nll(x, y, b) = (1-b)*L_dis(x) + (b/N)*L_gen(x)``, with L_dis/L_gen keyed
     off a per-batch tag, so the weighting can be checked in closed form."""
     n_features = _N
+    dtype = torch.float32
 
     def __init__(self):
         self.param = torch.nn.Parameter(torch.zeros(1))
@@ -402,13 +380,14 @@ class _DecompStubCBM:
 
     def train(self): pass
     def eval(self): pass
-    def forward_stats(self): return {}
+    def log_Z(self, recompute=False): return torch.tensor(0.0)
 
     def mixed_nll(self, data, labels, beta, debug=False):
         tag = float(data[0, 0])
         self.calls.append((tag, beta))
         # param keeps the result a graph leaf so backward() works in _train_epoch
-        return self.param.sum() + (1 - beta) * _L_DIS[tag] + beta / _N * _L_GEN[tag]
+        objective = self.param.sum() + (1 - beta) * _L_DIS[tag] + beta / _N * _L_GEN[tag]
+        return objective, torch.zeros(len(data), 2)
 
 
 class _OnesAttack:
@@ -435,7 +414,8 @@ def _stub_trainer(beta, cw, *, attack=True):
 
 
 def _objective(t):
-    return t._objective(torch.zeros(4, 2), torch.zeros(4, dtype=torch.long), 0.1, NormTracker())
+    objective, _ = t._objective(torch.zeros(4, 2), torch.zeros(4, dtype=torch.long), 0.1)
+    return objective
 
 
 def _naive_at_loss(beta, cw):
