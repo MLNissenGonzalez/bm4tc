@@ -14,7 +14,6 @@ config:
   trainer.batch_size: 64
   trainer.patience: 5
   trainer.eval_every: 1
-  trainer.clean_weight: 0.5
   trainer.curriculum: false
   trainer.evasion.num_steps: 5
   trainer.optimizer.kwargs.lr: 1e-2

@@ -17,7 +17,7 @@ from tests.e2e.conftest import python
 
 # The two runs are the studies configs/studies/tests/seam_{nat,at}.yaml: tiny
 # spirals (400 points: 200 train, 100 valid, 100 test), legendre d4r3, seed 42.
-# NAT beta=0, 40 epochs; AT warm from it, beta=0.03, cw=0.5, PGD-5 Linf eps_rel
+# NAT beta=0, 40 epochs; AT warm from it, beta=0.03, PGD-5 Linf eps_rel
 # 0.15, 5 epochs.
 STUDIES = {"nat": "tests/seam_nat", "at": "tests/seam_at"}
 
@@ -82,12 +82,13 @@ RATE_TOL = 0.02
 # - The analysis is the `analyse` parts (Phase 5): `rob` is the accuracy on the UQ
 #   attack's PGD examples (random start; was a separate pass without one), every
 #   part starts from seed 0, and budgets are the studies' [0.1, 0.15].
+# - AT at cw = 0 (D91: clean_weight is gone; the seam ran at 0.5 before).
 # `clean_flagged`: the clean test flag rate at the 5th-percentile tau from valid.
 EXPECTED = {
     "nat": {"objective": 0.092497, "acc": 1.00, "dis_loss": 0.057825, "rob": 0.50,
             "detection": 0.17, "clean_flagged": 0.08, "purified_acc": 0.60},
-    "at": {"objective": 0.658017, "acc": 0.79, "dis_loss": 0.390657, "rob": 0.63,
-           "detection": 0.08, "clean_flagged": 0.08, "purified_acc": 0.68},
+    "at": {"objective": 0.889565, "acc": 0.71, "dis_loss": 0.518483, "rob": 0.65,
+           "detection": 0.08, "clean_flagged": 0.09, "purified_acc": 0.67},
 }
 
 # Training curves, pinned tightly (runs are bit-for-bit deterministic on CPU). They
@@ -119,13 +120,13 @@ CURVES = {
     },
     "at": {
         "objective/train": [
-            0.880242685, 0.688598573, 0.696950813, 0.677133203, 0.662753959
+            1.66091506, 1.24018542, 1.08697391, 1.02466393, 0.880700529
         ],
         "objective/valid": [
-            0.758763342, 0.757466522, 0.757630845, 0.709612552, 0.658016533
+            1.62679465, 1.24184342, 1.07933971, 0.984701496, 0.889564552
         ],
         "rob/valid/0.15": [
-            0.4, 0.42, 0.52, 0.5, 0.56
+            0.22, 0.41, 0.48, 0.53, 0.53
         ],
     },
 }
