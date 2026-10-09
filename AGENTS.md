@@ -56,12 +56,22 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-09, evening)
+## State (2026-10-09, night)
 
-Branch `ousterhout`, pushed to GitHub up to `d127eaad` (the commits after it are
-local). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
-`pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
-`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates.
+Branch `ousterhout`, pushed to GitHub up to `fc9d452e`. Phases 0–7 of the refactor are
+done; `main` is untouched and the local tag `pre-ousterhout` marks it. Phase 8 (journal
+studies on the HPC) is in its pilots; `docs/plan.md` has the details, `docs/compute.md`
+the (pre-graph) cost estimates.
+
+**Start here: captured validation crashes the training graph (open; discuss with
+Martin first).** `docs/plan.md`, Efficiency, "Captured validation crashes" has the
+evidence table, hypotheses, next steps and which commits are safe. In short: capturing
+validation (D92) makes the next training replay hit an illegal memory access at real
+shapes (E2a's MNIST12 d3r40 batch 512, d3r80); the tiny tests pass. The cause is
+probably the interaction of CUDA graphs with tensorkrowch's Python-side state; tk's
+source is in `../tensorkrowch` (branch `develop`). **Do not run studies on
+`5c2db9cd`..`fc9d452e` with `trainer.cuda_graph` on.** Martin brings tk intuition,
+not CUDA expertise: explain the GPU side plainly.
 
 Done before (D78–D87, see decisions.md): micro-batches, AT with cw = 0, the HPO budget,
 pilot A (log Z target n·ln d / 2), **β replaces α** (D86; Martin's theory note
@@ -102,28 +112,27 @@ still shows launches without `--mps`.
 Laptop: the eGPU is away until Tuesday 2026-10-13; GPU checks are commands for Martin
 to run on the cluster.
 
-Done on 2026-10-09, late (CPU-tested; CUDA parts unchecked):
+Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation crashes):
 - **D91:** `clean_weight` deleted; AT is `(1-β)·L_dis(x_adv) + (β/N)·L_gen(x)`, AT
   validation attacks every sample, no `n_rob`. The AT seams were re-pinned at cw = 0
   first, then reproduced exactly.
-- **D92, captured evaluation:** `Graphs` (one pool per graph: a pool shared with
-  validation crashed the training graph; replays return copies; one warm-up stream),
-  `Evaluation` (the Trainer's validation, captured), and the analysis's per-batch work
-  (PGD, joint PGD, likelihood purification, log p(x), prediction) captured for the MPS
-  on CUDA. Gibbs and JEM stay eager. d3r80 (micro 128) does not fit yet.
+- **D92, captured evaluation (broken, see "Start here"):** `Graphs` (one pool per graph,
+  replays return copies, one warm-up stream: that fixed the 3× warm-up memory),
+  `Evaluation` (the Trainer's validation, captured: crashes the training graph), and the
+  analysis's per-batch work (PGD, joint PGD, likelihood purification, log p(x),
+  prediction) captured for the MPS on CUDA (≈ 7× per batch, bit-identical to eager).
+  Gibbs and JEM stay eager. d3r80 (micro 128) does not fit yet.
 - **D93:** an HPO trial that ends in a CUDA error is retried, not counted, and stops its
   worker. E2a's two launches were lost (out of memory, then the shared pool); it
   relaunches with `--replace`.
 
 **Next (in this order):**
-1. **Martin, on G21G01** (needs a push and a worktree at the new head):
-   `pytest -q -p no:logging tests/unit/test_graphs.py` (captured vs eager: validation,
-   analysis routines, UQ reproducibility); the d3r80 bench
-   `python -m tests.bench.bench_train_step --features 784 --bond-dim 80 --batch 512
-   --micro-batch 128 --beta 0.5 --regime nat` (fits? peak reserved); one analysis
-   timed captured vs the old worktree (eager).
-2. Read E2c and E2a with Martin (plan.md "Beta", E2: knees, β*, ladder, AT grid). Then
-   E2b (`pilot_beta28`, `hparams_from` E2a), on the new head.
+1. **Discuss the captured-validation crash with Martin**, then (eGPU from Tue
+   2026-10-13) reproduce and bisect it locally (plan.md, "Captured validation
+   crashes"). E2a waits; it relaunches with `--replace` on code that is safe.
+2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
+   `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Beta", E2:
+   knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).
 3. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
    race); `select`/`run --cell` on a subset; a multi-study launcher; the Gibbs O(n²)
    rework; re-estimate `docs/compute.md` (units per GPU from M0).
