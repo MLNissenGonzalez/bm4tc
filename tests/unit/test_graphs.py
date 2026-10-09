@@ -4,16 +4,21 @@ The tests that capture need a GPU and are skipped without one (the seams run on
 CPU and never capture): run them on the cluster or with the eGPU,
 ``pytest -q -p no:logging tests/unit/test_graphs.py``.
 """
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from bm4tc.core.graphs import GraphCaptureError, Graphed
+from bm4tc.core.graphs import Graphed
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import NormControlConfig, OptimizerConfig
 from bm4tc.core.train import TrainConfig, Trainer
 from bm4tc.pipeline.metrics import flatten_epoch
 
+REPO = Path(__file__).resolve().parents[2]
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 CUDA = torch.device("cuda")
 PGD_FIXED_START = {"method": "PGD", "eps_rel": [0.1], "num_steps": 3, "random_start": False}
@@ -44,11 +49,25 @@ def test_graphed_replays_the_function_per_input_shape():
     assert len(graphed._captures) == 2
 
 
+HOST_SYNC_CAPTURE = """
+import torch
+from bm4tc.core.graphs import GraphCaptureError, Graphed
+graphed = Graphed(lambda x: x * x.sum().item(), enabled=True, warmup_calls=0)
+try:
+    graphed(torch.ones(3, device="cuda"))
+except GraphCaptureError:
+    raise SystemExit(0)
+raise SystemExit("no GraphCaptureError")
+"""
+
+
 @needs_cuda
 def test_a_host_sync_fails_capture_with_its_own_error():
-    graphed = Graphed(lambda x: x * x.sum().item(), enabled=True, warmup_calls=0)
-    with pytest.raises(GraphCaptureError):
-        graphed(torch.ones(3, device=CUDA))
+    """In a child process: a failed capture leaves the process's CUDA allocator and
+    generator in capture mode (torch 2.1), so every later capture would fail."""
+    child = subprocess.run([sys.executable, "-c", HOST_SYNC_CAPTURE], cwd=REPO,
+                           capture_output=True, text=True, timeout=300)
+    assert child.returncode == 0, child.stderr[-3000:]
 
 
 def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
