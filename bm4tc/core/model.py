@@ -257,13 +257,11 @@ class ConditionalBornMachine(tk.models.MPS):
         # Detached log Z for analysis (constant w.r.t. params), stamped with
         # _params_key() like the caches below; read through log_normalizer().
         self._log_Z: tuple | None = None            # (params key, log Z)
-        # Per-forward with-gradient log Z + detached log|amp|² stats, populated
-        # by mixed_nll each training forward, each stamped with _params_key() so
-        # it is never served for other parameter values (no caller invalidates).
-        # Read through log_Z() and forward_stats(), not a second contraction.
-        # DISTINCT from _log_Z above (that one is detached/param-constant).
+        # Per-forward with-gradient log Z, populated by mixed_nll each training
+        # forward, stamped with _params_key() so it is never served for other
+        # parameter values (no caller invalidates). Read through log_Z(), not a
+        # second contraction. DISTINCT from _log_Z above (detached/param-constant).
         self._log_Z_cache: tuple | None = None      # ((params key, grad mode), log Z)
-        self._amp_diag_cache: tuple | None = None   # (params key, stats dict)
         # Per-forward accumulator for the norm-accumulating (overflow-safe)
         # contraction; reset/read inside forward(). None between forwards. See
         # _inline_contraction.
@@ -578,48 +576,10 @@ class ConditionalBornMachine(tk.models.MPS):
         invalidates explicitly.)"""
         return tuple((id(p), p._version) for p in self.parameters())
 
-    def forward_stats(self) -> dict:
-        """Stats of the most recent forward on the current parameters, at no
-        contraction cost; empty once the parameters change.
-
-        ``log_Z`` when that forward formed it (``mixed_nll`` at beta > 0, or the
-        norm penalty), and the log|ψ|² summary of the last ``mixed_nll`` batch:
-        ``log_amp_sq_mean``/``_min``/``_max``, ``amp_nonfinite_count``,
-        ``amp_nan_count``.
-        """
-        key = self._params_key()
-        out = {}
-        if self._amp_diag_cache is not None and self._amp_diag_cache[0] == key:
-            out.update(self._amp_diag_cache[1])
-        if self._log_Z_cache is not None and self._log_Z_cache[0][0] == key:
-            out["log_Z"] = self._log_Z_cache[1].detach().item()
-        return out
-
     def _invalidate_log_Z_cache(self) -> None:
-        """Drop the per-forward norm/amplitude caches after a tensor mutation."""
+        """Drop the norm caches after a tensor mutation."""
         self._log_Z_cache = None
-        self._amp_diag_cache = None
         self._log_Z = None
-
-    @torch.no_grad()
-    def _cache_amp_diag(self, log_abs_sq: torch.Tensor) -> None:
-        """Cache detached log|amp|² summary stats from the current forward.
-
-        log_abs_sq = 2·log|ψ(x,c)| (B, C) is already computed in mixed_nll; this
-        stores its finite-masked mean/min/max plus a non-finite count, matching
-        the keys _format_diagnostics() expects.
-        """
-        finite_mask = torch.isfinite(log_abs_sq)
-        finite = log_abs_sq[finite_mask]
-        self._amp_diag_cache = (self._params_key(), {
-            "log_amp_sq_mean": finite.mean().item() if finite.numel() else float("nan"),
-            "log_amp_sq_min": finite.min().item() if finite.numel() else float("nan"),
-            "log_amp_sq_max": finite.max().item() if finite.numel() else float("nan"),
-            "amp_nonfinite_count": int((~finite_mask).sum().item()),
-            # Split so the reporter can name the cause: +inf is a genuine
-            # amplitude overflow, NaN is a degenerate contraction (0/0).
-            "amp_nan_count": int(torch.isnan(log_abs_sq).sum().item()),
-        })
 
     def cache_log_Z(self) -> float:
         """Compute and cache log Z as a detached float."""
@@ -662,10 +622,13 @@ class ConditionalBornMachine(tk.models.MPS):
         labels: torch.Tensor,
         beta: float,
         debug: bool = False,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         The objective (1-β)·L_dis + β·L_gen/N, in nats per variable (D86), with
-        N = ``n_features`` (the data sites and the class site):
+        N = ``n_features`` (the data sites and the class site), and the batch's
+        log|ψ(x,c)|² (B, C), detached, for the norm statistics. Without host
+        syncs (unless ``debug``), so a training step can be captured (D90): a
+        non-finite log Z makes the objective non-finite, which the caller checks.
 
         L = -(1-β+β/N)·log|ψ(x,c)|² + (1-β)·log Σ_c |ψ(x,c)|² + (β/N)·log Z
 
@@ -673,7 +636,6 @@ class ConditionalBornMachine(tk.models.MPS):
         β=1  →  -log p(x,c) / N   (generative)
 
         debug=True: log per-term NaN/inf stats inside the grad-tracked forward.
-        Non-finite log_Z is logged rather than raised so all terms are visible.
         """
         def _stats(t: torch.Tensor) -> str:
             fin = t[torch.isfinite(t)]
@@ -683,7 +645,6 @@ class ConditionalBornMachine(tk.models.MPS):
 
         B = data.shape[0]
         las = self.log_amp_sq(data)                                      # (B, C) = log|ψ|²
-        self._cache_amp_diag(las)                                         # detached, for diagnostics
 
         if debug:
             nf_las = int((~torch.isfinite(las)).sum().item())
@@ -692,7 +653,7 @@ class ConditionalBornMachine(tk.models.MPS):
             )
 
         n_vars = self.n_features
-        term1 = -(1.0 - beta + beta / n_vars) * las[torch.arange(B), labels]
+        term1 = -(1.0 - beta + beta / n_vars) * las[torch.arange(B, device=labels.device), labels]
 
         if debug:
             logger.warning(f"  [mixed_nll/grad] term1(-(1-β+β/N)·log|ψ(x,c)|²): {_stats(term1)}")
@@ -709,21 +670,13 @@ class ConditionalBornMachine(tk.models.MPS):
 
         if beta > 0.0:
             log_Z = self.log_Z(recompute=True)
-            if not torch.isfinite(log_Z):
-                if debug:
-                    logger.warning(f"  [mixed_nll/grad] log_Z={log_Z.item():.4g} (non-finite)")
-                else:
-                    raise RuntimeError(
-                        f"log_partition_function returned non-finite value: {log_Z.item():.4g}. "
-                        "MPS has collapsed or exploded."
-                    )
-            elif debug:
+            if debug:
                 logger.warning(f"  [mixed_nll/grad] term3(β/N·log_Z): log_Z={log_Z.item():.4g}")
             term3 = (beta / n_vars) * log_Z
         else:
             term3 = 0.0
 
-        return (term1 + term2 + term3).mean()
+        return (term1 + term2 + term3).mean(), las.detach()
 
     def renormalize_(self, log_target: float = 0.0) -> None:
         """

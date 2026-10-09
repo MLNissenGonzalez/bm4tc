@@ -57,7 +57,7 @@ def main():
 
     def step():
         opt.zero_grad()
-        loss = cbm.mixed_nll(x, y, beta=a.beta)
+        loss = cbm.mixed_nll(x, y, beta=a.beta)[0]
         loss.backward()
         opt.step()
         return loss
@@ -71,7 +71,7 @@ def main():
 
     def fwd_bwd():
         opt.zero_grad()
-        cbm.mixed_nll(x, y, beta=a.beta).backward()
+        cbm.mixed_nll(x, y, beta=a.beta)[0].backward()
     ms_fb, _ = _timed(fwd_bwd, device, a.steps)
     ms_opt, _ = _timed(opt.step, device, a.steps)
     ms_step, _ = _timed(step, device, a.steps)

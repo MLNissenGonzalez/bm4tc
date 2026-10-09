@@ -31,9 +31,11 @@ from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_at
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
+    NORM_STATISTICS,
     NormTracker,
     OptimizerConfig,
     evaluate,
+    norm_statistics,
     optimizer,
     resolve_log_target,
 )
@@ -180,8 +182,10 @@ class Trainer:
     # Objective
     # ------------------------------------------------------------------
 
-    def _objective(self, data, labels, eps_abs, tracker: NormTracker) -> torch.Tensor:
-        """The training objective on one batch (module docstring).
+    def _objective(self, inputs, labels, eps_abs) -> tuple[torch.Tensor, torch.Tensor]:
+        """The training objective on one batch (module docstring), and the
+        log|ψ|² of the forward the norm statistics describe: the adversarial one
+        when there is one (its amplitudes explode first), else the clean one.
 
         ``mixed_nll(x, y, b) = (1-b)·L_dis + (b/N)·L_gen`` is linear in b, so both
         clean terms fold into one call at a rescaled beta: with
@@ -196,75 +200,41 @@ class Trainer:
         """
         beta, cw = self.cfg.beta, self.clean_weight
         if self.attack is None:
-            nll = self.cbm.mixed_nll(data, labels, beta, debug=self._nc.debug)
-            tracker.record_amp(self.cbm)
-            return nll
+            return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug)
 
-        adv_w = (1.0 - beta) * (1.0 - cw)
-        s = (1.0 - beta) * cw + beta
+        adversarial_weight = (1.0 - beta) * (1.0 - cw)
+        clean_weight = (1.0 - beta) * cw + beta
 
-        terms = []
-        if adv_w > 0.0:
+        objective = None
+        if adversarial_weight > 0.0:
             self.cbm.eval()
-            adv_data = self.attack.generate(
-                model=self.cbm, naturals=data, labels=labels, eps_abs=eps_abs,
+            adversarials = self.attack.generate(
+                model=self.cbm, naturals=inputs, labels=labels, eps_abs=eps_abs,
                 device=self.device,
             )
             self.cbm.train()
-            terms.append(adv_w * self.cbm.mixed_nll(adv_data, labels, beta=0.0))
-            # Amplitudes explode on the adversarial batch; record before the clean
-            # forward overwrites the cache.
-            tracker.record_amp(self.cbm)
-        if s > 0.0:
-            terms.append(s * self.cbm.mixed_nll(data, labels, beta=beta / s,
-                                                debug=self._nc.debug))
-            if adv_w <= 0.0:
-                tracker.record_amp(self.cbm)
-
-        return terms[0] if len(terms) == 1 else terms[0] + terms[1]
+            adversarial_objective, log_amp_sq = self.cbm.mixed_nll(adversarials, labels, beta=0.0)
+            objective = adversarial_weight * adversarial_objective
+        if clean_weight > 0.0:
+            clean_objective, clean_log_amp_sq = self.cbm.mixed_nll(
+                inputs, labels, beta=beta / clean_weight, debug=self._nc.debug)
+            clean_term = clean_weight * clean_objective
+            objective = clean_term if objective is None else objective + clean_term
+            if adversarial_weight <= 0.0:
+                log_amp_sq = clean_log_amp_sq
+        return objective, log_amp_sq
 
     # ------------------------------------------------------------------
-    # Collapse diagnostics
+    # Collapse report
     # ------------------------------------------------------------------
-
-    def _diagnostics(self, data: torch.Tensor) -> Dict[str, float]:
-        """log_Z and log|amp|² stats. Prefers the failing mixed_nll forward's
-        stats (no extra contraction); falls back to a fresh no-grad recompute when
-        it did not form them (e.g. beta=0 leaves log_Z out)."""
-        result: Dict[str, float] = self.cbm.forward_stats()
-
-        if "log_Z" not in result:
-            with torch.no_grad():
-                try:
-                    self.cbm.reset()
-                    result["log_Z"] = self.cbm.log_partition_function().item()
-                except Exception:
-                    result["log_Z"] = float("nan")
-
-        if "log_amp_sq_mean" not in result:
-            with torch.no_grad():
-                try:
-                    log_abs_sq = self.cbm.log_amp_sq(data)
-                    finite_mask = torch.isfinite(log_abs_sq)
-                    finite = log_abs_sq[finite_mask]
-                    result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")
-                    result["log_amp_sq_min"] = finite.min().item() if finite.numel() else float("nan")
-                    result["log_amp_sq_max"] = finite.max().item() if finite.numel() else float("nan")
-                    result["amp_nonfinite_count"] = int((~finite_mask).sum().item())
-                    result["amp_nan_count"] = int(torch.isnan(log_abs_sq).sum().item())
-                except Exception:
-                    result["log_amp_sq_mean"] = float("nan")
-                    result["log_amp_sq_min"] = float("nan")
-                    result["log_amp_sq_max"] = float("nan")
-                    result["amp_nonfinite_count"] = -1
-                    result["amp_nan_count"] = -1
-        return result
 
     @staticmethod
     def _format_diagnostics(d: Dict[str, float]) -> str:
         parts = []
         log_Z = d.get("log_Z", float("nan"))
-        if not math.isfinite(log_Z):
+        if "log_Z" not in d:
+            pass  # the step did not form log Z (beta=0 without the norm penalty)
+        elif not math.isfinite(log_Z):
             tag = "overflow" if log_Z > 0 else ("underflow" if log_Z < 0 else "nan")
             parts.append(f"norm {tag} (log_Z={log_Z:.4g})")
         else:
@@ -301,88 +271,89 @@ class Trainer:
     # Loop
     # ------------------------------------------------------------------
 
-    def _chunk_objective(self, data, labels, eps_abs: float, tracker) -> Optional[torch.Tensor]:
-        """The objective on one (micro-)batch, retried once after ``cbm.reset()`` if
-        it is not finite. None, with ``_collapsed`` set, when training must stop."""
-        try:
-            nll = self._objective(data, labels, eps_abs, tracker)
-            if not torch.isfinite(nll):
-                # Reset clears stale tensorkrowch contraction nodes; the retry
-                # is for recovery only.
-                self.cbm.reset()
-                nll = self._objective(data, labels, eps_abs, tracker)
-                if not torch.isfinite(nll):
-                    diag = self._diagnostics(data)
-                    logger.warning(
-                        f"NaN/inf loss at step {self.step} (also after cbm.reset()): "
-                        f"{self._format_diagnostics(diag)}"
-                    )
-                    self._collapsed = True
-                    return None
-                logger.warning(
-                    f"NaN/inf loss at step {self.step} recovered after cbm.reset(); continuing."
-                )
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                logger.error(f"CUDA OOM at step {self.step}, re-raising.")
-                raise
-            logger.warning(f"Training stopped at step {self.step}: {e}")
-            self._collapsed = True
-            return None
-        return nll
+    def _backward_over_micro_batches(self, inputs, labels, eps_abs):
+        """The batch objective, its backward into the parameter gradients, the
+        norm penalty and the step's norm statistics (:func:`norm_statistics`).
+
+        Micro-batches (D79): each chunk's objective is a mean over the chunk, so
+        weighting it by its share of the batch accumulates the gradient of the
+        batch mean. One chunk is the batch itself: the same graph and numbers as
+        without micro-batching. The penalty is per step, added once on the last
+        chunk's graph (it may share that chunk's log Z).
+        """
+        micro = self.cfg.micro_batch_size
+        chunks = (list(zip(inputs.split(micro), labels.split(micro))) if micro
+                  else [(inputs, labels)])
+        objective = 0.0
+        penalty = torch.zeros((), device=inputs.device)
+        log_Z = None
+        log_amp_sqs = []
+        for i, (chunk_inputs, chunk_labels) in enumerate(chunks):
+            chunk_objective, log_amp_sq = self._objective(chunk_inputs, chunk_labels, eps_abs)
+            weight = len(chunk_inputs) / len(inputs)
+            loss = chunk_objective if len(chunks) == 1 else weight * chunk_objective
+            if i == len(chunks) - 1:
+                if self.norm_regularizer is not None:
+                    penalty = self.norm_regularizer(self.cbm)
+                    loss = loss + penalty
+                # log Z is formed by mixed_nll (beta>0) or the regularizer; read
+                # it before optimizer.step() changes the parameters.
+                if self.cfg.beta > 0.0 or self.norm_regularizer is not None:
+                    log_Z = self.cbm.log_Z(recompute=False)
+            loss.backward()
+            objective = objective + weight * chunk_objective.detach()
+            log_amp_sqs.append(log_amp_sq)
+        return objective, penalty.detach(), norm_statistics(torch.cat(log_amp_sqs), log_Z)
+
+    def _train_step(self, inputs, labels, eps_abs):
+        """One optimizer step, without host syncs. Returns the batch objective,
+        the norm penalty and the norm statistics of the forward before the
+        update, all on the device."""
+        self.optimizer.zero_grad()
+        objective, penalty, statistics = self._backward_over_micro_batches(inputs, labels, eps_abs)
+        self.optimizer.step()
+        return objective, penalty, statistics
 
     def _train_epoch(self, eps_abs: float):
-        """One pass over the training split. Sets ``_collapsed`` and stops early on
-        a non-OOM error or a loss that stays non-finite after ``cbm.reset()``."""
+        """One pass over the training split. Sets ``_collapsed`` and stops at a
+        loss that is not finite (the parameters are then lost: training ends with
+        the best validated epoch's) or at a non-OOM error."""
         objectives, penalties = [], []
         self._collapsed = False
-        tracker = NormTracker()
+        norm_tracker = NormTracker()
         self.cbm.train()
 
-        micro = self.cfg.micro_batch_size
-        for data, labels in self.train_loader:
-            data, labels = data.to(self.device), labels.to(self.device)
+        for inputs, labels in self.train_loader:
+            inputs, labels = inputs.to(self.device), labels.to(self.device)
             self.step += 1
-            self.optimizer.zero_grad()
-
-            # One chunk is the batch itself: the same graph and numbers as without
-            # micro-batching. Each chunk's objective is a mean over the chunk, so
-            # weighting it by its share of the batch accumulates the gradient of
-            # the batch mean (D79).
-            chunks = (list(zip(data.split(micro), labels.split(micro))) if micro
-                      else [(data, labels)])
-            batch_nll, penalty = 0.0, None
-            for i, (x, y) in enumerate(chunks):
-                nll = self._chunk_objective(x, y, eps_abs, tracker)
-                if nll is None:
-                    break
-                weight = len(x) / len(data)
-                loss = nll if len(chunks) == 1 else weight * nll
-                if i == len(chunks) - 1:
-                    # The penalty is per step, added once, on the last chunk's graph
-                    # (it may share that chunk's log Z).
-                    if self.norm_regularizer is not None:
-                        penalty = self.norm_regularizer(self.cbm)
-                        loss = loss + penalty
-                    # log Z is formed by mixed_nll (beta>0) or the regularizer;
-                    # read it before optimizer.step() changes the parameters.
-                    tracker.record_logZ(self.cbm)
-                loss.backward()
-                batch_nll += weight * nll.detach().cpu().item()
-            if self._collapsed:
+            try:
+                objective, penalty, statistics = self._train_step(inputs, labels, eps_abs)
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logger.error(f"CUDA OOM at step {self.step}, re-raising.")
+                    raise
+                logger.warning(f"Training stopped at step {self.step}: {e}")
+                self._collapsed = True
                 break
-            self.optimizer.step()
-
-            if self._nc.hard_every > 0 and (self.step % self._nc.hard_every == 0):
-                self.cbm.renormalize_(log_target=self._nc_log_target)
-
-            objectives.append(batch_nll)
-            penalties.append(penalty.detach().cpu().item() if penalty is not None else 0.0)
+            batch_objective = objective.item()          # the one host sync per step
+            if not math.isfinite(batch_objective):
+                report = dict(zip(NORM_STATISTICS, statistics.tolist()))
+                for count in ("amp_nonfinite_count", "amp_nan_count"):
+                    report[count] = int(report[count])
+                if not (self.cfg.beta > 0.0 or self.norm_regularizer is not None):
+                    del report["log_Z"]
+                logger.warning(f"NaN/inf loss at step {self.step}: "
+                               f"{self._format_diagnostics(report)}")
+                self._collapsed = True
+                break
+            objectives.append(batch_objective)
+            penalties.append(penalty.clone())
+            norm_tracker.add(statistics)
 
         n = len(objectives)
         self._train_objective = sum(objectives) / n if n else float("nan")
-        self._train_penalty = sum(penalties) / n if n else float("nan")
-        self._norm_stats = tracker.finalize(self.cbm)
+        self._train_penalty = sum(torch.stack(penalties).tolist()) / n if n else float("nan")
+        self._norm_stats = norm_tracker.finalize(self.cbm)
 
     def _validate(self) -> dict:
         return evaluate(

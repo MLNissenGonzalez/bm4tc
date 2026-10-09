@@ -3,7 +3,7 @@ import logging
 import random
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, List, Union
 
 import numpy as np
 import torch
@@ -121,7 +121,6 @@ def optimizer(params, config: OptimizerConfig) -> optim.Optimizer:
 @dataclass
 class NormControlConfig:
     log_target: Optional[Union[float, str]] = 0.0
-    hard_every: int = 0
     soft_strength: float = 0.1
     debug: bool = False
 
@@ -217,89 +216,90 @@ def resolve_log_target(cbm, nc: NormControlConfig) -> float:
     return float(raw)
 
 
+# The order of norm_statistics' entries; NormTracker and the collapse report
+# read them by these names.
+NORM_STATISTICS = ("log_amp_sq_mean", "log_amp_sq_min", "log_amp_sq_max",
+                   "amp_nonfinite_count", "amp_nan_count", "log_Z")
+
+
+def norm_statistics(log_amp_sq: torch.Tensor, log_Z: Optional[torch.Tensor]) -> torch.Tensor:
+    """One training forward's norm statistics, as one tensor in the order of
+    ``NORM_STATISTICS``, on the device and without a host sync (D90).
+
+    From the batch's log|ψ|² (B, C): the mean, min and max of its finite entries
+    (nan, +inf, -inf when none is), its non-finite and NaN counts (+inf is an
+    amplitude overflow, NaN a degenerate contraction); then log Z, nan when the
+    step did not form it.
+    """
+    log_amp_sq = log_amp_sq.detach()
+    finite = torch.isfinite(log_amp_sq)
+    zero = torch.zeros((), dtype=log_amp_sq.dtype, device=log_amp_sq.device)
+    mean = torch.where(finite, log_amp_sq, zero).sum() / finite.sum()
+    low = torch.where(finite, log_amp_sq, zero + math.inf).min()
+    high = torch.where(finite, log_amp_sq, zero - math.inf).max()
+    nonfinite = (~finite).sum().to(log_amp_sq.dtype)
+    nans = torch.isnan(log_amp_sq).sum().to(log_amp_sq.dtype)
+    log_Z = zero + math.nan if log_Z is None else log_Z.detach().to(log_amp_sq.dtype)
+    return torch.stack([mean, low, high, nonfinite, nans, log_Z])
+
+
 class NormTracker:
-    """Accumulate per-step training-side norm (log Z) and mean-amplitude
-    (log|ψ|²) statistics over one epoch, then emit one ``norm/*`` metric dict:
-    per site (divided by N = ``n_features``, D86), except ``norm/log_Z_headroom``,
-    which is absolute because overflow is.
+    """Accumulate the per-step norm statistics (:func:`norm_statistics`) over one
+    epoch, then emit one ``norm/*`` metric dict: per site (divided by N =
+    ``n_features``, D86), except ``norm/log_Z_headroom``, which is absolute
+    because overflow is.
 
-    Reads ``cbm.forward_stats()``: the amplitude stats ``mixed_nll`` always
-    forms, and the log Z the forward or the ``NormRegularizer`` forms when
-    ``beta>0`` or ``soft_strength>0``, so it adds no contraction in the common
-    cases. Call :meth:`record_amp` / :meth:`record_logZ` per step *before*
-    ``optimizer.step()`` changes the parameters, then :meth:`finalize` once.
-
-    Running max/min are kept alongside the mean so an intra-epoch explosion (a
-    spike) survives aggregation instead of being smeared by the mean. ``log Z``
-    is taken only from finite cache values; if it is never cached during the
-    epoch (``beta=0`` with no soft norm control), :meth:`finalize` falls back to
-    a single post-epoch ``log_partition_function()`` snapshot.
+    :meth:`add` keeps a copy of each step's statistics on the device;
+    :meth:`finalize` reads them all with one host sync. Running max/min are kept
+    alongside the mean so an intra-epoch explosion (a spike) survives
+    aggregation instead of being smeared by the mean. Only finite values count.
+    If no step formed log Z (``beta=0`` with no soft norm control),
+    :meth:`finalize` takes one post-epoch ``log_partition_function()`` snapshot.
     """
 
     def __init__(self):
-        self._logZ_sum, self._logZ_n = 0.0, 0
-        self._logZ_max, self._logZ_min = -math.inf, math.inf
-        self._amp_sum, self._amp_n = 0.0, 0
-        self._amp_max, self._amp_min = -math.inf, math.inf
+        self._steps: List[torch.Tensor] = []
 
-    def record_amp(self, cbm) -> None:
-        """Fold in the log|ψ|² stats of the last ``mixed_nll`` batch."""
-        d = cbm.forward_stats()
-        if "log_amp_sq_mean" not in d:
-            return
-        mean = d.get("log_amp_sq_mean", float("nan"))
-        if math.isfinite(mean):
-            self._amp_sum += mean
-            self._amp_n += 1
-        mx = d.get("log_amp_sq_max", float("nan"))
-        if math.isfinite(mx):
-            self._amp_max = max(self._amp_max, mx)
-        mn = d.get("log_amp_sq_min", float("nan"))
-        if math.isfinite(mn):
-            self._amp_min = min(self._amp_min, mn)
-
-    def record_logZ(self, cbm) -> None:
-        """Fold in this step's log Z if a forward formed it and it is finite."""
-        v = cbm.forward_stats().get("log_Z")
-        if v is None:
-            return
-        if math.isfinite(v):
-            self._logZ_sum += v
-            self._logZ_n += 1
-            self._logZ_max = max(self._logZ_max, v)
-            self._logZ_min = min(self._logZ_min, v)
+    def add(self, statistics: torch.Tensor) -> None:
+        """Fold in one step's statistics (copied: a captured step overwrites its
+        outputs on the next replay)."""
+        self._steps.append(statistics.detach().clone())
 
     def finalize(self, cbm) -> Dict[str, float]:
-        if self._logZ_n == 0:
+        rows = torch.stack(self._steps).tolist() if self._steps else []
+        columns = {name: [row[i] for row in rows if math.isfinite(row[i])]
+                   for i, name in enumerate(NORM_STATISTICS)}
+        log_Z = columns["log_Z"]
+        if not log_Z:
             # beta=0 without soft norm control never forms log Z during the
             # step; take one post-epoch snapshot so norm/log_Z is still reported.
             with torch.no_grad():
                 try:
-                    v = cbm.log_partition_function().item()
+                    snapshot = cbm.log_partition_function().item()
                 except Exception:
-                    v = float("nan")
-            if math.isfinite(v):
-                self._logZ_sum, self._logZ_n = v, 1
-                self._logZ_max = self._logZ_min = v
+                    snapshot = float("nan")
+            if math.isfinite(snapshot):
+                log_Z = [snapshot]
 
         out: Dict[str, float] = {}
         n = cbm.n_features
-        if self._logZ_n:
-            out["norm/log_Z_mean"] = self._logZ_sum / self._logZ_n / n
-            out["norm/log_Z_max"] = self._logZ_max / n
-            out["norm/log_Z_min"] = self._logZ_min / n
+        if log_Z:
+            out["norm/log_Z_mean"] = sum(log_Z) / len(log_Z) / n
+            out["norm/log_Z_max"] = max(log_Z) / n
+            out["norm/log_Z_min"] = min(log_Z) / n
             # Amplitudes overflow once ‖ψ‖ = exp(log_Z/2) crosses the dtype max,
             # i.e. log_Z > 2·log(finfo.max) (≈177.45 for float32/complex64).
             ceiling = 2.0 * math.log(torch.finfo(cbm.dtype).max)
-            out["norm/log_Z_headroom"] = ceiling - self._logZ_max
-        # Emit each amp stat on its own guard: a step can contribute a finite
-        # max/min even if its mean was non-finite (and vice versa).
-        if self._amp_n:
-            out["norm/log_amp_sq_mean"] = self._amp_sum / self._amp_n / n
-        if math.isfinite(self._amp_max):
-            out["norm/log_amp_sq_max"] = self._amp_max / n
-        if math.isfinite(self._amp_min):
-            out["norm/log_amp_sq_min"] = self._amp_min / n
+            out["norm/log_Z_headroom"] = ceiling - max(log_Z)
+        # Each amp stat on its own guard: a step can contribute a finite max/min
+        # even if its mean was non-finite (and vice versa).
+        means = columns["log_amp_sq_mean"]
+        if means:
+            out["norm/log_amp_sq_mean"] = sum(means) / len(means) / n
+        if columns["log_amp_sq_max"]:
+            out["norm/log_amp_sq_max"] = max(columns["log_amp_sq_max"]) / n
+        if columns["log_amp_sq_min"]:
+            out["norm/log_amp_sq_min"] = min(columns["log_amp_sq_min"]) / n
         return out
 
 
