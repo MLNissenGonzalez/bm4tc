@@ -1,6 +1,6 @@
 import pytest
 import torch
-from tests.conftest import DATA_DIM
+from tests.conftest import DATA_DIM, raw_amplitudes
 from bm4tc.analysis.purification import GibbsPurification
 
 pytestmark = pytest.mark.slow
@@ -243,7 +243,7 @@ def test_gibbs_stable_when_amplitudes_overflow(step_radius):
     lo, hi = cbm.input_range
     # precondition: the linear path this replaced really is broken here
     x_probe = lo + (hi - lo) * torch.rand(2, data_dim)
-    assert not torch.isfinite(cbm.amplitudes(x_probe)).all(), \
+    assert not torch.isfinite(raw_amplitudes(cbm, x_probe)).all(), \
         "fixture no longer overflows; the regime this guards is untested"
 
     torch.manual_seed(0)
@@ -282,8 +282,8 @@ def test_gibbs_numeric_regression():
         torch.manual_seed(0)
         m = ConditionalBornMachine(
             # Explicit: the model these goldens were pinned on (real dtype, randn
-            # init, raw amplitudes), independent of the schema defaults (D4).
-            cfg=CBMConfig(embedding="legendre", accumulate=False,
+            # init), independent of the schema defaults (D4).
+            cfg=CBMConfig(embedding="legendre",
                           init_kwargs=MPSInitConfig(in_dim=2, bond_dim=3, std=1e-1,
                                                     init_method="randn", dtype="float32")),
             data_dim=4, num_classes=3, device=torch.device("cpu"),

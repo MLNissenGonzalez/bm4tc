@@ -289,7 +289,7 @@ class GibbsPurification:
             x_cur = batch.clone()
 
             # Clear any data nodes left over from a previous batch. The candidate
-            # forward runs through the eager accumulate path (log_amp_sq), which
+            # forward (log_amp_sq) is the eager norm-accumulating contraction, which
             # resets around itself, so this is only hygiene between batches.
             born.reset()
 
@@ -334,9 +334,9 @@ class GibbsPurification:
                         # computed entirely in log space. Each candidate is a full
                         # chain contraction over every site, so the linear |ψ|²
                         # overflows on long chains; log_amp_sq is the norm-
-                        # accumulating (always overflow-safe) contraction, and
+                        # accumulating (overflow-safe) contraction, and
                         # logsumexp does the class sum without leaving log space.
-                        las = born.log_amp_sq_accumulate(x_cand)                      # (bs*bins, C)
+                        las = born.log_amp_sq(x_cand)                      # (bs*bins, C)
                         log_p = torch.logsumexp(las, dim=-1).view(bs, self.num_bins)
 
                     # No masking needed: the grid *is* the window, so every bin is

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from torch.utils.data import DataLoader, TensorDataset
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import evaluate
+from tests.conftest import raw_amplitudes
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
@@ -22,7 +23,6 @@ def test_cbmconfig_defaults():
     cfg = CBMConfig()
     assert cfg.embedding == "legendre"
     assert cfg.model_path is None
-    assert cfg.accumulate is True
     assert cfg.init_kwargs.dtype == "complex64"  # D4
     assert cfg.init_kwargs.init_method == "randn_eye"
     assert cfg.init_kwargs.std == 1e-9
@@ -434,7 +434,7 @@ def test_large_amplitude_numerical_stability():
     y = torch.randint(0, 2, (4,))
 
     with torch.no_grad():
-        amp0 = cbm.amplitudes(x)
+        amp0 = raw_amplitudes(cbm, x)
         max_abs = float(amp0.abs().max().clamp(min=1e-30))
         c = (2e19 / max_abs) ** (1.0 / cbm.n_features)
         for node in cbm._mats_env:
@@ -442,7 +442,7 @@ def test_large_amplitude_numerical_stability():
 
     cbm.reset()
     with torch.no_grad():
-        amp = cbm.amplitudes(x)
+        amp = raw_amplitudes(cbm, x)
     assert amp.abs().max().item() > 1.84e19, "setup: amplitudes not large enough"
     assert amp.isfinite().all(), "setup: amplitudes must be finite (not yet overflowed)"
 
@@ -486,18 +486,17 @@ def test_mixed_nll_term1_gradient_at_small_amplitude():
 
 
 # ── Norm-accumulating (overflow-safe) contraction ────────────────────────────
-# amplitudes_accumulate / log_amp_sq contract while keeping the running node O(1)
+# log_amp_sq contracts while keeping the running node O(1)
 # and accumulate the extracted norm in log space, so log|ψ|² is recoverable
 # without ever materializing an overflowing amplitude. Verified against the
-# default (non-accumulating) amplitudes() path.
+# raw tensorkrowch contraction (raw_amplitudes).
 
 def _acc_cbm(dtype="float32", data_dim=3, num_classes=2, bond_dim=3,
-             std=0.3, out_position=None, accumulate=False):
+             std=0.3, out_position=None):
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype,
                                   std=std, out_position=out_position),
-        accumulate=accumulate,
     )
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
 
@@ -517,8 +516,8 @@ def testlog_amp_sq_matches_amplitudes(dtype):
     torch.manual_seed(0)
     cbm = _acc_cbm(dtype=dtype)
     x = torch.rand(5, 3) * 1.6 - 0.8
-    ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
-    got = cbm.log_amp_sq_accumulate(x)
+    ref = 2.0 * torch.log(raw_amplitudes(cbm, x).abs().clamp(min=1e-30))
+    got = cbm.log_amp_sq(x)
     assert got.shape == ref.shape == (5, cbm.out_dim)
     assert torch.allclose(got, ref, atol=1e-4)
 
@@ -537,16 +536,15 @@ def testlog_amp_sq_finite_when_embedding_vanishes(dtype):
     cfg = CBMConfig(
         embedding="chebychev2",
         init_kwargs=MPSInitConfig(in_dim=6, bond_dim=3, dtype=dtype, std=0.3),
-        accumulate=True,
     )
     cbm = ConditionalBornMachine(cfg=cfg, data_dim=2, num_classes=2)
 
     x = torch.tensor([[0.3, -0.2], [1.0, 0.5], [-1.0, -1.0]])
-    psi, log_norm = cbm.amplitudes_accumulate(x)
+    psi, log_norm = cbm(cbm.embed(x))
     assert torch.isfinite(psi.abs()).all()
     assert torch.isfinite(log_norm).all()
 
-    las = cbm.log_amp_sq_accumulate(x)
+    las = cbm.log_amp_sq(x)
     assert torch.isfinite(las).all()
     # The vanishing rows floor far below the interior row rather than NaN-ing.
     assert las[0].max() > las[1].max()
@@ -559,12 +557,12 @@ def test_amplitude_reconstruction(dtype):
     torch.manual_seed(1)
     cbm = _acc_cbm(dtype=dtype)
     x = torch.rand(4, 3) * 1.6 - 0.8
-    psi, log_norm = cbm.amplitudes_accumulate(x)
+    psi, log_norm = cbm(cbm.embed(x))
     assert psi.shape == log_norm.shape == (4, cbm.out_dim)
     assert not torch.is_complex(log_norm)
     assert torch.allclose(psi.abs(), torch.ones_like(psi.abs()), atol=1e-5)  # unit-modulus
     recon = psi.abs() * torch.exp(log_norm)
-    assert torch.allclose(recon, cbm.amplitudes(x).abs(), atol=1e-5)
+    assert torch.allclose(recon, raw_amplitudes(cbm, x).abs(), atol=1e-5)
 
 
 def test_class_probabilities_fromlog_amp_sq():
@@ -573,7 +571,7 @@ def test_class_probabilities_fromlog_amp_sq():
     torch.manual_seed(2)
     cbm = _acc_cbm(num_classes=3)
     x = torch.rand(6, 3) * 1.6 - 0.8
-    las = cbm.log_amp_sq_accumulate(x)
+    las = cbm.log_amp_sq(x)
     log_probs = las - torch.logsumexp(las, dim=-1, keepdim=True)
     assert torch.allclose(log_probs.exp(), cbm.class_probabilities(x), atol=1e-5)
 
@@ -585,7 +583,7 @@ def test_mixed_nll_beta0_fromlog_amp_sq():
     cbm = _acc_cbm()
     x = torch.rand(5, 3) * 1.6 - 0.8
     y = torch.randint(0, cbm.out_dim, (5,))
-    las = cbm.log_amp_sq_accumulate(x)
+    las = cbm.log_amp_sq(x)
     term1 = -las[torch.arange(5), y]
     term2 = torch.logsumexp(las, dim=-1)
     recon = (term1 + term2).mean()
@@ -601,7 +599,7 @@ def test_mixed_nll_is_the_per_variable_objective(beta):
     x = torch.rand(5, 3) * 1.6 - 0.8
     y = torch.randint(0, cbm.out_dim, (5,))
     with torch.no_grad():
-        las = cbm.log_amp_sq_accumulate(x)
+        las = cbm.log_amp_sq(x)
         log_Z = cbm.log_partition_function()
         l_dis = (torch.logsumexp(las, dim=-1) - las[torch.arange(5), y]).mean()
         l_gen = (log_Z - las[torch.arange(5), y]).mean()
@@ -621,15 +619,15 @@ def testlog_amp_sq_overflow_safe():
     torch.manual_seed(4)
     cbm = _acc_cbm(data_dim=4)
     x = torch.rand(3, 4) * 1.6 - 0.8
-    las_base = cbm.log_amp_sq_accumulate(x).detach().clone()
+    las_base = cbm.log_amp_sq(x).detach().clone()
     # Per-site scale whose product over the chain overflows the amplitude, while
     # no single contraction step does (that would overflow the norm itself).
     scale = 1e10
     with torch.no_grad():
         for node in cbm._mats_env:
             node.tensor.data.mul_(scale)
-    amp = cbm.amplitudes(x)
-    las = cbm.log_amp_sq_accumulate(x)
+    amp = raw_amplitudes(cbm, x)
+    las = cbm.log_amp_sq(x)
     assert (~torch.isfinite(amp)).any(), "test scale did not overflow the amplitude"
     assert torch.isfinite(las).all()
     shift = 2.0 * cbm.n_features * math.log(scale)
@@ -643,8 +641,8 @@ def testlog_amp_sq_out_position(out_position):
     torch.manual_seed(5)
     cbm = _acc_cbm(data_dim=4, num_classes=3, out_position=out_position)
     x = torch.rand(4, 4) * 1.6 - 0.8
-    ref = 2.0 * torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
-    assert torch.allclose(cbm.log_amp_sq_accumulate(x), ref, atol=1e-4)
+    ref = 2.0 * torch.log(raw_amplitudes(cbm, x).abs().clamp(min=1e-30))
+    assert torch.allclose(cbm.log_amp_sq(x), ref, atol=1e-4)
 
 
 def test_accumulate_gradients_match():
@@ -655,11 +653,11 @@ def test_accumulate_gradients_match():
     x = torch.rand(4, 3) * 1.6 - 0.8
 
     cbm.zero_grad()
-    cbm.log_amp_sq_accumulate(x).sum().backward()
+    cbm.log_amp_sq(x).sum().backward()
     g_acc = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
 
     cbm.zero_grad()
-    amp = cbm.amplitudes(x)
+    amp = raw_amplitudes(cbm, x)
     (2.0 * torch.log(amp.abs().clamp(min=1e-30))).sum().backward()
     g_ref = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
 
@@ -679,7 +677,7 @@ def test_amplitudes_accumulate_forward_backward(dtype):
     cbm = _acc_cbm(dtype=dtype)
     x = torch.rand(4, 3) * 1.6 - 0.8
 
-    psi, log_norm = cbm.amplitudes_accumulate(x)          # forward
+    psi, log_norm = cbm(cbm.embed(x))          # forward
     assert psi.requires_grad and log_norm.requires_grad
     assert psi.grad_fn is not None and log_norm.grad_fn is not None
 
@@ -692,36 +690,28 @@ def test_amplitudes_accumulate_forward_backward(dtype):
 
 
 def test_accumulate_mode_isolation():
-    """A renormalize=True call resets around itself, leaving the default traced
-    amplitudes() path bit-identical before and after."""
+    """The norm-accumulating forward resets around itself, leaving the raw
+    tensorkrowch contraction bit-identical before and after."""
     torch.manual_seed(7)
     cbm = _acc_cbm()
     x = torch.rand(4, 3) * 1.6 - 0.8
-    before = cbm.amplitudes(x)
-    _ = cbm.amplitudes_accumulate(x)
-    after = cbm.amplitudes(x)
+    before = raw_amplitudes(cbm, x)
+    _ = cbm(cbm.embed(x))
+    after = raw_amplitudes(cbm, x)
     assert torch.equal(before, after)
 
 
-# ── accumulate flag: opt-in routing of mixed_nll + eval ──────────────────────
-# log_amp_sq dispatches on the flag; off = direct 2·log|amplitudes|, on = the
-# norm-accumulating log_amp_sq. Default off, so training/eval are unchanged
-# unless a run opts in (born.accumulate=true).
+# ── The norm-accumulating contraction against the raw one ───────────────────
 
-def test_cbmconfig_accumulate_is_settable():
-    assert _acc_cbm(accumulate=False).accumulate is False
-    assert _acc_cbm(accumulate=True).accumulate is True
-
-
-def test_accumulate_flag_off_matches_direct():
-    """Flag off: mixed_nll and class_probabilities equal the direct (raw
-    amplitudes) computation — regression guard on the default path."""
+def test_mixed_nll_matches_raw_amplitudes():
+    """mixed_nll and class_probabilities equal the raw-amplitude computation
+    where it does not overflow."""
     torch.manual_seed(10)
-    cbm = _acc_cbm()  # flag off
+    cbm = _acc_cbm()
     x = torch.rand(5, 3) * 1.6 - 0.8
     y = torch.randint(0, cbm.out_dim, (5,))
 
-    log_abs = torch.log(cbm.amplitudes(x).abs().clamp(min=1e-30))
+    log_abs = torch.log(raw_amplitudes(cbm, x).abs().clamp(min=1e-30))
     ref_probs = (2 * log_abs
                  - torch.logsumexp(2 * log_abs, dim=-1, keepdim=True)).exp()
     assert torch.allclose(cbm.class_probabilities(x), ref_probs, atol=1e-6)
@@ -733,29 +723,26 @@ def test_accumulate_flag_off_matches_direct():
 
 
 @pytest.mark.parametrize("beta", [0.0, 1.0])
-def test_accumulate_flag_mixed_nll_finite_on_overflow(beta):
-    """Flag on: mixed_nll stays finite when the raw amplitude overflows (both
-    the discriminative and generative ends); flag off it is non-finite."""
+def test_mixed_nll_finite_on_overflow(beta):
+    """mixed_nll stays finite when the raw amplitude overflows (both the
+    discriminative and generative ends)."""
     torch.manual_seed(11)
-    cbm_on = _acc_cbm(data_dim=4, accumulate=True)
-    cbm_off = _acc_cbm(data_dim=4, accumulate=False)
+    cbm = _acc_cbm(data_dim=4)
     x = torch.rand(3, 4) * 1.6 - 0.8
-    y = torch.randint(0, cbm_on.out_dim, (3,))
+    y = torch.randint(0, cbm.out_dim, (3,))
     # 1e8 overflows the raw amplitude (product over 5 sites > float32 max) while
-    # keeping log_Z finite, so the α=1 term3 does not raise on the off path.
-    _overflow_scale_(cbm_on, scale=1e8)
-    _overflow_scale_(cbm_off, scale=1e8)
+    # keeping log_Z finite.
+    _overflow_scale_(cbm, scale=1e8)
 
-    assert (~torch.isfinite(cbm_off.amplitudes(x))).any(), "scale did not overflow"
-    assert torch.isfinite(cbm_on.mixed_nll(x, y, beta=beta))
-    assert not torch.isfinite(cbm_off.mixed_nll(x, y, beta=beta))
+    assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
+    assert torch.isfinite(cbm.mixed_nll(x, y, beta=beta))
 
 
-def test_accumulate_flag_class_probabilities_finite_on_overflow():
-    """Flag on: class_probabilities stays finite and normalized when the raw
-    amplitude overflows (covers eval / all class_probabilities consumers)."""
+def test_class_probabilities_finite_on_overflow():
+    """class_probabilities stays finite and normalized when the raw amplitude
+    overflows (covers eval / all class_probabilities consumers)."""
     torch.manual_seed(12)
-    cbm = _acc_cbm(data_dim=4, num_classes=3, accumulate=True)
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
     x = torch.rand(4, 4) * 1.6 - 0.8
     _overflow_scale_(cbm)
     probs = cbm.class_probabilities(x)
@@ -768,50 +755,24 @@ def _eval_metrics(cbm, loader):
     return out["loss_dis"], out["acc"], out["loss_x"]
 
 
-def test_evaluate_accumulate_parity():
-    """evaluate returns the same (dis_loss, acc, gen_loss) with the flag on
-    or off on a non-overflowing model — the accumulate path only changes the
-    contraction, not the result. Regression guard that existing (flag-off) valid
-    numbers are unchanged by routing eval through log_amp_sq."""
-    torch.manual_seed(13)
-    cbm = _acc_cbm(data_dim=4, num_classes=3)
-    ds = TensorDataset(torch.rand(12, 4) * 1.6 - 0.8, torch.randint(0, 3, (12,)))
-    loader = DataLoader(ds, batch_size=5)
-
-    cbm.accumulate = False
-    dis_off, acc_off, gen_off = _eval_metrics(cbm, loader)
-    cbm.accumulate = True
-    dis_on, acc_on, gen_on = _eval_metrics(cbm, loader)
-
-    assert acc_off == acc_on
-    assert dis_on == pytest.approx(dis_off, abs=1e-4)
-    assert gen_on == pytest.approx(gen_off, abs=1e-4)
-
-
-def test_evaluate_accumulate_finite_on_overflow():
-    """evaluate's valid losses stay finite with accumulate on when the raw
-    amplitude overflows; with it off they are nan — the MNIST-resize symptom
-    (stable training, nan valid) that motivated routing eval through the same
-    log_amp_sq path as the loss."""
+def test_evaluate_finite_on_overflow():
+    """evaluate's valid losses stay finite when the raw amplitude overflows —
+    the MNIST-resize symptom (stable training, nan valid) that motivated routing
+    eval through the same log_amp_sq as the loss."""
     torch.manual_seed(14)
     cbm = _acc_cbm(data_dim=4, num_classes=3)
     _overflow_scale_(cbm, scale=1e8)  # overflows the raw amplitude, keeps log_Z finite
     x = torch.rand(9, 4) * 1.6 - 0.8
-    assert (~torch.isfinite(cbm.amplitudes(x))).any(), "scale did not overflow"
+    assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
     ds = TensorDataset(x, torch.randint(0, 3, (9,)))
     loader = DataLoader(ds, batch_size=4)
 
-    cbm.accumulate = False
-    dis_off, _, gen_off = _eval_metrics(cbm, loader)
-    assert math.isnan(dis_off) and math.isnan(gen_off)
-
-    cbm.accumulate = True
-    dis_on, _, gen_on = _eval_metrics(cbm, loader)
-    assert math.isfinite(dis_on) and math.isfinite(gen_on)
+    dis, _, gen = _eval_metrics(cbm, loader)
+    assert math.isfinite(dis) and math.isfinite(gen)
 
 
 def test_marginal_log_probability_safe_parity():
-    """marginal_log_probability (always overflow-safe) equals the raw
+    """marginal_log_probability (overflow-safe) equals the raw
     2·log|amplitudes| formula where the amplitude does not overflow — including
     the input gradient purification relies on."""
     torch.manual_seed(15)
@@ -824,7 +785,7 @@ def test_marginal_log_probability_safe_parity():
     g_safe = x.grad.clone()
 
     x_raw = x.detach().clone().requires_grad_(True)
-    log_abs = torch.log(cbm.amplitudes(x_raw).abs().clamp(min=1e-30))
+    log_abs = torch.log(raw_amplitudes(cbm, x_raw).abs().clamp(min=1e-30))
     lp_raw = torch.logsumexp(2.0 * log_abs, dim=-1) - cbm.log_normalizer()
     lp_raw.sum().backward()
 
@@ -835,54 +796,15 @@ def test_marginal_log_probability_safe_parity():
 
 def test_marginal_log_probability_finite_on_overflow():
     """marginal_log_probability stays finite when the raw amplitude overflows —
-    the log-density primitive behind purification/UQ/MIA, so it must not go inf
-    regardless of the accumulate flag."""
+    the log-density primitive behind purification/UQ/MIA, so it must not go inf."""
     torch.manual_seed(16)
-    cbm = _acc_cbm(data_dim=4, num_classes=3)  # accumulate flag off — must still be safe
+    cbm = _acc_cbm(data_dim=4, num_classes=3)
     _overflow_scale_(cbm, scale=1e8)
     cbm.cache_log_Z()
     x = torch.rand(4, 4) * 1.6 - 0.8
 
-    assert (~torch.isfinite(cbm.amplitudes(x))).any(), "scale did not overflow"
+    assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
     assert torch.isfinite(cbm.marginal_log_probability(x)).all()
-
-
-def test_accumulate_save_load_roundtrip(tmp_path):
-    """accumulate is persisted in the saved config and restored by load()."""
-    p = str(tmp_path / "model")
-    _acc_cbm(accumulate=True).save(p)
-    assert ConditionalBornMachine.load(p).accumulate is True
-    _acc_cbm(accumulate=False).save(p)
-    assert ConditionalBornMachine.load(p).accumulate is False
-
-
-def test_load_accumulate_override_routes_and_persists(tmp_path):
-    """A warm start loads an older checkpoint with the current run's flag
-    (load(path, accumulate=...)): the override routes log_amp_sq, and a later
-    save() records it."""
-    p, q = str(tmp_path / "model"), str(tmp_path / "warm")
-    _acc_cbm(data_dim=4, accumulate=False).save(p)
-    cbm = ConditionalBornMachine.load(p, accumulate=True)
-    x = torch.rand(3, 4) * 1.6 - 0.8
-    _overflow_scale_(cbm)
-    assert torch.isfinite(cbm.class_probabilities(x)).all()  # accumulate path active
-    cbm.save(q)
-    assert ConditionalBornMachine.load(q).accumulate is True
-
-
-def test_load_accumulate_override(tmp_path):
-    """load(path, accumulate=...) overrides the saved flag; None keeps it.
-
-    The analysis pipeline passes accumulate=True so eval/analysis always uses the
-    overflow-safe path regardless of the checkpoint's stored flag."""
-    p = str(tmp_path / "model")
-    _acc_cbm(accumulate=False).save(p)
-    assert ConditionalBornMachine.load(p, accumulate=True).accumulate is True
-    assert ConditionalBornMachine.load(p).accumulate is False  # None → saved flag
-
-    _acc_cbm(accumulate=True).save(p)
-    assert ConditionalBornMachine.load(p, accumulate=False).accumulate is False
-    assert ConditionalBornMachine.load(p).accumulate is True   # None → saved flag
 
 
 @pytest.mark.parametrize("data_dim,scale", [(120, 2.0), (200, 2.0), (120, 4.0)])
@@ -894,7 +816,8 @@ def test_sample_stable_on_long_overscaled_chain(data_dim, scale):
     raised either `probability tensor contains inf, nan or element < 0` from
     multinomial or `_LinAlgError` from a non-converging SVD. Note the first case
     tripped while raw amplitudes() was still finite — this failure mode is
-    distinct from amplitude overflow and is not addressed by born.accumulate.
+    distinct from amplitude overflow and is not addressed by the log-norm
+    accumulation.
     """
     cbm = _acc_cbm(data_dim=data_dim, bond_dim=4)
     _overflow_scale_(cbm, scale=scale)
@@ -906,27 +829,6 @@ def test_sample_stable_on_long_overscaled_chain(data_dim, scale):
     assert (s >= lo).all() and (s <= hi).all()
     # not collapsed onto a single grid value
     assert len(torch.unique(s)) > 1
-
-
-def test_accumulate_cfg_sync_persists_override(tmp_path):
-    """The train.py cfg-sync makes save() record the actually-used flag.
-
-    A warm-started run loads an a0 checkpoint (accumulate=False), overrides the
-    flag, and syncs cbm.cfg; the model saved after training must report the true
-    flag when reloaded with no override (as the analysis pipeline would)."""
-    from omegaconf import OmegaConf
-    p = str(tmp_path / "model")
-    _acc_cbm(accumulate=False).save(p)
-
-    cbm = ConditionalBornMachine.load(p)
-    cbm.accumulate = True
-    # mirror bm4tc/pipeline/stages.py: persist the override into the model config
-    OmegaConf.set_struct(cbm.cfg, False)
-    cbm.cfg.accumulate = cbm.accumulate
-    OmegaConf.set_struct(cbm.cfg, True)
-    cbm.save(p)
-
-    assert ConditionalBornMachine.load(p).accumulate is True
 
 
 # ── Boundary vectors (D87) ───────────────────────────────────────────────────

@@ -19,9 +19,17 @@ def pytest_collection_modifyitems(config, items):
             if item.get_closest_marker("requires_download"):
                 item.add_marker(skip_dl)
 from torch.utils.data import DataLoader, TensorDataset
+import tensorkrowch as tk
 
 DATA_DIM = 4
 NUM_CLASSES = 2
+
+
+def raw_amplitudes(cbm, data):
+    """ψ(x, c) (B, C) by tensorkrowch's own MPS contraction, without the per-site
+    norm accumulation: the reference for ``cbm.log_amp_sq`` where ψ does not
+    overflow float32."""
+    return tk.models.MPS.forward(cbm, cbm.embed(data))
 
 
 @pytest.fixture(scope="session")

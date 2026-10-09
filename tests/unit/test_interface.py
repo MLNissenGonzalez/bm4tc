@@ -4,6 +4,7 @@ attack (which moved from the direct amplitudes path to log_amp_sq)."""
 import torch
 
 from bm4tc.core.interface import best_wrong_log_joint, class_probabilities, log_px, nll
+from tests.conftest import raw_amplitudes
 
 _EPS = float(torch.finfo(torch.float32).tiny)
 
@@ -18,10 +19,7 @@ def test_mps_derived_quantities_are_its_own(cbm):
     x, y = _data(cbm)
     assert torch.equal(class_probabilities(cbm, x), cbm.class_probabilities(x))
     assert torch.equal(nll(cbm, x, y), cbm.mixed_nll(x, y, beta=0.0))
-    if cbm.accumulate:
-        assert torch.equal(log_px(cbm, x), cbm.marginal_log_probability(x))
-    else:
-        torch.testing.assert_close(log_px(cbm, x), cbm.marginal_log_probability(x))
+    assert torch.equal(log_px(cbm, x), cbm.marginal_log_probability(x))
 
 
 def test_nll_gradient_matches_mixed_nll(cbm):
@@ -36,7 +34,7 @@ def test_nll_gradient_matches_mixed_nll(cbm):
 
 def test_joint_loss_matches_amplitudes(cbm):
     x, y = _data(cbm)
-    log_joint = 2 * torch.log(cbm.amplitudes(x).abs().clamp(min=_EPS))
+    log_joint = 2 * torch.log(raw_amplitudes(cbm, x).abs().clamp(min=_EPS))
     wrong = torch.ones_like(log_joint, dtype=torch.bool)
     wrong[torch.arange(len(y)), y] = False
     old = log_joint.masked_fill(~wrong, float("-inf")).max(dim=-1).values.mean()

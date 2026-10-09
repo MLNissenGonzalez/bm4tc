@@ -384,8 +384,8 @@ def evaluate(
         offset += B
 
         with torch.no_grad():
-            # MPS: log|ψ|², the loss's entry point (dispatches on cbm.accumulate),
-            # so evaluation matches training's numerics.
+            # MPS: log|ψ|², the loss's entry point, so evaluation matches
+            # training's numerics.
             las = cbm.log_joint(data)                        # (B, C)
             log_sq_obs = las[range(B), labels]
             dis = torch.logsumexp(las, dim=1) - log_sq_obs    # (B,)

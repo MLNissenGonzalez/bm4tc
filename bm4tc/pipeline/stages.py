@@ -89,7 +89,7 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
                     f"parameters, sized to d{cfg.jem.model.match_in_dim}"
                     f"r{cfg.jem.model.match_bond_dim} (D70)")
     elif source is not None:
-        model = ConditionalBornMachine.load(source, accumulate=cfg.born.accumulate)
+        model = ConditionalBornMachine.load(source)
         model.to(device)
     else:
         model = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
