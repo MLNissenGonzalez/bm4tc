@@ -479,8 +479,10 @@ def test_evaluate_is_per_sample_not_per_batch():
     cbm = _ready_cbm()
     whole = evaluate(cbm, _valid_loader(n=20, batch_size=20), CPU, beta=0.5)
     ragged = evaluate(cbm, _valid_loader(n=20, batch_size=6), CPU, beta=0.5)
+    # loss_x = log Z - logsumexp log|ψ|², a float32 difference of two large numbers:
+    # near 0 for some initialisations, so an absolute tolerance too.
     for k in ("loss_dis", "loss_x", "acc", "objective"):
-        assert ragged[k] == pytest.approx(whole[k], rel=1e-5), k
+        assert ragged[k] == pytest.approx(whole[k], rel=1e-5, abs=1e-6), k
 
 
 def test_evaluate_without_attack_is_the_clean_mix():
