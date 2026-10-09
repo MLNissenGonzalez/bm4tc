@@ -188,10 +188,17 @@ Measured in [compute.md](compute.md).
       tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
       (7.3 µs). Casting the divisor to complex does not help; multiplying a real view by
       1/n halves it but is not bit-identical (≈ 1e-7).
-    - Integration (to design with Martin, then a D-number): the graph in the Trainer;
-      static batch (last batch); diagnostics, non-finite check and `.item()`s outside
-      the captured step; eps of the curriculum as a device scalar; the random start's
-      RNG (re-pin); MPS daemon per GPU in the launch. Then re-estimate compute.md.
+    - **Integrated (D90):** the Trainer captures its step (`trainer.cuda_graph`, on by
+      default on CUDA) and `run ... --mps` serves each GPU's units through an MPS
+      daemon. Left to do:
+      1. Run `tests/unit/test_graphs.py` on a GPU (cluster, or the eGPU from
+         2026-10-13): eager vs captured training bit for bit, the per-shape replay.
+      2. A real launch on the cluster with `--mps --per-gpu 8` (a pilot-sized study):
+         throughput per GPU, memory per unit (open: full MNIST d3r40 with micro-batch
+         256 ran out of memory on the laptop's 8 GB).
+      3. Capture the validation (AT validation stays eager: PGD on the valid subset
+         every `eval_every` epochs, an estimated +40% of a captured training run).
+      4. Re-estimate compute.md.
   - **Then, in order (they cut GPU time, which is what is left under graphs):**
     1. A custom `torch.autograd.Function` for the renormalised chain: the forward
        saves the per-site vectors and norms, the backward is one hand-written

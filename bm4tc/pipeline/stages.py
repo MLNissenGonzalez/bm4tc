@@ -570,7 +570,7 @@ def _alive(pid: int) -> bool:
 
 def launch(study: Study, stages: Sequence[str], cells: List[Cell],
            seeds: Optional[List[int]] = None, gpus: Optional[List[str]] = None,
-           per_gpu: int = 1, replace: bool = False) -> Dict[str, str]:
+           per_gpu: int = 1, replace: bool = False, mps: bool = False) -> Dict[str, str]:
     """Run the stages of a study through the executor; returns each unit's state.
     HPO journals are prepared here first, and results.csv is collected last."""
     from bm4tc.pipeline.executor import execute
@@ -581,7 +581,8 @@ def launch(study: Study, stages: Sequence[str], cells: List[Cell],
                 prepare_hpo(study, cell, replace)
         todo = units(study, stages, cells, seeds, workers=len(gpus or [None]) * per_gpu,
                      replace=replace)
-        states = execute(todo, gpus, per_gpu, state_file=logs_dir(study) / "status.json")
+        states = execute(todo, gpus, per_gpu, state_file=logs_dir(study) / "status.json",
+                         mps=mps)
         if "analyse" in stages:
             collect(study)
     return states
@@ -623,7 +624,7 @@ def status(study: Study) -> str:
             counts[s["state"]] = counts.get(s["state"], 0) + 1
         lines.append("")
         lines.append(f"last launch (process {last['pid']}, "
-                     f"{'running' if live else 'ended'}): "
+                     f"{'running' if live else 'ended'}{', MPS' if last.get('mps') else ''}): "
                      + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())))
         for name, s in last["units"].items():
             state = s["state"]

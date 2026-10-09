@@ -96,11 +96,12 @@ Learning rates and other hyperparameters never appear in names (D14).
 
 ```
 bm4tc/core/        the maths; no files, no configs
-  model.py           ConditionalBornMachine (MPS): amplitudes, log Z, sampling, Gibbs conditionals
+  model.py           ConditionalBornMachine (MPS): log|ψ|², log Z, sampling, Gibbs conditionals
   embeddings.py      feature maps; budget conversion (rel_to_abs, fmt_budget)
   interface.py       the model interface for analysis (D69)
   objective.py       losses, mixed objective, norm control, evaluate()
-  train.py           Trainer (MPS, NAT and AT)
+  train.py           Trainer (MPS, NAT and AT); the step is captured as a CUDA graph (D90)
+  graphs.py          Graphed: a function replayed from a CUDA graph per input shape
   attacks.py         PGD and the joint (class + density) PGD
   jem/               JEM: model, SGLD sampler, JEMTrainer, SGLD purifier
 bm4tc/analysis/    evaluating a trained model -> numbers; imports only core
@@ -115,6 +116,7 @@ bm4tc/pipeline/    configs, files, runs
   stages.py          hpo, select, train, analyse, collect, prune, status
   analyse.py         the analysis parts of one run
   executor.py        the job pool (GPU slots, dependencies, logs)
+  mps.py             NVIDIA MPS daemons for --mps launches (D90)
   metrics.py         metric keys: the only place they are built (D48, D64)
   tracking.py        log.json and W&B
   paths.py           BM4TC_DATA_ROOT
@@ -190,7 +192,9 @@ python -m bm4tc figures <paper> [--item NAME]
 
 Options: `--cell legendre/d3r40/b0.5` and `--seed 3` (repeatable) narrow a stage;
 `--gpus 0,1 --per-gpu 2` runs units in parallel (each pinned to a GPU via
-`CUDA_VISIBLE_DEVICES`); `--replace` archives finished results whose config changed
+`CUDA_VISIBLE_DEVICES`); `--mps` serves each GPU's units through its NVIDIA MPS daemon
+(started if needed and left running), so CUDA-graph units share the GPU concurrently:
+about 8 per GPU (D90); `--replace` archives finished results whose config changed
 and redoes them.
 
 **Execution** (D38, D66). Each unit (an HPO worker, one run's training, one run's

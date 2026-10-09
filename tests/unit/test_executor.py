@@ -40,3 +40,26 @@ def test_each_slot_pins_its_gpu(tmp_path):
     execute(units, gpus=["3", "5"], per_gpu=1, poll=0.05)
     seen = {(tmp_path / f"u{i}.log").read_text().strip() for i in range(4)}
     assert seen == {"3", "5"}
+
+
+def test_mps_units_use_their_gpus_daemon(tmp_path, monkeypatch):
+    """--mps: each GPU's daemon is ensured once, and a unit sees device 0 of the
+    daemon serving its slot's GPU (D90)."""
+    from bm4tc.pipeline import mps
+    ensured = []
+    monkeypatch.setattr(mps, "ensure_running", lambda gpu: ensured.append(gpu) or True)
+    code = ("import os; print(os.environ['CUDA_VISIBLE_DEVICES'], "
+            "os.environ['CUDA_MPS_PIPE_DIRECTORY'])")
+    units = [_unit(tmp_path, f"u{i}", code) for i in range(4)]
+    state_file = tmp_path / "status.json"
+    execute(units, gpus=["3", "5"], per_gpu=2, state_file=state_file, poll=0.05, mps=True)
+    assert ensured == ["3", "5"]
+    seen = {tuple((tmp_path / f"u{i}.log").read_text().split()) for i in range(4)}
+    assert seen == {("0", str(mps.pipe_directory("3"))), ("0", str(mps.pipe_directory("5")))}
+    assert json.loads(state_file.read_text())["mps"] is True
+
+
+def test_mps_needs_gpus(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="--gpus"):
+        execute([_unit(tmp_path, "u", "pass")], mps=True)
