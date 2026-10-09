@@ -105,15 +105,17 @@ the splits differ (or valid leaks from train); if it gives -140, the analysis pa
 (checkpoint load, log Z, chunks) differs from training-time validation.
 
 **E2. Locate the knees on MNIST and test the correction** (to discuss). Pilot-style
-studies: 1 seed, d3r20, `max_epoch` 100, target $n \ln d / 2$, analysis at
+studies: 1 seed, d3r40 (Martin, 2026-10-09; was d3r20), `max_epoch` 100, target $n \ln d / 2$, analysis at
 $\epsilon = 0.1$ only, no joint attack; grid
 $\beta \in \{0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1\}$ (a factor 3
 in the weight ratio per step, 12 cells).
-- E2a `pilot_beta12`, MNIST 12×12: lr-only HPO over `{log: [1e-4, 1e-2]}`, 6 trials, no
+- E2a `pilot_beta12` (written), MNIST 12×12: lr-only HPO over `{log: [1e-4, 1e-2]}`, 6 trials, no
   pruning (random search, all trials at once); ≤ 110 unit-h, one night.
 - E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same $\beta$
   (`hparams_from`, which needs $\beta$ implemented); 12 runs × ≤ 7 h, one night.
-- E2c `pilot_beta_spirals`, d10r6, normal HPO: minutes.
+- E2c `pilot_beta_spirals` (written), d10r6, normal HPO: minutes; the first `--mps` launch.
+- Before E2a, M0: peak memory per unit of the E2a and full-MNIST shapes, captured
+  (`tests.bench.bench_train_step --features/--bond-dim/--batch/--micro-batch/--beta`).
 
 Read per $\beta$: test acc, $L_\text{dis}$, $\bar\ell$, rob and purify at 0.1, detection
 q5; plot against $\ln r(\beta)$ and against $\ln r(\alpha)$. Knees: where acc and
