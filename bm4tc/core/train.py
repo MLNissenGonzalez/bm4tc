@@ -9,7 +9,7 @@ case (``evasion: null``): L = mixed_nll(x, β). The generative term always sees 
 would work against detection and purification.
 
 Every ``eval_every`` epochs the trainer validates the same objective on the
-validation set (:func:`bm4tc.core.objective.evaluate`) and keeps the epoch with the
+validation set (:class:`bm4tc.core.objective.Evaluation`) and keeps the epoch with the
 lowest ``objective`` (D8). ``patience`` counts validation events, not epochs.
 """
 
@@ -34,7 +34,7 @@ from bm4tc.core.objective import (
     NORM_STATISTICS,
     NormTracker,
     OptimizerConfig,
-    evaluate,
+    Evaluation,
     norm_statistics,
     optimizer,
     resolve_log_target,
@@ -333,10 +333,8 @@ class Trainer:
         self._norm_stats = norm_tracker.finalize(self.cbm)
 
     def _validate(self) -> dict:
-        return evaluate(
-            self.cbm, self.valid_loader, self.device,
-            beta=self.cfg.beta,
-            attack=self.attack,
+        return self._evaluation(
+            self.valid_loader, self.device,
             eps_abs=self.eps_abs if self.attack is not None else 0.0,
         )
 
@@ -400,8 +398,10 @@ class Trainer:
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
+        # Validation shares the step's graphs: one memory pool (D92).
         graphs = Graphs(enabled=cfg.cuda_graph and on_cuda)
         self._graphed_train_step = graphs.wrap(self._train_step)
+        self._evaluation = Evaluation(self.cbm, beta=cfg.beta, attack=self.attack, graphs=graphs)
 
         regime = "AT" if self.attack is not None else "NAT"
         logger.info(f"{regime} training begins (beta={cfg.beta:.3g}).")
