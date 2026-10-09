@@ -28,6 +28,7 @@ from tqdm import tqdm
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
+from bm4tc.core.graphs import Graphed
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
@@ -74,6 +75,10 @@ class TrainConfig:
     curriculum_end: float = 1.0
     norm_control: NormControlConfig = field(default_factory=NormControlConfig)
     save: bool = False
+    # On CUDA, capture the training step once and replay it (D90). Bit-identical
+    # to the eager step except for the AT random start, whose draws come from
+    # other RNG offsets. Ignored on CPU.
+    cuda_graph: bool = True
 
 
 def evasion_config(raw) -> EvasionConfig:
@@ -125,6 +130,9 @@ class Trainer:
         self._nc = cfg.norm_control
         self.norm_regularizer: NormRegularizer | None = None
         self._nc_log_target: float | None = None
+
+        # The training step, eager until train() knows whether to capture it.
+        self._graphed_train_step = Graphed(self._train_step, enabled=False)
 
         self.attack: ProjectedGradientDescent | None = None
         self.adv_indices: set[int] = set()
@@ -306,10 +314,11 @@ class Trainer:
         return objective, penalty.detach(), norm_statistics(torch.cat(log_amp_sqs), log_Z)
 
     def _train_step(self, inputs, labels, eps_abs):
-        """One optimizer step, without host syncs. Returns the batch objective,
-        the norm penalty and the norm statistics of the forward before the
-        update, all on the device."""
-        self.optimizer.zero_grad()
+        """One optimizer step, without host syncs, so it can be captured (D90).
+        Returns the batch objective, the norm penalty and the norm statistics of
+        the forward before the update, all on the device. The gradients are
+        zeroed in place: a captured step writes them at fixed addresses."""
+        self.optimizer.zero_grad(set_to_none=False)
         objective, penalty, statistics = self._backward_over_micro_batches(inputs, labels, eps_abs)
         self.optimizer.step()
         return objective, penalty, statistics
@@ -322,12 +331,17 @@ class Trainer:
         self._collapsed = False
         norm_tracker = NormTracker()
         self.cbm.train()
+        # A captured step reads the radius from a device scalar (float64, so the
+        # step size 2.5·eps/K is the same double as on the host); eager takes the
+        # float, as always.
+        radius = (torch.tensor(eps_abs, dtype=torch.float64, device=self.device)
+                  if self._graphed_train_step.enabled else eps_abs)
 
         for inputs, labels in self.train_loader:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             self.step += 1
             try:
-                objective, penalty, statistics = self._train_step(inputs, labels, eps_abs)
+                objective, penalty, statistics = self._graphed_train_step(inputs, labels, radius)
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     logger.error(f"CUDA OOM at step {self.step}, re-raising.")
@@ -417,7 +431,15 @@ class Trainer:
             self.norm_regularizer = NormRegularizer(
                 strength=self._nc.soft_strength, log_target=self._nc_log_target
             )
-        self.optimizer = optimizer(self.cbm.parameters(), cfg.optimizer)
+        # Capturable optimizer state lives on the device: needed by a captured
+        # step, and used by the eager CUDA step too, so the two are bit-identical.
+        on_cuda = torch.device(self.device).type == "cuda"
+        self.optimizer = optimizer(self.cbm.parameters(), cfg.optimizer,
+                                   **({"capturable": True} if on_cuda else {}))
+        if cfg.cuda_graph and on_cuda and self._nc.debug:
+            raise ValueError("norm_control.debug logs with host syncs inside the step; "
+                             "set trainer.cuda_graph=false to use it.")
+        self._graphed_train_step = Graphed(self._train_step, enabled=cfg.cuda_graph and on_cuda)
 
         regime = "AT" if self.attack is not None else "NAT"
         logger.info(f"{regime} training begins (beta={cfg.beta:.3g}).")
