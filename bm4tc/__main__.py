@@ -55,7 +55,7 @@ def main(argv=None):
     parser.add_argument("study", help="a study under configs/studies/, e.g. spirals_nat "
                                       "(figures: a paper under configs/papers/)")
     parser.add_argument("--cell", action="append",
-                        help="only this cell (repeatable), e.g. legendre/d3r40/a0.01")
+                        help="only this cell (repeatable), e.g. legendre/d3r40/b0.01")
     parser.add_argument("--seed", type=int, action="append",
                         help="train, analyse: only this seed (repeatable)")
     parser.add_argument("--gpus", help="comma-separated GPU ids, e.g. 0,1")

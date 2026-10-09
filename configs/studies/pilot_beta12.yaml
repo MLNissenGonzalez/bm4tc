@@ -1,0 +1,24 @@
+# β pilot E2a (plan.md "Beta"): where are the accuracy and density knees on MNIST
+# 12x12? 12 cells, a factor ≈ 3 in the weight ratio β/(1-β) per step; d3r40 as in
+# the Phase 8 studies; one seed. They set the Phase 8 ladder, β* (best purified
+# accuracy) for the AT grid, and the lr that pilot_beta28 reuses (hparams_from).
+dataset: mnist12
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1]
+config:
+  trainer.max_epoch: 100
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:                           # the lr only, 6 trials per cell, random search (no pruning)
+  trials_per_param: 6
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-4, 1e-2]}
+  pruning:
+    enabled: false
+budgets: [0.1]                 # read at ε = 0.1 only
+analysis:
+  joint_attack: false
