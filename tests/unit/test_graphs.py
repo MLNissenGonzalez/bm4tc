@@ -89,8 +89,8 @@ def test_a_host_sync_fails_capture_with_its_own_error():
 
 
 def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
-    """Three epochs of a tiny complex MPS on CUDA, validated every epoch (eager
-    validation between replays); the AT radius follows the curriculum (a new
+    """Three epochs of a tiny complex MPS on CUDA, validated every epoch (two
+    batches of one shape: three warm-up calls, captured in the second validation); the AT radius follows the curriculum (a new
     device scalar each epoch). Returns the logged records and the best tensors."""
     torch.manual_seed(seed)
     cbm = ConditionalBornMachine(
@@ -113,6 +113,9 @@ def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
     records = []
     trainer.train(on_epoch_end=lambda epoch, record: records.append(flatten_epoch(record)))
     assert len(trainer._graphed_train_step._captures) == (1 if cuda_graph else 0)
+    assert len(trainer._evaluation._clean_sums._captures) == (1 if cuda_graph else 0)
+    assert len(trainer._evaluation._adversarial_sums._captures) == \
+        (1 if cuda_graph and evasion is not None else 0)
     return records, [t.detach().cpu() for t in trainer.cbm.tensors]
 
 

@@ -12,6 +12,7 @@ from torch import nn
 from tqdm.auto import tqdm
 
 from bm4tc.core.interface import class_probabilities
+from bm4tc.core.graphs import Graphs
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +327,7 @@ def mix(dis: float, gen: float, beta: float, n: int) -> float:
     return out
 
 
-def evaluate(
-    cbm, loader, device, *, log_Z=None,
-    beta: float = 0.0, attack=None, eps_abs: float = 0.0, progress: bool = False,
-) -> dict:
+class Evaluation:
     """Validation (or test) metrics, and the training objective mirrored on them.
 
     Without an attack, ``objective = mix(L_dis, L_gen, β, N)``. With one, it
@@ -346,65 +344,113 @@ def evaluate(
     ``L_gen = log Z - log_joint(x)[y]``. ``log_Z`` None computes the MPS's exact
     one; JEM passes its SGLD estimate, or nan when there is no generative term
     (then ``loss_x`` is nan and the objective drops the generative term).
+
+    The work on one batch, the clean forward and the attack with its forward,
+    is two functions of tensors returning per-batch sums, so in enabled
+    :class:`~bm4tc.core.graphs.Graphs` each replays from a CUDA graph (D92). The
+    Trainer keeps one Evaluation across validations, in its training step's
+    Graphs: validation then shares the step's memory pool and captures once per
+    batch shape. Disabled, it is the eager evaluation, number for number.
     """
-    cbm.eval()
-    if log_Z is None:
-        with torch.no_grad():
-            log_Z = cbm.log_partition_function()
-        if not math.isfinite(log_Z.item()):
-            logger.warning(f"log_Z is non-finite ({log_Z.item()}); loss_x will be nan.")
-    gen_finite = math.isfinite(float(log_Z))
 
-    dis_sum = gen_sum = marg_sum = 0.0      # clean
-    dis_adv_sum = 0.0                       # adversarial
-    correct = rob_correct = total = 0
+    def __init__(self, cbm, *, beta: float = 0.0, attack=None, graphs: Optional[Graphs] = None):
+        self.cbm = cbm
+        self.beta = beta
+        self.attack = attack
+        graphs = graphs if graphs is not None else Graphs(enabled=False)
+        self._captured = graphs.enabled
+        self._clean_sums = graphs.wrap(self._clean_batch)
+        self._adversarial_sums = graphs.wrap(self._adversarial_batch)
 
-    for data, labels in tqdm(
-        loader, desc="eval", unit="batch", leave=False,
-        dynamic_ncols=True, disable=not progress,
-    ):
-        data, labels = data.to(device), labels.to(device)
-        B = len(labels)
+    def _clean_batch(self, data, labels, log_Z) -> torch.Tensor:
+        """[Σ L_dis, Σ L_gen, Σ -log p(x), Σ correct] over the batch."""
         with torch.no_grad():
             # MPS: log|ψ|², the loss's entry point, so evaluation matches
             # training's numerics.
-            las = cbm.log_joint(data)                        # (B, C)
-            log_sq_obs = las[range(B), labels]
-            dis = torch.logsumexp(las, dim=1) - log_sq_obs    # (B,)
-            correct += (las.argmax(dim=1) == labels).sum().item()
-            total += B
-            dis_sum += dis.sum().item()
-            if gen_finite:
-                gen_sum += (log_Z - log_sq_obs).sum().item()
-                marg_sum += (log_Z - torch.logsumexp(las, dim=1)).sum().item()
+            las = self.cbm.log_joint(data)                        # (B, C)
+            log_sq_obs = las.gather(1, labels[:, None]).squeeze(1)
+            log_marginal = torch.logsumexp(las, dim=1)
+            dis = log_marginal - log_sq_obs                        # (B,)
+            correct = (las.argmax(dim=1) == labels).sum()
+            return torch.stack([dis.sum(), (log_Z - log_sq_obs).sum(),
+                                (log_Z - log_marginal).sum(), correct.to(dis.dtype)])
 
-        if attack is not None:
-            adv = attack.generate(model=cbm, naturals=data, labels=labels,
-                                  eps_abs=eps_abs, device=device)
+    def _adversarial_batch(self, data, labels, radius) -> torch.Tensor:
+        """[Σ L_dis(x_adv), Σ correct on x_adv] over the batch, PGD at ``radius``."""
+        adversarials = self.attack.generate(model=self.cbm, naturals=data, labels=labels,
+                                            eps_abs=radius, device=data.device)
+        with torch.no_grad():
+            las = self.cbm.log_joint(adversarials)
+            log_sq_obs = las.gather(1, labels[:, None]).squeeze(1)
+            dis = torch.logsumexp(las, dim=1) - log_sq_obs
+            correct = (las.argmax(dim=1) == labels).sum()
+            return torch.stack([dis.sum(), correct.to(dis.dtype)])
+
+    def __call__(self, loader, device, *, log_Z=None, eps_abs: float = 0.0,
+                 progress: bool = False) -> dict:
+        cbm = self.cbm
+        cbm.eval()
+        if log_Z is None:
             with torch.no_grad():
-                las_adv = cbm.log_joint(adv)
-                log_sq_adv = las_adv[range(B), labels]
-                dis_adv_sum += (torch.logsumexp(las_adv, dim=1) - log_sq_adv).sum().item()
-                rob_correct += (las_adv.argmax(dim=1) == labels).sum().item()
+                log_Z = cbm.log_partition_function()
+            if not math.isfinite(log_Z.item()):
+                logger.warning(f"log_Z is non-finite ({log_Z.item()}); loss_x will be nan.")
+        gen_finite = math.isfinite(float(log_Z))
+        # A captured attack reads its radius from a device scalar (float64, so the
+        # step size 2.5·eps/K is the same double as on the host, as in training).
+        radius = (torch.tensor(eps_abs, dtype=torch.float64, device=device)
+                  if self._captured else eps_abs)
 
-    def _mean(s, n):
-        return s / n if n else float("nan")
+        dis_sum = gen_sum = marg_sum = 0.0      # clean
+        dis_adv_sum = 0.0                       # adversarial
+        correct = rob_correct = total = 0
 
-    dis_loss = _mean(dis_sum, total)
-    n = n_vars(data) if total else 1
-    gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
-    loss_x = _mean(marg_sum, total) / (n - 1) if gen_finite else float("nan")
-    out = {"loss_dis": dis_loss, "loss_x": loss_x, "acc": _mean(correct, total)}
+        for data, labels in tqdm(
+            loader, desc="eval", unit="batch", leave=False,
+            dynamic_ncols=True, disable=not progress,
+        ):
+            data, labels = data.to(device), labels.to(device)
+            batch_dis, batch_gen, batch_marg, batch_correct = \
+                self._clean_sums(data, labels, log_Z).tolist()
+            correct += batch_correct
+            total += len(labels)
+            dis_sum += batch_dis
+            if gen_finite:
+                gen_sum += batch_gen
+                marg_sum += batch_marg
+            if self.attack is not None:
+                batch_dis_adv, batch_rob_correct = \
+                    self._adversarial_sums(data, labels, radius).tolist()
+                dis_adv_sum += batch_dis_adv
+                rob_correct += batch_rob_correct
 
-    if attack is None:
-        out["objective"] = mix(dis_loss, gen_loss, beta, n)
+        def _mean(s, n):
+            return s / n if n else float("nan")
+
+        dis_loss = _mean(dis_sum, total)
+        n = n_vars(data) if total else 1
+        gen_loss = _mean(gen_sum, total) if gen_finite else float("nan")
+        loss_x = _mean(marg_sum, total) / (n - 1) if gen_finite else float("nan")
+        out = {"loss_dis": dis_loss, "loss_x": loss_x, "acc": _mean(correct, total)}
+
+        if self.attack is None:
+            out["objective"] = mix(dis_loss, gen_loss, self.beta, n)
+            return out
+
+        adv_loss = _mean(dis_adv_sum, total)
+        out["objective"] = mix(adv_loss, gen_loss, self.beta, n)
+        out["loss_adv"] = adv_loss
+        out["rob"] = _mean(rob_correct, total)
         return out
 
-    adv_loss = _mean(dis_adv_sum, total)
-    out["objective"] = mix(adv_loss, gen_loss, beta, n)
-    out["loss_adv"] = adv_loss
-    out["rob"] = _mean(rob_correct, total)
-    return out
+
+def evaluate(
+    cbm, loader, device, *, log_Z=None,
+    beta: float = 0.0, attack=None, eps_abs: float = 0.0, progress: bool = False,
+) -> dict:
+    """One eager :class:`Evaluation` of ``cbm`` on ``loader``."""
+    return Evaluation(cbm, beta=beta, attack=attack)(
+        loader, device, log_Z=log_Z, eps_abs=eps_abs, progress=progress)
 
 
 def eval_rob(cbm, loader, attack, eps_abs: float, device, progress: bool = False) -> float:
