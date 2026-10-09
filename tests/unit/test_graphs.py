@@ -112,8 +112,8 @@ def test_a_host_sync_fails_capture_with_its_own_error():
 
 def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
     """Three epochs of a tiny complex MPS on CUDA, validated every epoch (two
-    batches of one shape: three warm-up calls, captured in the second validation); the AT radius follows the curriculum (a new
-    device scalar each epoch). Returns the logged records and the best tensors."""
+    batches of one shape, captured at the first); the AT radius follows the
+    curriculum (a new device scalar each epoch). Returns the logged records and the best tensors."""
     torch.manual_seed(seed)
     cbm = ConditionalBornMachine(
         CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=3, bond_dim=4)),
