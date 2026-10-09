@@ -108,14 +108,9 @@ class LikelihoodPurification:
             x_tilde = (data + delta).clamp(input_range[0], input_range[1])
 
             nll = -log_px(model, x_tilde).mean()
-
-            model.zero_grad()
-            if delta.grad is not None:
-                delta.grad.zero_()
-
-            nll.backward()
-
-            grad = delta.grad.detach()
+            # The input gradient only, as in PGD: no parameter gradients are
+            # written, so the routine can be captured as a CUDA graph (D92).
+            (grad,) = torch.autograd.grad(nll, delta)
             normalized_gradient = normalizing(grad, norm=self.norm)
 
             # Gradient descent on NLL (subtract, not add)

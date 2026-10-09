@@ -11,10 +11,12 @@ put the numbers in the commit message:
 
 Random inputs in the embedding's input range, 10 classes; the defaults are MNIST12
 (144 features), d3r20, batch 256, β = 0. The Trainer runs through its public
-`train()` with its defaults (on CUDA the step is captured, D90; `--eager` turns that
-off); only `_train_epoch` is timed (the validation pass is not), and the first epoch
-is discarded as warm-up. Peak memory covers the whole run, validation and capture
-included, without the CUDA context (≈ 0.3-0.5 GB more per process).
+`train()` with its defaults (on CUDA the step and the validation are captured, D90,
+D92; `--eager` turns that off); only `_train_epoch` is timed (the validation pass is
+not), and the first epoch is discarded as warm-up. Peak memory covers the whole run,
+validation and capture included, without the CUDA context (≈ 0.3-0.5 GB more per
+process): allocated, and reserved (the allocator's cache and the graphs' pool, what
+the GPU must hold).
 """
 import argparse
 import statistics
@@ -54,9 +56,9 @@ def _datahandler(cbm, n_features: int, batch: int, micro_batch, steps: int) -> S
     )
 
 
-def bench(regime: str, args, device: torch.device) -> tuple[list[float], int]:
+def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, int]:
     """Seconds per training step, one value per timed epoch, and the peak memory
-    allocated [bytes] (0 on CPU)."""
+    allocated and reserved [bytes] (0 on CPU)."""
     torch.manual_seed(0)
     born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=args.bond_dim))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, args.features, N_CLASSES, device)
@@ -85,8 +87,10 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int]:
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     trainer.train()
-    peak = torch.cuda.max_memory_allocated(device) if device.type == "cuda" else 0
-    return times[1:], peak
+    if device.type != "cuda":
+        return times[1:], 0, 0
+    return (times[1:], torch.cuda.max_memory_allocated(device),
+            torch.cuda.max_memory_reserved(device))
 
 
 def main():
@@ -110,11 +114,11 @@ def main():
           f"batch {args.batch}, micro-batch {args.micro_batch}, β {args.beta}, {mode}, "
           f"{args.steps} steps x {args.epochs - 1} timed epochs, {name}")
     for regime in (["nat", "at"] if args.regime == "both" else [args.regime]):
-        times, peak = bench(regime, args, device)
+        times, allocated, reserved = bench(regime, args, device)
         ms = [1e3 * t for t in times]
         print(f"  {regime}: {statistics.mean(ms):8.1f} ms/step  "
               f"(min {min(ms):.1f}, max {max(ms):.1f}, {len(ms)} epochs), "
-              f"peak {peak / 2**30:.2f} GiB")
+              f"peak {allocated / 2**30:.2f} GiB allocated, {reserved / 2**30:.2f} GiB reserved")
         if device.type == "cuda":
             torch.cuda.empty_cache()
 

@@ -1,4 +1,5 @@
-"""CUDA graphs (D90, D92): bm4tc.core.graphs and the Trainer's captured step.
+"""CUDA graphs (D90, D92): bm4tc.core.graphs, the Trainer's captured step and
+validation, and the analysis stage's captured per-batch work.
 
 The tests that capture need a GPU and are skipped without one (the seams run on
 CPU and never capture): run them on the cluster or with the eGPU,
@@ -12,6 +13,9 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from bm4tc.analysis.purification import LikelihoodPurification
+from bm4tc.analysis.uq import UQConfig, UQEvaluation, _BatchWork
+from bm4tc.core.attacks import EvasionConfig, build_attack
 from bm4tc.core.graphs import Graphs
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import NormControlConfig, OptimizerConfig
@@ -136,3 +140,76 @@ def test_captured_at_with_random_start_is_reproducible():
     first, _ = _run(True, PGD_RANDOM_START)
     second, _ = _run(True, PGD_RANDOM_START)
     assert first == second
+
+
+# ── The analysis stage (D92) ────────────────────────────────────────────────
+
+def _analysed_cbm():
+    """A tiny MPS on CUDA, as the analysis loads it, with its log Z cached."""
+    torch.manual_seed(0)
+    cbm = ConditionalBornMachine(
+        CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=3, bond_dim=4)),
+        data_dim=6, num_classes=3)
+    cbm.prepare(device=CUDA)
+    cbm.log_normalizer()
+    return cbm
+
+
+def _batches(cbm, n_batches, batch_size=8):
+    lo, hi = cbm.input_range
+    g = torch.Generator().manual_seed(2)
+    return [((lo + (hi - lo) * torch.rand(batch_size, 6, generator=g)).to(CUDA),
+             torch.randint(0, 3, (batch_size,), generator=g).to(CUDA))
+            for _ in range(n_batches)]
+
+
+@needs_cuda
+@pytest.mark.parametrize("method", ["PGD", "JOINT_PGD"])
+def test_captured_analysis_batch_work_is_bit_identical_to_eager(method):
+    """log p(x), the prediction, the attack (fixed start) and the likelihood
+    purification, replayed from graphs, against the eager routines: three
+    warm-up batches, then capture and replays."""
+    cbm = _analysed_cbm()
+    attack = build_attack(EvasionConfig(method=method, num_steps=3, random_start=False))
+    purifier = LikelihoodPurification(num_steps=3)
+    eager = _BatchWork(cbm, attack, purifier, Graphs(enabled=False), CUDA)
+    captured = _BatchWork(cbm, attack, purifier, Graphs(enabled=True), CUDA)
+    for data, labels in _batches(cbm, 6):
+        assert torch.equal(captured.log_px(data), eager.log_px(data))
+        assert torch.equal(captured.predict(data), eager.predict(data))
+        for eps_abs in (0.1, 0.3):           # one graph serves every radius
+            adversarials = captured.attack(data, labels, eps_abs)
+            assert torch.equal(adversarials, eager.attack(data, labels, eps_abs))
+            purified, purified_log_px = captured.purify(adversarials, 0.05)
+            eager_purified, eager_log_px = eager.purify(adversarials, 0.05)
+            assert torch.equal(purified, eager_purified)
+            assert torch.equal(purified_log_px, eager_log_px)
+    for routine in (captured.log_px, captured.predict, captured._attack, captured._purify):
+        assert len(routine._captures) == 1
+
+
+def _uq_run(captured: bool):
+    cbm = _analysed_cbm()
+    data, labels = (torch.cat(parts).cpu() for parts in zip(*_batches(cbm, 5)))
+    loader = DataLoader(TensorDataset(data, labels), batch_size=8)   # 5 batches a pass
+    cfg = UQConfig(eps_rel=[0.1, 0.2], delta_rel=[0.1], percentiles=[10],
+                   attack_num_steps=3, num_steps=3)
+    torch.manual_seed(5)
+    return UQEvaluation(cfg).evaluate(cbm, loader, CUDA, calib_loader=loader,
+                                      graphs=Graphs(enabled=captured))
+
+
+@needs_cuda
+def test_captured_uq_evaluation_is_reproducible():
+    """The whole UQ evaluation on graphs: every budget and purification
+    completes, and the attack's random start (other RNG offsets than eager)
+    gives the same results run to run. Clean metrics match eager exactly."""
+    first, second, eager = _uq_run(True), _uq_run(True), _uq_run(False)
+    assert set(first.adv_accuracies) == {0.1, 0.2}
+    assert set(first.purification_results) == {(0.1, 0.1), (0.2, 0.1)}
+    assert first.adv_accuracies == second.adv_accuracies
+    assert first.purification_results == second.purification_results
+    assert (first.adv_log_px[0.2] == second.adv_log_px[0.2]).all()
+    assert first.clean_accuracy == eager.clean_accuracy
+    assert (first.clean_log_px == eager.clean_log_px).all()
+    assert first.thresholds == eager.thresholds

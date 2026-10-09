@@ -31,6 +31,7 @@ from tqdm.auto import tqdm
 import logging
 from functools import partial
 
+from bm4tc.core.graphs import GraphCaptureError, Graphs
 from bm4tc.core.interface import class_probabilities, log_px
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,46 @@ def _recover_after_failure(model) -> None:
         torch.cuda.empty_cache()
 
 
+class _BatchWork:
+    """The UQ evaluation's work on one batch: log p(x), the predicted class, the
+    attack and the likelihood purification, each replayed from a CUDA graph when
+    ``graphs`` are enabled (D92), one graph per batch shape. The radii are device
+    scalars there (float64, as in training), so one graph serves every budget;
+    eager, they stay floats, as before.
+    """
+
+    def __init__(self, model, attack, purifier, graphs: Graphs, device):
+        self.device = device
+        self._captured = graphs.enabled
+
+        def marginal(x):
+            with torch.no_grad():
+                return log_px(model, x)
+
+        def predicted_class(x):
+            with torch.no_grad():
+                return class_probabilities(model, x).argmax(dim=1)
+
+        self.log_px = graphs.wrap(marginal)
+        self.predict = graphs.wrap(predicted_class)
+        self._attack = graphs.wrap(
+            lambda x, labels, radius: attack.generate(model, x, labels, radius, device))
+        self._purify = graphs.wrap(
+            lambda x, radius: purifier.purify(model, x, radius, device))
+
+    def _radius(self, radius: float):
+        if not self._captured:
+            return radius
+        return torch.tensor(radius, dtype=torch.float64, device=self.device)
+
+    def attack(self, x, labels, eps_abs: float) -> torch.Tensor:
+        return self._attack(x, labels, self._radius(eps_abs))
+
+    def purify(self, x, delta_abs: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        """(purified x, its log p(x))."""
+        return self._purify(x, self._radius(delta_abs))
+
+
 def _batched_forward(fn, x: torch.Tensor, batch_size: Optional[int], device) -> torch.Tensor:
     """Apply a no-grad model forward `fn` over `x` in chunks, returning a CPU tensor.
 
@@ -124,6 +165,7 @@ def compute_log_px(
     loader: DataLoader,
     device: torch.device,
     desc: str = "log p(x)",
+    batch_log_px=None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute marginal log p(x) for all samples in a loader.
 
@@ -132,12 +174,15 @@ def compute_log_px(
         loader: DataLoader yielding (data, labels) tuples.
         device: Torch device.
         desc: Label for the progress bar.
+        batch_log_px: log p(x) of one batch (a graphed one, :class:`_BatchWork`);
+            None is the eager ``log_px(model, ·)``.
 
     Returns:
         Tuple of (log_px, labels) tensors concatenated over all batches.
     """
     all_log_px = []
     all_labels = []
+    batch_log_px = batch_log_px or partial(log_px, model)
 
     model.to(device)
 
@@ -146,8 +191,7 @@ def compute_log_px(
             loader, desc=desc, unit="batch", leave=False, dynamic_ncols=True
         ):
             batch_data = batch_data.to(device)
-            batch_log_px = log_px(model, batch_data)
-            all_log_px.append(batch_log_px.cpu())
+            all_log_px.append(batch_log_px(batch_data).cpu())
             all_labels.append(batch_labels)
 
     return torch.cat(all_log_px), torch.cat(all_labels)
@@ -158,6 +202,7 @@ def compute_thresholds(
     clean_loader: DataLoader,
     percentiles: List[float],
     device: torch.device,
+    batch_log_px=None,
 ) -> Tuple[Dict[float, float], torch.Tensor]:
     """Compute percentile-based detection thresholds from clean data.
 
@@ -169,13 +214,14 @@ def compute_thresholds(
         clean_loader: DataLoader for clean (in-distribution) data.
         percentiles: List of percentile values (e.g., [1, 5, 10, 20]).
         device: Torch device.
+        batch_log_px: as for :func:`compute_log_px`.
 
     Returns:
         Tuple of:
             - Dict mapping percentile -> threshold value.
             - Tensor of all clean log p(x) values.
     """
-    clean_log_px, _ = compute_log_px(model, clean_loader, device)
+    clean_log_px, _ = compute_log_px(model, clean_loader, device, batch_log_px=batch_log_px)
 
     thresholds = {}
     for p in percentiles:
@@ -399,6 +445,7 @@ class UQEvaluation:
         *,
         calib_loader: DataLoader,
         sweep_purifier=None,
+        graphs: Optional[Graphs] = None,
     ) -> UQResults:
         """Run the full UQ evaluation pipeline.
 
@@ -422,6 +469,9 @@ class UQEvaluation:
             device: Torch device.
             calib_loader: DataLoader for the clean calibration split (validation),
                 which sets the detection thresholds (D2).
+            graphs: replay the per-batch work (attack, likelihood purification,
+                log p(x), prediction) from CUDA graphs if enabled (D92); None is
+                eager. The sweep purification stays eager.
 
         Returns:
             UQResults with all evaluation metrics.
@@ -456,8 +506,27 @@ class UQEvaluation:
             calib_loader = DataLoader(
                 calib_loader.dataset, batch_size=cfg.eval_batch_size, shuffle=False
             )
-        thresholds, _ = compute_thresholds(model, calib_loader, cfg.percentiles, device)
-        clean_log_px = compute_log_px(model, clean_loader, device)[0].numpy()
+        # 3. and 4. build the attack and the purifier; their per-batch work, and
+        #    log p(x) and the prediction, go through `work`.
+        attack = build_attack(EvasionConfig(
+            method=cfg.attack_method,
+            norm=cfg.norm,
+            num_steps=cfg.attack_num_steps,
+            random_start=True,
+        ))
+        likelihood_purifier = LikelihoodPurification(
+            norm=cfg.norm,
+            num_steps=cfg.num_steps,
+            step_size=cfg.step_size,
+            random_start=cfg.random_start,
+        )
+        work = _BatchWork(model, attack, likelihood_purifier,
+                          graphs if graphs is not None else Graphs(enabled=False), device)
+
+        thresholds, _ = compute_thresholds(model, calib_loader, cfg.percentiles, device,
+                                           batch_log_px=work.log_px)
+        clean_log_px = compute_log_px(model, clean_loader, device,
+                                      batch_log_px=work.log_px)[0].numpy()
         clean_flagged = {p: float((clean_log_px < tau).mean()) for p, tau in thresholds.items()}
 
         # Compute clean accuracy
@@ -469,20 +538,13 @@ class UQEvaluation:
             ):
                 batch_data = batch_data.to(device)
                 batch_labels = batch_labels.to(device)
-                probs = class_probabilities(model, batch_data)
-                preds = probs.argmax(dim=1)
+                preds = work.predict(batch_data)
                 clean_correct += (preds == batch_labels).sum().item()
                 clean_total += len(batch_labels)
         clean_accuracy = clean_correct / clean_total
         logger.info(f"Clean accuracy: {clean_accuracy:.4f}")
 
         # 3. Generate adversarial examples and evaluate detection
-        attack = build_attack(EvasionConfig(
-            method=cfg.attack_method,
-            norm=cfg.norm,
-            num_steps=cfg.attack_num_steps,
-            random_start=True,
-        ))
 
         adv_log_px: Dict[float, np.ndarray] = {}
         adv_accuracies: Dict[float, float] = {}
@@ -514,22 +576,17 @@ class UQEvaluation:
                     batch_labels = batch_labels.to(device)
 
                     # Generate adversarial examples
-                    adv_data = attack.generate(
-                        model, batch_data, batch_labels, eps_abs, device
-                    )
+                    adv_data = work.attack(batch_data, batch_labels, eps_abs)
 
                     # Classify adversarial examples
-                    with torch.no_grad():
-                        adv_probs = class_probabilities(model, adv_data)
-                        adv_preds = adv_probs.argmax(dim=1)
-                        correct_batch = adv_preds == batch_labels
-                        all_adv_correct += correct_batch.sum().item()
-                        all_adv_correct_list.append(correct_batch.cpu())
-                        all_adv_total += len(batch_labels)
+                    adv_preds = work.predict(adv_data)
+                    correct_batch = adv_preds == batch_labels
+                    all_adv_correct += correct_batch.sum().item()
+                    all_adv_correct_list.append(correct_batch.cpu())
+                    all_adv_total += len(batch_labels)
 
-                        # Compute log p(x_adv)
-                        log_px_adv = log_px(model, adv_data)
-                        all_adv_log_px.append(log_px_adv.cpu())
+                    # Compute log p(x_adv)
+                    all_adv_log_px.append(work.log_px(adv_data).cpu())
 
                     adv_batches.append((adv_data.detach().cpu(), batch_labels.cpu()))
 
@@ -567,18 +624,13 @@ class UQEvaluation:
                         f"    tau={pct}pct: det={m.detection_rate:.4f} "
                         f"(chance {m.chance:.2f}, lift {m.lift:+.4f})"
                     )
+            except GraphCaptureError:
+                raise   # fatal for the process (graphs.py): no budget would succeed
             except Exception as e:
                 logger.warning(f"Detection/attack failed (eps_rel={eps_rel}): {e}; skipping")
                 _recover_after_failure(model)
 
         # 4. Purification
-        purifier = LikelihoodPurification(
-            norm=cfg.norm,
-            num_steps=cfg.num_steps,
-            step_size=cfg.step_size,
-            random_start=cfg.random_start,
-        )
-
         purification_results: Dict[Tuple[float, float], PurificationMetrics] = {}
 
         for eps_rel in tqdm(
@@ -608,24 +660,14 @@ class UQEvaluation:
                         adv_data = adv_data_cpu.to(device)
                         labels = labels_cpu.to(device)
 
-                        # Log p(x) before purification
-                        with torch.no_grad():
-                            log_px_before = log_px(model, adv_data)
-                            # Classify before purification
-                            adv_probs = class_probabilities(model, adv_data)
-                            adv_preds = adv_probs.argmax(dim=1)
-                            misclassified = (adv_preds != labels)
+                        # Log p(x) and the class before purification
+                        log_px_before = work.log_px(adv_data)
+                        misclassified = work.predict(adv_data) != labels
 
-                        # Purify
-                        purified, log_px_after = purifier.purify(
-                            model, adv_data, delta_abs, device
-                        )
+                        purified, log_px_after = work.purify(adv_data, delta_abs)
 
                         # Classify after purification
-                        with torch.no_grad():
-                            pur_probs = class_probabilities(model, purified)
-                            pur_preds = pur_probs.argmax(dim=1)
-                            correct_after = (pur_preds == labels)
+                        correct_after = work.predict(purified) == labels
 
                         # Recovery: correctly classified after purification
                         # among those misclassified before
@@ -661,6 +703,8 @@ class UQEvaluation:
                         f"  eps_rel={eps_rel}, d={delta_rel}: "
                         f"acc={acc_after:.4f}, recovery={recovery:.2%}"
                     )
+                except GraphCaptureError:
+                    raise
                 except Exception as e:
                     logger.warning(
                         f"Gradient purification failed (eps_rel={eps_rel}, "
@@ -688,15 +732,11 @@ class UQEvaluation:
                     batch_data = batch_data.to(device)
                     batch_labels = batch_labels.to(device)
 
-                    with torch.no_grad():
-                        log_px_before = log_px(model, batch_data)
-
-                    purified, log_px_after = purifier.purify(model, batch_data, delta_abs, device)
-
-                    with torch.no_grad():
-                        preds = class_probabilities(model, purified).argmax(dim=1)
-                        all_correct += (preds == batch_labels).sum().item()
-                        all_total += len(batch_labels)
+                    log_px_before = work.log_px(batch_data)
+                    purified, log_px_after = work.purify(batch_data, delta_abs)
+                    preds = work.predict(purified)
+                    all_correct += (preds == batch_labels).sum().item()
+                    all_total += len(batch_labels)
 
                     all_log_px_before.append(log_px_before.cpu())
                     all_log_px_after.append(log_px_after.cpu())
@@ -710,6 +750,8 @@ class UQEvaluation:
                     rejection_rate=0.0,
                 )
                 logger.info(f"  delta_rel={delta_rel}: clean_purify_acc={acc:.4f}")
+            except GraphCaptureError:
+                raise
             except Exception as e:
                 logger.warning(
                     f"Clean purification failed (delta_rel={delta_rel}): {e}; skipping"
