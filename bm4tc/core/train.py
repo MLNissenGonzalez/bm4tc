@@ -232,7 +232,6 @@ class Trainer:
         stats (no extra contraction); falls back to a fresh no-grad recompute when
         it did not form them (e.g. beta=0 leaves log_Z out)."""
         result: Dict[str, float] = self.cbm.forward_stats()
-        _tiny = float(torch.finfo(torch.float32).tiny)
 
         if "log_Z" not in result:
             with torch.no_grad():
@@ -245,8 +244,7 @@ class Trainer:
         if "log_amp_sq_mean" not in result:
             with torch.no_grad():
                 try:
-                    amp = self.cbm.amplitudes(data)
-                    log_abs_sq = 2.0 * torch.log(amp.abs().clamp(min=_tiny))
+                    log_abs_sq = self.cbm.log_amp_sq(data)
                     finite_mask = torch.isfinite(log_abs_sq)
                     finite = log_abs_sq[finite_mask]
                     result["log_amp_sq_mean"] = finite.mean().item() if finite.numel() else float("nan")

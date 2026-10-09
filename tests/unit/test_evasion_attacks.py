@@ -1,7 +1,7 @@
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from tests.conftest import DATA_DIM, NUM_CLASSES
+from tests.conftest import DATA_DIM, NUM_CLASSES, raw_amplitudes
 from bm4tc.core.attacks import (
     JointProjectedGradientDescent,
     ProjectedGradientDescent,
@@ -63,7 +63,7 @@ def test_joint_pgd_increases_wrong_class_log_joint(cbm_attack, naturals, labels)
     eps = 1e-12
 
     with torch.no_grad():
-        amps_before = cbm_attack.amplitudes(naturals)
+        amps_before = raw_amplitudes(cbm_attack, naturals)
         log_joint_before = 2 * torch.log(amps_before.abs().clamp(min=eps))
         mask = torch.zeros(BATCH, K, dtype=torch.bool)
         mask[torch.arange(BATCH), labels] = True
@@ -72,7 +72,7 @@ def test_joint_pgd_increases_wrong_class_log_joint(cbm_attack, naturals, labels)
     adversarials = attacker.generate(cbm_attack, naturals, labels, eps_abs=STRENGTH)
 
     with torch.no_grad():
-        amps_after = cbm_attack.amplitudes(adversarials)
+        amps_after = raw_amplitudes(cbm_attack, adversarials)
         log_joint_after = 2 * torch.log(amps_after.abs().clamp(min=eps))
         max_wrong_after = log_joint_after.masked_fill(mask, float("-inf")).max(dim=-1).values.mean().item()
 

@@ -43,7 +43,7 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
     if manifest.config.model == "jem":
         model, _ = JEMMLP.load(checkpoint, device)
     else:
-        model = ConditionalBornMachine.load(checkpoint, accumulate=True)
+        model = ConditionalBornMachine.load(checkpoint)
     model.to(device)
     datahandler = DataHandler(manifest.config.dataset)
     datahandler.load()

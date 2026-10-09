@@ -100,11 +100,6 @@ class CBMConfig:
     init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
     embedding: str = "legendre"
     model_path: Optional[str] = None
-    # Overflow-safe amplitudes: route mixed_nll + class_probabilities through the
-    # norm-accumulating contraction (log_amp_sq_accumulate) instead of the raw
-    # amplitudes() path. On by default (every production config set it); equal to
-    # the raw path wherever that does not overflow. See log_amp_sq.
-    accumulate: bool = True
 
 
 class ConditionalBornMachine(tk.models.MPS):
@@ -112,8 +107,8 @@ class ConditionalBornMachine(tk.models.MPS):
     Single MPS-based model for both discriminative and generative inference.
 
     Replaces BornMachine + BornClassifier + BornGenerator. The class site at
-    out_features=[cls_pos] is left open; forward() returns (B, num_classes)
-    amplitudes via a single parallel contraction.
+    out_features=[cls_pos] is left open; log_amp_sq() returns log|ψ(x,c)|² (B,
+    num_classes) from one norm-accumulating contraction (forward()).
 
     One auxiliary network shares the same Parameter objects:
       norm_net — used for log_partition_function() during training
@@ -165,10 +160,6 @@ class ConditionalBornMachine(tk.models.MPS):
         self.embedding = embedding(self.embedding_name, _in_dim, dtype=_dtype)
         self.input_range = range_from_embedding(self.embedding_name)
         self.dtype = _dtype
-
-        # Opt-in overflow-safe amplitude path (getattr so checkpoints whose saved
-        # config predates the flag default to off). See log_amp_sq.
-        self.accumulate = cfg.accumulate
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────
         _cls_pos = cfg.init_kwargs.out_position
@@ -274,8 +265,8 @@ class ConditionalBornMachine(tk.models.MPS):
         self._log_Z_cache: tuple | None = None      # ((params key, grad mode), log Z)
         self._amp_diag_cache: tuple | None = None   # (params key, stats dict)
         # Per-forward accumulator for the norm-accumulating (overflow-safe)
-        # contraction; reset/read inside forward(renormalize=True). None between
-        # accumulate forwards. See _inline_contraction / amplitudes_accumulate.
+        # contraction; reset/read inside forward(). None between forwards. See
+        # _inline_contraction.
         self._log_norm_acc: torch.Tensor | None = None
 
     # ======================================================================
@@ -325,22 +316,19 @@ class ConditionalBornMachine(tk.models.MPS):
         """Embed raw input → (B, data_dim, phys_dim)."""
         return self.embedding(data)
 
-    def amplitudes(self, data: torch.Tensor) -> torch.Tensor:
-        """Single parallel forward pass → (B, num_classes) amplitudes ψ."""
-        return super().forward(data=self.embed(data))
-
     # ── Norm-accumulating (overflow-safe) contraction ─────────────────────
     # Contract the amplitude while renormalizing each step to keep the running
     # node O(1), but *keep* the extracted norm in log space (unlike tk's
     # renormalize op, which discards it). ψ(x,c) = psi_renorm(x,c)·exp(log_norm),
     # so log|ψ|² = 2·log|psi_renorm| + 2·log_norm never materializes an
-    # overflowing amplitude. Eager / untraced, opt-in via renormalize=True.
+    # overflowing amplitude. The only amplitude contraction (D89); eager, untraced.
 
     def _inline_contraction(self, mats_env, renormalize=False, from_left=True):
         """Inline MPS contraction (overrides tk's static helper).
 
         Byte-equivalent to ``tk.models.MPS._inline_contraction`` when
-        ``renormalize=False`` (the default traced path is unaffected). When
+        ``renormalize=False`` (tk's own ``MPS.forward``, which the tests use as the
+        raw-amplitude reference). When
         ``renormalize=True`` each step's bond-axis norm is computed *once*,
         folded into ``self._log_norm_acc`` at (batch, class) granularity, and
         used to divide the running node via the ``div`` op — no second norm, no
@@ -377,8 +365,8 @@ class ConditionalBornMachine(tk.models.MPS):
         domain (Chebyshev T2 at x = ±1, before its range was restricted) makes
         the running node exactly zero for that sample. The unguarded form then
         did ``0 / 0`` into ``psi`` and ``log(0)`` into ``log_norm``, so both came
-        back NaN and poisoned the loss — while the traced path, which clamps the
-        *final* amplitude, returned a finite floor. Flooring the divisor keeps
+        back NaN and poisoned the loss — while the raw tk contraction, which clamps
+        the *final* amplitude, returned a finite floor. Flooring the divisor keeps
         ``psi`` at 0 and ``log_norm`` finite, so a zero amplitude now floors on
         this path too instead of producing NaN.
 
@@ -416,21 +404,16 @@ class ConditionalBornMachine(tk.models.MPS):
             contrib if self._log_norm_acc is None else self._log_norm_acc + contrib
         )
 
-    def forward(self, data=None, *args, renormalize: bool = False, **kwargs):
-        """Dispatch between the default traced contraction and the eager
-        norm-accumulating one.
+    def forward(self, data=None, *args, **kwargs):
+        """The norm-accumulating contraction of embedded ``data`` →
+        ``(psi_renorm (B, C), log_norm (B, C))`` with ψ = psi_renorm·exp(log_norm):
+        ``psi_renorm`` is unit-modulus (pure phase/sign), ``log_norm`` the real
+        log-magnitude.
 
-        ``renormalize=False`` (default) → tk's traced ``MPS.forward`` unchanged
-        (``data`` already embedded, matching ``amplitudes``/``trace``).
-        ``renormalize=True`` → eager contraction returning
-        ``(psi_renorm (B, C), log_norm (B, C))``. Runs ``contract`` directly with
-        ``inline_mats=True`` so the sole renorm site is the overridden
-        ``_inline_contraction``; ``reset()`` around it so this untraced path
-        never pollutes (or is polluted by) the default traced ``_seq_ops``. This
-        makes it eager (no trace reuse) — the accepted cost.
+        Runs ``contract`` with ``inline_mats=True`` so the sole renorm site is the
+        overridden ``_inline_contraction``, with ``reset()`` around it: every call
+        builds its nodes afresh (eager, no tk trace reuse).
         """
-        if not renormalize:
-            return super().forward(data, *args, **kwargs)
         self.reset()
         if not self._data_nodes:
             self.set_data_nodes()
@@ -449,45 +432,18 @@ class ConditionalBornMachine(tk.models.MPS):
         psi_renorm = out / mag
         return psi_renorm, log_norm
 
-    def amplitudes_accumulate(self, data: torch.Tensor):
-        """Overflow-safe amplitudes → ``(psi_renorm (B, C), log_norm (B, C))``.
-
-        ψ(x,c) = psi_renorm(x,c)·exp(log_norm(x,c)); ``psi_renorm`` is
-        unit-modulus (pure phase/sign), ``log_norm`` is the real log-magnitude —
-        the norm/phase split. Eager / untraced (see :meth:`forward`). Use
-        :meth:`log_amp_sq` for |ψ|². Opt-in; not yet wired into training/eval.
-        """
-        return self(self.embed(data), renormalize=True)
-
-    def log_amp_sq_accumulate(self, data: torch.Tensor) -> torch.Tensor:
-        """Overflow-safe ``log|ψ(x,c)|²`` (B, C) = 2·log|psi_renorm| + 2·log_norm.
-
-        Drop-in replacement for ``2·log|amplitudes(data)|`` that never
-        materializes an overflowing amplitude.
+    def log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
+        """log|ψ(x,c)|² (B, C) = 2·log|psi_renorm| + 2·log_norm: the entry point of
+        the loss, evaluation and analysis. It never materialises an overflowing
+        amplitude.
 
         Where ψ = 0 exactly (an embedding that vanishes in its own domain) the
-        true value is −inf and both paths return a finite floor, but *different*
-        floors: this one is the more negative, because ``_safe_bond_norm``
-        contributes a floored log per vanishing step. Agreement between the two
-        paths holds wherever ψ ≠ 0, which is the case the equivalence is claimed
-        for.
+        true value is −inf; this returns a finite floor (``_safe_bond_norm``
+        contributes a floored log per vanishing step).
         """
-        psi, log_norm = self.amplitudes_accumulate(data)
+        psi, log_norm = self(self.embed(data))
         log_abs = torch.log(psi.abs().clamp(min=_LOG_PROB_EPS))
         return 2.0 * log_abs + 2.0 * log_norm
-
-    def log_amp_sq(self, data: torch.Tensor) -> torch.Tensor:
-        """log|ψ(x,c)|² (B, C) — the shared entry point for the loss and eval.
-
-        Routes through the overflow-safe accumulate path (:meth:`log_amp_sq`)
-        when ``accumulate`` is set, else the direct traced path
-        ``2·log|amplitudes|``. The two are numerically equivalent where the raw
-        amplitude does not overflow (see ``test_log_amp_sq_matches_amplitudes``).
-        """
-        if self.accumulate:
-            return self.log_amp_sq_accumulate(data)
-        log_abs = torch.log(self.amplitudes(data).abs().clamp(min=_LOG_PROB_EPS))
-        return 2.0 * log_abs
 
     def class_probabilities(self, data: torch.Tensor) -> torch.Tensor:
         """Born-rule normalized class probabilities → (B, num_classes)."""
@@ -693,13 +649,8 @@ class ConditionalBornMachine(tk.models.MPS):
         Differentiable w.r.t. input data (for purification). log Z is a
         detached constant, so not differentiable w.r.t. model parameters.
 
-        Always routes through the overflow-safe ``log_amp_sq`` contraction,
-        independent of the ``accumulate`` flag: this is an analysis primitive
-        (log-density for purification/UQ/MIA), so correctness beats the fast
-        traced path — a raw ``amplitudes()`` here would overflow to inf and
-        silently corrupt every downstream log-density on overflow-prone models.
         """
-        return torch.logsumexp(self.log_amp_sq_accumulate(data), dim=-1) - self.log_normalizer()
+        return torch.logsumexp(self.log_amp_sq(data), dim=-1) - self.log_normalizer()
 
     # ======================================================================
     # Training
@@ -965,21 +916,13 @@ class ConditionalBornMachine(tk.models.MPS):
             all_labels.append(torch.full((n_per_class,), c, dtype=torch.long))
         return torch.cat(all_samples, dim=0), torch.cat(all_labels, dim=0)
 
-    def prepare(self, device: torch.device | None = None, train_cfg=None) -> None:
-        """
-        Reset state, move to device, and trace for efficient contraction.
-
-        train_cfg is ignored. auto_stack/auto_unbind are hardcoded and never
-        modified via train_cfg.
-        """
+    def prepare(self, device: torch.device | None = None) -> None:
+        """Reset the contraction state and move to ``device``. No tk trace: every
+        forward builds its nodes afresh (D89)."""
         self.unset_data_nodes()
         self.reset()
         if device is not None:
             self.to(device)
-        self.trace(
-            torch.zeros(1, self._data_dim, self.in_dim, dtype=self.dtype,
-                        device=self.device)
-        )
 
     # ======================================================================
     # Device / mode
@@ -1014,20 +957,8 @@ class ConditionalBornMachine(tk.models.MPS):
         )
 
     @classmethod
-    def load(cls, path: str, accumulate: bool | None = None) -> "ConditionalBornMachine":
-        """Restore a model from a checkpoint.
-
-        ``accumulate`` overrides the overflow-safe amplitude flag on the loaded
-        model (an inference-path toggle, not part of the weights): ``None`` keeps
-        the saved value; a warm start passes the current run's ``born.accumulate``;
-        the analysis pipeline passes ``True`` so analysis always uses the
-        overflow-safe path (numerically identical where nothing overflows). The
-        override is written into the model's config too, so a later ``save()``
-        records the flag actually used.
-        """
+    def load(cls, path: str) -> "ConditionalBornMachine":
+        """Restore a model from a checkpoint."""
         ckpt = torch.load(path, weights_only=False)
-        cfg = OmegaConf.create(ckpt["config"])
-        if accumulate is not None:
-            OmegaConf.update(cfg, "accumulate", bool(accumulate), force_add=True)
-        return cls(cfg=cfg, tensors=ckpt["tensors"])
+        return cls(cfg=OmegaConf.create(ckpt["config"]), tensors=ckpt["tensors"])
 

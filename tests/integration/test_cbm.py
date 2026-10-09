@@ -1,6 +1,7 @@
 import pytest
 import torch
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
+from tests.conftest import raw_amplitudes
 
 pytestmark = pytest.mark.slow
 
@@ -66,7 +67,7 @@ def test_norm_net_tensors_shared(cbm):
 # ── Amplitudes / probabilities ────────────────────────────────────────────
 
 def test_amplitudes_shape(cbm, x_batch):
-    amps = cbm.amplitudes(x_batch)
+    amps = raw_amplitudes(cbm, x_batch)
     assert amps.shape == (x_batch.shape[0], NUM_CLASSES)
 
 
