@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D90 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D92 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -58,7 +58,7 @@ place, no pass-through layers.
 
 ## State (2026-10-09, evening)
 
-Branch `ousterhout`, pushed to GitHub up to `d127eaad` (`a42b1ece`, a plan.md note, is
+Branch `ousterhout`, pushed to GitHub up to `d127eaad` (the commits after it are
 local). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates.
@@ -102,20 +102,29 @@ still shows launches without `--mps`.
 Laptop: the eGPU is away until Tuesday 2026-10-13; GPU checks are commands for Martin
 to run on the cluster.
 
+Done on 2026-10-09, late (CPU-tested; CUDA parts unchecked):
+- **D91:** `clean_weight` deleted; AT is `(1-β)·L_dis(x_adv) + (β/N)·L_gen(x)`, AT
+  validation attacks every sample, no `n_rob`. The AT seams were re-pinned at cw = 0
+  first, then reproduced exactly.
+- **D92, captured evaluation:** `Graphs` (one pool for graphs that never run together;
+  replays return copies; `empty_cache()` after each capture), `Evaluation` (the
+  Trainer validates in its step's graphs), and the analysis's per-batch work (PGD, joint
+  PGD, likelihood purification, log p(x), prediction) captured for the MPS on CUDA.
+  Gibbs and JEM stay eager.
+
 **Next (in this order):**
-1. **Design the captured evaluation with Martin** (options with code sketches first,
-   then a D-number). Part 1, training-time validation (clean forward, log Z, AT's PGD on
-   the valid subset) captured in the training step's memory pool: fixes d3r80's memory,
-   saves ≈ 20–30% (NAT) / ≈ 40% (AT). Part 2, the analysis stage (attacks, detection,
-   purification; `bm4tc/analysis/`), all eager today. Both before Phase 8.
-2. Read E2c and E2a with Martin (plan.md "Beta", E2: knees, β*, ladder, AT grid); their
-   timings also size part 1's gain. Then E2b (`pilot_beta28`, `hparams_from` E2a).
+1. **Martin, on G21G01** (needs a push and a worktree at the new head):
+   `pytest -q -p no:logging tests/unit/test_graphs.py` (captured vs eager: validation,
+   analysis routines, UQ reproducibility); the d3r80 bench
+   `python -m tests.bench.bench_train_step --features 784 --bond-dim 80 --batch 512
+   --micro-batch 128 --beta 0.5 --regime nat` (fits? peak reserved); one analysis
+   timed captured vs the old worktree (eager).
+2. Read E2c and E2a with Martin (plan.md "Beta", E2: knees, β*, ladder, AT grid). Then
+   E2b (`pilot_beta28`, `hparams_from` E2a), on the new head.
 3. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
    race); `select`/`run --cell` on a subset; a multi-study launcher; the Gibbs O(n²)
    rework; re-estimate `docs/compute.md` (units per GPU from M0).
-4. Not urgent: the sampling comparison with the fork's `develop` branch; the flaky
-   `test_trainer.py::test_evaluate_is_per_sample_not_per_batch` (unseeded model, fails
-   when its file runs alone).
+4. Not urgent: the sampling comparison with the fork's `develop` branch.
 
 Other open items (time series, adaptive attacks, notes on the other laptop) are in
 `docs/plan.md`.
