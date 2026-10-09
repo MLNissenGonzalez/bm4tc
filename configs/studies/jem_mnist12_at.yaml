@@ -10,9 +10,9 @@ grid:
   arch: [d3r20, d3r40]
   beta: [0, 0.1, 0.5]
 config:
-  trainer.max_epoch: 100
+  trainer.max_epoch: 150       # D88: full radius from epoch 105
   trainer.batch_size: 512
-  trainer.patience: 10         # validations (eval_every 5): 50 epochs
+  trainer.patience: 8          # validations (eval_every 5): 40 epochs (D88)
 hpo:                           # the lr only; clean_weight stays 0 (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}   # the jem_mnist12_nat range (D81)

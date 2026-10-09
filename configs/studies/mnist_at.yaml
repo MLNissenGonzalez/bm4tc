@@ -6,9 +6,9 @@ grid:
   arch: ???                    # the rank mnist_capacity selects (D44)
   beta: [0, 0.1, 0.5]           # D86, revisit after the β pilots
 config:
-  trainer.max_epoch: 100
+  trainer.max_epoch: 150       # D88: full radius from epoch 105
   trainer.batch_size: 512
-  trainer.patience: 10
+  trainer.patience: 8          # validations (eval_every 5): 40 epochs (D88)
   trainer.norm_control.soft_strength: 1e-3
   trainer.norm_control.log_target: null
 hpo:                           # the lr only; clean_weight stays 0 (D80)
