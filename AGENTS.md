@@ -140,3 +140,76 @@ Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation cr
 
 Other open items (time series, adaptive attacks, notes on the other laptop) are in
 `docs/plan.md`.
+
+## Personal laptop vs lab laptop (2026-10-12)
+
+This compares the personal laptop's local state with the lab laptop's state (this
+branch), for plan.md's open item "Agent notes on the other laptop". It records
+differences only; it does not judge either side against the plan.
+
+The personal laptop's checkout (`~/0git/bm4tc`) is on `main` at `aa697706`, the merge
+base of this branch, with nothing unpushed. What it has that the lab laptop does not
+is all in git-ignored files:
+
+- `CLAUDE.md`: the agent guide for `main`, last edited around 2026-08-02 to
+  2026-09-18.
+- `DEFERRED.md`: two deferred features.
+- `.claude/settings.local.json`: permissions only.
+- `reference/`: the same material as `_paper/` here (NeurIPS v2 `.tex`, reviews,
+  rebuttal drafts, `chebyshev_boundary_born_machines.md`, old analysis scripts).
+- `notebooks/archive/`: 2025 notebooks.
+- Backup branches `backup-behemoth`, `backup-functional-version` and `paper`, and an
+  old stash on `local_luck`. These were not reviewed.
+
+The personal laptop has no conda and only an MX150 (2 GB). Its `CLAUDE.md` says to
+use a full env path and never `conda run`; that path does not exist there any more.
+
+| Personal laptop (`main` + local `CLAUDE.md`) | Lab laptop (`ousterhout`) |
+|---|---|
+| Model selection: NAT on `mixed_loss` for every α (decided 2026-07-30, not implemented), AT on `at_loss` (2026-08-02) | One rule for every regime: argmin `objective/valid` (D8, D11, D48). `stop_crit` is gone |
+| AT in the `gen_on_clean` split form, with `clean_weight` tuned | Split objective only (D18); cw = 0 (D80), then deleted (D91) |
+| α ladders; `warm_`/`cold_` prefixes in dir names, with a bare name not meaning warm | β instead of α (D86), ladder after E2; `init: cold\|warm` per study (D19); identity in `run.json` (D17, D58) |
+| Budgets authored as `eps_rel`/`delta_rel`, `_abs` derived | The same (D3, D14, D48, D65) |
+| Notebooks report budgets with `REPORT_UNIT = "abs"`, because José wants absolute [-1, 1] budgets in the paper | Notebooks deleted (D75). `bm4tc/pipeline/figures/` and `configs/papers/` have no rel/abs switch; the rebuttal quotes ε = 0.1 in [0,1] pixel units (rel) |
+| `born.accumulate` tied to complex64, behind a flag | On by default (D60), then the only path (D89) |
+| Norm control: `hard_every` 0, soft 0.1, target 0 | Target n·ln d / 2 for cold MNIST (D84); penalty ÷N (D86); `hard_every` removed and kept as a benchmark-project idea (D90) |
+| Chebyshev restricted to ±0.99, explained in `reference/chebyshev_boundary_born_machines.md` | The same restriction. The comment at `bm4tc/core/embeddings.py:250` cites that note, which exists only untracked on the personal laptop |
+| Known bug, open: spirals AT `rob` (0.929 / 0.829) above the data-only ceiling (0.679 / 0.609 at abs 0.2 / 0.3), on real-dtype runs from before D87 | `analysis/ceiling.py` and the `clean` part compute the ceiling. The bug is not mentioned in plan.md |
+| Known bug, open: attacks don't clamp to `input_range` | `attacks.py` clamps (lines 102, 140). `main` already clamps since `73c9d692` (2026-07-29), so the note there is out of date |
+| Known bug, fixed: Gibbs weight overflow | The same fix (`draw_from_grid_log`) |
+| Flat and consolidated output layouts, `analysis/batch.py`, `tools/*` | Deleted (D12, D49, D58, D77) |
+| `DEFERRED.md` §2: mixed NLL for AT | AT at β > 0 (D82, D86, D91) |
+| `DEFERRED.md` §1: DMRG sweeps | Not mentioned. D27 asked for DEFERRED.md's content to move into issues or the docs |
+
+**Working rules.** The personal laptop's user-global `~/.claude/CLAUDE.md` has rules
+that are not in this repo:
+
+- Use plan mode before writing code.
+- Add tests with every new feature.
+- When a bug surfaces, stop and discuss it with Martin before debugging.
+- Diagnostic scripts and monkey-patches never land in the codebase.
+- Vocabulary: "Born Machine" is the probability rule, not a model class. Copied-input
+  models are "polar networks", never "polynomial models".
+
+These agree with "Working with Martin" above, and "polynomial model" appears nowhere
+on this branch.
+
+**Rebuttal material (personal laptop `reference/`, lab laptop `_paper/`) against
+this branch.**
+
+Covered by this branch:
+- More datasets: mnist12, mnist, and time series (D6, still open).
+- A baseline: JEM (D24, D35, D69–D74), parameter-matched by `arch` (D70). The
+  rebuttal compared JEM at r20 with the MPS at r40.
+- Accuracy vs coverage: D2 and the `coverage` figure kind.
+- Langevin purification (MyWa): `sgld` (D72).
+- Compute and bond-dimension scaling (2eMz Q5): `mnist_capacity` and `compute.md`.
+
+Not covered:
+- BPDA/EOT adaptive attacks (in plan.md's open items).
+- Purification at a smaller or unknown radius (2eMz Q4). `purify_delta` is `[0.1]`
+  only; Gibbs is radius-agnostic.
+- Pretraining on unlabelled data (A5V3 Q3).
+
+The rebuttal's MPS table came from code from before D2, D70 and D87. That includes
+its comparison of MPS against JEM purification, 0.783 vs 0.536 at α = 0.01.
