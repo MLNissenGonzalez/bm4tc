@@ -3,25 +3,37 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D95, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D97, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
-## Now (2026-10-13)
+## Now (2026-10-13, evening)
 
 - **E2a runs** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4 --mps`,
   since 13:09).
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
+- **Adaptive attacks and ceilings are in** (D96, D97, `docs/adaptive.md`): the
+  `adaptive` analysis part, the selective ceiling, the population ceiling on spirals.
+  **E3** (`pilot_adaptive_spirals`) runs overnight on the eGPU. Its first numbers:
+  the detector attack works, but BPDA through likelihood purification (and Gibbs at
+  6 sweeps) is weaker than PGD followed by the purifier (`docs/adaptive.md` §5).
+  The fix is not decided; the PGD warm start is the proposal.
 
 Next, in order:
 
-1. Read E2a; decide the knees, β\*, the β ladder (`defaults.yaml`) and the AT grid.
-   Then E2b (`pilot_beta28`, `hparams_from` E2a).
-2. Before Phase 8 (below): cap HPO workers per cell, `select`/`run --cell` on a
-   subset, a multi-study launcher, the Gibbs rework, adaptive attacks.
-3. Phase 8 studies.
+1. **Talk about E2a** (new session); decide the knees, β\*, the β ladder
+   (`defaults.yaml`) and the AT grid. Then E2b (`pilot_beta28`, `hparams_from` E2a).
+2. **The sampling code:** the Gibbs purification rework (O(n²) per sweep, under
+   Efficiency) and the comparison with tensorkrowch's `develop` sampling (below).
+   Gibbs is also most of the adaptive part's cost.
+3. **Read E3**, decide the purifier-attack fix (`docs/adaptive.md` §5: PGD warm start
+   proposed), rerun E3 with it, then the saturation ablation (steps, restarts, EOT)
+   that sets `analysis.adaptive`'s defaults.
+4. Before Phase 8 (below): cap HPO workers per cell, `select`/`run --cell` on a
+   subset, a multi-study launcher.
+5. Phase 8 studies.
 
 ## What the branch changed, by theme
 
@@ -59,7 +71,9 @@ Next, in order:
   (D40, D43, D61), PGD-5, MNIST AT 150 epochs (D88); no `clean_weight` (D80, D91);
   one budget grid for training and analysis (D3, D65).
 - **Analysis.** Cached, separately seeded parts (D63); detection calibrated on valid
-  (D2); data-only robustness ceiling for two classes; MIA out of the pipeline (D1).
+  (D2); data-only robustness ceilings for two classes, with rejection and on the
+  spirals law (D97); adaptive attacks through purifier and detector (D96); MIA out of
+  the pipeline (D1).
 - **JEM baseline** in the same pipeline, parameter-matched by `arch`, with SGLD
   purification (D24, D35, D69–D74).
 - **Figures from paper manifests** (`configs/papers/`, D28, D75).
@@ -109,7 +123,8 @@ need their `warm_from` study trained.
 - **Full-MNIST d3r80 (micro 128) does not fit**: validation needs ≈ 4.8 GiB beside
   the step's 16 GiB pool. Smaller validation chunks or micro 64; `mnist_capacity`
   decides.
-- **Adaptive attacks** (E2c makes them urgent, see the spirals pilot).
+- **Adaptive attacks:** implemented (D96); the purifier attack needs its fix and
+  E3's saturation ablation sets `analysis.adaptive`'s defaults (Now, step 3).
 - **Re-estimate compute.md** with graphs, MPS and the HPO budget (D81 cuts the HPO
   share to ≈ 40% of the 3,500 GPU-h estimate's).
 - **Review the study settings** copied from the old sweeps (epochs, patience, HPO
@@ -164,7 +179,7 @@ sweep sat at β ≥ 0.59). E2a measures both.
 
 Outputs in `pilots/cluster/pilot_beta_spirals/` (untracked). Captured training step,
 eager validation: sound despite D94's bug (nothing released the stray buffers).
-1000 test points, so one standard error is ≈ ±0.015 on a rate. ε = 0.1 (relative;
+2000 test points, so one standard error is ≈ ±0.011 on a rate near 0.6. ε = 0.1 (relative;
 0.2 absolute on legendre's [−1, 1]), purification radius 0.1, detection at the
 clean 5th percentile.
 
@@ -310,9 +325,9 @@ networks generatively).
 
 ## Open items
 
-- **Adaptive attacks** a reviewer will ask for (rebuttal, and E2c's purified
-  accuracy above the ceiling): BPDA/EOT through Gibbs purification, unrolled PGD
-  through likelihood purification. Not implemented.
+- **Adaptive attacks** a reviewer will ask for: implemented for likelihood
+  purification, Gibbs/SGLD and the detector (D96); the purifier attack is weaker than
+  the transfer attack so far (`docs/adaptive.md` §5).
 - **Time series** (D6): datasets, grids and studies (NAT and AT; JEM if wanted).
 - **Trainer unification** for MPS and JEM: noted, not decided (decisions.md, under
   the table).

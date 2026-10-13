@@ -166,14 +166,18 @@ real forward pass, and score the success criterion of the metric, not a proxy.
   z = x' + (P(x') − x').detach().
   - Likelihood purification with L∞ sign steps: for a fixed sign pattern and fixed box
     clamps, P_δ(x) = clamp(x + c). Its Jacobian is the identity, or 0 on coordinates
-    that the box clamps. So the identity backward is the exact gradient almost
-    everywhere: no unrolling and no second-order autograd through the tensor network
-    are needed. f∘P is only piecewise smooth, so restarts help.
+    that the box clamps, so the identity backward is the exact gradient almost
+    everywhere. **That is true and misleading** (E3, §5). The 40 sign steps of size
+    2.5δ/40 oscillate around the ridge of the density, so P is a staircase of tiny
+    translations: the identity on each step, but at any larger scale it snaps inputs
+    onto the ridge (contracting across it). The identity backward then overstates how
+    far moving x' across an arm moves P(x').
   - Gibbs and SGLD: with the random choices held fixed, the purified point is again
     x + const (both work in windows centred on the current state). So the identity
     backward is the pathwise gradient; the dependence of the draw probabilities on x
     (the score-function term) is dropped. EOT averages the margin over K draws per
-    step.
+    step. The same caveat applies: the more sweeps, the further the draws pull points
+    towards the density, and the worse the identity backward fits.
   - A random defence's x' is chosen with the attack's own estimate, then scored with M
     fresh draws. The maximum over noisy estimates is biased; fresh draws are not.
 
@@ -206,6 +210,38 @@ There is no attack-specific reference (no grid search: D96). The checks are:
    ceiling, must fall under it.
 
 Only once these hold do the same attacks report numbers on MNIST.
+
+## 5. First pilot (E3, 2026-10-13): what it showed
+
+`configs/studies/pilot_adaptive_spirals.yaml`, run on the eGPU. The analysis was read
+on β = 0 at ε = 0.05, with steps 100, restarts 5 and EOT 16 (higher numbers mean a
+weaker attack).
+
+| defence | PGD on f, then the defence | adaptive |
+|---|---|---|
+| detector q1 / q5 / q10 / q20 (`rob_sel`) | 0.9870 / 0.9500 / 0.8970 / 0.8040 | 0.9865 / 0.9490 / 0.8970 / 0.8040 |
+| likelihood purification d0.1 (`purify`) | 0.978 | **0.9925** |
+| purify + detect q1 … q20 (`purify_sel`) | 0.978 … 0.9715 | **0.9915 … 0.986** |
+| Gibbs k1 / k3 / k6 | 0.948 / 0.896 / 0.888 | 0.892 / 0.876 / **0.903** |
+
+- **The detector attack works:** it is at least as strong as PGD at every threshold,
+  in 8 s per threshold.
+- **BPDA through likelihood purification is weaker than the transfer attack**, which
+  fails check 4's spirit: an attack that knows the defence must not lose to one that
+  ignores it. The cause is the staircase of §3.
+- **Gibbs:** BPDA + EOT beats the transfer attack at 1 and 3 sweeps, and loses at 6.
+- **Cost:** about 2.5 min per likelihood-purifier defence per budget; Gibbs takes
+  130 / 239 / 416 s at k1 / k3 / k6. One run then takes about 2.5–3 h, mostly Gibbs.
+
+Fixes proposed (not decided):
+1. Warm-start the adaptive attack from the PGD example, as one of its restarts, so
+   it can only improve on the transfer attack: the attacker's best attack per point,
+   as in AutoAttack's ensemble.
+2. Also evaluate the margin at x' as well as at P(x') (a hybrid loss), so the
+   gradient pulls towards f's boundary too. Cheap; a heuristic.
+3. Unroll the purifier with smooth steps for the backward pass (the true contracting
+   Jacobian). Principled, but more code and second-order autograd through
+   tensorkrowch.
 
 ## References
 

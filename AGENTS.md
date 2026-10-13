@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D95 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D97 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -56,23 +56,22 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-13)
+## State (2026-10-13, evening)
 
 Branch `ousterhout`, pushed to GitHub up to `f9e7cb0c` (D95). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates
 and the measurements since CUDA graphs.
 
-**Start here: E2a relaunches on D95 (`f9e7cb0c`; Next 1); D92's crash is fixed
-(D94, cluster check passed 2026-10-13).** D94 in `docs/decisions.md` has the cause
-and the evidence; `docs/plan.md` the next steps. In short: tensorkrowch's
-`norm_net` state and the log Z cache kept the warm-up's autograd graph alive, so the
-captured backward summed gradients on the warm-up stream, outside the graph's memory
-pool; a later capture's `empty_cache` released that memory. The fix captures on the
-warm-up stream. **Studies may run with `trainer.cuda_graph` on only from the D94
-commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.** Martin brings
-tk intuition, not CUDA expertise: explain the GPU side plainly. tk's source is in
-`../tensorkrowch` (branch `develop`).
+**Start here (2026-10-13, evening): talk about E2a with Martin first** (it runs on
+G21G01 since 13:09; plan.md "Pilots", E2: knees, β\*, ladder, AT grid). **Then the
+sampling code:** the Gibbs purification rework and the comparison with tk's
+`develop` sampling (plan.md, Now step 2). The adaptive attacks wait for that (Now step 3).
+
+**Rule from D94, still binding:** studies may run with `trainer.cuda_graph` on only
+from the D94 commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.
+Martin brings tk intuition, not CUDA expertise: explain the GPU side plainly. tk's
+source is in `../tensorkrowch` (branch `develop`).
 
 Done before (D78–D87, see decisions.md): micro-batches, AT with cw = 0, the HPO budget,
 pilot A (log Z target n·ln d / 2), **β replaces α** (D86; Martin's theory note
@@ -136,25 +135,46 @@ Done on 2026-10-13 (eGPU):
   of a capture on one stream (tk-free and through the Trainer), and the E2a-shape run
   captured vs eager number for number.
 
-**Next (in this order):**
-1. **E2a, relaunched on D95** (Martin, on G21G01). D94's cluster check passed
-   (2026-10-13: graph tests and bench fine). The first relaunch found D95's three
-   problems (old journal kept by `--replace`, `--per-gpu 6` out of memory, Ctrl+C
-   would count running trials); the study's 2026-10-09 outputs are in
-   `outputs/pilot_beta12.broken-20261009`. Relaunch from a worktree at the D95
-   commit, without `--replace` (it would now archive the trials done since):
-   `python -m bm4tc run pilot_beta12 --gpus <idle> --per-gpu 4 --mps`. Trials the
-   stopped launch left running are run again; out-of-memory ones too (D93).
-2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
-   `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Pilots", E2:
-   knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).
-3. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
-   race); `select`/`run --cell` on a subset; a multi-study launcher; the Gibbs O(n²)
-   rework; re-estimate `docs/compute.md` (units per GPU from M0).
-4. Not urgent: the sampling comparison with the fork's `develop` branch.
+Done on 2026-10-13 (evening; commits `2268ebec`, `19d3a5ba`, not pushed):
+- **D96, adaptive attacks** (`bm4tc/analysis/adaptive.py`, part `adaptive`, off by
+  default): `Defense` (purifier, classifier, detector at τ_q on the input or the
+  purified input) and `AdaptivePGD` (BPDA + EOT through the purifier, selective PGD
+  through the detector, best iterate, restarts). New keys: `purify_adapt`,
+  `rob_sel[_adapt]`, `purify_sel[_adapt]`, `purify_gibbs_adapt`. No grid attack: Martin
+  wants universal attacks, not 2-D special cases.
+- **D97, ceilings:** selective (the ceiling at ε/2), and the population ceiling on the
+  spirals law (a certified max-flow bracket, `DataHandler.class_masses`,
+  `population_ceiling`), logged as `rob_ceiling[_sel]/pop/{eps}`. Spirals at ε = 0.1:
+  test 0.676, population [0.651, 0.654]. MNIST has no useful ceiling.
+  `docs/adaptive.md` has the theory, the curve and the first pilot.
+- **E3** (`configs/studies/pilot_adaptive_spirals.yaml`, uses an untracked copy of E2c's
+  hparams in `configs/hparams/`) runs overnight on the eGPU, data root in the
+  session's scratchpad
+  (`/tmp/claude-878363552/-home-nisseng261-0git-bm4tc/a390311e-4834-46d3-b90c-2eaaa1a56cb5/scratchpad/data`,
+  log `../e3.log`; gone after a
+  reboot, retrains in about 1 min per run). First numbers (β = 0, ε = 0.05): the
+  detector attack is as strong as PGD or stronger; **BPDA through likelihood
+  purification is weaker than PGD then purify** (0.9925 vs 0.978), and so is Gibbs at
+  6 sweeps. The identity backward misleads because sign-step purification is a
+  staircase that snaps onto the density ridge (`docs/adaptive.md` §3, §5). **To
+  decide with Martin:** the PGD warm start (recommended) or the other fixes in §5.
+- The eGPU dropped off the bus once mid-run ("unspecified launch failure" in three
+  processes at once, `nvidia-smi`: no devices): a driver or link problem, not the
+  code. **Never suggest unplugging it then: that has crashed the laptop.** Reboot.
 
-Other open items (time series, adaptive attacks, notes on the other laptop) are in
-`docs/plan.md`.
+**Next (in this order):**
+1. **E2a** with Martin (above).
+2. **The sampling code:** Gibbs purification O(n²) per sweep (plan.md, Efficiency:
+   cache the left/right environments on tk nodes, reproduce the snapshots), and the
+   comparison with tk's `develop` sampling (plan.md, Sampling). Gibbs is most of the
+   adaptive part's cost (130–416 s per budget and sweep count on spirals).
+3. **E3:** read it against the ceilings, decide the purifier-attack fix, rerun, then
+   the saturation ablation that sets `analysis.adaptive`'s defaults.
+4. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
+   race); `select`/`run --cell` on a subset; a multi-study launcher; re-estimate
+   `docs/compute.md`.
+
+Other open items (time series, notes on the other laptop) are in `docs/plan.md`.
 
 ## Personal laptop vs lab laptop (2026-10-12)
 

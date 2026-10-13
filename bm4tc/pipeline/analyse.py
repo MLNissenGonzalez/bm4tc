@@ -20,6 +20,8 @@ per part (D92); JEM's stays eager.
 """
 import hashlib
 import json
+import logging
+import time
 from pathlib import Path
 from functools import partial
 from typing import Callable, Dict, List, Optional
@@ -41,6 +43,8 @@ from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.graphs import Graphs
 from bm4tc.core.objective import Evaluation, set_seed
+
+logger = logging.getLogger(__name__)
 
 SEED = 0
 SPLIT = "test"
@@ -309,13 +313,16 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
             if selective:
                 crafts[""] = None   # the PGD examples
             for suffix, craft in crafts.items():
+                start = time.time()
                 scores = []
                 for i in range(0, len(idx), analysis.batch_size):
                     b = idx[i:i + analysis.batch_size]
                     xb, yb = X[b].to(device), y[b].to(device)
                     x_adv = x_pgd[b].to(device) if craft is None else craft(xb, yb)
                     scores.append(_score(defense, xb, x_adv, yb, selective, a.eval_draws).cpu())
-                out[key(name + suffix, SPLIT, eps, setting)] = float(torch.cat(scores).mean())
+                k = key(name + suffix, SPLIT, eps, setting)
+                out[k] = float(torch.cat(scores).mean())
+                logger.info(f"  {k} = {out[k]:.4f} ({time.time() - start:.0f} s)")
     return out
 
 
