@@ -136,13 +136,17 @@ def test_analyse_caches_each_part(scratch):
     metrics = stages.analyse(job)
     for k in ("acc/test", "rob/test/0.1", "detect/test/0/q10", "detect/test/0.1/q10",
               "purify/test/0.1/d0.1", "rob_joint/test/0.1", "purify_gibbs/test/0.1/k1",
-              "purify_gibbs/test/0/k1"):
+              "purify_gibbs/test/0/k1",
+              "rob_ceiling/test/0.1", "rob_ceiling_sel/test/0.1", "rob_ceiling/pop/0.1",
+              "rob_ceiling_sel/pop/0.1", "purify_adapt/test/0.1/d0.1", "rob_sel/test/0.1/q10",
+              "rob_sel_adapt/test/0.1/q10", "purify_sel/test/0.1/d0.1_q10",
+              "purify_sel_adapt/test/0.1/d0.1_q10", "purify_gibbs_adapt/test/0.1/k1"):
         assert k in metrics, k
 
     path = job.run_dir / "analysis.json"
     before = json.loads(path.read_text())
     assert stages.analyse(job) == metrics                          # all cached
-    nat.cfg.analysis.purify_steps = 3                              # uq, uq_joint only
+    nat.cfg.analysis.purify_steps = 3                              # uq, uq_joint, adaptive
     stages.analyse(job)
     after = json.loads(path.read_text())
     assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]

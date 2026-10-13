@@ -107,7 +107,8 @@ bm4tc/analysis/    evaluating a trained model -> numbers; imports only core
   uq.py              attacks at every budget, detection, purification (UQEvaluation);
                      its per-batch work captured on CUDA (D92)
   purification.py    likelihood (gradient) and Gibbs purification
-  ceiling.py         data-only upper bound on robust accuracy (two-class 2-D data)
+  ceiling.py         upper bounds on robust accuracy: test split, data law (D97)
+  adaptive.py        attacks through purifier and detector (Defense, AdaptivePGD; D96)
   privacy.py         membership inference, standalone, not in the pipeline (D1)
 bm4tc/pipeline/    configs, files, runs
   config.py          the run-config schema (D25)
@@ -239,10 +240,11 @@ outputs/<study>/.logs/             one log per unit, status.json
 
 | Part | Computes |
 |---|---|
-| `clean` | accuracy, losses, the robust-accuracy ceiling (2-D data) |
+| `clean` | accuracy, losses, the robust-accuracy ceilings without and with rejection: on the test split (two classes) and, under the pseudo-split `pop`, on the data law where it is known (spirals; D97) |
 | `uq` | PGD-40 at every budget; detection at clean-percentile thresholds q (calibrated on valid, D2); likelihood purification at radius δ |
-| `uq_joint` | the same under the joint attack on class and log p(x), the adaptive attack (if `joint_attack`) |
+| `uq_joint` | the same under the joint attack on class and log p(x) (if `joint_attack`) |
 | `gibbs` / `sgld` | Gibbs (MPS) or SGLD (JEM) purification of the PGD examples, per number of sweeps (if `sweep_purify.enabled`) |
+| `adaptive` | attacks through the whole defence (D96, `docs/adaptive.md`): BPDA (+ EOT) through likelihood, Gibbs or SGLD purification, selective PGD through the detector; selective robust accuracy where a detector may reject (if `adaptive.enabled`; eager) |
 
 **Metric keys** (`quantity/split[/budget][/setting]`) are documented in
 `bm4tc/pipeline/metrics.py`: e.g. `acc/test`, `rob/test/0.1`, `detect/test/0.1/q5`,

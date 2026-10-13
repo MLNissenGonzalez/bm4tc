@@ -157,6 +157,7 @@ class GibbsPurification:
         num_bins: Number of candidate values evaluated per feature.  With a
             ``step_delta_rel`` these all fall *inside* the window (see below), so
             this is the resolution of the window, not of the full input range.
+        progress: Show progress bars.
         gibbs_batch_size: Number of adversarial samples processed per batch.
             Controls memory: gibbs_batch_size × num_bins inputs per forward pass.
             At bs=8, bins=200: 1600 forward evals per feature per sweep.
@@ -183,7 +184,9 @@ class GibbsPurification:
         num_bins: int,
         gibbs_batch_size: int = 8,
         step_delta_rel: Optional[float] = 0.1,
+        progress: bool = True,
     ):
+        self.progress = progress   # off inside an attack loop (bm4tc.analysis.adaptive)
         self.num_bins = num_bins
         self.gibbs_batch_size = gibbs_batch_size
         self.step_delta_rel = step_delta_rel
@@ -278,6 +281,7 @@ class GibbsPurification:
             desc="Gibbs",
             unit="batch",
             dynamic_ncols=True,
+            disable=not self.progress,
         ):
             batch = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
             bs = len(batch)
@@ -300,6 +304,7 @@ class GibbsPurification:
                     unit="feat",
                     leave=False,
                     dynamic_ncols=True,
+                    disable=not self.progress,
                 ):
                     # Candidate values for feature k. Unrestricted: the shared global
                     # grid. Restricted: a per-sample grid spanning this sample's window
@@ -369,6 +374,7 @@ class GibbsPurification:
                 unit="batch",
                 leave=False,
                 dynamic_ncols=True,
+                disable=not self.progress,
             ):
                 chunk = x_purified[i:i + self.gibbs_batch_size].to(device)
                 log_px_chunks.append(born.marginal_log_probability(chunk).cpu())

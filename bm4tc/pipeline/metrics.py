@@ -33,6 +33,10 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
 
     acc, loss_dis, loss_x                clean, on the full test split
     rob_ceiling/test/{eps}               data-only bound on robust accuracy (two classes)
+    rob_ceiling_sel/test/{eps}           the same for a classifier that may reject (D97)
+    rob_ceiling/pop/{eps}, rob_ceiling_sel/pop/{eps}
+                                         the same on the data law where it is known
+                                         (spirals): the pseudo-split pop
     rob/test/{eps}                       accuracy on the PGD examples
     log_px/test/{eps}                    mean log p(x) / n of those examples (0: clean)
     detect/test/{eps}/q{p}               fraction flagged (0: the clean false-positive rate)
@@ -42,6 +46,19 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
     purify_gibbs, recovery_gibbs         the same for Gibbs purification (MPS), /k{n},
                                          on a fixed test subsample
     purify_sgld, recovery_sgld           the same for SGLD purification (JEM)
+
+Adaptive attacks (part `adaptive`, D96; docs/adaptive.md). `_adapt` on a name means
+the attack through the whole defence instead of PGD on the classifier. Selective
+robust accuracy counts a point when its clean input is accepted and right and its
+attacked input is rejected or right:
+
+    purify_adapt/test/{eps}/d{r}         likelihood purification, adaptive attack
+    rob_sel[_adapt]/test/{eps}/q{p}      detector at q{p}: selective robust accuracy
+    purify_sel[_adapt]/test/{eps}/d{r}_q{p}
+                                         purification, then the detector on the
+                                         purified input: selective robust accuracy
+    purify_gibbs_adapt/test/{eps}/k{n}   Gibbs (MPS) / SGLD (JEM, purify_sgld_adapt),
+                                         adaptive attack, on the sweep subsample
 
 JEM has no loss_x on test (no exact log Z), and its log_px is unnormalised.
 

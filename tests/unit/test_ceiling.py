@@ -106,3 +106,71 @@ def test_spirals_ceiling_is_below_the_reported_at_robustness():
     assert c02 == pytest.approx(0.68, abs=0.03)
     assert c03 == pytest.approx(0.63, abs=0.03)
     assert c02 < 0.929 and c03 < 0.829
+
+
+def test_selective_ceiling_is_the_ceiling_at_half_the_budget():
+    """With rejection two opposite-class points conflict only within eps, not 2*eps."""
+    X = np.array([[0.0, 0.0], [0.3, 0.0]])
+    y = np.array([0, 1])
+
+    assert robust_accuracy_ceiling(X, y, eps_abs=0.2) == pytest.approx(0.5)
+    assert robust_accuracy_ceiling(X, y, eps_abs=0.2, selective=True) == 1.0
+    assert robust_accuracy_ceiling(X, y, eps_abs=0.35, selective=True) == pytest.approx(0.5)
+
+
+def _adjacent_rectangles(cell):
+    """Class 0 uniform on [-1, 0) x [0, 1), class 1 on [0, 1) x [0, 1)."""
+    n = int(round(1 / cell))
+    mass0 = np.zeros((2 * n, n))
+    mass0[:n] = 1 / n ** 2
+    return mass0, mass0[::-1].copy()
+
+
+@pytest.mark.parametrize("eps", [0.05, 0.1, 0.23])
+def test_population_ceiling_brackets_adjacent_rectangles(eps):
+    """The best robust classifier splits at x = 0 and loses a band of width eps on
+    each side: acc* = 1 - eps."""
+    from bm4tc.analysis.ceiling import population_ceiling
+
+    lo, hi = population_ceiling(*_adjacent_rectangles(0.01), cell=0.01, eps_abs=eps)
+    assert lo <= 1 - eps <= hi
+    assert hi - lo < 0.025
+
+
+def test_population_ceiling_brackets_two_gaussians():
+    """N(±mu e1, sigma² I) under Linf: acc* = Phi((mu - eps) / sigma)."""
+    from scipy.special import ndtr
+    from bm4tc.analysis.ceiling import population_ceiling
+
+    mu, sigma, eps, cell = 1.0, 0.5, 0.3, 0.05
+    edges = np.arange(-3, 3 + cell / 2, cell)
+    bounds = edges.copy()
+    bounds[0], bounds[-1] = -np.inf, np.inf
+
+    def mass(mean_x):
+        px = np.diff(ndtr((bounds - mean_x) / sigma))
+        py = np.diff(ndtr(bounds / sigma))
+        return np.outer(px, py)
+
+    lo, hi = population_ceiling(mass(-mu), mass(mu), cell=cell, eps_abs=eps)
+    assert lo <= ndtr((mu - eps) / sigma) <= hi
+    assert hi - lo < 0.05
+
+
+def test_population_bracket_shrinks_with_the_cell():
+    from bm4tc.analysis.ceiling import population_ceiling
+
+    widths = []
+    for cell in (0.04, 0.02, 0.01):
+        lo, hi = population_ceiling(*_adjacent_rectangles(cell), cell=cell, eps_abs=0.1)
+        widths.append(hi - lo)
+    assert widths[0] > widths[1] > widths[2]
+
+
+def test_population_ceiling_of_separated_laws_is_one():
+    from bm4tc.analysis.ceiling import population_ceiling
+
+    mass0, mass1 = np.zeros((10, 10)), np.zeros((10, 10))
+    mass0[0, 0], mass1[9, 9] = 1.0, 1.0
+    assert population_ceiling(mass0, mass1, cell=0.1, eps_abs=0.2) == pytest.approx((1.0, 1.0))
+    assert population_ceiling(mass0, mass1, cell=0.1, eps_abs=0.2, selective=True)[0] == pytest.approx(1.0)

@@ -51,10 +51,9 @@ What it can be trusted for:
   about what a model can reach: E[test ceiling] ≥ the population ceiling (2.3). On
   spirals at ε = 0.1 it is 0.676, against ≈ 0.652 for the population.
 - It does not bound selective accuracy (2.2).
-- The shared point z must lie in the input box, because attacks clamp to it. Two points
-  inside the box always have z inside, but a test point outside the train-fitted box
-  might not. `conflict_pairs` therefore counts a pair only when the two ε-boxes meet
-  inside the domain. On spirals, 7 of the 2000 test points lie outside.
+- The shared point z must lie in the input box, because attacks clamp to it. It does:
+  the scaler clips valid and test points into the box (`clip=True`), and the midpoint of
+  two points in a box is in the box.
 
 ### 2.2 With rejection: the ceiling at ε/2
 
@@ -72,7 +71,7 @@ r → 0 of the independent set). On spirals test (2000 points) the two ceilings 
 | ε | 0.05 | 0.1 | 0.15 | 0.2 | 0.3 |
 |---|---|---|---|---|---|
 | without rejection | 0.998 | 0.676 | 0.629 | 0.568 | 0.504 |
-| with rejection | 1.000 | 0.998 | — | 0.676 | 0.629 |
+| with rejection | 1.000 | 0.998 | 0.766 | 0.676 | 0.629 |
 
 Detection has far more room than classification. Whether a model uses that room is
 what the adaptive detector attack must show.
@@ -95,7 +94,8 @@ The spirals law is the generator in `bm4tc/pipeline/data.py`:
 - class 0 has mean μ₀(θ) = (2θ + π)(cos θ, sin θ), class 1 has μ₁ = −μ₀;
 - the noise is N(0, σ² I) in raw units;
 - the train-fitted MinMaxScaler is affine per axis, so the noise stays Gaussian and
-  separable in model units.
+  separable in model units. It also clips into the box, so the law is the clipped one:
+  the outer cells hold the tails, and each class's cell masses sum to 1.
 
 The mass of a class in a grid cell of side h is a quadrature over θ of a product of two
 erf differences. For the whole grid that is one matrix product per class
@@ -113,6 +113,30 @@ Within reach means at most K cells away on each axis. Splitting that move into "
 along x", then "≤ K along y" is exact, and costs O(cells · K) edges instead of
 O(cells · K²). `population_ceiling` reports the bracket. The pipeline logs its upper end
 as `rob_ceiling/pop/{eps}` (`rob_ceiling_sel/pop/{eps}` with rejection).
+
+The default spirals (`configs/dataset/spirals.yaml`, legendre's [−1, 1]) at 400 cells
+per axis. "Test" is the matching ceiling on the 2000 test points, "pop" the certified
+bracket on acc*:
+
+| ε | test | pop | test, selective | pop, selective |
+|---|---|---|---|---|
+| 0.025 | 1.000 | [1.000, 1.000] | 1.000 | [1.000, 1.000] |
+| 0.05 | 0.998 | [0.978, 0.987] | 1.000 | [1.000, 1.000] |
+| 0.075 | 0.766 | [0.709, 0.729] | 1.000 | [0.999, 0.999] |
+| 0.1 | 0.676 | [0.651, 0.654] | 0.998 | [0.978, 0.987] |
+| 0.125 | 0.655 | [0.625, 0.628] | 0.930 | [0.866, 0.900] |
+| 0.15 | 0.629 | [0.598, 0.601] | 0.766 | [0.709, 0.729] |
+| 0.175 | 0.599 | [0.569, 0.572] | 0.694 | [0.668, 0.673] |
+| 0.2 | 0.568 | [0.540, 0.543] | 0.676 | [0.651, 0.654] |
+| 0.25 | 0.504 | [0.500, 0.500] | 0.655 | [0.625, 0.628] |
+| 0.3 | 0.504 | [0.500, 0.500] | 0.629 | [0.598, 0.601] |
+
+Computed with `DataHandler.class_masses(np.linspace(-1, 1, 401))`, then
+`population_ceiling(m[0], m[1], 0.005, 2 * eps)` (and `selective=True`); 3–30 s per value.
+The pipeline uses 200 cells (`analysis.rob_ceiling_cells`, 1–3 s per value), which
+widens the bracket to 0.005–0.017 where the curve is steep (ε ≈ 0.075, selective
+ε ≈ 0.15). The test ceiling is 0.02–0.06 above the population one wherever either is
+below 1, the optimism of §2.1.
 
 The population ceiling is the reference for "how far from optimal". A test-split number
 compares with it up to sampling error: with 2000 test points, one standard error on a

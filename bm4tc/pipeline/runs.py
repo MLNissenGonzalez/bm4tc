@@ -113,16 +113,28 @@ class SweepPurifyConfig:
 
 
 @dataclass
+class AdaptiveConfig:
+    """Adaptive attacks through purifier and detector (D96)."""
+    enabled: bool = MISSING
+    steps: int = MISSING
+    restarts: int = MISSING
+    eot: int = MISSING          # draws per step for a random purifier (Gibbs, SGLD)
+    eval_draws: int = MISSING   # fresh draws scoring a random purifier's examples
+
+
+@dataclass
 class AnalysisConfig:
     """What `analyse` computes per run; values in configs/defaults.yaml (D20)."""
     attack_steps: int = MISSING
     joint_attack: bool = MISSING
     rob_ceiling: bool = MISSING
+    rob_ceiling_cells: int = MISSING
     percentiles: List[float] = MISSING
     purify_delta: List[float] = MISSING
     purify_steps: int = MISSING
     batch_size: int = MISSING
     sweep_purify: SweepPurifyConfig = field(default_factory=SweepPurifyConfig)
+    adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
 
 
 @dataclass
