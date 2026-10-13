@@ -1,0 +1,203 @@
+# Adaptive attacks and robustness ceilings
+
+What the analysis's attacks are allowed to claim, and the bounds that check them (D96,
+D97). The code is `bm4tc/analysis/adaptive.py` (the attacks) and
+`bm4tc/analysis/ceiling.py` (the bounds).
+
+## 1. Defences and what is measured
+
+A defence is a triple (P, f, D):
+
+- P, the purifier: likelihood purification P_δ (deterministic: no random start), Gibbs
+  with k sweeps or SGLD (random), or the identity.
+- f(z) = argmax_c p(c | z), the classifier.
+- D, the detector: it accepts iff log p(·) ≥ τ_q, read on the input x or on P(x).
+  τ_q is the q-th percentile of clean log p(x) on valid (D2). The attacker knows τ_q
+  (white box).
+
+The defended output is h(x) = ⊥ (reject) if D rejects, else f(P(x)). The attacker picks
+x' in B∞(x, ε) ∩ [lo, hi]ⁿ. A test point (x, y) scores:
+
+- **robust accuracy (no rejection):** 1[h(x') = y]. These are `rob` (P = identity, no
+  D) and `purify`. For a random P the attacker fixes x' before the draw; the score is
+  P_ω[h(x') = y].
+- **selective robust accuracy** (Tramèr 2022): 1[h(x) = y] · 1[h(x') ∈ {y, ⊥}]. The
+  clean point must be accepted and correct, and the attacked point must be rejected or
+  correct. Detection is judged by this one number: a detection rate and an error rate
+  among passed examples are not bounded by anything, and a detector that rejects
+  everything scores 0 here, not 1.
+
+## 2. Ceilings
+
+### 2.1 On the test set, without rejection
+
+Two test points of opposite class within 2ε of each other (L∞) share a point z within ε
+of both. No h is right at z for both labels. This holds for a random h too, since the two
+probabilities of being right sum to at most 1. So every edge of a matching in the
+conflict graph forces one error:
+
+    robust accuracy ≤ 1 − |M| / n.
+
+For two classes the graph is bipartite, and the maximum matching gives the tightest bound
+of this kind (König). It is also attained on the sample: the unmatched points form an
+independent set, and labelling their ε-balls by class makes all of them robustly correct.
+
+What it can be trusted for:
+
+- It is a hard bound on any measured accuracy without rejection on that test set: any
+  model, any purifier, any randomness. A measured value above it means that the attack
+  missed adversarial examples that exist. It never means robustness.
+- It is tight only for a classifier that knows the test points, so it is optimistic
+  about what a model can reach: E[test ceiling] ≥ the population ceiling (2.3). On
+  spirals at ε = 0.1 it is 0.676, against ≈ 0.652 for the population.
+- It does not bound selective accuracy (2.2).
+- The shared point z must lie in the input box, because attacks clamp to it. Two points
+  inside the box always have z inside, but a test point outside the train-fitted box
+  might not. `conflict_pairs` therefore counts a pair only when the two ε-boxes meet
+  inside the domain. On spirals, 7 of the 2000 test points lie outside.
+
+### 2.2 With rejection: the ceiling at ε/2
+
+Let x_i and x_j be of opposite class and within ε of each other. Suppose both were
+selectively robust. Then x_j is accepted with label y_j. But x_j lies in B(x_i, ε), so it
+must also be rejected or labelled y_i, a contradiction. The matching argument therefore
+holds with threshold ε instead of 2ε:
+
+    selective robust accuracy ≤ ceiling at ε/2.
+
+This is the data-only form of "detecting adversarial examples is as hard as classifying
+them at half the radius" (Tramèr 2022). It is tight on the sample (accept only within
+r → 0 of the independent set). On spirals test (2000 points) the two ceilings are:
+
+| ε | 0.05 | 0.1 | 0.15 | 0.2 | 0.3 |
+|---|---|---|---|---|---|
+| without rejection | 0.998 | 0.676 | 0.629 | 0.568 | 0.504 |
+| with rejection | 1.000 | 0.998 | — | 0.676 | 0.629 |
+
+Detection has far more room than classification. Whether a model uses that room is
+what the adaptive detector attack must show.
+
+### 2.3 Population ceiling (2-D data with a known law)
+
+With equal priors, the best robust accuracy any classifier attains on the data
+distribution is
+
+    acc*(ε) = 1 − ½ · F_2ε(p₀, p₁),
+
+where F_2ε is the largest mass that can be coupled between the class laws p₀ and p₁ with
+every pair at most 2ε apart. This is optimal transport with the 0–1 cost 1[d > 2ε]
+(Bhagoji, Cullina & Mittal 2019; Pydi & Jog 2020). The selective version is acc*(ε/2).
+The test-set ceiling is the same quantity computed on the empirical laws.
+
+The spirals law is the generator in `bm4tc/pipeline/data.py`:
+
+- θ = 2π√U, so p(θ) = θ / (2π²) on [0, 2π];
+- class 0 has mean μ₀(θ) = (2θ + π)(cos θ, sin θ), class 1 has μ₁ = −μ₀;
+- the noise is N(0, σ² I) in raw units;
+- the train-fitted MinMaxScaler is affine per axis, so the noise stays Gaussian and
+  separable in model units.
+
+The mass of a class in a grid cell of side h is a quadrature over θ of a product of two
+erf differences. For the whole grid that is one matrix product per class
+(`DataHandler.class_masses`).
+
+On the grid, F is a max-flow: from the source to the class-0 cells (capacity: their
+mass), then to the class-1 cells within reach, then to the sink (capacity: their mass).
+Cells blur distances by up to h per axis, which brackets F with certainty:
+
+- connect cells whose farthest points are within 2ε: a lower bound on F;
+- connect cells whose nearest points are within 2ε: an upper bound on F;
+- hence acc* lies in [1 − F_hi/2, 1 − F_lo/2], and the bracket shrinks linearly with h.
+
+Within reach means at most K cells away on each axis. Splitting that move into "≤ K
+along x", then "≤ K along y" is exact, and costs O(cells · K) edges instead of
+O(cells · K²). `population_ceiling` reports the bracket. The pipeline logs its upper end
+as `rob_ceiling/pop/{eps}` (`rob_ceiling_sel/pop/{eps}` with rejection).
+
+The population ceiling is the reference for "how far from optimal". A test-split number
+compares with it up to sampling error: with 2000 test points, one standard error on a
+rate near 0.6 is ≈ 0.011. The test-set ceiling stays the per-sample hard flag.
+
+### 2.4 MNIST
+
+MNIST has no generating law, so it has no population ceiling. The matching bound still
+holds for 10 classes, with a general matching, but it carries no information: on 28×28,
+opposite-class images are ≈ 0.74 apart in L∞ (in [0, 1] pixel units; Yang et al. 2020,
+"A closer look at accuracy vs. robustness"). That is far more than 2ε for every budget up
+to 0.3, so the ceiling is 1. Trust in the MNIST adaptive numbers therefore comes from
+validating the same attacks on spirals.
+
+## 3. Adaptive attacks
+
+The principles are those of Athalye, Carlini & Wagner (2018), Tramèr et al. (2020),
+Bryniarski et al. (2022) and Croce et al. (2022): attack the whole defence, with its
+real forward pass, and score the success criterion of the metric, not a proxy.
+
+- **Loss:** the margin m(z) = log p(y | z) − max_{c' ≠ y} log p(c' | z), evaluated on
+  the point that f actually classifies. The attack succeeds where m < 0. It descends on
+  m.
+
+- **Purifier attack, BPDA + EOT.** The forward pass runs the real purifier; the backward
+  pass treats it as the identity, written straight-through as
+  z = x' + (P(x') − x').detach().
+  - Likelihood purification with L∞ sign steps: for a fixed sign pattern and fixed box
+    clamps, P_δ(x) = clamp(x + c). Its Jacobian is the identity, or 0 on coordinates
+    that the box clamps. So the identity backward is the exact gradient almost
+    everywhere: no unrolling and no second-order autograd through the tensor network
+    are needed. f∘P is only piecewise smooth, so restarts help.
+  - Gibbs and SGLD: with the random choices held fixed, the purified point is again
+    x + const (both work in windows centred on the current state). So the identity
+    backward is the pathwise gradient; the dependence of the draw probabilities on x
+    (the score-function term) is dropped. EOT averages the margin over K draws per
+    step.
+  - A random defence's x' is chosen with the attack's own estimate, then scored with M
+    fresh draws. The maximum over noisy estimates is biased; fresh draws are not.
+
+- **Detector attack, selective PGD.** Per sample, the attack steps on log p − τ (up) while
+  the input is rejected, and on the margin once it is accepted. There is no Lagrange
+  weight to tune. log p is read where the detector reads it: on x', or on P(x') for
+  purify + detect, which then combines both attacks.
+
+- **For every attack:**
+  - the best iterate per sample is kept: any iterate in the ball at which the defence
+    errs (and accepts) is a valid adversarial example;
+  - R random restarts;
+  - the attack is done when the defence errs and accepts.
+
+- **JOINT_PGD** (D72) adds log p(x) to the class loss with a fixed weight. It ignores the
+  threshold and the purifier, so it is not an adaptive attack in this sense; it stays as
+  a cheap extra attack.
+
+## 4. Checking the attacks on spirals
+
+There is no attack-specific reference (no grid search: D96). The checks are:
+
+1. Every adaptive number lies under its test ceiling, and within about two standard
+   errors of the population ceiling at most.
+2. Saturation: doubling steps, restarts or EOT draws moves the numbers by less than
+   0.005.
+3. With P = identity and no detector, the adaptive attack reproduces PGD on the
+   classifier.
+4. The known gap closes: E2c's purified accuracy of 0.82 at ε = 0.1, above the 0.676
+   ceiling, must fall under it.
+
+Only once these hold do the same attacks report numbers on MNIST.
+
+## References
+
+- A. Athalye, N. Carlini, D. Wagner. Obfuscated gradients give a false sense of security.
+  ICML 2018.
+- A. N. Bhagoji, D. Cullina, P. Mittal. Lower bounds on adversarial robustness from
+  optimal transport. NeurIPS 2019.
+- O. Bryniarski, N. Hingun, P. Pachuca, V. Wang, N. Carlini. Evading adversarial example
+  detection defenses with orthogonal projected gradient descent. ICLR 2022.
+- F. Croce, S. Gowal, T. Brunner, E. Shelhamer, M. Hein, T. Cemgil. Evaluating the
+  adversarial robustness of adaptive test-time defenses. ICML 2022.
+- M. S. Pydi, V. Jog. Adversarial risk via optimal transport and optimal couplings.
+  ICML 2020.
+- F. Tramèr. Detecting adversarial examples is (nearly) as hard as classifying them.
+  ICML 2022.
+- F. Tramèr, N. Carlini, W. Brendel, A. Madry. On adaptive attacks to adversarial example
+  defenses. NeurIPS 2020.
+- Y.-Y. Yang, C. Rashtchian, H. Zhang, R. Salakhutdinov, K. Chaudhuri. A closer look at
+  accuracy vs. robustness. NeurIPS 2020.
