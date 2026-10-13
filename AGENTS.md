@@ -58,13 +58,12 @@ place, no pass-through layers.
 
 ## State (2026-10-13)
 
-Branch `ousterhout`, pushed to GitHub up to `e864767c` (D94); the handoff commit after
-it is local. Phases 0–7 of the refactor are done; `main` is untouched and the local tag
+Branch `ousterhout`, pushed to GitHub up to `f9e7cb0c` (D95). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates.
 
-**Start here: D92's crash is found and fixed (D94, `e864767c`, pushed 2026-10-13);
-Martin runs the cluster check, then E2a relaunches (Next 1).** `docs/plan.md`,
+**Start here: E2a relaunches on D95 (`f9e7cb0c`; Next 1); D92's crash is fixed
+(D94, cluster check passed 2026-10-13).** `docs/plan.md`,
 Efficiency, "Captured validation crashed the training graph" has the cause, the
 evidence and the next steps. In short: tensorkrowch's
 `norm_net` state and the log Z cache kept the warm-up's autograd graph alive, so the
