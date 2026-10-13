@@ -5,8 +5,9 @@ import sys
 from bm4tc.pipeline.executor import Unit, execute, slots
 
 
-def _unit(tmp_path, name, code, deps=()):
-    return Unit(name, [sys.executable, "-c", code], tmp_path / f"{name}.log", list(deps))
+def _unit(tmp_path, name, code, deps=(), after=()):
+    return Unit(name, [sys.executable, "-c", code], tmp_path / f"{name}.log", list(deps),
+                list(after))
 
 
 def test_slots():
@@ -32,6 +33,22 @@ def test_dependencies_order_and_failures_skip_downstream(tmp_path):
     assert (tmp_path / "bad.log").read_text().strip() == "boom"
     saved = json.loads(state_file.read_text())["units"]
     assert saved["bad"]["exit"] == 3
+
+
+def test_after_waits_for_the_end_in_any_state(tmp_path):
+    """A unit with ``after`` starts once those units ended, failed or skipped too,
+    and not before (D99: select after the HPO workers)."""
+    order = tmp_path / "order"
+    write = lambda tag: f"open({str(order)!r}, 'a').write({tag!r})"
+    units = [
+        _unit(tmp_path, "last", write("z"), after=["bad", "skipped", "slow"]),
+        _unit(tmp_path, "bad", "import sys; sys.exit(3)"),
+        _unit(tmp_path, "skipped", write("x"), deps=["bad"]),
+        _unit(tmp_path, "slow", "import time; time.sleep(0.5); " + write("s")),
+    ]
+    states = execute(units, per_gpu=4, poll=0.05)
+    assert states == {"last": "done", "bad": "failed", "skipped": "skipped", "slow": "done"}
+    assert order.read_text() == "sz"
 
 
 def test_each_slot_pins_its_gpu(tmp_path):
