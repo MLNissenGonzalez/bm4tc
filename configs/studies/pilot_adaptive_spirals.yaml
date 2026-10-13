@@ -1,0 +1,28 @@
+# E3 (plan.md "Pilots"; docs/adaptive.md §4): the adaptive attacks (D96) on E2c's
+# models, against the ceilings (D97). Half of E2c's β ladder, E2c's selected lr
+# (hparams_from: configs/hparams/pilot_beta_spirals.yaml, from the cluster), one seed.
+# Minutes per run on one GPU.
+dataset: spirals
+regime: nat
+seeds: 1
+grid:
+  arch: [d10r6]
+  beta: [0, 0.01, 0.1, 0.5, 0.9, 1]
+config:
+  trainer.max_epoch: 300
+  trainer.batch_size: 256
+  trainer.patience: 100
+  tracking.mode: disabled      # a local pilot (eGPU), no W&B
+hpo: null
+hparams_from:
+  study: pilot_beta_spirals
+  params: [trainer.optimizer.kwargs.lr]
+budgets: [0.05, 0.1, 0.15, 0.2]
+analysis:
+  joint_attack: false
+  batch_size: 2000             # the whole spirals test split in one batch
+  sweep_purify:
+    enabled: true
+    gibbs: {batch_size: 256}   # the 250-point subsample in one batch
+  adaptive:
+    enabled: true
