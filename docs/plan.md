@@ -11,8 +11,8 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 - **E2a's HPO is done** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4
   --mps`, 13:09–15:03, 6/6 trials in every cell). Two workers failed on trials
-  started in the first second (MPS "busy or unavailable"; an "unspecified launch
-  failure", not yet explained), which skipped `select` and every train (fixed by
+  started in the first second, both on GPU 7 (MPS "busy or unavailable", and an
+  "unspecified launch failure" 4 s into the other trial: the same start-up race), which skipped `select` and every train (fixed by
   D99). Relaunch the same command without `--replace`: select, then the 12 trains
   and analyses.
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
