@@ -13,14 +13,21 @@ Random inputs in the embedding's input range, 10 classes; the defaults are MNIST
 (144 features), d3r20, batch 256, β = 0. The Trainer runs through its public
 `train()` with its defaults (on CUDA the step and the validation are captured, D90,
 D92; `--eager` turns that off); only `_train_epoch` is timed (the validation pass is
-not), and the first epoch is discarded as warm-up. Peak memory covers the whole run,
-validation and capture included, without the CUDA context (≈ 0.3-0.5 GB more per
-process): allocated, and reserved (the allocator's cache and the graphs' pool, what
-the GPU must hold).
+not), and the first epoch is discarded as warm-up. The validation split is 2.5
+chunks, as a real one has full chunks and a last partial one: over the default 5
+epochs both shapes are captured, each graph with its own pool. Peak memory covers
+the whole run, validation and capture included: allocated, reserved (the
+allocator's cache and the graphs' pools), and the process as nvidia-smi sees it at
+the end, CUDA context included: that is what one unit takes from the GPU, so
+`--per-gpu` is about (GPU memory - other processes) / this (D95; E2a's units held
+3.9 GiB each on G21G01 where reserved said 2.9).
 """
 import argparse
+import os
 import statistics
+import subprocess
 import time
+from typing import Optional
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,17 +55,36 @@ def _datahandler(cbm, n_features: int, batch: int, micro_batch, steps: int) -> S
         labels = torch.randint(0, N_CLASSES, (n,))
         return DataLoader(TensorDataset(inputs, labels), batch_size=batch_size, shuffle=shuffle)
 
-    # validation in chunks of the micro-batch, as the pipeline builds it (D79)
+    # validation in chunks of the micro-batch, as the pipeline builds it (D79):
+    # two full chunks and a half one, so both shapes are captured
+    chunk = micro_batch or batch
     return SimpleNamespace(
         classification={"train": loader(steps * batch, batch, True),
-                        "valid": loader(batch, micro_batch or batch, False)},
+                        "valid": loader(2 * chunk + chunk // 2, chunk, False)},
         data_dim=n_features,
     )
 
 
-def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, int]:
-    """Seconds per training step, one value per timed epoch, and the peak memory
-    allocated and reserved [bytes] (0 on CPU)."""
+def process_gpu_memory() -> Optional[int]:
+    """This process's GPU memory as the driver reports it [bytes]: the CUDA context
+    and everything the allocator holds. None without nvidia-smi."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
+                              "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        pid, mib = (field.strip() for field in line.split(","))
+        if pid == str(os.getpid()):
+            return int(mib) * 2**20
+    return None
+
+
+def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, int, Optional[int]]:
+    """Seconds per training step, one value per timed epoch, the peak memory
+    allocated and reserved, and the process's GPU memory at the end [bytes]
+    (0, 0, None on CPU)."""
     torch.manual_seed(0)
     born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=args.bond_dim))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, args.features, N_CLASSES, device)
@@ -88,15 +114,16 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, in
         torch.cuda.reset_peak_memory_stats(device)
     trainer.train()
     if device.type != "cuda":
-        return times[1:], 0, 0
+        return times[1:], 0, 0, None
     return (times[1:], torch.cuda.max_memory_allocated(device),
-            torch.cuda.max_memory_reserved(device))
+            torch.cuda.max_memory_reserved(device), process_gpu_memory())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--steps", type=int, default=20, help="training steps per epoch")
-    parser.add_argument("--epochs", type=int, default=3, help="epochs, the first is warm-up")
+    parser.add_argument("--epochs", type=int, default=5,
+                        help="epochs, the first is warm-up (5 capture both validation shapes)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--regime", choices=["nat", "at", "both"], default="both")
     parser.add_argument("--features", type=int, default=144, help="sites (MNIST12 144, MNIST 784)")
@@ -114,11 +141,13 @@ def main():
           f"batch {args.batch}, micro-batch {args.micro_batch}, β {args.beta}, {mode}, "
           f"{args.steps} steps x {args.epochs - 1} timed epochs, {name}")
     for regime in (["nat", "at"] if args.regime == "both" else [args.regime]):
-        times, allocated, reserved = bench(regime, args, device)
+        times, allocated, reserved, process = bench(regime, args, device)
         ms = [1e3 * t for t in times]
+        unit = "" if process is None else f", {process / 2**30:.2f} GiB per process (nvidia-smi)"
         print(f"  {regime}: {statistics.mean(ms):8.1f} ms/step  "
               f"(min {min(ms):.1f}, max {max(ms):.1f}, {len(ms)} epochs), "
-              f"peak {allocated / 2**30:.2f} GiB allocated, {reserved / 2**30:.2f} GiB reserved")
+              f"peak {allocated / 2**30:.2f} GiB allocated, {reserved / 2**30:.2f} GiB reserved"
+              f"{unit}")
         if device.type == "cuda":
             torch.cuda.empty_cache()
 

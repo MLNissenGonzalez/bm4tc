@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D94 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D95 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -129,21 +129,23 @@ Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation cr
   relaunches with `--replace`.
 
 Done on 2026-10-13 (eGPU):
+- **D95:** `--replace` always starts an HPO over; trials left running by a stopped
+  launch are run again, not counted; `bench_train_step` validates like a real run
+  and prints the process's GPU memory (E2a's unit: 3.9 GiB on G21G01).
 - **D94:** the crash's cause (plan.md) and its fix, one side stream per `Graphs` for
   warm-ups and captures. New seams in `tests/unit/test_graphs.py`: every allocation
   of a capture on one stream (tk-free and through the Trainer), and the E2a-shape run
   captured vs eager number for number.
 
 **Next (in this order):**
-1. **Cluster check, then E2a** (Martin, on G21G01; D94 confirmed and pushed). From a
-   worktree at `e864767c` (`git worktree add ../runs/e864767c e864767c`, see
-   `docs/hpc_bm4tc.md`):
-   - `python -m pytest -q -p no:logging tests/unit/test_graphs.py`: 15 passed expected.
-   - `python -m tests.bench.bench_train_step --regime nat --bond-dim 40 --batch 512
-     --beta 0.5`: no crash, ≈ 62 ms/step on the 2080, ≈ 2.9 GiB reserved per unit.
-   - Then, in a screen: `python -m bm4tc run pilot_beta12 --gpus <idle> --per-gpu 6
-     --mps --replace` (≈ 3.3 GiB per unit with the CUDA context, 22 GB per GPU).
-   Ask Martin for the outputs; if a graph test fails there, stop and discuss.
+1. **E2a, relaunched on D95** (Martin, on G21G01). D94's cluster check passed
+   (2026-10-13: graph tests and bench fine). The first relaunch found D95's three
+   problems (old journal kept by `--replace`, `--per-gpu 6` out of memory, Ctrl+C
+   would count running trials); the study's 2026-10-09 outputs are in
+   `outputs/pilot_beta12.broken-20261009`. Relaunch from a worktree at the D95
+   commit, without `--replace` (it would now archive the trials done since):
+   `python -m bm4tc run pilot_beta12 --gpus <idle> --per-gpu 4 --mps`. Trials the
+   stopped launch left running are run again; out-of-memory ones too (D93).
 2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
    `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Beta", E2:
    knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).

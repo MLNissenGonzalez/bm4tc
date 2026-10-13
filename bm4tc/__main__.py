@@ -65,7 +65,8 @@ def main(argv=None):
                         help="run each GPU's units under its NVIDIA MPS daemon (needs --gpus)")
     parser.add_argument("--replace", action="store_true",
                         help="archive finished results whose config changed (or whose checkpoint "
-                             "was pruned), then redo them")
+                             "was pruned), then redo them; an HPO is always archived and "
+                             "started over")
     prune = parser.add_mutually_exclusive_group()
     for mode in stages.PRUNE_MODES:
         prune.add_argument(f"--{mode}", dest="prune", action="store_const", const=mode,

@@ -84,13 +84,34 @@ def test_changed_space_is_refused(scratch, monkeypatch):
     assert len(_states(nat, cell)) == 1
 
 
-def test_stale_running_trials_fail(scratch):
+def test_stale_running_trials_fail_and_are_run_again(scratch):
+    """A trial left running by a stopped launch (Ctrl+C) is marked FAIL and
+    interrupted, and does not count towards the budget (D95)."""
     nat = Study("tests/stages_nat")
     cell = nat.cells()[0]
     stages.prepare_hpo(nat, cell)
-    stages._optuna_study(nat, cell).ask()                         # a crashed worker's trial
+    stages._optuna_study(nat, cell).ask()                         # a stopped worker's trial
     stages.prepare_hpo(nat, cell)
-    assert _states(nat, cell) == [optuna.trial.TrialState.FAIL]
+    (trial,) = stages._optuna_study(nat, cell).get_trials()
+    assert trial.state == optuna.trial.TrialState.FAIL
+    assert trial.user_attrs[stages.INTERRUPTED]
+    assert stages._counted([trial]) == []
+    assert f"0/{nat.n_trials}" in stages.status(nat)
+
+
+@pytest.mark.slow
+def test_replace_starts_an_unchanged_hpo_over(scratch, monkeypatch):
+    """--replace archives a journal even when its config is unchanged: one of
+    crashed launches would otherwise be kept, its failures counted (D95)."""
+    nat = Study("tests/stages_nat")
+    cell = nat.cells()[0]
+    monkeypatch.setattr(nat.cfg.hpo, "trials_per_param", 1)
+    stages.hpo(nat, [cell])
+    stages.hpo(nat, [cell])                                       # resumes: nothing to do
+    assert len(_states(nat, cell)) == 1
+    stages.hpo(nat, [cell], replace=True)
+    assert len(list((scratch / "outputs/tests/stages_nat/.replaced").rglob("journal.log"))) == 1
+    assert len(_states(nat, cell)) == 1
 
 
 def test_suggest_parses_the_space():

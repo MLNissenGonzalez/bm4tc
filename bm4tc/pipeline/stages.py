@@ -12,7 +12,8 @@ seed runs with those hparams; ``analyse`` evaluates each finished run on test
 (:mod:`bm4tc.pipeline.analyse`) into its ``analysis.json`` and collects the study's
 ``results.csv``. Every stage resumes: finished trials and runs are
 kept, and a changed config is refused unless ``--replace`` archives the old
-results (:meth:`bm4tc.pipeline.runs.Job.claim`). Warm studies need their
+results (:meth:`bm4tc.pipeline.runs.Job.claim`); for an HPO, ``--replace`` always
+archives the journal and starts over (D95). Warm studies need their
 ``warm_from`` study trained first.
 """
 import contextlib
@@ -154,13 +155,17 @@ TPE_STARTUP_TRIALS = 6
 _FINISHED = (optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED,
              optuna.trial.TrialState.FAIL)
 _COUNTED = _FINISHED + (optuna.trial.TrialState.RUNNING,)
-CUDA_FAILURE = "cuda_failure"  # trial user attribute (D93)
+# Trial user attributes of a FAIL that says nothing about its hparams, so the
+# trial does not count towards the budget and is run again.
+CUDA_FAILURE = "cuda_failure"   # ended in a CUDA error (D93)
+INTERRUPTED = "interrupted"     # left running by a stopped launch (D95)
 
 
 def _counted(trials, states=_COUNTED) -> list:
     """The trials in ``states`` that count towards the budget: all but those that
-    ended in a CUDA error, which says nothing about their hparams (D93)."""
-    return [t for t in trials if t.state in states and not t.user_attrs.get(CUDA_FAILURE)]
+    ended in a CUDA error (D93) or were interrupted (D95)."""
+    return [t for t in trials if t.state in states
+            and not t.user_attrs.get(CUDA_FAILURE) and not t.user_attrs.get(INTERRUPTED)]
 
 
 def _cuda_failure(error: BaseException) -> bool:
@@ -241,24 +246,28 @@ def _hpo_hash(study: Study, cell: Cell) -> str:
 def prepare_hpo(study: Study, cell: Cell, replace: bool = False) -> None:
     """Make the cell's HPO ready to (re)start, before any worker runs.
 
-    A journal started under another config or space raises :class:`RunConflict`,
-    unless ``replace`` archives it. Trials left RUNNING by a crashed launch are
-    marked FAIL (so: one launch per study at a time).
+    ``replace`` archives an existing journal and starts over, whatever its config
+    (D95: a journal of crashed launches has the same config and would be kept).
+    Without it, a journal started under another config or space raises
+    :class:`RunConflict`. Trials left RUNNING by a stopped or crashed launch are
+    marked FAIL and :data:`INTERRUPTED`, so they are run again, not counted (so:
+    one launch per study at a time).
     """
     hpo_dir = study.hpo_dir(cell)
     if (hpo_dir / "journal.log").exists():
         stored = _optuna_study(study, cell).user_attrs.get("config_hash")
-        if stored != _hpo_hash(study, cell):
-            if not replace:
-                raise RunConflict(
-                    f"{hpo_dir} holds an HPO under another config or search space. "
-                    f"Pass --replace to move it to .replaced/ and start over.")
+        if replace:
             archive(study.name, hpo_dir)
+        elif stored != _hpo_hash(study, cell):
+            raise RunConflict(
+                f"{hpo_dir} holds an HPO under another config or search space. "
+                f"Pass --replace to move it to .replaced/ and start over.")
     opt = _optuna_study(study, cell)
     opt.set_user_attr("config_hash", _hpo_hash(study, cell))
     for t in opt.get_trials(deepcopy=False, states=(optuna.trial.TrialState.RUNNING,)):
         logger.warning(f"{study.name}/{cell.name}: trial {t.number} was left running; "
-                       "marking it failed.")
+                       "marking it interrupted, to be run again.")
+        optuna.trial.Trial(opt, t._trial_id).set_user_attr(INTERRUPTED, True)
         opt.tell(t.number, state=optuna.trial.TrialState.FAIL)
 
 
