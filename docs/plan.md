@@ -276,9 +276,10 @@ Measured in [compute.md](compute.md).
       allocated on that warm-up stream after the capture and nothing released memory
       (an allocator out-of-memory retry would have, and would have crashed, not
       corrupted silently).
-    - **Next:** Martin confirms D94; push; on G21G01 run the graph tests and a short
-      E2a-shape run from a worktree at the fix; then E2a relaunches with `--replace`
-      (`--per-gpu` from the bench's ≈ 3 GiB per unit). The commits `5c2db9cd`..
+    - **Next:** D94 is confirmed and pushed (`e864767c`). On G21G01, from a worktree
+      at it: the graph tests and `bench_train_step` at E2a's shape; then E2a
+      relaunches with `--mps --replace --per-gpu 6` (≈ 3 GiB per unit from the bench,
+      plus the CUDA context). The commits `5c2db9cd`..
       `fc9d452e` stay unusable with `trainer.cuda_graph` on.
     - **Also open:** full-MNIST d3r80 micro 128 does not fit even without the crash
       (validation needs ≈ 4.8 GiB beside the step's 16 GiB pool): smaller validation

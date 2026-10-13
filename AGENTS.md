@@ -58,14 +58,15 @@ place, no pass-through layers.
 
 ## State (2026-10-13)
 
-Branch `ousterhout`, pushed to GitHub up to `5b55b66d`. Phases 0–7 of the refactor are
-done; `main` is untouched and the local tag `pre-ousterhout` marks it. Phase 8 (journal
-studies on the HPC) is in its pilots; `docs/plan.md` has the details, `docs/compute.md`
-the (pre-graph) cost estimates.
+Branch `ousterhout`, pushed to GitHub up to `e864767c` (D94); the handoff commit after
+it is local. Phases 0–7 of the refactor are done; `main` is untouched and the local tag
+`pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
+`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates.
 
-**Start here: D92's crash is found and fixed (D94, 2026-10-13); the cluster check
-is next.** `docs/plan.md`, Efficiency, "Captured validation crashed the training
-graph" has the cause, the evidence and the next steps. In short: tensorkrowch's
+**Start here: D92's crash is found and fixed (D94, `e864767c`, pushed 2026-10-13);
+Martin runs the cluster check, then E2a relaunches (Next 1).** `docs/plan.md`,
+Efficiency, "Captured validation crashed the training graph" has the cause, the
+evidence and the next steps. In short: tensorkrowch's
 `norm_net` state and the log Z cache kept the warm-up's autograd graph alive, so the
 captured backward summed gradients on the warm-up stream, outside the graph's memory
 pool; a later capture's `empty_cache` released that memory. The fix captures on the
@@ -134,9 +135,15 @@ Done on 2026-10-13 (eGPU):
   captured vs eager number for number.
 
 **Next (in this order):**
-1. **Martin confirms D94**, then push; on G21G01 run `pytest tests/unit/test_graphs.py`
-   and a short E2a-shape run from a worktree at the fix; then E2a relaunches with
-   `--replace`.
+1. **Cluster check, then E2a** (Martin, on G21G01; D94 confirmed and pushed). From a
+   worktree at `e864767c` (`git worktree add ../runs/e864767c e864767c`, see
+   `docs/hpc_bm4tc.md`):
+   - `python -m pytest -q -p no:logging tests/unit/test_graphs.py`: 15 passed expected.
+   - `python -m tests.bench.bench_train_step --regime nat --bond-dim 40 --batch 512
+     --beta 0.5`: no crash, ≈ 62 ms/step on the 2080, ≈ 2.9 GiB reserved per unit.
+   - Then, in a screen: `python -m bm4tc run pilot_beta12 --gpus <idle> --per-gpu 6
+     --mps --replace` (≈ 3.3 GiB per unit with the CUDA context, 22 GB per GPU).
+   Ask Martin for the outputs; if a graph test fails there, stop and discuss.
 2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
    `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Beta", E2:
    knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).
