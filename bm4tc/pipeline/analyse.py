@@ -5,11 +5,13 @@ study's analysis settings and returns metric keys (:mod:`bm4tc.pipeline.metrics`
 Every part starts from the same seed, so its numbers do not depend on which
 parts ran before it (a resumed analysis reproduces them).
 
-    clean      acc, losses, the robust-accuracy ceiling
+    clean      acc, losses, the robust-accuracy ceilings (test; data law if known)
     uq         PGD at every budget: rob, detection, likelihood purification
     uq_joint   the same under the joint attack (if analysis.joint_attack)
     gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
+    adaptive   PGD and the adaptive attack against purifier and detector (D96; if
+               analysis.adaptive.enabled; eager)
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -19,14 +21,19 @@ per part (D92); JEM's stays eager.
 import hashlib
 import json
 from pathlib import Path
-from typing import Callable, Dict, List
+from functools import partial
+from typing import Callable, Dict, List, Optional
 
+import numpy as np
 import torch
 from omegaconf import OmegaConf
 
 from bm4tc.pipeline.metrics import key
-from bm4tc.analysis.ceiling import robust_accuracy_ceiling
-from bm4tc.analysis.uq import UQConfig, UQEvaluation, UQResults
+from bm4tc.analysis.ceiling import population_ceiling, robust_accuracy_ceiling
+from bm4tc.analysis.adaptive import AdaptivePGD, Defense
+from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
+from bm4tc.analysis.uq import UQConfig, UQEvaluation, UQResults, compute_thresholds
+from bm4tc.core.attacks import ProjectedGradientDescent
 from bm4tc.pipeline.data import DataHandler
 from bm4tc.core.jem.model import JEMMLP
 from bm4tc.core.jem.purification import SGLDPurification
@@ -58,11 +65,13 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
 # The analysis settings each part's numbers depend on (besides the budgets): a
 # part is recomputed when one of them, the budgets or the run changes.
 SETTINGS = {
-    "clean": ("rob_ceiling",),
+    "clean": ("rob_ceiling", "rob_ceiling_cells"),
     "uq": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
     "uq_joint": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
     "gibbs": ("attack_steps", "batch_size", "sweep_purify"),
     "sgld": ("attack_steps", "batch_size", "sweep_purify"),
+    "adaptive": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size",
+                 "sweep_purify", "adaptive"),
 }
 
 
@@ -81,6 +90,8 @@ def parts(analysis, model: str = "mps") -> Dict[str, Callable]:
         out["uq_joint"] = uq_joint
     if analysis.sweep_purify.enabled:
         out.update({"sgld": sgld} if model == "jem" else {"gibbs": gibbs})
+    if analysis.adaptive.enabled:
+        out["adaptive"] = adaptive
     return out
 
 
@@ -98,12 +109,30 @@ def clean(cbm, datahandler, analysis, budgets: List[float], device) -> Dict[str,
     names = ("acc", "loss_dis") if jem else ("acc", "loss_dis", "loss_x")
     out = {key(name, SPLIT): m[name] for name in names}
     if analysis.rob_ceiling:
-        X = datahandler.data[SPLIT].detach().cpu().numpy()
-        y = datahandler.labels[SPLIT].detach().cpu().numpy()
-        for eps in budgets:
-            ceiling = robust_accuracy_ceiling(X, y, rel_to_abs(eps, range_size_of(cbm)))
+        out.update(_ceilings(cbm, datahandler, budgets, analysis.rob_ceiling_cells))
+    return out
+
+
+def _ceilings(cbm, datahandler, budgets, cells: int) -> Dict[str, float]:
+    """Bounds on robust accuracy without (``rob_ceiling``) and with rejection
+    (``rob_ceiling_sel``): on the test split (two classes), and on the data law
+    under the pseudo-split ``pop`` where the law is known (spirals), the upper end
+    of the bracket (D97, docs/adaptive.md §2)."""
+    X = datahandler.data[SPLIT].detach().cpu().numpy()
+    y = datahandler.labels[SPLIT].detach().cpu().numpy()
+    edges = np.linspace(*cbm.input_range, cells + 1)
+    masses = datahandler.class_masses(edges)
+    out = {}
+    for eps in budgets:
+        eps_abs = rel_to_abs(eps, range_size_of(cbm))
+        for name, selective in (("rob_ceiling", False), ("rob_ceiling_sel", True)):
+            ceiling = robust_accuracy_ceiling(X, y, eps_abs, selective=selective)
             if ceiling == ceiling:  # nan: not two classes, or too many points
-                out[key("rob_ceiling", SPLIT, eps)] = ceiling
+                out[key(name, SPLIT, eps)] = ceiling
+            if masses is not None:
+                _, upper = population_ceiling(masses[0], masses[1], edges[1] - edges[0],
+                                              eps_abs, selective=selective)
+                out[key(name, "pop", eps)] = upper
     return out
 
 
@@ -191,15 +220,114 @@ def _sweep(name: str, cbm, datahandler, analysis, budgets, device, purifier=None
     return out
 
 
+def _sweep_purifier(cbm, analysis, progress: bool = True):
+    """The model's sweep purifier: ``("sgld", ...)`` for JEM, ``("gibbs", ...)`` for the MPS."""
+    p = analysis.sweep_purify
+    if isinstance(cbm, JEMMLP):
+        return "sgld", SGLDPurification(step_rel=p.step, steps=p.sgld.steps,
+                                        step_size=p.sgld.step_size,
+                                        noise_std=p.sgld.noise_std, batch_size=p.sgld.batch_size)
+    return "gibbs", GibbsPurification(num_bins=p.gibbs.num_bins, gibbs_batch_size=p.gibbs.batch_size,
+                                      step_delta_rel=p.step, progress=progress)
+
+
 def gibbs(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
-    return _sweep("gibbs", cbm, datahandler, analysis, budgets, device)
+    return _sweep("gibbs", cbm, datahandler, analysis, budgets, device,
+                  _sweep_purifier(cbm, analysis)[1])
 
 
 def sgld(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
+    return _sweep("sgld", cbm, datahandler, analysis, budgets, device,
+                  _sweep_purifier(cbm, analysis)[1])
+
+
+def _likelihood_purified(purifier, model, delta_abs, device, x):
+    return purifier.purify(model, x, delta_abs, device)[0]
+
+
+def _sweep_purified(purifier, model, sweeps, device, x):
+    return purifier.purify_snapshots(model, x, [sweeps], device)[sweeps][0]
+
+
+def _subsample(n: int, size: Optional[int]) -> torch.Tensor:
+    """The fixed test subsample of the sweep purification (the same points as
+    UQEvaluation's, seed 0)."""
+    if size is None or size >= n:
+        return torch.arange(n)
+    return torch.from_numpy(np.random.default_rng(0).permutation(n)[:size])
+
+
+def _defences(cbm, analysis, thresholds, range_size, device):
+    """(key name, setting, Defense, selective, test subsample) for every defence:
+    likelihood purification, the detector at each threshold, both, and the sweep
+    purification if it is on."""
+    likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps)
+    out = []
+    for delta in analysis.purify_delta:
+        purify = partial(_likelihood_purified, likelihood, cbm, rel_to_abs(delta, range_size),
+                         device)
+        out.append(("purify", f"d{delta:g}", Defense(cbm, purify), False, None))
+        for q, tau in thresholds.items():
+            out.append(("purify_sel", f"d{delta:g}_q{q:g}",
+                        Defense(cbm, purify, tau, detect_on="purified"), True, None))
+    for q, tau in thresholds.items():
+        out.append(("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True, None))
     p = analysis.sweep_purify
-    purifier = SGLDPurification(step_rel=p.step, steps=p.sgld.steps, step_size=p.sgld.step_size,
-                                noise_std=p.sgld.noise_std, batch_size=p.sgld.batch_size)
-    return _sweep("sgld", cbm, datahandler, analysis, budgets, device, purifier)
+    if p.enabled:
+        name, purifier = _sweep_purifier(cbm, analysis, progress=False)
+        for k in p.sweeps:
+            out.append((f"purify_{name}", f"k{k}",
+                        Defense(cbm, partial(_sweep_purified, purifier, cbm, k, device),
+                                random=True), False, p.subsample))
+    return out
+
+
+def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
+    """Each defence at each budget, attacked by PGD on the classifier (no suffix) and
+    by the adaptive attack (``_adapt``, D96). Robust accuracy for the purifiers,
+    selective robust accuracy (``rob_sel``, ``purify_sel``) where a detector may
+    reject. PGD on the purifiers alone is the ``uq`` and sweep parts' already."""
+    a = analysis.adaptive
+    cbm.to(device)
+    cbm.log_normalizer()
+    thresholds, _ = compute_thresholds(cbm, datahandler.classification["valid"],
+                                       list(analysis.percentiles), device)
+    X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
+    range_size = range_size_of(cbm)
+    pgd = ProjectedGradientDescent(norm="inf", num_steps=analysis.attack_steps)
+    attack = AdaptivePGD(steps=a.steps, restarts=a.restarts, eot=a.eot)
+    defences = _defences(cbm, analysis, thresholds, range_size, device)
+    out = {}
+    for eps in budgets:
+        eps_abs = rel_to_abs(eps, range_size)
+        x_pgd = torch.cat([pgd.generate(cbm, X[i:i + analysis.batch_size],
+                                        y[i:i + analysis.batch_size], eps_abs, device).cpu()
+                           for i in range(0, len(X), analysis.batch_size)])
+        for name, setting, defense, selective, subsample in defences:
+            idx = _subsample(len(X), subsample)
+            crafts = {"_adapt": lambda xb, yb: attack.generate(defense, xb, yb, eps_abs)}
+            if selective:
+                crafts[""] = None   # the PGD examples
+            for suffix, craft in crafts.items():
+                scores = []
+                for i in range(0, len(idx), analysis.batch_size):
+                    b = idx[i:i + analysis.batch_size]
+                    xb, yb = X[b].to(device), y[b].to(device)
+                    x_adv = x_pgd[b].to(device) if craft is None else craft(xb, yb)
+                    scores.append(_score(defense, xb, x_adv, yb, selective, a.eval_draws).cpu())
+                out[key(name + suffix, SPLIT, eps, setting)] = float(torch.cat(scores).mean())
+    return out
+
+
+def _score(defense: Defense, x, x_adv, labels, selective: bool, draws: int) -> torch.Tensor:
+    """Per sample: the probability of a right answer on ``x_adv``, or with
+    ``selective`` of a right answer on ``x`` and no wrong one on ``x_adv``
+    (docs/adaptive.md §1)."""
+    right_adv, error_adv = defense.rates(x_adv, labels, draws)
+    if not selective:
+        return right_adv
+    right_clean, _ = defense.rates(x, labels, draws)
+    return right_clean * (1 - error_adv)
 
 
 def run_part(part: Callable, cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:

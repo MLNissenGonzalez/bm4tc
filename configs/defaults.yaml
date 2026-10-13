@@ -38,6 +38,7 @@ analysis:
   attack_steps: 40             # PGD Linf with random start, at every budget
   joint_attack: true           # also attack class and log p(x) jointly (JOINT_PGD)
   rob_ceiling: true            # data-only bound on robust accuracy (two-class data only)
+  rob_ceiling_cells: 200       # grid cells per axis for the population ceiling (2-D data with a known law, D97)
   percentiles: [1, 5, 10, 20]  # detection thresholds: percentiles of clean log p(x)
   purify_delta: [0.1]          # likelihood-purification radius (fraction of the input range)
   purify_steps: 40
@@ -55,3 +56,9 @@ analysis:
       step_size: 0.01          # fixed for every model (not the training sampler's)
       noise_std: 0.005
       batch_size: 256
+  adaptive:                    # PGD through purifier and detector (D96, docs/adaptive.md)
+    enabled: false
+    steps: 100
+    restarts: 5
+    eot: 16                    # draws per step for Gibbs / SGLD
+    eval_draws: 32             # fresh draws scoring their examples

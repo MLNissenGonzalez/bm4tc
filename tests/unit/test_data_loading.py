@@ -141,3 +141,29 @@ def test_italy_power_demand_loading():
     assert ds.num_cls == 2, f"Expected 2 classes, got {ds.num_cls}"
     assert ds.ucr_train_size is not None, "ucr_train_size should be set for UCR datasets"
     assert ds.X.dtype in (np.float32, np.float64)
+
+
+def test_spirals_cell_masses_match_the_generator():
+    """The law written in _spirals_cell_masses is the law _two_dim_generator samples
+    (clipped into the outer cells), cell by cell."""
+    import numpy as np
+    from bm4tc.pipeline.data import DataGenDowConfig, _spirals_cell_masses, _two_dim_generator
+
+    cfg = DataGenDowConfig(name="spirals", size=500_000, seed=3, noise=0.5)
+    X, t = _two_dim_generator(cfg)
+    edges = np.linspace(-12, 12, 17)        # the outer cells hold the tails
+    masses = _spirals_cell_masses(cfg, edges, scale=np.ones(2), shift=np.zeros(2))
+
+    assert masses.shape == (2, 16, 16)
+    np.testing.assert_allclose(masses.sum(axis=(1, 2)), 1.0, atol=1e-9)
+    clipped = np.clip(X, edges[0], edges[-1])
+    for c in (0, 1):
+        counts, _, _ = np.histogram2d(*clipped[t == c].T, bins=[edges, edges])
+        np.testing.assert_allclose(masses[c], counts / counts.sum(), atol=2e-3)
+
+
+def test_class_masses_only_for_a_known_law():
+    import numpy as np
+    from bm4tc.pipeline.data import DataHandler, DatasetConfig
+
+    assert DataHandler(DatasetConfig(name="moons")).class_masses(np.linspace(-1, 1, 5)) is None

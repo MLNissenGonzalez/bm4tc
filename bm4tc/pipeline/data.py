@@ -156,6 +156,36 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
         return X, t
 
 
+def _spirals_cell_masses(cfg: DataGenDowConfig, edges: np.ndarray, scale: np.ndarray,
+                         shift: np.ndarray, n_theta: int = 6000) -> np.ndarray:
+    """The law of ``_two_dim_generator``'s spirals, as each class's probability per grid
+    cell (docs/adaptive.md §2.3), in the coordinates ``x * scale + shift``.
+
+    θ = 2π√U has density θ / (2π²) on [0, 2π]; class 0 is centred on
+    (2θ + π)(cos θ, sin θ), class 1 on its negative; the noise is N(0, noise²) per raw
+    coordinate. A cell's mass is a midpoint quadrature over θ of a product of two normal
+    interval probabilities. The outer edges are taken as ±∞, so the outer cells hold the
+    tails: the law of the clipped data (the scaler clips), and each class sums to 1.
+
+    Returns ``(2, n, n)`` for ``n = len(edges) - 1`` cells per axis.
+    """
+    from scipy.special import ndtr
+
+    theta = (np.arange(n_theta) + 0.5) * 2 * np.pi / n_theta
+    weight = theta / (2 * np.pi ** 2) * (2 * np.pi / n_theta)
+    bounds = np.asarray(edges, dtype=np.float64).copy()
+    bounds[0], bounds[-1] = -np.inf, np.inf
+    masses = []
+    for sign in (1, -1):
+        centre = sign * (2 * theta + np.pi) * np.stack([np.cos(theta), np.sin(theta)])
+        per_axis = []
+        for k in range(2):
+            z = (bounds[None, :] - (scale[k] * centre[k][:, None] + shift[k])) / (scale[k] * cfg.noise)
+            per_axis.append(np.diff(ndtr(z), axis=1))                  # (n_theta, n)
+        masses.append((per_axis[0] * weight[:, None]).T @ per_axis[1])  # (n, n)
+    return np.stack(masses)
+
+
 def _nist_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
     """Download and preprocess MNIST dataset.
 
@@ -567,6 +597,16 @@ class DataHandler:
             raise ValueError(f"Unknown scaler '{scaler_name}'")
         self.scaler = scaler_cls(feature_range=self.input_range, clip=True)
 
+
+    def class_masses(self, edges: np.ndarray) -> Optional[np.ndarray]:
+        """Each class's probability per cell of the square grid ``edges × edges``, in
+        model coordinates (after :meth:`split_and_rescale`): ``(num_cls, n, n)``, or
+        None for a dataset whose law the code does not know (all but spirals)."""
+        canonical, _ = _parse_dataset_name(self.cfg.name)
+        if canonical != "spirals":
+            return None
+        return _spirals_cell_masses(self.cfg.gen_dow_kwargs, edges,
+                                    self.scaler.scale_, self.scaler.min_)
 
     def split_and_rescale(self, input_range: Tuple[float, float]):
         """Split data into train/valid/test and rescale it to ``input_range``, the

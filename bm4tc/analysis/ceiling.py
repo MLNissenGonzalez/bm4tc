@@ -12,16 +12,21 @@ For two classes the conflict graph is bipartite, so the maximum matching is comp
 exactly in polynomial time and the bound is the tightest one obtainable this way (König).
 The bound is a property of the *data*, not of any model: a measured ``rob`` above it means
 the attack failed to find adversarial examples that provably exist, never that the model is
-that robust.
+that robust. It is tight on the sample, so it is optimistic about what a model can reach
+on the data law (docs/adaptive.md §2.1).
 
-Budget convention (see "Budget vocabulary" in CLAUDE.md): ``eps_abs`` is an ABSOLUTE
+``selective`` bounds a classifier that may reject (the matching bound at ``eps_abs / 2``),
+and :func:`population_ceiling` brackets the bound for a known 2-D data law instead of a
+sample (docs/adaptive.md §2.2, §2.3).
+
+Budget convention (GUIDE.md, glossary): ``eps_abs`` is an ABSOLUTE
 model-domain budget, matching ``eval_rob(eps_abs=)``. Callers convert with
 ``rel_to_abs(eps_rel, range_size_of(cbm))``. It must be measured in the same coordinates as
 ``X`` — i.e. after ``DataHandler.split_and_rescale``.
 """
 
 import logging
-from typing import Union
+from typing import Tuple, Union
 
 import numpy as np
 
@@ -81,8 +86,14 @@ def robust_accuracy_ceiling(
     eps_abs: float,
     norm: Union[int, str] = "inf",
     max_points: int = DEFAULT_MAX_POINTS,
+    selective: bool = False,
 ) -> float:
     """Largest robust accuracy any classifier can attain on ``(X, y)`` at ``eps_abs``.
+
+    With ``selective``, the bound on selective robust accuracy (a classifier that may
+    reject: the clean point accepted and correct, the attacked one rejected or correct).
+    Two opposite-class points within ``eps_abs`` of each other cannot both be robust in
+    that sense, which is the matching bound at ``eps_abs / 2`` (docs/adaptive.md §2.2).
 
     Args:
         X: ``(n, d)`` inputs, in the same coordinates as ``eps_abs``.
@@ -117,7 +128,7 @@ def robust_accuracy_ceiling(
         logger.info(f"robust_accuracy_ceiling: {n} > max_points={max_points}, skipping")
         return float("nan")
 
-    pairs = conflict_pairs(X, y, eps_abs, norm=norm)
+    pairs = conflict_pairs(X, y, eps_abs / 2 if selective else eps_abs, norm=norm)
     if len(pairs) == 0:
         return 1.0
 
@@ -138,3 +149,93 @@ def robust_accuracy_ceiling(
     matching_size = int((matched >= 0).sum())
 
     return 1.0 - matching_size / n
+
+
+def population_ceiling(
+    mass0: np.ndarray,
+    mass1: np.ndarray,
+    cell: float,
+    eps_abs: float,
+    selective: bool = False,
+) -> Tuple[float, float]:
+    """Bracket on the best robust accuracy any classifier attains on a 2-D data law.
+
+    With equal class priors the robust Bayes accuracy is ``1 - F/2``, where ``F`` is the
+    largest mass that can be coupled between the two class laws with every pair at most
+    ``2 * eps_abs`` apart in L∞ (``eps_abs`` with ``selective``, the bound for a
+    classifier that may reject; docs/adaptive.md §2). On a grid of square cells ``F`` is
+    a maximum flow from class-0 cells to class-1 cells within reach. A cell blurs a
+    distance by up to ``cell`` per axis, so connecting the cells whose farthest points
+    are within reach gives a lower bound on ``F`` and connecting those whose nearest
+    points are gives an upper bound: the bracket is certain, and shrinks with ``cell``.
+
+    Args:
+        mass0, mass1: ``(nx, ny)`` probability of each class in each cell, each summing
+            to 1 (the class's whole law, tails included in the outer cells).
+        cell: the cells' side, in the same units as ``eps_abs``.
+        eps_abs: absolute attack budget.
+        selective: bound selective robust accuracy (reach ``eps_abs`` instead of
+            ``2 * eps_abs``).
+
+    Returns:
+        ``(lo, hi)`` with ``lo <= acc* <= hi``.
+    """
+    reach = (1.0 if selective else 2.0) * float(eps_abs) / float(cell)
+    k_sure = int(np.floor(reach - 1 + 1e-9))       # every pair of points within reach
+    k_maybe = int(np.floor(reach + 1 + 1e-9))      # some pair of points within reach
+    flow_lo, slack = _coupled_mass(mass0, mass1, k_sure)
+    flow_hi, _ = _coupled_mass(mass0, mass1, k_maybe)
+    return max(0.0, 1 - (flow_hi + slack) / 2), min(1.0, 1 - (flow_lo - slack) / 2)
+
+
+_SCALE = 10 ** 9   # probability -> integer capacity (scipy's max flow is int32)
+
+
+def _coupled_mass(mass0: np.ndarray, mass1: np.ndarray, k: int) -> Tuple[float, float]:
+    """Largest mass coupled between cells at most ``k`` cells apart on each axis, and
+    the rounding error of the integer capacities.
+
+    The move "≤ k cells in x and ≤ k in y" goes through a middle layer, one node per
+    cell: first ≤ k along x, then ≤ k along y. That is exact (the middle nodes have no
+    capacity) and costs O(cells · k) edges instead of O(cells · k²).
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import maximum_flow
+
+    if k < 0:
+        return 0.0, 0.0
+    nx, ny = mass0.shape
+    cap0 = np.rint(mass0 * _SCALE).astype(np.int64)
+    cap1 = np.rint(mass1 * _SCALE).astype(np.int64)
+    slack = (np.count_nonzero(mass0) + np.count_nonzero(mass1)) / (2 * _SCALE)
+
+    # Nodes: source, class-0 cells, middle cells, class-1 cells, sink.
+    cells = nx * ny
+    src, a, m, b, sink = 0, 1, 1 + cells, 1 + 2 * cells, 1 + 3 * cells
+    ii, jj = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    ii, jj = ii.ravel(), jj.ravel()
+    rows, cols, caps = [], [], []
+
+    def add(r, c, cap):
+        rows.append(r), cols.append(c), caps.append(cap)
+
+    on0, on1 = cap0.ravel() > 0, cap1.ravel() > 0
+    flat = np.arange(cells)
+    add(np.full(on0.sum(), src), a + flat[on0], cap0.ravel()[on0])
+    add(b + flat[on1], np.full(on1.sum(), sink), cap1.ravel()[on1])
+    big = np.iinfo(np.int32).max
+    for d in range(-k, k + 1):
+        # class-0 cell (i, j) -> middle cell (i + d, j)
+        ok = on0 & (ii + d >= 0) & (ii + d < nx)
+        add(a + flat[ok], m + flat[ok] + d * ny, np.full(ok.sum(), big))
+        # middle cell (i, j) -> class-1 cell (i, j + d)
+        ok = (jj + d >= 0) & (jj + d < ny)
+        ok[ok] &= on1[flat[ok] + d]
+        add(m + flat[ok], b + flat[ok] + d, np.full(ok.sum(), big))
+
+    graph = csr_matrix(
+        (np.concatenate(caps).astype(np.int32), (np.concatenate(rows), np.concatenate(cols))),
+        shape=(sink + 1, sink + 1),
+    )
+    flow = maximum_flow(graph, src, sink, method="dinic").flow_value
+    return flow / _SCALE, slack
