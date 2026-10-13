@@ -540,15 +540,17 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
           replace: bool = False) -> List["Unit"]:
     """The units of the given stages of a study, as subprocesses of ``_unit``.
 
-    select waits for every HPO worker, train for select, analyse for its train,
-    each only when that stage is part of the launch. Studies without HPO have no
-    hpo or select units.
+    select waits for every HPO worker to end, train for select, analyse for its
+    train, each only when that stage is part of the launch. A failed HPO worker
+    does not skip select: its trial is run again by the others (D93), and select
+    checks every cell's budget itself (D99). Studies without HPO have no hpo or
+    select units.
     """
     from bm4tc.pipeline.executor import Unit
 
-    def unit(name, *args, deps=()):
+    def unit(name, *args, deps=(), after=()):
         argv = [sys.executable, "-m", "bm4tc", "_unit", *args]
-        return Unit(name, argv, logs_dir(study) / f"{name}.log", list(deps))
+        return Unit(name, argv, logs_dir(study) / f"{name}.log", list(deps), list(after))
 
     has_hpo = study.cfg.hpo is not None
     jobs = [j for j in study.jobs() if j.cell in cells and (not seeds or j.seed in seeds)]
@@ -562,7 +564,7 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
                                 "--worker", str(w)))
     select_deps = []
     if "select" in stages and has_hpo:
-        out.append(unit("select", "select", study.name, deps=hpo_names))
+        out.append(unit("select", "select", study.name, after=hpo_names))
         select_deps = ["select"]
     for job in jobs:
         name = f"{job.cell.name}/s{job.seed}"

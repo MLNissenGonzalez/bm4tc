@@ -4,9 +4,10 @@ Each unit is a subprocess with its own log file. The pool has one slot per
 (GPU, k) for ``--gpus 0,1 --per-gpu k``; a unit's ``CUDA_VISIBLE_DEVICES`` is
 its slot's GPU, or with ``mps`` that GPU's MPS daemon (:mod:`bm4tc.pipeline.mps`,
 started if it is not running). Without GPUs there are ``per_gpu`` unpinned slots. A unit
-starts when every unit it depends on succeeded; when a unit fails, everything
-downstream of it is skipped and the rest goes on. The state of every unit is
-written to a JSON file as it changes, for ``status``.
+starts when every unit in its ``deps`` succeeded and every unit in its ``after``
+ended, in any state; when a unit fails, everything that depends on it is skipped
+and the rest goes on. The state of every unit is written to a JSON file as it
+changes, for ``status``.
 
 The pool knows nothing about studies: :mod:`bm4tc.pipeline.stages` builds the units.
 """
@@ -30,7 +31,8 @@ class Unit:
     name: str                       # unique, path-like: train/legendre/d3r40/a0/s1
     argv: List[str]
     log: Path
-    deps: List[str] = field(default_factory=list)
+    deps: List[str] = field(default_factory=list)   # must succeed first
+    after: List[str] = field(default_factory=list)  # must end first, in any state
 
 
 def slots(gpus: Optional[Sequence[str]], per_gpu: int) -> List[Optional[str]]:
@@ -58,7 +60,7 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                         f"({mps_daemons.pipe_directory(gpu)})")
     by_name = {u.name: u for u in units}
     for u in units:
-        unknown = set(u.deps) - set(by_name)
+        unknown = set(u.deps + u.after) - set(by_name)
         if unknown:
             raise ValueError(f"{u.name} depends on unknown units {sorted(unknown)}")
     state = {u.name: {"state": PENDING, "log": str(u.log)} for u in units}
@@ -89,7 +91,8 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                         set_state(u.name, SKIPPED)
                         changed = True
             ready = [u for u in units if state[u.name]["state"] == PENDING
-                     and all(state[d]["state"] == DONE for d in u.deps)]
+                     and all(state[d]["state"] == DONE for d in u.deps)
+                     and all(state[d]["state"] in (DONE, FAILED, SKIPPED) for d in u.after)]
             while ready and free:
                 u, gpu = ready.pop(0), free.pop(0)
                 u.log.parent.mkdir(parents=True, exist_ok=True)

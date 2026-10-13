@@ -3,14 +3,18 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D98, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D99, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
 ## Now (2026-10-13, evening)
 
-- **E2a runs** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4 --mps`,
-  since 13:09).
+- **E2a's HPO is done** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4
+  --mps`, 13:09–15:03, 6/6 trials in every cell). Two workers failed on trials
+  started in the first second (MPS "busy or unavailable"; an "unspecified launch
+  failure", not yet explained), which skipped `select` and every train (fixed by
+  D99). Relaunch the same command without `--replace`: select, then the 12 trains
+  and analyses.
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.

@@ -186,6 +186,19 @@ def test_run_in_parallel_then_status(scratch):
     assert "legendre/d4r3/b0" in report and "3/3" in report and "failed" not in report
 
 
+def test_select_runs_after_failed_hpo_workers():
+    """select waits for the HPO workers to end, not to succeed: a worker stopped by
+    a CUDA error leaves its trial to the others (D93), and select checks the
+    budget itself (D99). train still needs select to succeed."""
+    nat = Study("tests/stages_nat")
+    todo = {u.name: u for u in stages.units(nat, ["hpo", "select", "train"], nat.cells(),
+                                            workers=2)}
+    hpo_names = [n for n in todo if n.startswith("hpo/")]
+    assert len(hpo_names) == 2 * len(nat.cells())
+    assert todo["select"].deps == [] and todo["select"].after == hpo_names
+    assert all(u.deps == ["select"] for n, u in todo.items() if n.startswith("train/"))
+
+
 def test_pruner_follows_the_config():
     nat = Study("tests/stages_nat")                    # max_epoch 3, warmup 0.5 -> 2 epochs
     pruner = stages._pruner(nat, nat.cells()[0])
