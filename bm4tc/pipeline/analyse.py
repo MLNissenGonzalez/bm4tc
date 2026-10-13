@@ -288,7 +288,8 @@ def _defences(cbm, analysis, thresholds, range_size, device):
 
 def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     """Each defence at each budget, attacked by PGD on the classifier (no suffix) and
-    by the adaptive attack (``_adapt``, D96). Robust accuracy for the purifiers,
+    by the adaptive attack (``_adapt``, D96), which starts its first restart from the
+    PGD example (D98). Robust accuracy for the purifiers,
     selective robust accuracy (``rob_sel``, ``purify_sel``) where a detector may
     reject. PGD on the purifiers alone is the ``uq`` and sweep parts' already."""
     a = analysis.adaptive
@@ -309,7 +310,8 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
                            for i in range(0, len(X), analysis.batch_size)])
         for name, setting, defense, selective, subsample in defences:
             idx = _subsample(len(X), subsample)
-            crafts = {"_adapt": lambda xb, yb: attack.generate(defense, xb, yb, eps_abs)}
+            crafts = {"_adapt": lambda xb, yb, b: attack.generate(defense, xb, yb, eps_abs,
+                                                                  start=x_pgd[b])}
             if selective:
                 crafts[""] = None   # the PGD examples
             for suffix, craft in crafts.items():
@@ -318,7 +320,7 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
                 for i in range(0, len(idx), analysis.batch_size):
                     b = idx[i:i + analysis.batch_size]
                     xb, yb = X[b].to(device), y[b].to(device)
-                    x_adv = x_pgd[b].to(device) if craft is None else craft(xb, yb)
+                    x_adv = x_pgd[b].to(device) if craft is None else craft(xb, yb, b)
                     scores.append(_score(defense, xb, x_adv, yb, selective, a.eval_draws).cpu())
                 k = key(name + suffix, SPLIT, eps, setting)
                 out[k] = float(torch.cat(scores).mean())

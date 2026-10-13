@@ -25,8 +25,11 @@ def test_study_composes_under_schema(name, monkeypatch):
     for cell in study.cells():  # one seed per cell: seeds only set tracking.seed
         cfg = Job(study, cell, study.seeds()[0]).compose(hparams={})  # no `select` yet
         OmegaConf.to_container(cfg, resolve=True)
+        # Every inherited key exists, or lands in an open dict (optimizer.kwargs).
         for key in (study.cfg.hparams_from.params if study.cfg.hparams_from else []):
-            assert OmegaConf.select(cfg, key) is not None, key
+            parent = key.rpartition(".")[0]
+            assert (OmegaConf.select(cfg, key) is not None
+                    or (parent.endswith("kwargs") and OmegaConf.select(cfg, parent) is not None)), key
         if cfg.trainer.evasion is not None:  # untyped in the schema (D53)
             evasion_config(cfg.trainer.evasion)
         assert (cfg.trainer.evasion is not None) == (study.regime == "at")
