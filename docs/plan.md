@@ -211,76 +211,75 @@ Measured in [compute.md](compute.md).
          allocated (≈ 3 × the eager peak; d3r80 likewise). E2a (`--per-gpu 8`, about
          3.4 GiB per unit at start) lost 61 of 73 HPO trials to out-of-memory errors
          at startup; E2c (spirals) was unaffected and finished.
-      3. **BROKEN, to discuss (2026-10-09, late; see "Captured validation crashes"
-         below).** In code (D91–D93): validation captured (`Graphs`, `Evaluation`),
-         one warm-up stream per `Graphs`, one memory pool per graph, the analysis
-         stage's per-batch work captured. Capturing validation corrupts the
-         training graph at real shapes.
+      3. **Fixed (D94, 2026-10-13; see "Captured validation crashes" below).** In
+         code (D91–D94): validation captured (`Graphs`, `Evaluation`), one side
+         stream per `Graphs` for warm-ups and captures, one memory pool per graph,
+         the analysis stage's per-batch work captured. Needs the cluster check
+         before studies run on it.
       4. Re-estimate compute.md.
-  - **Captured validation crashes (open, 2026-10-09, late; discuss with Martin before
-    any change).** Goal: efficiency. Graphs make a unit ≈ 9–10× faster per step
-    (training, D90) and ≈ 7× per batch (analysis, `tests.bench.bench_analysis`
-    MNIST12 d3r40: 178 s eager → 81 s with warm-ups included), at the price of code
-    complexity (`bm4tc/core/graphs.py`, capturable functions, device scalars, copies
-    of outputs) and memory (each graph keeps a private pool; three eager warm-up
-    calls per shape). The interaction with tensorkrowch is the hazy part: tk keeps
-    Python-side state between calls (data nodes made once in `CBM.forward`,
-    `stack_data_memory`, `_memory_nodes`, successors, resultant nodes until
-    `reset()`), and a captured graph records the addresses of whatever tensors that
-    state held at capture time. tk's source: `../tensorkrowch` (branch `develop`;
-    the env has tk 1.1.6). Martin knows tk's design; the CUDA side is ours.
-    - **What works (G21G01):** the captured training step alone (D90, every bench,
-      E2c); one warm-up stream per `Graphs` (MNIST12 d3r40 batch 512: 2.96 GiB
-      reserved instead of 5.79: a new stream per warm-up call had cached the step's
-      peak three times; this also caused E2a's first loss: 61 of 73 trials out of
-      memory at `--per-gpu 8`); the analysis routines captured, bit-identical to
-      eager (PGD, joint PGD, likelihood purification, log p(x), prediction), and a
-      whole captured UQ evaluation; captured validation in the tiny tests
-      (`tests/unit/test_graphs.py`, d4 models).
-    - **What crashes:** the first training replay after validation was captured:
-      `CUDA error: an illegal memory access`, and the process's CUDA context is
-      dead afterwards (every later CUDA call fails).
-
-      | Run | train batch / valid chunk | valid captured | Result |
-      |---|---|---|---|
-      | bench, micro 128, valid in own graphs | 512 (4 × 128) / 128 | yes, epoch 1 | fine |
-      | bench, micro 128, valid in the step's pool | 512 (4 × 128) / 128 | yes | fine |
-      | bench, no micro, valid in the step's pool | 512 / 512 | yes, 1st batch | crash |
-      | `test_captured_training_and_validation_at_e2as_shape`, own pools | 512 / 512 | yes, after 3 warm-ups | crash |
-      | E2a relaunch (`8554e342`, shared pool) | 512 / 512 | yes | crash, 56 trials |
-      | full MNIST d3r80 micro 128, shared pool, 1st batch | 512 (4 × 128) / 128 | yes | crash |
-      | any of these with validation eager | | no | fine |
-
-      Separate pools did not fix it, so the shared pool was not the cause. The
-      no-micro cases have validation inputs of the training step's exact shape, but
-      d3r80 micro 128 crashed with different shapes, so shape alone does not explain
-      it either. `CUDA_LAUNCH_BLOCKING=1` cannot locate it (a graph is one launch).
-    - **Hypotheses, unverified:** (a) the training graph reads or writes a tensor it
-      did not allocate (made eagerly before its capture, held by tk state), which
-      later Python code releases; the cache emptying that `torch.cuda.graph` does at
-      every capture start then unmaps it, and the next replay touches unmapped
-      memory (fits "crash only after a second capture"; does not explain why the
-      micro-128 MNIST12 bench survived). (b) tk state reused across the two graphs
-      (data nodes, `stack_data_memory`, the norm net's nodes in
-      `log_partition_function`, eval vs train mode) makes one graph's recorded
-      addresses stale after the other's capture. (c) Something in torch 2.1's
-      allocator under capture (private pools, `empty_cache` at capture start).
-    - **Next (with the eGPU, from Tue 2026-10-13):** reproduce with
-      `test_captured_training_and_validation_at_e2as_shape` (fits 8 GB); bisect what
-      validation's capture changes (skip `log_partition_function`; skip `cbm.eval()`;
-      validation through a separate `ConditionalBornMachine` sharing only the
-      parameters; `torch.cuda.graph` with `capture_error_mode`); compute-sanitizer
-      if needed. Options once understood: fix the tk interaction; keep validation
-      eager (D90's state, ≈ 20–30 % of NAT training time); or capture validation in a
-      separate process. The analysis captures run in their own process (no training
-      graph) and passed; whether they stay depends on the cause.
-    - **Code state (`fc9d452e`, pushed):** D91 (cw gone) and D93 (an HPO trial that
-      ends in a CUDA error is retried, not counted, and stops its worker) are sound.
-      D92 is not: the Trainer captures validation on CUDA by default, so **no study
-      may run on `5c2db9cd`..`fc9d452e` with `trainer.cuda_graph` on.** E2a's
-      journals are garbage (two lost launches); relaunch with `--replace`. Usable
-      now: `trainer.cuda_graph=false` (all eager), or `d127eaad` (captured step,
-      eager validation; ≈ 6 GiB per unit at E2a's shape, so `--per-gpu 3`).
+  - **Captured validation crashed the training graph: found and fixed (D94,
+    2026-10-13).** Goal: efficiency. Graphs make a unit ≈ 9–10× faster per step
+    (training, D90) and ≈ 7× per batch (analysis), at the price of code complexity
+    (`bm4tc/core/graphs.py`, capturable functions, device scalars, copies of
+    outputs) and memory (a private pool per graph; three eager warm-up calls per
+    shape).
+    - **The symptom (2026-10-09):** at real shapes (E2a's MNIST12 d3r40 batch 512,
+      full-MNIST d3r80 micro 128) the first training replay after validation was
+      captured hit `CUDA error: an illegal memory access`, with shared or separate
+      pools; tiny models passed; validation eager was fine. E2a lost two launches.
+    - **The cause (D94):** autograd accumulates a parameter's gradients on the stream
+      where its AccumulateGrad node was made. tensorkrowch's resultant nodes in
+      `norm_net` (kept between calls, `log_partition_function` reuses its
+      successors) and the log Z cache keep the last warm-up's autograd graph alive,
+      hence that node, made on the warm-up side stream; the capture ran on torch's
+      default capture stream. Summing a parameter's complex gradients (one a
+      conjugate view, so out of place) allocated on the side stream, outside the
+      graph's pool in torch 2.1: 288 buffers at E2a's shape, freed when the capture
+      ended, written by every replay. Validation's eager warm-ups on that stream
+      could reuse them, and the `empty_cache` at validation's capture released them.
+      Not a tk bug and not an in-place write by tk: tk only keeps references, which
+      kept the autograd node alive. The size dependence came from the allocator:
+      small buffers share segments with live tensors, which are never released.
+    - **How it was found** (eGPU, scripts in the scratchpad, none in the repo): the
+      E2a-shape test reproduced in 8 s. Knobs, one process each: no `empty_cache` at
+      capture → fine (so the graph used memory it did not own); clearing cuBLAS
+      workspaces, a capture stream per graph → still crashed; dropping tk's
+      `norm_net` state and the log Z cache before capture → fine, either alone →
+      crashed. `compute-sanitizer` hid the bug (0 errors, no crash). Proof: the
+      training graph's kernel arguments, read through the CUDA driver API (an
+      `LD_PRELOAD` shim on `cudaGraphDebugDotPrint`), point into the segments
+      released at validation's capture, at buffers that `InputBuffer::accumulate`
+      (conjugate fallback) allocated on the autograd thread on the side stream.
+    - **The fix (D94):** one side stream per `Graphs` for warm-ups *and* captures.
+      With it every allocation of a capture is on one stream, in the graph's pool;
+      captured equals eager number for number at E2a's shape (NAT; AT PGD-5; d3r80
+      micro 128), the analysis bench gives identical rob and purify, and step time
+      and memory are unchanged (RTX 2080: 62 vs 64 ms/step, 2.93 vs 2.96 GiB).
+      Rejected: dropping tk's state and the cache before capture (model knowledge in
+      `graphs.py`, or the numerical core outside Phase 9); eager validation in large
+      chunks (Martin's fallback, not needed).
+    - **Seams added:** `test_a_capture_allocates_only_in_its_graphs_pool` (tk-free:
+      a complex weight used twice, one use conjugated, with the previous call's
+      graph held), `test_the_captured_training_step_allocates_only_in_its_pool`
+      (tiny Trainer, β > 0 with the norm penalty: catches the bug at any size; the
+      E2a-shape crash depended on the memory layout and did not reproduce when an
+      eager run went first), and the E2a-shape test now compares captured with
+      eager number for number.
+    - **Gaps left:** no test pins memory per unit at a study's shape (the bench
+      does, by hand); replays do not bump version counters, so `_params_key()` is
+      stale after a capture and an eager `log_normalizer()` or `log_Z(recompute=
+      False)` during captured training would serve an old log Z (nothing does
+      today); a cluster check before each launch (`pytest tests/unit/test_graphs.py`
+      plus a short run at the study's shape, from its worktree).
+    - **E2c is sound:** it ran on `d127eaad` (captured step, eager validation), which
+      had the same stray buffers; they were harmless there because nothing
+      allocated on that warm-up stream after the capture and nothing released memory
+      (an allocator out-of-memory retry would have, and would have crashed, not
+      corrupted silently).
+    - **Next:** Martin confirms D94; push; on G21G01 run the graph tests and a short
+      E2a-shape run from a worktree at the fix; then E2a relaunches with `--replace`
+      (`--per-gpu` from the bench's ≈ 3 GiB per unit). The commits `5c2db9cd`..
+      `fc9d452e` stay unusable with `trainer.cuda_graph` on.
     - **Also open:** full-MNIST d3r80 micro 128 does not fit even without the crash
       (validation needs ≈ 4.8 GiB beside the step's 16 GiB pool): smaller validation
       chunks or micro 64, with `mnist_capacity`.

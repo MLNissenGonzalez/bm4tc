@@ -8,9 +8,15 @@ to the eager step), and with NVIDIA MPS several units share a GPU.
 :class:`Graphed` hides what capture needs: eager warm-up calls on a side stream,
 one graph per tuple of input shapes and dtypes, and static input buffers.
 :class:`Graphs` groups the graphed functions of one task (a training step and its
-validation; an analysis part), D92. Each graph has a memory pool of its own:
-sharing one between the training step and its validation corrupted the training
-graph (an illegal memory access at its next replay, on G21G01).
+validation; an analysis part), D92. Each graph has a memory pool of its own.
+
+Warm-ups and captures run on one side stream per :class:`Graphs` (D94). Autograd
+runs a parameter's gradient accumulation on the stream where its AccumulateGrad
+node was made, and tensorkrowch's resultant nodes and the log Z cache keep the
+warm-ups' autograd graphs, hence those nodes, alive. Captured on another stream,
+the backward's summing buffers came from the general cache instead of the graph's
+pool; later eager calls reused them and the next capture's ``empty_cache``
+released them while the graph still wrote there (D92's illegal memory access).
 """
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
@@ -37,15 +43,23 @@ class Graphs:
     """The CUDA graphs of one task's functions; all eager when disabled (on CPU,
     or with ``trainer.cuda_graph`` off).
 
-    The eager warm-up calls all run on one side stream: the allocator caches
-    freed memory per stream, so a new stream per call would reserve the
-    function's peak memory once per call (three warm-up steps held three steps'
-    memory, D92). Each graph captures into a memory pool of its own.
+    The eager warm-up calls and the captures all run on one side stream: the
+    allocator caches freed memory per stream, so a new stream per call would
+    reserve the function's peak memory once per call (three warm-up steps held
+    three steps' memory, D92); and a capture must run where the warm-ups made
+    their autograd nodes (module docstring, D94). Each graph captures into a
+    memory pool of its own.
     """
 
     def __init__(self, enabled: bool):
         self.enabled = enabled
-        self._warmup_stream = None  # created on the first warm-up call
+        self._side_stream = None
+
+    @property
+    def side_stream(self) -> "torch.cuda.Stream":
+        if self._side_stream is None:
+            self._side_stream = torch.cuda.Stream()
+        return self._side_stream
 
     def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
         return Graphed(function, self, warmup_calls)
@@ -98,9 +112,7 @@ class Graphed:
                         capture.outputs)
 
     def _warm_up(self, inputs):
-        if self.graphs._warmup_stream is None:
-            self.graphs._warmup_stream = torch.cuda.Stream()
-        stream = self.graphs._warmup_stream
+        stream = self.graphs.side_stream
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
             outputs = self.function(*inputs)
@@ -113,7 +125,7 @@ class Graphed:
         static_inputs = tuple(x.clone() for x in inputs)
         graph = torch.cuda.CUDAGraph()
         try:
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, stream=self.graphs.side_stream):
                 outputs = self.function(*static_inputs)
         except RuntimeError as e:
             raise GraphCaptureError(f"CUDA graph capture failed: {e}") from e

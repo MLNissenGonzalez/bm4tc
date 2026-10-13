@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D92 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D94 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -56,22 +56,23 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-09, night)
+## State (2026-10-13)
 
-Branch `ousterhout`, pushed to GitHub up to `fc9d452e`. Phases 0–7 of the refactor are
+Branch `ousterhout`, pushed to GitHub up to `5b55b66d`. Phases 0–7 of the refactor are
 done; `main` is untouched and the local tag `pre-ousterhout` marks it. Phase 8 (journal
 studies on the HPC) is in its pilots; `docs/plan.md` has the details, `docs/compute.md`
 the (pre-graph) cost estimates.
 
-**Start here: captured validation crashes the training graph (open; discuss with
-Martin first).** `docs/plan.md`, Efficiency, "Captured validation crashes" has the
-evidence table, hypotheses, next steps and which commits are safe. In short: capturing
-validation (D92) makes the next training replay hit an illegal memory access at real
-shapes (E2a's MNIST12 d3r40 batch 512, d3r80); the tiny tests pass. The cause is
-probably the interaction of CUDA graphs with tensorkrowch's Python-side state; tk's
-source is in `../tensorkrowch` (branch `develop`). **Do not run studies on
-`5c2db9cd`..`fc9d452e` with `trainer.cuda_graph` on.** Martin brings tk intuition,
-not CUDA expertise: explain the GPU side plainly.
+**Start here: D92's crash is found and fixed (D94, 2026-10-13); the cluster check
+is next.** `docs/plan.md`, Efficiency, "Captured validation crashed the training
+graph" has the cause, the evidence and the next steps. In short: tensorkrowch's
+`norm_net` state and the log Z cache kept the warm-up's autograd graph alive, so the
+captured backward summed gradients on the warm-up stream, outside the graph's memory
+pool; a later capture's `empty_cache` released that memory. The fix captures on the
+warm-up stream. **Studies may run with `trainer.cuda_graph` on only from the D94
+commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.** Martin brings
+tk intuition, not CUDA expertise: explain the GPU side plainly. tk's source is in
+`../tensorkrowch` (branch `develop`).
 
 Done before (D78–D87, see decisions.md): micro-batches, AT with cw = 0, the HPO budget,
 pilot A (log Z target n·ln d / 2), **β replaces α** (D86; Martin's theory note
@@ -109,8 +110,8 @@ clients `CUDA_VISIBLE_DEVICES=0`; `--mps` handles it. Martin's notes `docs/hpc_*
 `docs/interpolation.md` and `pilots/` are untracked on purpose; `docs/hpc_bm4tc.md`
 still shows launches without `--mps`.
 
-Laptop: the eGPU is away until Tuesday 2026-10-13; GPU checks are commands for Martin
-to run on the cluster.
+Laptop: the eGPU (RTX 2080, 8 GB) is back since 2026-10-13: the CUDA tests run here
+(full suite with the GPU: ≈ 3.5 min).
 
 Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation crashes):
 - **D91:** `clean_weight` deleted; AT is `(1-β)·L_dis(x_adv) + (β/N)·L_gen(x)`, AT
@@ -126,10 +127,16 @@ Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation cr
   worker. E2a's two launches were lost (out of memory, then the shared pool); it
   relaunches with `--replace`.
 
+Done on 2026-10-13 (eGPU):
+- **D94:** the crash's cause (plan.md) and its fix, one side stream per `Graphs` for
+  warm-ups and captures. New seams in `tests/unit/test_graphs.py`: every allocation
+  of a capture on one stream (tk-free and through the Trainer), and the E2a-shape run
+  captured vs eager number for number.
+
 **Next (in this order):**
-1. **Discuss the captured-validation crash with Martin**, then (eGPU from Tue
-   2026-10-13) reproduce and bisect it locally (plan.md, "Captured validation
-   crashes"). E2a waits; it relaunches with `--replace` on code that is safe.
+1. **Martin confirms D94**, then push; on G21G01 run `pytest tests/unit/test_graphs.py`
+   and a short E2a-shape run from a worktree at the fix; then E2a relaunches with
+   `--replace`.
 2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
    `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Beta", E2:
    knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).

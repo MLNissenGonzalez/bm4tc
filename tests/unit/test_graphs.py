@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from bm4tc.analysis.purification import LikelihoodPurification
 from bm4tc.analysis.uq import UQConfig, UQEvaluation, _BatchWork
 from bm4tc.core.attacks import EvasionConfig, build_attack
-from bm4tc.core.graphs import Graphs
+from bm4tc.core.graphs import Graphed, Graphs
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import NormControlConfig, OptimizerConfig
 from bm4tc.core.train import TrainConfig, Trainer
@@ -90,6 +90,67 @@ def test_warm_up_calls_reuse_one_streams_memory():
     assert torch.cuda.max_memory_reserved() - before < 2 * 128 * 2**20
 
 
+@pytest.fixture
+def capture_streams(monkeypatch):
+    """Per captured function, the streams its capture allocated on (the
+    allocator's history), the default stream left out: the static inputs are
+    copied there before capture. One stream means every buffer the graph uses
+    came from its own pool."""
+    def trace():
+        return torch.cuda.memory._snapshot()["device_traces"][torch.cuda.current_device()]
+
+    streams = {}
+    capture = Graphed._capture
+
+    def recording(self, inputs):
+        start = len(trace())
+        output = capture(self, inputs)
+        streams[self.function.__name__] = {
+            e["stream"] for e in trace()[start:] if e["action"] == "alloc"} - {0}
+        return output
+
+    monkeypatch.setattr(Graphed, "_capture", recording)
+    torch.cuda.memory._record_memory_history(max_entries=200_000, stacks="python")
+    yield streams
+    torch.cuda.memory._record_memory_history(enabled=None)
+
+
+@needs_cuda
+def test_a_capture_allocates_only_in_its_graphs_pool(capture_streams):
+    """Autograd accumulates a parameter's gradients on the stream where its
+    AccumulateGrad node was made. State that keeps an earlier call's autograd
+    graph alive (here ``held``; in bm4tc tensorkrowch's resultant nodes and the
+    log Z cache) keeps that node from the eager warm-up. Captured on another
+    stream, the backward's buffers came from the general cache, which later
+    eager calls reuse and ``empty_cache`` releases while the graph still writes
+    them: D92's illegal memory access."""
+    weight = torch.randn(64, 64, dtype=torch.complex64, device=CUDA, requires_grad=True)
+    held = []
+
+    def step(x):
+        y = x @ weight
+        held[:] = [y]                                  # outlives the call
+        # Two gradients to sum, one a conjugate view: summed out of place, in a
+        # new buffer (as tensorkrowch's complex log Z does).
+        (y.abs().sum() + (x @ weight.conj()).abs().sum()).backward()
+        return weight.grad.clone()
+
+    graphed = Graphs(enabled=True).wrap(step, warmup_calls=1)
+    x = torch.randn(32, 64, dtype=torch.complex64, device=CUDA)
+    for _ in range(3):
+        graphed(x)
+    assert len(capture_streams["step"]) == 1
+
+
+@needs_cuda
+def test_the_captured_training_step_allocates_only_in_its_pool(capture_streams):
+    """The same through the Trainer, with log Z in the step (β > 0 and the norm
+    penalty), whose norm_net keeps its resultant nodes between calls."""
+    _run(True)
+    assert len(capture_streams["_train_step"]) == 1
+    assert len(capture_streams["_clean_batch"]) == 1
+
+
 HOST_SYNC_CAPTURE = """
 import torch
 from bm4tc.core.graphs import GraphCaptureError, Graphs
@@ -154,12 +215,10 @@ def test_captured_training_is_bit_identical_to_eager(evasion, micro_batch_size):
     assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
 
 
-@needs_cuda
-def test_captured_training_and_validation_at_e2as_shape():
-    """MNIST12 d3r40, batch 512, β 0.5, as E2a trains it: validation (four
-    batches) captured in the first epoch, then training replays again. The tiny
-    models above did not show the crash a shared pool caused at this size (an
-    illegal memory access at the next training replay, D92)."""
+def _run_at_e2as_shape(cuda_graph: bool):
+    """MNIST12 d3r40, batch 512, β 0.5, as E2a trains it, for three epochs:
+    validation (four batches) captured in the first epoch, then training
+    replays again."""
     torch.manual_seed(0)
     cbm = ConditionalBornMachine(CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=40)),
                                  data_dim=144, num_classes=10)
@@ -173,13 +232,26 @@ def test_captured_training_and_validation_at_e2as_shape():
 
     cfg = TrainConfig(beta=0.5, max_epoch=3, eval_every=1, batch_size=512,
                       norm_control=NormControlConfig(soft_strength=0.1, log_target=0.0),
-                      optimizer=OptimizerConfig(kwargs={"lr": 1e-3}))
+                      optimizer=OptimizerConfig(kwargs={"lr": 1e-3}), cuda_graph=cuda_graph)
     trainer = Trainer(cbm, cfg, loader(5 * 512, True), loader(4 * 512, False), CUDA)
     records = []
     trainer.train(on_epoch_end=lambda epoch, record: records.append(flatten_epoch(record)))
     assert len(records) == 3 and not trainer._collapsed
-    assert len(trainer._evaluation._clean_sums._captures) == 1
+    assert len(trainer._evaluation._clean_sums._captures) == (1 if cuda_graph else 0)
     torch.cuda.synchronize()
+    return records, [t.detach().cpu() for t in trainer.cbm.tensors]
+
+
+@needs_cuda
+def test_captured_training_and_validation_at_e2as_shape_match_eager():
+    """At this size D92's bug crashed the next training replay after validation
+    was captured (an illegal memory access): the backward's stray buffers sat
+    in segments that validation's capture released. The tiny models above kept
+    them in shared segments and passed. Number for number, not only no crash."""
+    eager_records, eager_tensors = _run_at_e2as_shape(False)
+    graph_records, graph_tensors = _run_at_e2as_shape(True)
+    assert graph_records == eager_records
+    assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
 
 
 @needs_cuda
