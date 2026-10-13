@@ -74,6 +74,52 @@ the pipeline's own `_fit` and analysis parts on the study configs at commit
    same time as step 2, once step 1 is settled. They only train, so Gibbs caching
    and overhead fixes don't change their answers.
 
+## Since CUDA graphs (2026-10-08 to 2026-10-13; not folded into the estimates yet)
+
+The estimates above are eager and per unit. These measurements replace their
+per-step costs; re-estimating the totals is open (plan.md, Efficiency).
+
+**Eager, where the time went** (`python -m tests.bench.profile_train_step`, laptop
+RTX 2080, 144 sites, d3r20, batch 512, β = 0.5, 2026-10-08): 170 ms per step, of
+which the log|ψ|² forward is 54 ms, log Z 25 ms, forward + backward 167 ms, Adam
+3 ms. Per step ≈ 9,900 kernel launches and 34,000 aten calls; the GPU is busy 74 ms
+of the 170, on tiny (r × r) kernels (`bmm`, `div`, `vector_norm`, `where`,
+`masked_fill` once per site, forward and backward). Launching alone costs ≈ 44 ms
+of CPU per step. Epoch time does not depend on the bond dimension; it grows with
+sites × steps. On G21G01 (busy node) an eager NAT step took 440 ms, ≈ 2.4× the
+laptop, CPU-bound.
+
+**Captured step** (prototypes `pilots/graph_*.py`, untracked, 2026-10-08; integrated
+as D90): bit-identical to eager for NAT β ∈ {0, 0.5, 1}, d3r20/d3r40, 144 and 784
+sites, micro-batched, and AT PGD-5/10 with a fixed start (a random start draws
+from other RNG offsets). Per unit: G21G01 8.7× (NAT d3r20), 9.9× (AT PGD-10);
+laptop 3.9× / 4.5×; full MNIST (laptop) 4.0× NAT d3r20, 3.7× NAT d3r40 (micro
+128), 3.3× AT d3r20. Capture takes 0.3–8 s once.
+
+**MPS** (several captured units per GPU), G21G01, steps/s per GPU at 1/2/4/6/8
+units: NAT graph 20.5/36.5/58.4/77.6/88.3 (eager 2.4/5.0/10.0/13.2/16.8); AT
+PGD-10 graph 3.6/5.7/7.8/8.9/9.5 (eager 0.4/0.8/1.4/2.0/2.6). So ≈ 5–6× NAT and
+≈ 4–5× AT per GPU against 6 eager units.
+
+**What is left per step is GPU time:** NAT d3r20 10.5k kernels (30 ms) + 15 ms
+gaps; AT 58k kernels (242 ms) + 22 ms gaps. The largest single cost (≈ 1/3) is the
+complex ÷ real division of the renormalisation (chain `[B, r] / [B, 1]`, log Z's
+tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
+(7.3 µs). Casting the divisor to complex does not help; multiplying a real view by
+1/n halves it but is not bit-identical (≈ 1e-7).
+
+**Memory per unit** (`tests.bench.bench_train_step`, captured, β = 0.5, RTX 6000):
+
+| Shape | ms/step | Memory |
+|---|---|---|
+| MNIST12 d3r40 batch 512 NAT (E2a) | 70 | 3.89 GiB per process on G21G01, 3.69 on the RTX 2080 (D95: CUDA context and both validation shapes included) |
+| full MNIST d3r40 micro 256 NAT | 595 | 5.34 GiB allocated (2026-10-09, before D92/D95: no context, eager validation) |
+| full MNIST d3r40 micro 256 AT PGD-5 | 2,600 | 7.58 GiB, likewise |
+| full MNIST d3r80 micro 128 NAT | | does not fit: validation needs ≈ 4.8 GiB beside the step's 16 GiB pool |
+
+`--per-gpu` ≈ (GPU memory − other processes) / the per-process figure; E2a runs 4
+per GPU on G21G01.
+
 ## Appendix: measurements
 
 RTX 2080, torch 2.1.0, one unit alone unless stated. Epoch time is the mean over
@@ -155,5 +201,5 @@ Adding d3r80 at batch 128 to `mnist_capacity` would cost another ≈ 820 h
 When a Gibbs or SGLD analysis part runs, every budget logs
 `Detection/attack failed (eps_rel=…): ; skipping`. The sweep part runs with no
 detection percentiles, so `next(iter(det.values()))` raises an empty
-`StopIteration` (`bm4tc/analysis/uq.py:556`). The attack results are stored
+`StopIteration` (`bm4tc/analysis/uq.py:611`). The attack results are stored
 before that line, so the numbers are unaffected. It only adds noise to the log.

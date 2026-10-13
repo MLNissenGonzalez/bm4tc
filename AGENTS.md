@@ -60,12 +60,12 @@ place, no pass-through layers.
 
 Branch `ousterhout`, pushed to GitHub up to `f9e7cb0c` (D95). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
-`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates.
+`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates
+and the measurements since CUDA graphs.
 
 **Start here: E2a relaunches on D95 (`f9e7cb0c`; Next 1); D92's crash is fixed
-(D94, cluster check passed 2026-10-13).** `docs/plan.md`,
-Efficiency, "Captured validation crashed the training graph" has the cause, the
-evidence and the next steps. In short: tensorkrowch's
+(D94, cluster check passed 2026-10-13).** D94 in `docs/decisions.md` has the cause
+and the evidence; `docs/plan.md` the next steps. In short: tensorkrowch's
 `norm_net` state and the log Z cache kept the warm-up's autograd graph alive, so the
 captured backward summed gradients on the warm-up stream, outside the graph's memory
 pool; a later capture's `empty_cache` released that memory. The fix captures on the
@@ -97,7 +97,7 @@ Done on 2026-10-09:
   (`tests.bench.bench_train_step`, which now takes the shape and prints peak memory):
   MNIST12 d3r40 1.87 GiB (8 units per GPU), full MNIST d3r40 micro 256 NAT 5.3 GiB,
   AT 7.6 GiB; **d3r80 micro 128 runs out of memory in the eager validation**, because
-  the training graph's private pool stays reserved (plan.md, "Integrated (D90)").
+  the training graph's private pool stays reserved (compute.md, "Since CUDA graphs").
 - **β pilots launched** (`configs/studies/pilot_beta12.yaml` = E2a, MNIST12 d3r40, 12 β,
   6 random lr trials, 1 seed; `pilot_beta_spirals.yaml` = E2c), both with `--mps
   --per-gpu 8`, worktree `runs/d127eaad`; E2a on GPUs 0,5 (overnight). E2c showed one
@@ -131,7 +131,7 @@ Done on 2026-10-13 (eGPU):
 - **D95:** `--replace` always starts an HPO over; trials left running by a stopped
   launch are run again, not counted; `bench_train_step` validates like a real run
   and prints the process's GPU memory (E2a's unit: 3.9 GiB on G21G01).
-- **D94:** the crash's cause (plan.md) and its fix, one side stream per `Graphs` for
+- **D94:** the crash's cause (decisions.md) and its fix, one side stream per `Graphs` for
   warm-ups and captures. New seams in `tests/unit/test_graphs.py`: every allocation
   of a capture on one stream (tk-free and through the Trainer), and the E2a-shape run
   captured vs eager number for number.
@@ -146,7 +146,7 @@ Done on 2026-10-13 (eGPU):
    `python -m bm4tc run pilot_beta12 --gpus <idle> --per-gpu 4 --mps`. Trials the
    stopped launch left running are run again; out-of-memory ones too (D93).
 2. Read E2c (copied to `pilots/cluster/pilot_beta_spirals/`, untracked; it ran on
-   `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Beta", E2:
+   `d127eaad` and is sound) with Martin, then E2a once it has run (plan.md "Pilots", E2:
    knees, β*, ladder, AT grid). Then E2b (`pilot_beta28`, `hparams_from` E2a).
 3. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
    race); `select`/`run --cell` on a subset; a multi-study launcher; the Gibbs O(n²)
@@ -159,7 +159,8 @@ Other open items (time series, adaptive attacks, notes on the other laptop) are 
 ## Personal laptop vs lab laptop (2026-10-12)
 
 This compares the personal laptop's local state with the lab laptop's state (this
-branch), for plan.md's open item "Agent notes on the other laptop". It records
+branch), for the former plan.md open item "Agent notes on the other laptop" (done; what
+still matters is now in plan.md). It records
 differences only; it does not judge either side against the plan.
 
 The personal laptop's checkout (`~/0git/bm4tc`) is on `main` at `aa697706`, the merge
@@ -189,7 +190,7 @@ use a full env path and never `conda run`; that path does not exist there any mo
 | `born.accumulate` tied to complex64, behind a flag | On by default (D60), then the only path (D89) |
 | Norm control: `hard_every` 0, soft 0.1, target 0 | Target n·ln d / 2 for cold MNIST (D84); penalty ÷N (D86); `hard_every` removed and kept as a benchmark-project idea (D90) |
 | Chebyshev restricted to ±0.99, explained in `reference/chebyshev_boundary_born_machines.md` | The same restriction. The comment at `bm4tc/core/embeddings.py:250` cites that note, which exists only untracked on the personal laptop |
-| Known bug, open: spirals AT `rob` (0.929 / 0.829) above the data-only ceiling (0.679 / 0.609 at abs 0.2 / 0.3), on real-dtype runs from before D87 | `analysis/ceiling.py` and the `clean` part compute the ceiling. The bug is not mentioned in plan.md |
+| Known bug, open: spirals AT `rob` (0.929 / 0.829) above the data-only ceiling (0.679 / 0.609 at abs 0.2 / 0.3), on real-dtype runs from before D87 | `analysis/ceiling.py` and the `clean` part compute the ceiling. Now an open item in plan.md |
 | Known bug, open: attacks don't clamp to `input_range` | `attacks.py` clamps (lines 102, 140). `main` already clamps since `73c9d692` (2026-07-29), so the note there is out of date |
 | Known bug, fixed: Gibbs weight overflow | The same fix (`draw_from_grid_log`) |
 | Flat and consolidated output layouts, `analysis/batch.py`, `tools/*` | Deleted (D12, D49, D58, D77) |

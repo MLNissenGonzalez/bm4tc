@@ -1,21 +1,83 @@
-# Plan: what is left
+# Plan: where bm4tc stands and what is left
 
-The `ousterhout` refactor (2026-10-06 to 2026-10-07) simplified bm4tc before the
-experiments are re-run for the journal version of the rejected NeurIPS submission
-27079. Phases 0–7 are done: seam tests and benchmark, deletions, one metrics module,
-one Trainer, model-owned caches, studies and `run.json`, the `bm4tc/{core,analysis,
-pipeline}` package with the CLI, JEM in the pipeline, figures from paper manifests,
-and these docs. How each was decided is in [decisions.md](decisions.md) (D1–D77); the
-per-phase plan is in the git history (`plan.md` before this file).
+The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
+submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
+(Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D95, chronological, the
+source of truth); the section below groups them by theme. Measured costs are in
+[compute.md](compute.md).
+
+## Now (2026-10-13)
+
+- **E2a runs** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4 --mps`,
+  since 13:09).
+- **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
+  knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
+  purified accuracy above the data-only ceiling.
+
+Next, in order:
+
+1. Read E2a; decide the knees, β\*, the β ladder (`defaults.yaml`) and the AT grid.
+   Then E2b (`pilot_beta28`, `hparams_from` E2a).
+2. Before Phase 8 (below): cap HPO workers per cell, `select`/`run --cell` on a
+   subset, a multi-study launcher, the Gibbs rework, adaptive attacks.
+3. Phase 8 studies.
+
+## What the branch changed, by theme
+
+- **Package and docs.** Three areas, `bm4tc/{core,analysis,pipeline}`; `core` imports
+  neither of the others, `analysis` only `core` (D32, D68). README, GUIDE, AGENTS
+  (D27, D77). Clean break from old run dirs and configs (D12). Tensor-network maths
+  stays on tensorkrowch nodes; the numerical core changes only on the Phase 9 track
+  (D30).
+- **Study-based config tree.** `defaults.yaml` (every constant once), `dataset/`,
+  `studies/` (one grid per dataset × regime × model, appendix variants as their own
+  studies), `hparams/<study>.yaml` written only by `select` (D16, D19, D20, D29, D34,
+  D36, D57); Hydra compose API and an enforced schema (D25, D56).
+- **Runs found by manifest.** Each run writes `run.json`; dirs are study-rooted and
+  named by identity axes only; nothing parses a path (D14, D17, D58). Checkpoints
+  and `prune` (D22, D67); dataset caches named by their settings, created under a
+  lock (D76, D78).
+- **One CLI, one job pool.** `python -m bm4tc {hpo,select,train,analyse,run,status,
+  figures,prune}` (D23, D33); every unit is a subprocess in a `--gpus × --per-gpu`
+  pool (D38, D66). HPO: one Optuna journal per cell, 15 trials per tuned hparam,
+  median pruning; `select` takes the argmin of `objective/valid` (D13, D21, D62, D81);
+  CUDA failures and interrupted trials are rerun, not counted (D93, D95). W&B for
+  live curves only (D39, D47). Runs on the lab HPC by hand, no agents there (D37).
+- **One Trainer, one selection rule.** NAT is AT without the attack (D10, D15,
+  D50, D52–D54); select on the objective on validation (D8); metric keys
+  `quantity/split[/budget]`, built only in `pipeline/metrics.py` (D11, D48, D64);
+  micro-batches for memory (D79).
+- **β objective.** $L_\beta = (1-\beta)L_\text{dis} + \beta L_\text{gen}/N$ in nats per
+  variable replaces α (D86); cold MNIST pulls log Z to n·ln d / 2 (D84). The ladder
+  waits for E2.
+- **The model.** complex64 and the production defaults (D4, D60); one log-space
+  amplitude contraction (D89); frozen obc boundaries (D87; β > 0 runs before it
+  optimised a corrupted objective); caches stamped by the parameters' version (D31,
+  D55).
+- **Adversarial training.** Split objective only (D18); PGD-AT with a curriculum
+  (D40, D43, D61), PGD-5, MNIST AT 150 epochs (D88); no `clean_weight` (D80, D91);
+  one budget grid for training and analysis (D3, D65).
+- **Analysis.** Cached, separately seeded parts (D63); detection calibrated on valid
+  (D2); data-only robustness ceiling for two classes; MIA out of the pipeline (D1).
+- **JEM baseline** in the same pipeline, parameter-matched by `arch`, with SGLD
+  purification (D24, D35, D69–D74).
+- **Figures from paper manifests** (`configs/papers/`, D28, D75).
+- **CUDA graphs and MPS for efficiency.** The training step, validation and the
+  analysis's per-batch work replay from CUDA graphs; several units share a GPU
+  through NVIDIA MPS (D90, D92, D94). ≈ 9–10× per unit, 4–6× per GPU (compute.md).
+- **Pinning.** Seam tests pin end-point metrics and curves; changes re-pin in their
+  own commit (D26, D51, D85).
+- **Grids and pilots.** D5, D7, D9, D42, D44, D46, D59, D82, D83, D84, D88; the
+  D45 α ladder and D82 α grid are superseded by β (D86), pending E2.
 
 ## Phase 8: reproduce the journal paper
 
-Run the studies on the lab HPC, then `python -m bm4tc figures paper`.
+Run the studies on the lab HPC, then `python -m bm4tc figures paper`. Warm studies
+need their `warm_from` study trained.
 
-Order (warm studies need their `warm_from` study trained):
-
-1. Pilots that set defaults (D83). Pilot A done: n·ln d / 2 (D84, applied). Pilot B done:
-   PGD-5, and the MNIST AT studies train 150 epochs with patience 8 (D88, applied).
+1. Pilots that set defaults (D83): A (log Z target, D84) and B (PGD-5, D88) done;
+   E2 (β) running, see below.
 2. `spirals_nat`, `spirals_capacity`, `spirals_embedding`, `mnist12_nat`,
    `mnist_capacity`, `jem_mnist12_nat` (independent; cold).
 3. `spirals_at`, `mnist12_at`, `jem_mnist12_at` (warm).
@@ -25,44 +87,43 @@ Order (warm studies need their `warm_from` study trained):
    `mnist_at`, `jem_mnist_at`.
 5. `python -m bm4tc figures paper`; commit `figures/journal/`.
 
-Still to provide for Phase 8:
-- A `run paper`-style launcher across studies (the executor already runs a DAG;
-  today one launch runs one study, D66).
-- **HPO budget (D81):** 15 trials per tuned hparam with median pruning (50%
-  warm-up). The HPO share of [compute.md](compute.md)'s ≈ 3,500 GPU-h (71% at 30
-  trials, unpruned) drops to roughly 40% of what it was.
-- **Batch size (D79, D82):** one batch size per study for every capacity; the
-  full-MNIST studies micro-batch d3r40 (256) and d3r80 (128) through `archs:`, and
-  analyse those runs in chunks of the same size. Gibbs (`sweep_purify.gibbs.batch_size`
-  24) still runs out of memory on full MNIST: part of the Gibbs rework below.
-- **AT (D80):** cw = 0, the lr is the only tuned hparam (done in the four AT
-  studies). Warm AT tunes the lr in [1e-5, 1e-2] (D81). AT α grid
-  {0, 0.01, 0.1} (D82).
-- **Gibbs purification on full MNIST costs ≈ 40–80 GPU-h per run** (see below).
-  Fix it first, or enable `analysis.sweep_purify` only where the paper reads it
-  (`paper.yaml`'s `mnist_sweep_purify`: `mnist_nat` α = 0.01).
-- **HPO workers per cell = the launch's slots** (capped at the cell's trials). With
-  ≥ 15 slots every trial of a cell starts at once: TPE never sees a finished trial
-  and the pruner never acts, so the HPO is random search. Cap the workers per cell
-  (e.g. at ~1/3 of the trials) before Phase 8; until then, give a study ~8 slots.
-- `run <study> --cell X` stops at `select`, which needs every cell's HPO. Let
-  select (and run) work on the launched cells only.
-- **Cluster speed:** `bench_train_step` on G21G01 (GPU shared with 4 pilot units, busy
-  node): 440 ms per NAT step vs ≈ 180 on the laptop, so ≈ 2.4x slower per unit;
-  mostly the CPU (single-thread bound). Double the wall times in compute.md.
-- Time one probe on a cluster node first. Training is limited by CPU speed, and
-  the cluster's CPU threads may be slower than the laptop's.
+**To do before the studies run:**
+- **β grids from E2:** the ladder in `defaults.yaml` (now {0, 0.01, 0.1, 0.5, 0.9,
+  0.99, 1}) and the AT grid (now {0, 0.1, 0.5} in every AT study; planned {0, β\*}).
+- **Cap HPO workers per cell.** Today workers = the launch's slots (capped at the
+  cell's trials): with ≥ 15 slots every trial starts at once, TPE never sees a
+  finished trial and the pruner never acts. Cap at ~1/3 of the trials; until then
+  give a study ~8 slots. Also fixes E2c's 16/15 trials (parallel workers race on
+  the count).
+- **`select`/`run --cell` on a subset:** `run <study> --cell X` stops at `select`,
+  which needs every cell's HPO.
+- **A multi-study launcher** (`run paper`-style; the executor already runs a DAG,
+  one launch runs one study, D66).
+- **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
+  once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
+  is/are busy or unavailable" (MPS refusing clients that connect together; retried
+  by D93).
+- **Gibbs purification on full MNIST** (≈ 40–80 GPU-h per run, out of memory at
+  batch 24): the rework under Efficiency, or enable `analysis.sweep_purify` only
+  where the paper reads it (`paper.yaml`'s `mnist_sweep_purify`).
+- **Full-MNIST d3r80 (micro 128) does not fit**: validation needs ≈ 4.8 GiB beside
+  the step's 16 GiB pool. Smaller validation chunks or micro 64; `mnist_capacity`
+  decides.
+- **Adaptive attacks** (E2c makes them urgent, see the spirals pilot).
+- **Re-estimate compute.md** with graphs, MPS and the HPO budget (D81 cuts the HPO
+  share to ≈ 40% of the 3,500 GPU-h estimate's).
+- **Review the study settings** copied from the old sweeps (epochs, patience, HPO
+  spaces).
 
-## Beta, the dimension-corrected objective (implemented, D86; pilots to plan)
+## Pilots: evidence so far
 
-Implemented on 2026-10-08 (D86): the code optimises
-$L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$ in nats per variable,
-logs `loss_dis` [nats/label], `loss_x` [nats/feature], `log_px` per feature, the
-`norm/*` diagnostics per site, and divides the norm penalty by $N$. The theory is in
-Martin's notes (`docs/interpolation.md`, untracked on purpose). What is left (E0 done): the
-beta pilots (E2), then the Phase 8 ladder and AT grid from them.
+### Beta: the objective (D86)
 
-Paper sentence (the translation table is in the theory note, §7):
+The code optimises $L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$ and logs
+`loss_dis` [nats/label], `loss_x` [nats/feature], `log_px` per feature and the
+`norm/*` diagnostics per site; the norm penalty is divided by $N$. The theory is in
+Martin's note `docs/interpolation.md` (untracked on purpose). Paper sentence (the
+translation table is in the note, §7):
 
 > We weight the two terms by $\beta \in [0, 1]$,
 > $L_\beta = (1-\beta)\,L_\text{dis} + \beta\,L_\text{gen}/N$, where $N = n + 1$ counts the
@@ -71,268 +132,160 @@ Paper sentence (the translation table is in the theory note, §7):
 > $\beta/(1-\beta) = N\alpha/(1-\alpha)$; TPM's $\alpha \in \{0.01, 0.1, 0.5\}$ on 12×12
 > MNIST are $\beta \approx \{0.59, 0.94, 0.993\}$.
 
-### Evidence so far
+**E2, the β pilots.** 1 seed, analysis at ε = 0.1 only, no joint attack; grid
+β ∈ {0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1} (a factor 3 in
+the weight ratio per step).
+- E2a `pilot_beta12`, MNIST 12×12 d3r40, 100 epochs, target n·ln d / 2, lr-only HPO
+  `{log: [1e-4, 1e-2]}`, 6 trials, random search: **running**.
+- E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same β
+  (`hparams_from`); 12 runs × ≤ 7 h. Not written yet.
+- E2c `pilot_beta_spirals`, d10r6, 300 epochs, normal HPO: **done**, below.
 
-- MNIST 12×12, pilot A (d3r40, target $n \ln d / 2$): test accuracy 98.1 / 76.2 / 73.8% at
-  $\beta = 0$ / 0.94 / 1 ($\alpha$ = 0 / 0.1 / 1); test $L_\text{gen}$ +62 / -138 / -142 nats.
-- MNIST 12×12, TPM (d3r20): classification "markedly degrades beyond $\alpha \approx 0.01$"
-  ($\beta = 0.59$, clean accuracy > 95%); at $\alpha = 0.5$ ($\beta = 0.993$) 56%.
-- Spirals (d10r6), TPM: clean accuracy near-perfect at every $\alpha$: no accuracy knee,
-  only a density knee.
+Read per β: test acc, $L_\text{dis}$, $L_x$, rob and purify at 0.1, detection q5,
+against $\ln r(\beta)$ and $\ln r(\alpha)$. Knees: where acc and $L_x$ cross the
+middle of their range (but see E2c: β = 0's $L_x$ is untrained); β\*: the best
+purified accuracy. Decisions from E2: the exponent (the knee shift between 12×12 and
+28×28 is 0 for $p = 1$, +0.85 for $p = \tfrac12$, +1.7 for $p = 0$, blurred by about
+±0.5; keep $N$ unless both knees shift by more than ~1); the Phase 8 ladder (≤ 7
+cells, ≥ 2 between the knees); the AT grid {0, β\*}. Prediction: with $p = 1$, D82's
+α = 0.01 on full MNIST (β = 0.89) is at or past the accuracy knee.
 
-So the MNIST 12×12 accuracy knee lies in $\beta \in (0.59, 0.94)$. The density knee is
-unmeasured. TPM's whole MNIST sweep sat at $\beta \ge 0.59$.
+### Beta / MNIST 12×12
 
-### Experiments
+- Pilot A (d3r40, target n·ln d / 2): test accuracy 98.1 / 76.2 / 73.8% at
+  β = 0 / 0.94 / 1 (α = 0 / 0.1 / 1); test $L_\text{gen}$ +62 / −138 / −142 nats.
+- TPM (d3r20): classification "markedly degrades beyond α ≈ 0.01" (β = 0.59, clean
+  accuracy > 95%); 56% at α = 0.5 (β = 0.993).
 
-**E0. Done (2026-10-08, G21G01): the gap is the evaluation path, i.e. D87.** One
-checkpoint evaluated with one code path gives train, valid and test within 0.7 nat
-(α = 1: −143.3 / −142.8 / −142.6), whatever the batch size or `to()`/`prepare()`; no
-cross-split duplicates, matching pixel and label statistics, medians within 1 nat of
-the means. At α = 0 the logged-vs-recomputed valid L_gen gap (2.89) equals the
-training-time log Z minus the checkpoint's (79.65 − 76.76). At α = 1 the gap is 50
-nats against a checkpoint log Z of 120.8; the per-step log Z logged that epoch
-(75–85) leaves 4–9 nats unexplained, not chased since D87 removed the cause. The
-original question, kept for the record: Martin (2026-10-08): the seed runs
-converged; `objective/valid` and the train objective sit near their asymptote of about
--16 at $\alpha = 0.1$. But the test objective of the same runs is about -13.1, and at
-$\alpha = 1$ valid $L_\text{gen}$ is -182 to -193 while test is -137 to -143: a gap of
-about 45 nats per image, on splits drawn at random from one pool (`train_test_split`,
-the scaler fitted on train). At $\alpha = 0$ valid and test $L_\text{dis}$ agree
-(0.057 vs 0.067). Find the cause before reading any test $L_\text{gen}$: evaluate one
-saved checkpoint on valid and test with the same code path. If valid gives -185 there,
-the splits differ (or valid leaks from train); if it gives -140, the analysis path
-(checkpoint load, log Z, chunks) differs from training-time validation.
+So the accuracy knee lies in β ∈ (0.59, 0.94); the density knee is unmeasured (TPM's
+sweep sat at β ≥ 0.59). E2a measures both.
 
-**E2. Locate the knees on MNIST and test the correction** (to discuss). Pilot-style
-studies: 1 seed, d3r40 (Martin, 2026-10-09; was d3r20), `max_epoch` 100, target $n \ln d / 2$, analysis at
-$\epsilon = 0.1$ only, no joint attack; grid
-$\beta \in \{0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1\}$ (a factor 3
-in the weight ratio per step, 12 cells).
-- E2a `pilot_beta12` (written), MNIST 12×12: lr-only HPO over `{log: [1e-4, 1e-2]}`, 6 trials, no
-  pruning (random search, all trials at once); ≤ 110 unit-h, one night.
-- E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same $\beta$
-  (`hparams_from`, which needs $\beta$ implemented); 12 runs × ≤ 7 h, one night.
-- E2c `pilot_beta_spirals` (written), d10r6, normal HPO: minutes; the first `--mps` launch.
-- Before E2a, M0: peak memory per unit of the E2a and full-MNIST shapes, captured
-  (`tests.bench.bench_train_step --features/--bond-dim/--batch/--micro-batch/--beta`).
+### Beta / Spirals (E2c, ran 2026-10-09 on `d127eaad`)
 
-Read per $\beta$: test acc, $L_\text{dis}$, $\bar\ell$, rob and purify at 0.1, detection
-q5; plot against $\ln r(\beta)$ and against $\ln r(\alpha)$. Knees: where acc and
-$\bar\ell$ cross the middle of their range; $\beta^*$: the best purified accuracy.
-Decisions: the exponent (the shift between 12×12 and 28×28 is 0 for $p = 1$, +0.85 for
-$p = \tfrac12$, +1.7 for $p = 0$, blurred by about ±0.5; keep $N$ unless both knees
-shift by more than ~1); the Phase 8 ladder (≤ 7 cells, ≥ 2 between the knees); the AT
-grid $\{0, \beta^*\}$ with pilot B. Prediction: with $p = 1$, D82's $\alpha = 0.01$ on
-full MNIST ($\beta = 0.89$) is at or past the accuracy knee.
+Outputs in `pilots/cluster/pilot_beta_spirals/` (untracked). Captured training step,
+eager validation: sound despite D94's bug (nothing released the stray buffers).
+1000 test points, so one standard error is ≈ ±0.015 on a rate. ε = 0.1 (relative;
+0.2 absolute on legendre's [−1, 1]), purification radius 0.1, detection at the
+clean 5th percentile.
 
-**E1 (optional, for the paper).** On E2 checkpoints, the per-sample ratio
-$\mathbb{E}\lVert\nabla \log p(x)\rVert^2 / \mathbb{E}\lVert\nabla \log p(c \mid x)\rVert^2$
-for 12×12 and 28×28 (the theory note §4.1 predicts ×5.4); depends on the MPS gauge, so
-supporting only.
+| β | acc | L_dis | L_x | rob | det q5 | err_passed | purify | recovery |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 1.000 | 0.0002 | 0.680 | 0.575 | 0.42 | 0.250 | 0.601 | 0.08 |
+| 0.001 | 1.000 | 0.0002 | 0.463 | 0.546 | 0.50 | 0.255 | 0.579 | 0.08 |
+| 0.01 | 1.000 | 0.0004 | 0.353 | 0.496 | 0.75 | 0.282 | 0.603 | 0.22 |
+| 0.03 | 1.000 | 0.0007 | 0.336 | 0.488 | 0.78 | 0.333 | 0.602 | 0.23 |
+| 0.1 | 1.000 | 0.0015 | 0.311 | 0.564 | 0.72 | 0.136 | 0.675 | 0.26 |
+| 0.25 | 1.000 | 0.0036 | 0.296 | 0.469 | 0.85 | 0.226 | 0.633 | 0.32 |
+| 0.5 | 1.000 | 0.0080 | 0.283 | 0.517 | 0.83 | 0.149 | 0.693 | 0.40 |
+| 0.75 | 1.000 | 0.0160 | 0.273 | 0.543 | 0.80 | 0.050 | 0.759 | 0.49 |
+| 0.9 | 0.9995 | 0.0215 | 0.265 | 0.532 | 0.81 | 0.011 | 0.809 | 0.61 |
+| 0.97 | 0.9995 | 0.0254 | 0.267 | 0.512 | 0.80 | 0.008 | 0.815 | 0.65 |
+| 0.99 | 0.9995 | 0.0268 | 0.266 | 0.515 | 0.80 | 0.010 | 0.810 | 0.64 |
+| 1 | 0.9995 | 0.0312 | 0.258 | 0.542 | 0.81 | 0.005 | 0.818 | 0.64 |
 
-## Efficiency (before the expensive studies; Phase 9 track, D30)
+The data-only ceiling is 0.676 at every β; the clean false-positive rate is
+0.045–0.054 (q5 is calibrated); purifying clean inputs keeps accuracy at 1.0.
 
-Measured in [compute.md](compute.md).
+- **No accuracy knee** (as TPM): accuracy loses one test point; $L_\text{dis}$ grows
+  150× but stays ≤ 0.03 nats.
+- **The density knee is at the bottom of the grid:** $L_x$ crosses the middle of its
+  range at β = 0.001 and has made most of its gain by 0.01. At β = 0 $L_x$ is
+  untrained (its valid value wanders 0.50–0.69 over the epochs), so "the middle of
+  the range" has no fixed low end.
+- **Detection follows the density knee:** 0.42 → 0.75 by β = 0.01, ≈ 0.80 from 0.25.
+- **Purification has a later knee:** 0.60 → 0.82, the middle near β ≈ 0.5–0.75,
+  although $L_x$ only drops 0.31 → 0.26 from β = 0.1 to 1. β\* ∈ [0.9, 1] (0.809–0.818,
+  within noise), where err_passed is also ≈ 1%.
+- **rob has no trend in β** (0.47–0.58: several standard errors, from each cell's
+  selected lr) and stays under the ceiling.
+- **Purified accuracy (0.82) is above the ceiling (0.676).** Likelihood purification
+  is deterministic (no random start), so "purify, then classify" is a classifier
+  and the ceiling binds it against a worst-case attack. The PGD attacks the bare
+  classifier only, so the purification numbers overstate robustness by ≥ 0.14 here.
+  MNIST has no ceiling (two classes only) to show this.
+- HPO: the sampler draws the same lr sequence in every cell (e.g. trial 13's
+  0.01285 won at β = 0.01, 0.97, 0.99), so neighbouring cells can share curves.
+  Four runs (β = 0.01, 0.1, 0.5, 0.9) stopped at the 300-epoch cap with their best
+  epoch past 250.
+
+To decide: the knee rule for E2a (proposed: within half of the β = 1 value, rather
+than the middle of the range from β = 0); adaptive attacks before the AT grid,
+since β\* is chosen on purified accuracy.
+
+### Done and optional experiments
+
+- **E0, done (2026-10-08):** the 45-nat valid/test $L_\text{gen}$ gap of the α
+  seed runs was the evaluation path, removed by D87. One checkpoint evaluated with
+  one code path gives train, valid and test within 0.7 nat; the logged gap equalled
+  training-time log Z minus the checkpoint's (at α = 1, 4–9 nats unexplained, not
+  chased).
+- **E1, optional (for the paper):** on E2 checkpoints, the per-sample ratio
+  $\mathbb{E}\lVert\nabla \log p(x)\rVert^2 / \mathbb{E}\lVert\nabla \log p(c \mid x)\rVert^2$
+  for 12×12 and 28×28 (the theory note §4.1 predicts ×5.4); depends on the MPS
+  gauge, so supporting only.
+
+## Efficiency (Phase 9 track, D30)
+
+The training step, validation and the analysis's per-batch work are captured
+(D90, D92, D94); the measurements and memory per unit are in compute.md. What is
+left:
 
 - **Gibbs purification is O(n²) per sweep.** `GibbsPurification.purify_snapshots`
-  (`bm4tc/analysis/purification.py`) builds (batch × num_bins) candidates for each
-  feature and evaluates each one with a full forward pass through all n sites.
-  - Cost: MNIST 12×12 447 s per 24 points; full MNIST ≈ 30× that per batch, and it
-    runs out of memory at Gibbs batch 24 on 8 GB.
-  - Fix: cache the left and right environments for the batch, so a candidate
-    costs L_{k-1} · A_k(x) · R_{k+1}, then update the left environment after
-    feature k is resampled (the sampler already does this from left to right). That
-    is about n× cheaper.
-  - It is tensor-network maths, so it belongs in `ConditionalBornMachine` on
-    tensorkrowch nodes. It must reproduce the current snapshots bit for bit (or to
-    floating-point tolerance, with the seam re-pinned).
-- **Per-step overhead dominates training and analysis.** Epoch time does not depend
-  on the bond dimension; it grows with the number of sites × steps. One unit
-  keeps one CPU core busy and leaves the GPU mostly idle (6 units per GPU = 4×
-  throughput; the cluster is ≈ 2.4× slower per unit, CPU-bound).
-  - **Measured** (`python -m tests.bench.profile_train_step`, laptop RTX 2080, 144
-    sites, d3r20, batch 512, β = 0.5, 2026-10-08): 170 ms per step, of which the
-    log|ψ|² forward is 54 ms, log Z 25 ms, forward + backward 167 ms, Adam 3 ms.
-    Per step ≈ 9,900 kernel launches and 34,000 aten calls; the GPU is busy 74 ms
-    of the 170, on tiny (r × r) kernels: `bmm`, `div`, `vector_norm`, `where`,
-    `masked_fill` once per site in the forward and again in the backward. Launching
-    alone costs ≈ 44 ms of CPU per step. The bottleneck is the number of small
-    operations per site, not arithmetic.
-  - **Ruled out by prototypes** (scratch code, 2026-10-08; both match the current
-    log|ψ|² to float32 precision, ≈ 2e-6 relative):
-    - a log-depth (tree) contraction with per-level renormalisation: 1.5× faster at
-      d3r20 but 2.6× slower at d3r40, because it multiplies matrices (r³) where the
-      chain multiplies a vector by a matrix (r²);
-    - all transfer matrices from one einsum, then a per-site matvec chain
-      renormalised every 8 sites: 3.6× (d3r20) to 14× (d3r40) slower, because
-      backward through the slices of one large tensor writes a full-size gradient
-      per slice.
-  - **CUDA graphs + MPS, measured** (scratch prototypes `pilots/graph_*.py`, untracked;
-    2026-10-08). A whole step (AT: random start, PGD-K, both objectives, backward,
-    Adam with `capturable=True`, micro-batches) captured once and replayed:
-    - Bit-identical to the eager step (losses and parameters after 30 steps) for NAT
-      β ∈ {0, 0.5, 1}, d3r20/d3r40, 144 and 784 sites, micro-batched, and AT PGD-5/10
-      with a fixed start. With the random start the draws differ (graph RNG offsets).
-    - Per unit: G21G01 8.7× (NAT d3r20), 9.9× (AT PGD-10); laptop 3.9× / 4.5×;
-      full MNIST (laptop) 4.0× NAT d3r20, 3.7× NAT d3r40 (micro 128), 3.3× AT d3r20.
-      Capture 0.3–8 s once.
-    - A graphed unit alone saturates the GPU (tiny kernels in sequence). With NVIDIA
-      MPS (no code change) units run concurrently. G21G01, steps/s per GPU at
-      1/2/4/6/8 units: NAT graph 20.5/36.5/58.4/77.6/88.3 (eager 2.4/5.0/10.0/13.2/16.8);
-      AT PGD-10 graph 3.6/5.7/7.8/8.9/9.5 (eager 0.4/0.8/1.4/2.0/2.6). So **≈ 5–6× NAT,
-      ≈ 4–5× AT per GPU** against today's 6 eager units. MPS gotcha: start the daemon
-      with the physical `CUDA_VISIBLE_DEVICES`, clients then use `CUDA_VISIBLE_DEVICES=0`
-      (indices are relative to the MPS server).
-    - What is left per step is GPU time: NAT d3r20 10.5k kernels (30 ms) + 15 ms gaps;
-      AT 58k kernels (242 ms) + 22 ms gaps. The largest single cost (≈ 1/3) is the
-      complex ÷ real division of the renormalisation (chain `[B, r] / [B, 1]`, log Z's
-      tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
-      (7.3 µs). Casting the divisor to complex does not help; multiplying a real view by
-      1/n halves it but is not bit-identical (≈ 1e-7).
-    - **Integrated (D90):** the Trainer captures its step (`trainer.cuda_graph`, on by
-      default on CUDA) and `run ... --mps` serves each GPU's units through an MPS
-      daemon. Left to do:
-      1. Done (G21G01, 2026-10-09): `tests/unit/test_graphs.py` passes (7/7). A
-         failed capture leaves torch 2.1's allocator and generator in capture mode
-         for the whole process, so that test runs in a child process.
-      2. M0, memory per unit (`tests.bench.bench_train_step`, captured, β 0.5, RTX
-         6000 22 GB, without the ≈ 0.4 GB CUDA context):
-         MNIST12 d3r40 batch 512 NAT 70 ms/step, 1.87 GiB (8 units per GPU fit);
-         full MNIST d3r40 micro 256 NAT 595 ms/step, 5.34 GiB; AT PGD-5 2.6 s/step,
-         7.58 GiB; **d3r80 micro 128 NAT runs out of memory in the eager
-         validation**: the training graph's private pool stays reserved (16 GiB
-         reserved, 1 GiB allocated) and the eager forward needs 4.8 GiB more (tk's
-         input contraction stacks every site's r×r matrix for the chunk). So with
-         graphs, eager evaluation does not reuse the training step's memory.
-         **Correction (2026-10-09, late):** the cause is the warm-up, not the pool.
-         Each of the 3 eager warm-up calls ran on a new CUDA stream, and the
-         allocator caches per stream: MNIST12 d3r40 reserved 5.79 GiB for 1.87 GiB
-         allocated (≈ 3 × the eager peak; d3r80 likewise). E2a (`--per-gpu 8`, about
-         3.4 GiB per unit at start) lost 61 of 73 HPO trials to out-of-memory errors
-         at startup; E2c (spirals) was unaffected and finished.
-      3. **Fixed (D94, 2026-10-13; see "Captured validation crashes" below).** In
-         code (D91–D94): validation captured (`Graphs`, `Evaluation`), one side
-         stream per `Graphs` for warm-ups and captures, one memory pool per graph,
-         the analysis stage's per-batch work captured. Needs the cluster check
-         before studies run on it.
-      4. Re-estimate compute.md.
-  - **Captured validation crashed the training graph: found and fixed (D94,
-    2026-10-13).** Goal: efficiency. Graphs make a unit ≈ 9–10× faster per step
-    (training, D90) and ≈ 7× per batch (analysis), at the price of code complexity
-    (`bm4tc/core/graphs.py`, capturable functions, device scalars, copies of
-    outputs) and memory (a private pool per graph; three eager warm-up calls per
-    shape).
-    - **The symptom (2026-10-09):** at real shapes (E2a's MNIST12 d3r40 batch 512,
-      full-MNIST d3r80 micro 128) the first training replay after validation was
-      captured hit `CUDA error: an illegal memory access`, with shared or separate
-      pools; tiny models passed; validation eager was fine. E2a lost two launches.
-    - **The cause (D94):** autograd accumulates a parameter's gradients on the stream
-      where its AccumulateGrad node was made. tensorkrowch's resultant nodes in
-      `norm_net` (kept between calls, `log_partition_function` reuses its
-      successors) and the log Z cache keep the last warm-up's autograd graph alive,
-      hence that node, made on the warm-up side stream; the capture ran on torch's
-      default capture stream. Summing a parameter's complex gradients (one a
-      conjugate view, so out of place) allocated on the side stream, outside the
-      graph's pool in torch 2.1: 288 buffers at E2a's shape, freed when the capture
-      ended, written by every replay. Validation's eager warm-ups on that stream
-      could reuse them, and the `empty_cache` at validation's capture released them.
-      Not a tk bug and not an in-place write by tk: tk only keeps references, which
-      kept the autograd node alive. The size dependence came from the allocator:
-      small buffers share segments with live tensors, which are never released.
-    - **How it was found** (eGPU, scripts in the scratchpad, none in the repo): the
-      E2a-shape test reproduced in 8 s. Knobs, one process each: no `empty_cache` at
-      capture → fine (so the graph used memory it did not own); clearing cuBLAS
-      workspaces, a capture stream per graph → still crashed; dropping tk's
-      `norm_net` state and the log Z cache before capture → fine, either alone →
-      crashed. `compute-sanitizer` hid the bug (0 errors, no crash). Proof: the
-      training graph's kernel arguments, read through the CUDA driver API (an
-      `LD_PRELOAD` shim on `cudaGraphDebugDotPrint`), point into the segments
-      released at validation's capture, at buffers that `InputBuffer::accumulate`
-      (conjugate fallback) allocated on the autograd thread on the side stream.
-    - **The fix (D94):** one side stream per `Graphs` for warm-ups *and* captures.
-      With it every allocation of a capture is on one stream, in the graph's pool;
-      captured equals eager number for number at E2a's shape (NAT; AT PGD-5; d3r80
-      micro 128), the analysis bench gives identical rob and purify, and step time
-      and memory are unchanged (RTX 2080: 62 vs 64 ms/step, 2.93 vs 2.96 GiB).
-      Rejected: dropping tk's state and the cache before capture (model knowledge in
-      `graphs.py`, or the numerical core outside Phase 9); eager validation in large
-      chunks (Martin's fallback, not needed).
-    - **Seams added:** `test_a_capture_allocates_only_in_its_graphs_pool` (tk-free:
-      a complex weight used twice, one use conjugated, with the previous call's
-      graph held), `test_the_captured_training_step_allocates_only_in_its_pool`
-      (tiny Trainer, β > 0 with the norm penalty: catches the bug at any size; the
-      E2a-shape crash depended on the memory layout and did not reproduce when an
-      eager run went first), and the E2a-shape test now compares captured with
-      eager number for number.
-    - **Gaps left:** no test pins memory per unit at a study's shape (the bench
-      does, by hand); replays do not bump version counters, so `_params_key()` is
-      stale after a capture and an eager `log_normalizer()` or `log_Z(recompute=
-      False)` during captured training would serve an old log Z (nothing does
-      today); a cluster check before each launch (`pytest tests/unit/test_graphs.py`
-      plus a short run at the study's shape, from its worktree).
-    - **E2c is sound:** it ran on `d127eaad` (captured step, eager validation), which
-      had the same stray buffers; they were harmless there because nothing
-      allocated on that warm-up stream after the capture and nothing released memory
-      (an allocator out-of-memory retry would have, and would have crashed, not
-      corrupted silently).
-    - **Next:** D94 passed the cluster check (2026-10-13). E2a's relaunch found
-      D95's problems (`--replace` kept the old journal; a unit holds 3.9 GiB, so
-      `--per-gpu 6` ran out of memory; Ctrl+C would have counted running trials).
-      E2a relaunches on D95 with `--per-gpu 4 --mps`, no `--replace` (running since
-      2026-10-13 13:09 on GPUs 5,6,7: 4 units of ≈ 4.0 GiB per GPU under MPS). Open:
-      staggered unit starts, so a launch does not put every warm-up peak on a GPU at
-      once; at that launch's start two units on GPU 7 failed with "CUDA-capable
-      device(s) is/are busy or unavailable" (MPS refusing a client while many
-      connect at once; retried by D93), which staggering would also avoid.
-    - **Also open:** full-MNIST d3r80 micro 128 does not fit even without the crash
-      (validation needs ≈ 4.8 GiB beside the step's 16 GiB pool): smaller validation
-      chunks or micro 64, with `mnist_capacity`.
-  - **Then, in order (they cut GPU time, which is what is left under graphs):**
-    1. A custom `torch.autograd.Function` for the renormalised chain: the forward
-       saves the per-site vectors and norms, the backward is one hand-written
-       reverse sweep. Removes the autograd graph of norm/divide/guard per site
-       (most of the backward's launches); same algorithm, so it should match the
-       current numbers to float rounding. The same for the log Z zip-up.
-    2. Fewer operations per site in the forward: renormalise every k sites instead
-       of every site (k bounded by overflow: the growth per site is bounded),
-       drop the `where`/`masked_fill` guards where the norm cannot be zero.
-    3. The renormalising division on a real view times 1/n (above): ≈ 2× on that
-       kernel, not bit-identical. `torch.compile` is not an option on torch 2.1 with
-       complex tensors.
-    A custom Function works on raw tensors, outside tensorkrowch's nodes: under D30
-    it belongs in tensorkrowch, as the renormalize-that-returns-log-norm operation
-    (tk's `renormalize` keeps gradients but discards the norm, so log Z computes
-    each norm twice), unless Martin makes an exception.
-  - **The bar** (D30, Phase 9 track): the new contraction matches the current
-    log|ψ|², log Z and their gradients on random models (overflowing ones
-    included) to float tolerance; the seams re-pin in their own commit; the gain
-    is measured with `tests.bench.bench_train_step` and `profile_train_step`
-    before and after, from a `git worktree` of HEAD.
-- Minor: the Gibbs/SGLD analysis part logs a spurious
-  `Detection/attack failed: ; skipping` at every budget (`bm4tc/analysis/uq.py:556`:
-  `next(iter(det.values()))` on empty percentiles). Harmless; guard it.
+  (`bm4tc/analysis/purification.py`) evaluates (batch × num_bins) candidates per
+  feature, each with a full forward through all n sites: MNIST 12×12 447 s per 24
+  points; full MNIST ≈ 30× that and out of memory at batch 24 on 8 GB. Fix: cache
+  the left and right environments, so a candidate costs L_{k-1} · A_k(x) · R_{k+1},
+  and update the left one after feature k is resampled (about n× cheaper). It is
+  tensor-network maths, so it belongs in `ConditionalBornMachine` on tensorkrowch
+  nodes, and must reproduce the current snapshots (bit for bit, or to tolerance with
+  a re-pin).
+- **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
+  by hand); replays do not bump version counters, so `_params_key()` is stale after
+  a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during
+  captured training would serve an old log Z (nothing does today). Before each
+  launch, a cluster check from the study's worktree: `pytest tests/unit/test_graphs.py`
+  plus `bench_train_step` at the study's shape.
+- **Then GPU time, in order:**
+  1. A custom `torch.autograd.Function` for the renormalised chain (and the log Z
+     zip-up): the forward saves the per-site vectors and norms, the backward is one
+     hand-written reverse sweep. Removes most of the backward's launches; same
+     algorithm, so it should match to float rounding.
+  2. Fewer operations per site: renormalise every k sites (k bounded by overflow),
+     drop the `where`/`masked_fill` guards where the norm cannot be zero.
+  3. The renormalising division on a real view times 1/n (≈ 2× on that kernel, not
+     bit-identical). `torch.compile` is not an option on torch 2.1 with complex
+     tensors.
 
-### Sampling: compare with tensorkrowch's develop branch
+  A custom Function works on raw tensors, outside tensorkrowch's nodes: under D30 it
+  belongs in tensorkrowch, as a renormalize that returns the log norm (tk's
+  `renormalize` keeps gradients but discards the norm, so log Z computes each norm
+  twice), unless Martin makes an exception.
+- **Ruled out** (prototypes, 2026-10-08; both match log|ψ|² to ≈ 2e-6): a log-depth
+  tree contraction with per-level renormalisation (1.5× faster at d3r20, 2.6×
+  slower at d3r40: matrix-matrix r³ against the chain's r²); all transfer matrices
+  from one einsum, then a matvec chain renormalised every 8 sites (3.6–14× slower:
+  backward through slices of one tensor writes a full-size gradient per slice).
+- **The bar** (D30): the new contraction matches log|ψ|², log Z and their gradients
+  on random models (overflowing ones included) to float tolerance; the seams re-pin
+  in their own commit; the gain is measured with `bench_train_step` and
+  `profile_train_step` before and after, from a `git worktree` of HEAD.
+- Minor: Gibbs/SGLD analysis parts log a spurious `Detection/attack failed: ;
+  skipping` at every budget (`bm4tc/analysis/uq.py:611`, `next(iter(det.values()))`
+  on empty percentiles). Harmless; guard it.
+
+## Sampling: compare with tensorkrowch's develop branch
 
 Martin's fork of tensorkrowch has an unfinished, general sampling implementation on
-its `develop` branch (`tensorkrowch/models/mps...`): full sampling from the learned
-distribution and conditional sampling (imputation, purification). Before Phase 9
-touches sampling in `ConditionalBornMachine`:
+`develop` (`tensorkrowch/models/mps...`): full sampling and conditional sampling
+(imputation, purification). It is checked out read-only at `../tensorkrowch`. Before
+Phase 9 touches sampling in `ConditionalBornMachine`:
 
-1. Martin clones the fork next to bm4tc (read only; the bm4tc env keeps
-   tensorkrowch 1.1.6):
-
-   ```bash
-   cd ~/0git && git clone -b develop https://github.com/MLNissenGonzalez/tensorkrowch.git
-   ```
-
-2. Read both implementations and write a comparison: what each one can do that the
-   other cannot (full and conditional sampling, which variables can be fixed, batch
-   handling, the class site, embeddings and their inverse, numerical safety on long
-   chains, speed), and how each would serve Gibbs purification.
-3. Discuss with Martin, as questions: what to adopt from the tensorkrowch code, what
-   to keep from bm4tc, and whether the shared part belongs upstream (Phase 9).
+1. Compare both implementations: what each can do that the other cannot (full and
+   conditional sampling, which variables can be fixed, batching, the class site,
+   embeddings and their inverse, numerical safety on long chains, speed), and how
+   each would serve Gibbs purification.
+2. Discuss with Martin: what to adopt, what to keep, and whether the shared part
+   belongs upstream (Phase 9).
 
 ## Phase 9 (separate track): tensorkrowch
 
@@ -347,32 +300,32 @@ sampling) happen here and nowhere else (D30).
 Kept here until they move to `~/0git/tn4dd/` (benchmarking ways to train tensor
 networks generatively).
 
-- **Hard renormalisation during training.** `Trainer` had a `norm_control.hard_every`
-  option: every k optimizer steps, `cbm.renormalize_(log_target)` rescaled all cores
-  in place so log Z returned to the target (a projection, against the soft penalty
-  strength·(log Z − target)²/N). No study used it, and it does not fit a captured
-  training step (D90), so it was removed; `renormalize_` itself stays (figures use
-  it). Worth comparing as a norm-control scheme: hard projection every k steps vs
-  the soft penalty vs neither (log-space accumulation only), on overflow, stability
+- **Hard renormalisation during training.** The removed `norm_control.hard_every`
+  (D90) rescaled all cores every k steps so log Z returned to the target, a
+  projection against the soft penalty strength·(log Z − target)²/N; it does not fit a
+  captured step. `renormalize_` stays (figures use it). Compare hard projection,
+  the soft penalty and neither (log-space accumulation only) on overflow, stability
   and the generative NLL.
+- **DMRG sweeps** (from the personal laptop's `DEFERRED.md` §1).
 
 ## Open items
 
-- **randn_eye rescale misses the edge cores:** `ConditionalBornMachine.__init__` multiplies
-  `self.tensors` by 1/φ₀, but the two edge entries are contracted copies (tensorkrowch
-  candidates in decisions.md), so ψ is rescaled by φ₀^−(n−2), not φ₀^−n. Harmless (the norm
-  penalty absorbs a constant); fixing it changes every initialisation, so it needs a re-pin.
-
+- **Adaptive attacks** a reviewer will ask for (rebuttal, and E2c's purified
+  accuracy above the ceiling): BPDA/EOT through Gibbs purification, unrolled PGD
+  through likelihood purification. Not implemented.
 - **Time series** (D6): datasets, grids and studies (NAT and AT; JEM if wanted).
-- **Study settings** were copied from the old sweeps (epochs, patience, HPO spaces);
-  review before Phase 8.
-- **Trainer unification** for MPS and JEM: noted, not decided (see the note under
-  the decisions table).
-- **Adaptive attacks** a journal reviewer will ask for (rebuttal): BPDA/EOT through
-  Gibbs purification, unrolled PGD through gradient purification. Not implemented.
-- **Agent notes on the other laptop:** `CLAUDE.md`, `DEFERRED.md` and `.claude/`
-  there may hold the old plan and issue list; move what still matters into GitHub
-  issues or this file.
+- **Trainer unification** for MPS and JEM: noted, not decided (decisions.md, under
+  the table).
+- **randn_eye rescale misses the edge cores:** `ConditionalBornMachine.__init__`
+  multiplies `self.tensors` by 1/φ₀, but the edge entries are contracted copies, so
+  ψ is rescaled by φ₀^−(n−2), not φ₀^−n. Harmless (the norm penalty absorbs a
+  constant); fixing it changes every initialisation, so it needs a re-pin.
+- **main's spirals AT `rob` above the ceiling** (0.929 / 0.829 against 0.679 / 0.609
+  at abs 0.2 / 0.3; real-dtype runs from before D87; AGENTS.md's laptop comparison):
+  check on `spirals_at` once it runs. E2c's NAT `rob` is below the ceiling.
+- **The Chebyshev comment** at `bm4tc/core/embeddings.py:250` cites
+  `reference/chebyshev_boundary_born_machines.md`, which exists only untracked on
+  the personal laptop.
 - `tests/unit/test_privacy.py::test_membership_inference_runs_end_to_end` fails when
   only `tests/unit tests/integration` run (order-dependent on the session `cbm`
   fixture); passes in the full suite.
