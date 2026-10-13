@@ -1,7 +1,7 @@
 # E3 (plan.md "Pilots"; docs/adaptive.md §4): the adaptive attacks (D96) on E2c's
 # models, against the ceilings (D97). Half of E2c's β ladder, E2c's selected lr
 # (hparams_from: configs/hparams/pilot_beta_spirals.yaml, from the cluster), one seed.
-# Minutes per run on one GPU.
+# About 40 min per run on the eGPU (Gibbs is most of it); 6 runs, 3 at a time: ~1.5-2 h.
 dataset: spirals
 regime: nat
 seeds: 1
@@ -20,9 +20,12 @@ hparams_from:
 budgets: [0.05, 0.1, 0.15, 0.2]
 analysis:
   joint_attack: false
+  percentiles: [5]             # one detection threshold, as E2c was read
   batch_size: 2000             # the whole spirals test split in one batch
   sweep_purify:
     enabled: true
+    sweeps: [1, 6]             # the first run showed BPDA+EOT ahead at 1, behind at 6
     gibbs: {batch_size: 256}   # the 250-point subsample in one batch
   adaptive:
     enabled: true
+    eot: 8                     # halves Gibbs's cost; the saturation ablation checks it

@@ -10,8 +10,11 @@ on P(x). Its output is ⊥ (reject) or f(P(x)). :class:`AdaptivePGD` attacks it:
 - through the detector with selective PGD: per sample, a step up log p while rejected and
   down the class margin once accepted.
 
-It keeps the best iterate per sample over every step and restart. A random defence's
-examples are scored on fresh draws (:meth:`Defense.rates`), not on the attack's own.
+It keeps the best iterate per sample over every step and restart. Given a ``start``
+(the pipeline passes the PGD example on the classifier), the first restart begins
+there, so the attack never does worse than that transfer attack (D98). A random
+defence's examples are scored on fresh draws (:meth:`Defense.rates`), not on the
+attack's own.
 
 Budgets are absolute (``eps_abs``), as in :mod:`bm4tc.core.attacks`.
 """
@@ -95,15 +98,15 @@ class Defense:
 
 class AdaptivePGD:
     """L∞ PGD on :meth:`Defense.attack_step` within the ε ball and the input box, from
-    ``restarts`` random starts, keeping per sample the iterate with the highest error
-    rate (the first one reaching it)."""
+    ``restarts`` starts (the given ``start`` first, if any, then random ones), keeping
+    per sample the iterate with the highest error rate (the first one reaching it)."""
 
     def __init__(self, steps: int = 100, restarts: int = 5, eot: int = 16,
                  step_size: Optional[float] = None):
         self.steps, self.restarts, self.eot, self.step_size = steps, restarts, eot, step_size
 
     def generate(self, defense: Defense, x: torch.Tensor, labels: torch.Tensor,
-                 eps_abs: float) -> torch.Tensor:
+                 eps_abs: float, start: Optional[torch.Tensor] = None) -> torch.Tensor:
         x = x.detach()
         lo, hi = defense.model.input_range
         draws = self.eot if defense.random else 1
@@ -114,8 +117,11 @@ class AdaptivePGD:
 
         best_x = x.clone()
         best_rate = torch.full((len(x),), -1.0, device=x.device)
-        for _ in range(self.restarts):
-            delta = bounded(random_in_ball(x.shape, "inf", eps_abs, x.device))
+        for restart in range(self.restarts):
+            if restart == 0 and start is not None:
+                delta = bounded(start.to(x.device).detach() - x)
+            else:
+                delta = bounded(random_in_ball(x.shape, "inf", eps_abs, x.device))
             for t in range(self.steps + 1):
                 delta.requires_grad_(True)
                 loss, rate = defense.attack_step(x + delta, labels, draws)

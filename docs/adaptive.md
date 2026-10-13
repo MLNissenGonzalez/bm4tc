@@ -187,6 +187,8 @@ real forward pass, and score the success criterion of the metric, not a proxy.
   purify + detect, which then combines both attacks.
 
 - **For every attack:**
+  - the first restart starts from the PGD example on the bare classifier (D98), so the
+    attack can only improve on the transfer attack;
   - the best iterate per sample is kept: any iterate in the ball at which the defence
     errs (and accepts) is a valid adversarial example;
   - R random restarts;
@@ -233,15 +235,22 @@ weaker attack).
 - **Cost:** about 2.5 min per likelihood-purifier defence per budget; Gibbs takes
   130 / 239 / 416 s at k1 / k3 / k6. One run then takes about 2.5–3 h, mostly Gibbs.
 
-Fixes proposed (not decided):
-1. Warm-start the adaptive attack from the PGD example, as one of its restarts, so
+Fixes considered:
+1. **Warm-start the adaptive attack from the PGD example**, as one of its restarts, so
    it can only improve on the transfer attack: the attacker's best attack per point,
-   as in AutoAttack's ensemble.
+   as in AutoAttack's ensemble. **Adopted (D98).**
 2. Also evaluate the margin at x' as well as at P(x') (a hybrid loss), so the
-   gradient pulls towards f's boundary too. Cheap; a heuristic.
+   gradient pulls towards f's boundary too. Cheap; a heuristic. Kept in reserve.
 3. Unroll the purifier with smooth steps for the backward pass (the true contracting
    Jacobian). Principled, but more code and second-order autograd through
-   tensorkrowch.
+   tensorkrowch. Kept in reserve.
+
+That first run was stopped. The next E3 (not yet run) is trimmed to its questions:
+detection at q5 only, Gibbs at sweeps {1, 6} with EOT 8 (about 40 min per run, 1.5–2 h
+for the study). It asks: is adaptive purified accuracy under the ceilings at every β,
+in particular E2c's 0.82 at high β and ε = 0.1? Does detection survive the adaptive
+attack, against its higher ceiling? Which β is best under adaptive attack? Then the
+saturation ablation (steps, restarts, EOT) sets `analysis.adaptive`'s defaults.
 
 ## References
 

@@ -158,3 +158,26 @@ def test_random_defence_is_scored_on_fresh_draws(model, data):
     calls.clear()
     Defense(model, purify=noisy).rates(x, y, draws=5)
     assert len(calls) == 1
+
+
+def test_warm_start_is_never_worse_than_its_start(model, data):
+    """D98: started from the PGD example, the adaptive attack errs at least wherever
+    that example already makes the (deterministic) defence err."""
+    x, y = data
+    purifier = LikelihoodPurification(num_steps=5)
+    defense = Defense(model, purify=lambda v: purifier.purify(model, v, 0.1)[0])
+    torch.manual_seed(4)
+    x_pgd = ProjectedGradientDescent(num_steps=20).generate(model, x, y, EPS)
+    x_adv = AdaptivePGD(steps=3, restarts=1).generate(defense, x, y, EPS, start=x_pgd)
+    _, error_pgd = defense.rates(x_pgd, y)
+    _, error_adv = defense.rates(x_adv, y)
+    assert (error_adv >= error_pgd).all()
+
+
+def test_the_first_restart_begins_at_the_start(model, data):
+    x, y = data
+    scripted = _Scripted(model, hit=0)
+    start = (x + 0.05).clamp(0, 1)
+    AdaptivePGD(steps=2, restarts=2).generate(scripted, x, y, EPS, start=start)
+    torch.testing.assert_close(scripted.seen[0], start)
+    assert not torch.allclose(scripted.seen[3], start)   # the second restart is random
