@@ -279,8 +279,12 @@ Measured in [compute.md](compute.md).
     - **Next:** D94 passed the cluster check (2026-10-13). E2a's relaunch found
       D95's problems (`--replace` kept the old journal; a unit holds 3.9 GiB, so
       `--per-gpu 6` ran out of memory; Ctrl+C would have counted running trials).
-      E2a relaunches on D95 with `--per-gpu 4 --mps`, no `--replace`. Open: staggered
-      unit starts, so a launch does not put every warm-up peak on a GPU at once.
+      E2a relaunches on D95 with `--per-gpu 4 --mps`, no `--replace` (running since
+      2026-10-13 13:09 on GPUs 5,6,7: 4 units of ≈ 4.0 GiB per GPU under MPS). Open:
+      staggered unit starts, so a launch does not put every warm-up peak on a GPU at
+      once; at that launch's start two units on GPU 7 failed with "CUDA-capable
+      device(s) is/are busy or unavailable" (MPS refusing a client while many
+      connect at once; retried by D93), which staggering would also avoid.
     - **Also open:** full-MNIST d3r80 micro 128 does not fit even without the crash
       (validation needs ≈ 4.8 GiB beside the step's 16 GiB pool): smaller validation
       chunks or micro 64, with `mnist_capacity`.
