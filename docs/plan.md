@@ -29,9 +29,9 @@ Next, in order:
 1. **Launch E2b** on G21G01 (a worktree at the current commit). The ladder waits
    for its knee shift; the AT grid {0, β\*} waits for E3's verdict on purification
    under adaptive attacks (below, E2a).
-2. **The sampling code (D100, in progress):** `SamplingMPS`, develop's sampler on tk
-   1.1.6, step 1 done; steps 2–5 under [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100).
-   Gibbs is also most of the adaptive part's cost.
+2. **The sampling code (D100, D101, in progress):** `SamplingMPS`, develop's sampler on
+   tk 1.1.6, steps 1–3 done (Gibbs and the figures use it); steps 4–5 under
+   [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100).
 3. **Run E3** (trimmed, with D98; ~1.5–2 h on the eGPU, launch it detached so the
    terminal can close), read it against the ceilings, then the saturation ablation
    (steps, restarts, EOT) that sets `analysis.adaptive`'s defaults.
@@ -314,9 +314,15 @@ The training step, validation and the analysis's per-batch work are captured
 (D90, D92, D94); the measurements and memory per unit are in compute.md. What is
 left:
 
-- **Gibbs purification is O(n²) per sweep** (MNIST 12×12: 6.8 s per sweep for 24
-  points; full MNIST out of memory at batch 24 on 8 GB). Being replaced by
-  `SamplingMPS.sample` (D100, under [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100)).
+- **The forward stores B·n·r² (noted, not scheduled).** `log_amp_sq` (training,
+  validation, log p(x)) runs tk 1.1.6's `contract`: every site is contracted with its
+  data first, into a (B, r, r) matrix, and all are kept (autograd keeps them for the
+  backward). Measured: 153 MiB per point at 784 sites, r160 (exactly n·r²·8 bytes),
+  38 MiB per point at r80 with 10 classes. Environment first, as develop's `norm`
+  zips up and the Gibbs sweep does (D101): the running vector absorbs the site
+  (B, d, r), then the data (B, r), so B·n·r·d is stored, ≈ 27× less at r80, d 3; the
+  time stays B·r²·d per site. It may be what puts d3r80 micro 128 out of memory.
+  Core path (D30): the bar below applies.
 - **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
   by hand); replays do not bump version counters, so `_params_key()` is stale after
   a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during
@@ -379,17 +385,16 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    and ~30 new nodes per site), not batch or bins. Left: `reset` deletes nodes in
    time quadratic in nodes of one name (2.3 s of 8.4 s profiled at 784 sites; an
    upstream candidate), and fewer operations per site.
-3. Switch `GibbsPurification` (each sweep: windows around the current x, then
-   `SamplingMPS.sample(cbm, in_condition=embed(x), domain=windows,
-   renormalize=True)`; snapshots stay) and the figures' class samples (`condition`
-   + `sample`); delete `CBM.sample`, `sample_all_classes`, `condition_on_class`,
-   `_make_conditioned_net`, `_h_node`/`_u_node` (then `CBM.sample` no longer
-   shadows `SamplingMPS.sample`); re-pin where Gibbs values are pinned. Also, as
-   decided (D100): rows with no usable weight fall back to uniform with a warning
-   count (`_probabilities_from_amplitudes` still raises, as in develop), and
-   `GibbsPurification` chunks the batch to bound memory (≈ 5.7 MiB per sample per
-   sweep at MNIST 12×12 r40). Raise `gibbs.batch_size` in `defaults.yaml` once
-   measured (time no longer grows with the batch).
+3. **Done (D101):** `GibbsPurification` runs each sweep as one `born.sample(in_condition=x,
+   domain=windows)`, the figures' class samples are `condition` + `sample`, the old
+   sampler is deleted; rows with no usable weight are drawn uniformly with one
+   warning per call; `gibbs.batch_size` 64. The Gibbs golden reproduces unchanged.
+   A sweep (`in_condition`) keeps the ket only: with every variable but the sampled
+   one fixed, the density is ρ = Σ_c w_c w_c† from the ket and its conjugate, so no
+   bra layer and memory per point linear in r (784 sites, 10 classes: 17.5 / 30.5 /
+   ≈ 57 MiB at r40 / r80 / r160). One sweep over 512 points at batch 64: MNIST 12×12
+   r40 3.95 s, full MNIST r40 / r80 29 s (1.1 / 2.7 GiB peak with the log p(x)
+   forward).
 4. Measure time and memory (spirals B 256, MNIST 12×12, full MNIST r40/r80) before and
    after, from a worktree of HEAD; compute.md.
 5. The develop patch (Phase 9). tensorkrowch findings for it are in commit

@@ -50,7 +50,7 @@ analysis:
     subsample: 250             # test points (fixed subset, seed 0); null = all
     gibbs:
       num_bins: 96             # candidate values per feature
-      batch_size: 24           # memory: batch_size x num_bins per forward
+      batch_size: 64           # points swept together; memory ∝ sites·classes·bond (D101)
     sgld:
       steps: 20                # SGLD transitions per sweep
       step_size: 0.01          # fixed for every model (not the training sampler's)

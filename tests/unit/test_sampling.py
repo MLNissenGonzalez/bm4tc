@@ -5,8 +5,9 @@ ported: every local distribution the sampler draws from is checked against the e
 one, enumerated over all configurations. ``torch.multinomial`` is replaced by argmax
 that records its input, so a test sees each distribution and the path is
 deterministic. The second part checks it on the ConditionalBornMachine: the class
-is summed out or fixed, and ``sample(in_condition=x)`` is one sweep of
-GibbsPurification on a fixed grid.
+is summed out or fixed, and ``sample(in_condition=x)`` is one Gibbs sweep, checked
+against the full-chain sweep that GibbsPurification ran before D101. The third part
+checks per-sample domains and the uniform fallback (D101).
 """
 import itertools
 
@@ -382,34 +383,103 @@ def _cbm(dtype, out_position, data_dim=6, num_classes=3):
     return cbm
 
 
+def _full_chain_sweep(cbm, x, domains):
+    """One Gibbs sweep as GibbsPurification ran it before D101: every candidate is
+    a full-chain contraction (``log_amp_sq``), the class summed in log space, the
+    features drawn left to right with ``torch.multinomial``. ``domains``: one
+    ``(bins,)`` or ``(batch, bins)`` tensor per feature."""
+    x = x.clone()
+    batch, features = x.shape
+    for k, candidates in enumerate(domains):
+        candidates = candidates.expand(batch, -1)                 # (batch, bins)
+        bins = candidates.shape[1]
+        trial = x.unsqueeze(1).expand(batch, bins, features).clone()
+        trial[:, :, k] = candidates
+        log_p = torch.logsumexp(cbm.log_amp_sq(trial.reshape(-1, features)), dim=-1)
+        log_p = log_p.view(batch, bins)
+        weights = (log_p - log_p.amax(dim=1, keepdim=True)).exp()
+        ids = torch.multinomial(weights, 1).squeeze(1)
+        x[:, k] = candidates.gather(1, ids[:, None]).squeeze(1)
+    return x
+
+
+def _embedding(cbm):
+    return lambda v: cbm.embedding(v).to(cbm.dtype).reshape(*v.shape, -1)
+
+
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
 @pytest.mark.parametrize("out_position", [0, 3, 6])
 def test_cbm_in_condition_is_one_gibbs_sweep(captured, dtype, out_position):
     """One ``sample(in_condition=x)`` draws every feature from the same
-    distributions as one sweep of GibbsPurification on the full-range grid."""
-    from bm4tc.analysis.purification import GibbsPurification
-
+    distributions as one full-chain Gibbs sweep on the full-range grid."""
     cbm = _cbm(dtype, out_position)
     lo, hi = cbm.input_range
     x = lo + (hi - lo) * torch.rand(4, 6)
-    bins = 12
+    grid = torch.linspace(lo, hi, 12)
 
-    gibbs = GibbsPurification(num_bins=bins, gibbs_batch_size=4,
-                              step_delta_rel=None, progress=False)
-    x_gibbs, _ = gibbs.purify(cbm, x, n_sweeps=1, device="cpu")
-    gibbs_probs = [p / p.sum(-1, keepdim=True) for p in captured]
+    x_ref = _full_chain_sweep(cbm, x, [grid] * 6)
+    ref_probs = [p / p.sum(-1, keepdim=True) for p in captured]
     captured.clear()
 
-    grid = torch.linspace(lo, hi, bins)
     x_tk = SamplingMPS.sample(
         cbm, in_condition=cbm.embed(x).to(cbm.dtype), domain=grid,
-        embedding=lambda v: cbm.embedding(v).to(cbm.dtype).reshape(len(v), -1),
-        renormalize=True)
+        embedding=_embedding(cbm), renormalize=True)
 
-    assert len(captured) == len(gibbs_probs) == 6
-    for p_tk, p_gibbs in zip(captured, gibbs_probs):
-        assert torch.allclose(p_tk.double(), p_gibbs.double(), atol=1e-6)
-    assert torch.equal(x_tk, x_gibbs)
+    assert len(captured) == len(ref_probs) == 6
+    for p_tk, p_ref in zip(captured, ref_probs):
+        assert torch.allclose(p_tk.double(), p_ref.double(), atol=1e-6)
+    assert torch.equal(x_tk, x_ref)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+@pytest.mark.parametrize("out_position", [0, 3, 6])
+def test_cbm_windowed_in_condition_is_one_windowed_gibbs_sweep(
+        captured, dtype, out_position):
+    """With a window per sample and feature, ``sample(in_condition=x)`` is one
+    full-chain Gibbs sweep over the same windows."""
+    cbm = _cbm(dtype, out_position)
+    lo, hi = cbm.input_range
+    x = lo + (hi - lo) * torch.rand(4, 6)
+    delta = 0.1 * (hi - lo)
+    w_lo, w_hi = (x - delta).clamp(lo, hi), (x + delta).clamp(lo, hi)
+    windows = w_lo[..., None] + (w_hi - w_lo)[..., None] * torch.linspace(0, 1, 12)
+    domains = list(windows.unbind(1))                              # 6 × (4, 12)
+
+    x_ref = _full_chain_sweep(cbm, x, domains)
+    ref_probs = [p / p.sum(-1, keepdim=True) for p in captured]
+    captured.clear()
+
+    x_tk = SamplingMPS.sample(
+        cbm, in_condition=cbm.embed(x).to(cbm.dtype), domain=domains,
+        embedding=_embedding(cbm), renormalize=True)
+
+    assert len(captured) == len(ref_probs) == 6
+    for p_tk, p_ref in zip(captured, ref_probs):
+        assert torch.allclose(p_tk.double(), p_ref.double(), atol=1e-6)
+    assert torch.equal(x_tk, x_ref)
+
+
+def test_gibbs_purification_sweeps_are_sample_calls(captured):
+    """GibbsPurification's restricted sweep is one ``sample`` over windows
+    re-centred on the sweep-start values: two sweeps match two reference sweeps."""
+    from bm4tc.analysis.purification import GibbsPurification
+
+    cbm = _cbm("float32", 3)
+    lo, hi = cbm.input_range
+    x = lo + (hi - lo) * torch.rand(4, 6)
+    bins, step = 12, 0.1
+    delta = step * (hi - lo)
+
+    x_ref = x
+    for _ in range(2):
+        w_lo, w_hi = (x_ref - delta).clamp(lo, hi), (x_ref + delta).clamp(lo, hi)
+        windows = w_lo[..., None] + (w_hi - w_lo)[..., None] * torch.linspace(0, 1, bins)
+        x_ref = _full_chain_sweep(cbm, x_ref, list(windows.unbind(1)))
+
+    gibbs = GibbsPurification(num_bins=bins, gibbs_batch_size=4,
+                              step_delta_rel=step, progress=False)
+    x_gibbs, _ = gibbs.purify(cbm, x, n_sweeps=2, device="cpu")
+    assert torch.equal(x_gibbs, x_ref)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])
@@ -433,7 +503,7 @@ def test_cbm_unchanged_by_sampling():
     SamplingMPS.sample(
         cbm, in_condition=cbm.embed(x).to(cbm.dtype),
         domain=torch.linspace(-1, 1, 8),
-        embedding=lambda v: cbm.embedding(v).to(cbm.dtype).reshape(len(v), -1))
+        embedding=_embedding(cbm))
     cbm.condition(tk.embeddings.basis(torch.tensor(0), dim=3).to(cbm.dtype))
     assert torch.equal(las, cbm.log_amp_sq(x))
     assert torch.equal(log_z, cbm.log_partition_function())
@@ -482,36 +552,44 @@ def test_per_sample_domain_rejects_wrong_rows_and_build_matrices():
                    embedding=tk.embeddings.unit, build_matrices=True)
 
 
-@pytest.mark.parametrize("dtype", ["float32", "complex64"])
-@pytest.mark.parametrize("out_position", [0, 3, 6])
-def test_cbm_windowed_in_condition_is_one_windowed_gibbs_sweep(
-        captured, dtype, out_position):
-    """With a window per sample and feature, ``sample(in_condition=x)`` is one
-    sweep of GibbsPurification as the analysis runs it (``step_delta_rel``)."""
-    from bm4tc.analysis.purification import GibbsPurification
+# ── rows with no usable weight (D101) ────────────────────────────────────────
 
-    cbm = _cbm(dtype, out_position)
-    lo, hi = cbm.input_range
-    x = lo + (hi - lo) * torch.rand(4, 6)
-    bins, step = 12, 0.1
-    delta = step * (hi - lo)
+def test_unusable_rows_become_uniform_and_are_counted():
+    probs = torch.tensor([[0., 0., 0.],
+                          [1., float('nan'), 2.],
+                          [float('inf'), 1., 0.],
+                          [1., 0., 3.]])
+    clean, n_unusable = SamplingMPS._probabilities_from_amplitudes(probs)
+    assert n_unusable == 3
+    assert torch.allclose(clean[:3], torch.full((3, 3), 1 / 3))
+    assert torch.allclose(clean[3], torch.tensor([0.25, 0., 0.75]))
 
-    gibbs = GibbsPurification(num_bins=bins, gibbs_batch_size=4,
-                              step_delta_rel=step, progress=False)
-    x_gibbs, _ = gibbs.purify(cbm, x, n_sweeps=1, device="cpu")
-    gibbs_probs = [p / p.sum(-1, keepdim=True) for p in captured]
-    captured.clear()
 
-    w_lo, w_hi = (x - delta).clamp(lo, hi), (x + delta).clamp(lo, hi)
-    unit = torch.linspace(0, 1, bins)
-    windows = w_lo[..., None] + (w_hi - w_lo)[..., None] * unit   # (B, D, bins)
-    x_tk = SamplingMPS.sample(
-        cbm, in_condition=cbm.embed(x).to(cbm.dtype),
-        domain=list(windows.unbind(1)),
-        embedding=lambda v: cbm.embedding(v).to(cbm.dtype),
-        renormalize=True)
+def test_huge_finite_weights_keep_their_ratios():
+    # Each weight is finite, but a row sum would overflow float32.
+    probs = torch.tensor([[3e38, 3e38, 0.], [1e-40, 3e-40, 0.]])
+    clean, n_unusable = SamplingMPS._probabilities_from_amplitudes(probs)
+    assert n_unusable == 0
+    assert torch.allclose(clean, torch.tensor([[0.5, 0.5, 0.], [0.25, 0.75, 0.]]))
 
-    assert len(captured) == len(gibbs_probs) == 6
-    for p_tk, p_gibbs in zip(captured, gibbs_probs):
-        assert torch.allclose(p_tk.double(), p_gibbs.double(), atol=1e-6)
-    assert torch.equal(x_tk, x_gibbs)
+
+def test_complex_weights_use_the_real_part():
+    probs = torch.tensor([[1 + 0j, 3 + 0j], [0j, 0j]])
+    clean, n_unusable = SamplingMPS._probabilities_from_amplitudes(probs)
+    assert n_unusable == 1
+    assert torch.allclose(clean, torch.tensor([[0.25, 0.75], [0.5, 0.5]]))
+
+
+def test_negative_weights_still_raise():
+    with pytest.raises(ValueError, match='negative'):
+        SamplingMPS._probabilities_from_amplitudes(torch.tensor([[1., -0.5]]))
+
+
+def test_sample_with_no_usable_weight_warns_once_with_the_count():
+    mps = SamplingMPS(n_features=3, phys_dim=2, bond_dim=2, boundary='obc')
+    for node in mps.mats_env:
+        node.tensor = torch.zeros_like(node.tensor)
+    with pytest.warns(UserWarning, match='12 of 12 draws') as record:
+        samples = mps.sample(n_samples=4)
+    assert len([w for w in record if 'usable' in str(w.message)]) == 1
+    assert samples.shape == (4, 3)

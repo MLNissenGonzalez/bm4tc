@@ -187,234 +187,6 @@ def test_norm_net_auto_stack_matches():
     assert cbm.norm_net._auto_unbind is False
 
 
-# ── condition_on_class ──────────────────────────────────────────────────────
-
-def test_condition_on_class_length():
-    cbm = _tiny_cbm(data_dim=4, num_classes=3)
-    assert len(cbm.condition_on_class(0)) == 4
-
-
-def test_condition_on_class_tensor_ranks():
-    cbm = _tiny_cbm(data_dim=4, num_classes=3)
-    tensors = cbm.condition_on_class(0)
-    assert tensors[0].ndim == 2   # left boundary
-    assert tensors[-1].ndim == 2  # right boundary
-    for t in tensors[1:-1]:
-        assert t.ndim == 3
-
-
-def test_condition_on_class_no_mutation():
-    cbm = _tiny_cbm(data_dim=4, num_classes=3)
-    before = [n.tensor.clone() for n in cbm._mats_env]
-    cbm.condition_on_class(0)
-    cbm.condition_on_class(1)
-    for snap, node in zip(before, cbm._mats_env):
-        assert torch.allclose(snap, node.tensor)
-
-
-def test_condition_on_class_last_position():
-    # out_position at the last site uses the left-merge path
-    cbm = _tiny_cbm(data_dim=2, num_classes=2)
-    # out_position defaults to n_features // 2 = 1; test with forced last position
-    from bm4tc.core.model import CBMConfig
-    cfg_dc = CBMConfig(embedding="fourier",
-                       init_kwargs=MPSInitConfig(in_dim=2, bond_dim=2, out_position=2,
-                                                 std=1e-3, dtype="float32"))
-    cbm2 = ConditionalBornMachine(cfg=cfg_dc, data_dim=2, num_classes=2)
-    tensors = cbm2.condition_on_class(0)
-    assert len(tensors) == 2
-    # both tensors are boundary nodes (2D) when out_position is the last site
-    for t in tensors:
-        assert t.ndim == 2
-
-
-# ── _make_conditioned_net ────────────────────────────────────────────────────
-
-def test_make_conditioned_net_returns_mps():
-    cbm = _tiny_cbm()
-    result = cbm._make_conditioned_net(0)
-    assert isinstance(result, tk.models.MPS)
-    assert result.n_features == cbm._data_dim
-
-
-def test_make_conditioned_net_is_canonical():
-    """Sites 1..n-1 are left-isometric up to a constant: A†A ≈ c²·P.
-
-    Not A†A ≈ I. Two reasons, both by design:
-      * canonicalize(renormalize=True) distributes a constant c per node, so the
-        right environment contracts to c²·I rather than I. Uniform across grid
-        bins, so torch.multinomial's per-row normalization divides it out.
-      * A randn-init MPS is near rank-deficient, so some bond directions carry no
-        weight and A†A is a scaled *projector* P, not full identity. What sampling
-        needs is that the retained directions share one common scale — that is
-        what makes the right environment a single multiplicative constant.
-    """
-    cbm = _tiny_cbm()
-    cond_mps = cbm._make_conditioned_net(0)
-    for k in range(1, cond_mps.n_features):
-        A = cond_mps._mats_env[k].tensor   # (D_l, d, D_r)
-        ATA = torch.einsum('ijk,ijl->kl', A.conj(), A)  # (D_r, D_r)
-        diag = torch.diagonal(ATA).real
-        off = ATA - torch.diag_embed(torch.diagonal(ATA))
-        assert torch.allclose(off, torch.zeros_like(off), atol=1e-5), \
-            f"Site {k} not orthogonal: max off-diag {off.abs().max():.2e}"
-        live = diag[diag > 1e-8]
-        assert len(live) > 0, f"Site {k} entirely degenerate"
-        # every populated direction carries the SAME constant c²
-        assert torch.allclose(live, live[0].expand_as(live), rtol=1e-4), \
-            f"Site {k} live directions not a common scale: {live}"
-
-
-def test_make_conditioned_net_degenerate_dirs_unused():
-    """Rank-deficient bond directions are never populated during sampling.
-
-    A zero direction in A†A is harmless only if the running left environment H
-    never acquires weight there — otherwise the right-environment-is-a-constant
-    assumption behind the sampler would break."""
-    cbm = _tiny_cbm()
-    cond_mps = cbm._make_conditioned_net(0)
-    for k in range(1, cond_mps.n_features):
-        A = cond_mps._mats_env[k].tensor
-        dead = torch.diagonal(torch.einsum('ijk,ijl->kl', A.conj(), A)).real <= 1e-8
-        if not dead.any():
-            continue
-        # any vector pushed through A has zero weight on the dead directions
-        H = torch.randn(16, A.shape[0], dtype=A.dtype)
-        out = torch.einsum('bi,ijk->bjk', H, A)          # (batch, d, D_r)
-        assert out[..., dead].abs().max() < 1e-6, \
-            f"Site {k}: degenerate direction carries weight {out[..., dead].abs().max():.2e}"
-
-
-def test_make_conditioned_net_no_mutation():
-    cbm = _tiny_cbm()
-    before = [n.tensor.clone() for n in cbm._mats_env]
-    cbm._make_conditioned_net(0)
-    for snap, node in zip(before, cbm._mats_env):
-        assert torch.allclose(snap, node.tensor)
-
-
-# ── sample ──────────────────────────────────────────────────────────────────
-
-def test_sample_shape():
-    cbm = _tiny_cbm()
-    assert cbm.sample(0, n=5, num_bins=10).shape == (5, cbm._data_dim)
-
-
-def test_sample_in_range():
-    cbm = _tiny_cbm()
-    lo, hi = cbm.input_range
-    for c in range(2):
-        s = cbm.sample(c, n=8, num_bins=10)
-        assert (s >= lo).all() and (s <= hi).all()
-
-
-def test_sample_finite():
-    cbm = _tiny_cbm()
-    assert torch.isfinite(cbm.sample(0, n=8, num_bins=10)).all()
-
-
-def test_sample_chunks_match_shape():
-    # n > batch_size exercises the chunked path
-    cbm = _tiny_cbm()
-    s = cbm.sample(0, n=7, num_bins=10, batch_size=3)
-    assert s.shape == (7, cbm._data_dim)
-
-
-def test_sample_no_mutation():
-    cbm = _tiny_cbm()
-    before = [n.tensor.clone() for n in cbm._mats_env]
-    cbm.sample(0, n=4, num_bins=10)
-    for snap, node in zip(before, cbm._mats_env):
-        assert torch.allclose(snap, node.tensor)
-
-
-def test_sample_complex_dtype():
-    cbm = _tiny_cbm(dtype="complex64")
-    s = cbm.sample(0, n=4, num_bins=10)
-    assert s.is_floating_point()  # output always real
-
-
-# ── sampling numerical stability (per-site H renormalization) ─────────────────
-
-def _old_sample_loop(cbm, class_idx, n, num_bins):
-    """Pre-fix sampling loop: byte-for-byte ConditionalBornMachine.sample()
-    EXCEPT the two H-renormalization lines are removed. Uses the same node
-    contraction path so the only difference under test is the renormalization."""
-    cond = cbm._make_conditioned_net(class_idx)
-    dev = cbm._mats_env[0].tensor.device
-    grid = torch.linspace(*cbm.input_range, num_bins, device=dev)
-    Phi = cbm.embedding(grid).to(cbm.dtype)
-    left = cond._left_node.tensor
-    tensors = [node.tensor for node in cond._mats_env]
-    H = left.unsqueeze(0).expand(n, -1).clone().to(dev)
-    cbm._h_node._direct_set_tensor(H)
-    samples = torch.zeros(n, cbm._data_dim, device=dev)
-    for k, T in enumerate(tensors):
-        T_embs = torch.einsum('ijk,bj->ibk', T, Phi)
-        cbm._u_node._direct_set_tensor(T_embs)
-        C = (cbm._h_node @ cbm._u_node).tensor
-        p = (C * C.conj()).real.sum(-1).clamp(min=0)
-        idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
-        samples[:, k] = grid[idx]
-        cbm._h_node._direct_set_tensor(C[torch.arange(n, device=dev), idx, :])
-    return samples.cpu()
-
-
-def _argmax_multinomial(weights, num_samples, *args, **kwargs):
-    """Deterministic stand-in for torch.multinomial(·, 1): argmax is exactly
-    scale-invariant, so it exposes any change in sampling decisions."""
-    return weights.argmax(dim=-1, keepdim=True)
-
-
-@pytest.mark.parametrize("dtype", ["float32", "complex64"])
-def test_sample_renorm_matches_old_method(dtype):
-    # On a short chain (no overflow) the renormalized sampler must reproduce the
-    # old method bit-for-bit: per-row positive rescaling of H leaves the draw
-    # unchanged. Patch multinomial -> argmax to remove RNG. Seed the random init
-    # too: an unseeded init can land on a near-tie between bins where the renorm's
-    # float noise flips argmax, making the comparison order-dependently flaky.
-    torch.manual_seed(0)
-    cbm = _tiny_cbm(dtype=dtype, data_dim=4, bond_dim=3, std=0.5)
-    with patch("torch.multinomial", _argmax_multinomial):
-        s_new = cbm.sample(0, n=16, num_bins=12)
-        s_old = _old_sample_loop(cbm, 0, 16, 12)
-    assert torch.equal(s_new, s_old)
-
-
-def test_sample_keeps_boundary_normalized_long_chain():
-    # MNIST-scale regime: a long chain. The fix keeps the running boundary H at
-    # unit norm every site, so output stays finite and non-degenerate.
-    cbm = _tiny_cbm(dtype="complex64", data_dim=250)
-    cbm.eval()
-    cbm.renormalize_(log_target=0.0)
-    with patch.object(cbm._h_node, "_direct_set_tensor",
-                      wraps=cbm._h_node._direct_set_tensor) as spy:
-        s = cbm.sample(0, n=8, num_bins=8)
-    assert torch.isfinite(s).all()
-    assert s.unique().numel() > 1  # not collapsed to a single value
-    # Every boundary set into the contraction node is per-sample unit-normalized.
-    assert spy.call_args_list, "H was never set"
-    for call in spy.call_args_list:
-        norms = call.args[0].norm(dim=-1)
-        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-4)
-
-
-# ── sample_all_classes ──────────────────────────────────────────────────────
-
-def test_sample_all_classes_shapes():
-    cbm = _tiny_cbm(num_classes=3)
-    samples, labels = cbm.sample_all_classes(n_per_class=5, num_bins=10)
-    assert samples.shape == (15, cbm._data_dim)
-    assert labels.shape == (15,)
-
-
-def test_sample_all_classes_label_counts():
-    cbm = _tiny_cbm(num_classes=3)
-    _, labels = cbm.sample_all_classes(n_per_class=4, num_bins=10)
-    for c in range(3):
-        assert (labels == c).sum().item() == 4
-
-
 # ── _LOG_PROB_EPS / gradient-at-small-amplitude tests ──────────────────────
 
 def test_mixed_nll_no_eps_param():
@@ -809,26 +581,36 @@ def test_marginal_log_probability_finite_on_overflow():
 
 @pytest.mark.parametrize("data_dim,scale", [(120, 2.0), (200, 2.0), (120, 4.0)])
 def test_sample_stable_on_long_overscaled_chain(data_dim, scale):
-    """sample() survives the many-site regime that used to break canonicalize.
+    """Class-conditional samples and a Gibbs sweep survive long, overscaled chains.
 
-    Before per-site pre-normalization + renormalize=True, canonicalize(oc=0)
-    concentrated the whole MPS norm into site 0 (~1e25 at data_dim=120), so these
-    raised either `probability tensor contains inf, nan or element < 0` from
-    multinomial or `_LinAlgError` from a non-converging SVD. Note the first case
-    tripped while raw amplitudes() was still finite — this failure mode is
-    distinct from amplitude overflow and is not addressed by the log-norm
-    accumulation.
-    """
+    The old canonical sampler concentrated the whole MPS norm into site 0 (~1e25 at
+    data_dim=120) and raised from multinomial or from a non-converging SVD. The
+    tensorkrowch sampler renormalizes each environment per sample (D100); no draw
+    may fall back to uniform (that would warn)."""
+    import warnings
     cbm = _acc_cbm(data_dim=data_dim, bond_dim=4)
     _overflow_scale_(cbm, scale=scale)
     torch.manual_seed(0)
-    s = cbm.sample(class_idx=0, n=4, num_bins=16)
     lo, hi = cbm.input_range
-    assert s.shape == (4, data_dim)
-    assert torch.isfinite(s).all()
-    assert (s >= lo).all() and (s <= hi).all()
-    # not collapsed onto a single grid value
-    assert len(torch.unique(s)) > 1
+    grid = torch.linspace(lo, hi, 16)
+
+    def embed(v):
+        return cbm.embedding(v).to(cbm.dtype).reshape(*v.shape, -1)
+
+    label = torch.nn.functional.one_hot(torch.tensor(0), cbm.out_dim).to(cbm.dtype)
+    x = lo + (hi - lo) * torch.rand(4, data_dim)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        drawn = cbm.condition(label).sample(n_samples=4, domain=grid, embedding=embed,
+                                            renormalize=True)
+        swept = cbm.sample(in_condition=cbm.embed(x).to(cbm.dtype), domain=grid,
+                           embedding=embed, renormalize=True)
+    for s in (drawn, swept):
+        assert s.shape == (4, data_dim)
+        assert torch.isfinite(s).all()
+        assert (s >= lo).all() and (s <= hi).all()
+        # not collapsed onto a single grid value
+        assert len(torch.unique(s)) > 1
 
 
 # ── Boundary vectors (D87) ───────────────────────────────────────────────────
