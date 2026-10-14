@@ -24,3 +24,6 @@ hparams_from:
 budgets: [0.1]                 # read at ε = 0.1 only
 analysis:
   joint_attack: false
+  # Captured per step (D105), the analysis holds ≈ 0.08 GiB per sample at 784 sites
+  # (2.55 / 5.05 GiB at batch 32 / 64): the micro-batch's 256 would need ≈ 20 GiB.
+  batch_size: 64
