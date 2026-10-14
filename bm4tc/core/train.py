@@ -115,8 +115,10 @@ class Trainer:
         self.norm_regularizer: NormRegularizer | None = None
         self._nc_log_target: float | None = None
 
-        # The training step, eager until train() knows whether to capture it.
+        # The training step and the attack, eager until train() knows whether to
+        # capture them.
         self._graphed_train_step = Graphs(enabled=False).wrap(self._train_step)
+        self._graphed_attack = None
 
         self.attack: ProjectedGradientDescent | None = None
         if cfg.evasion is not None:
@@ -162,7 +164,29 @@ class Trainer:
     # Objective
     # ------------------------------------------------------------------
 
-    def _objective(self, inputs, labels, eps_abs) -> tuple[torch.Tensor, torch.Tensor]:
+    def _chunks(self, batch: torch.Tensor):
+        """The micro-batches of a batch (D79): one chunk, the batch itself, without."""
+        micro = self.cfg.micro_batch_size
+        return batch.split(micro) if micro else (batch,)
+
+    def _adversarials(self, inputs, labels, eps_abs) -> Optional[torch.Tensor]:
+        """The batch's adversarial examples, attacked chunk by chunk as the step
+        uses them (D79); None for NAT, and at β = 1, where AT drops them.
+
+        The attack runs before the step, not inside it: each attack step replays
+        from a graph of its own, as in the analysis (D105). The parameters do not
+        change between chunks and the attack writes no parameter gradient, so
+        attacking every chunk first gives the same examples, the random starts
+        drawn in the same order."""
+        if self.attack is None or self.cfg.beta >= 1.0:
+            return None
+        self.cbm.eval()
+        adversarials = torch.cat([self._graphed_attack(x, y, eps_abs) for x, y in
+                                  zip(self._chunks(inputs), self._chunks(labels))])
+        self.cbm.train()
+        return adversarials
+
+    def _objective(self, inputs, labels, adversarials) -> tuple[torch.Tensor, torch.Tensor]:
         """The training objective on one batch (module docstring), and the
         log|ψ|² of the forward the norm statistics describe: the adversarial one
         when there is one (its amplitudes explode first), else the clean one.
@@ -178,12 +202,6 @@ class Trainer:
         adversarial_weight = 1.0 - beta
         objective = None
         if adversarial_weight > 0.0:
-            self.cbm.eval()
-            adversarials = self.attack.generate(
-                model=self.cbm, naturals=inputs, labels=labels, eps_abs=eps_abs,
-                device=self.device,
-            )
-            self.cbm.train()
             adversarial_objective, log_amp_sq = self.cbm.mixed_nll(adversarials, labels, beta=0.0)
             objective = adversarial_weight * adversarial_objective
         if beta > 0.0:
@@ -242,7 +260,7 @@ class Trainer:
     # Loop
     # ------------------------------------------------------------------
 
-    def _backward_over_micro_batches(self, inputs, labels, eps_abs):
+    def _backward_over_micro_batches(self, inputs, labels, adversarials):
         """The batch objective, its backward into the parameter gradients, the
         norm penalty and the step's norm statistics (:func:`norm_statistics`).
 
@@ -252,15 +270,17 @@ class Trainer:
         without micro-batching. The penalty is per step, added once on the last
         chunk's graph (it may share that chunk's log Z).
         """
-        micro = self.cfg.micro_batch_size
-        chunks = (list(zip(inputs.split(micro), labels.split(micro))) if micro
-                  else [(inputs, labels)])
+        input_chunks = self._chunks(inputs)
+        chunks = list(zip(input_chunks, self._chunks(labels),
+                          [None] * len(input_chunks) if adversarials is None
+                          else self._chunks(adversarials)))
         objective = 0.0
         penalty = torch.zeros((), device=inputs.device)
         log_Z = None
         log_amp_sqs = []
-        for i, (chunk_inputs, chunk_labels) in enumerate(chunks):
-            chunk_objective, log_amp_sq = self._objective(chunk_inputs, chunk_labels, eps_abs)
+        for i, (chunk_inputs, chunk_labels, chunk_adversarials) in enumerate(chunks):
+            chunk_objective, log_amp_sq = self._objective(chunk_inputs, chunk_labels,
+                                                          chunk_adversarials)
             weight = len(chunk_inputs) / len(inputs)
             loss = chunk_objective if len(chunks) == 1 else weight * chunk_objective
             if i == len(chunks) - 1:
@@ -276,13 +296,15 @@ class Trainer:
             log_amp_sqs.append(log_amp_sq)
         return objective, penalty.detach(), norm_statistics(torch.cat(log_amp_sqs), log_Z)
 
-    def _train_step(self, inputs, labels, eps_abs):
-        """One optimizer step, without host syncs, so it can be captured (D90).
+    def _train_step(self, inputs, labels, adversarials=None):
+        """One optimizer step, without host syncs, so it can be captured (D90),
+        on the batch and, for AT, its adversarial examples (:meth:`_adversarials`).
         Returns the batch objective, the norm penalty and the norm statistics of
         the forward before the update, all on the device. The gradients are
         zeroed in place: a captured step writes them at fixed addresses."""
         self.optimizer.zero_grad(set_to_none=False)
-        objective, penalty, statistics = self._backward_over_micro_batches(inputs, labels, eps_abs)
+        objective, penalty, statistics = self._backward_over_micro_batches(
+            inputs, labels, adversarials)
         self.optimizer.step()
         return objective, penalty, statistics
 
@@ -304,7 +326,9 @@ class Trainer:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
             self.step += 1
             try:
-                objective, penalty, statistics = self._graphed_train_step(inputs, labels, radius)
+                adversarials = self._adversarials(inputs, labels, radius)
+                batch = (inputs, labels) if adversarials is None else (inputs, labels, adversarials)
+                objective, penalty, statistics = self._graphed_train_step(*batch)
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     logger.error(f"CUDA OOM at step {self.step}, re-raising.")
@@ -400,6 +424,8 @@ class Trainer:
                              "set trainer.cuda_graph=false to use it.")
         graphs = Graphs(enabled=cfg.cuda_graph and on_cuda)
         self._graphed_train_step = graphs.wrap(self._train_step)
+        if self.attack is not None:
+            self._graphed_attack = self.attack.graphed(self.cbm, graphs)
         self._evaluation = Evaluation(self.cbm, beta=cfg.beta, attack=self.attack, graphs=graphs)
 
         regime = "AT" if self.attack is not None else "NAT"

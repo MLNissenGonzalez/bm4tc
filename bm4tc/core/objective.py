@@ -345,11 +345,12 @@ class Evaluation:
     one; JEM passes its SGLD estimate, or nan when there is no generative term
     (then ``loss_x`` is nan and the objective drops the generative term).
 
-    The work on one batch, the clean forward and the attack with its forward,
-    is two functions of tensors returning per-batch sums, so in enabled
-    :class:`~bm4tc.core.graphs.Graphs` each replays from a CUDA graph (D92). The
-    Trainer keeps one Evaluation across validations, so validation captures once
-    per batch shape. Disabled, it is the eager evaluation, number for number.
+    The work on one batch, the clean forward and the forward on the attacked
+    batch, is two functions of tensors returning per-batch sums, so in enabled
+    :class:`~bm4tc.core.graphs.Graphs` each replays from a CUDA graph (D92); the
+    attack replays step by step from a graph of its own (D105). The Trainer keeps
+    one Evaluation across validations, so validation captures once per batch
+    shape. Disabled, it is the eager evaluation, number for number.
     """
 
     def __init__(self, cbm, *, beta: float = 0.0, attack=None, graphs: Optional[Graphs] = None):
@@ -359,6 +360,7 @@ class Evaluation:
         graphs = graphs if graphs is not None else Graphs(enabled=False)
         self._captured = graphs.enabled
         self._clean_sums = graphs.wrap(self._clean_batch)
+        self._attack = attack.graphed(cbm, graphs) if attack is not None else None
         self._adversarial_sums = graphs.wrap(self._adversarial_batch)
 
     def _clean_batch(self, data, labels, log_Z) -> torch.Tensor:
@@ -374,10 +376,8 @@ class Evaluation:
             return torch.stack([dis.sum(), (log_Z - log_sq_obs).sum(),
                                 (log_Z - log_marginal).sum(), correct.to(dis.dtype)])
 
-    def _adversarial_batch(self, data, labels, radius) -> torch.Tensor:
-        """[Σ L_dis(x_adv), Σ correct on x_adv] over the batch, PGD at ``radius``."""
-        adversarials = self.attack.generate(model=self.cbm, naturals=data, labels=labels,
-                                            eps_abs=radius, device=data.device)
+    def _adversarial_batch(self, adversarials, labels) -> torch.Tensor:
+        """[Σ L_dis(x_adv), Σ correct on x_adv] over the attacked batch."""
         with torch.no_grad():
             las = self.cbm.log_joint(adversarials)
             log_sq_obs = las.gather(1, labels[:, None]).squeeze(1)
@@ -419,7 +419,7 @@ class Evaluation:
                 marg_sum += batch_marg
             if self.attack is not None:
                 batch_dis_adv, batch_rob_correct = \
-                    self._adversarial_sums(data, labels, radius).tolist()
+                    self._adversarial_sums(self._attack(data, labels, radius), labels).tolist()
                 dis_adv_sum += batch_dis_adv
                 rob_correct += batch_rob_correct
 

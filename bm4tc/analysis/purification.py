@@ -17,6 +17,7 @@ from typing import Dict, Tuple, Optional, List
 from tqdm.auto import tqdm
 
 from bm4tc.core.attacks import normalizing, project, random_in_ball
+from bm4tc.core.graphs import Graphs
 from bm4tc.core.interface import log_px
 
 
@@ -91,41 +92,61 @@ class LikelihoodPurification:
                   shape (batch_size,).
         """
         model.to(device)
-        data = data.to(device).detach()
-        input_range = model.input_range
+        return self.graphed(model, Graphs(enabled=False))(data.to(device).detach(), delta_abs)
 
+    def _step(self, model, data: torch.Tensor, delta: torch.Tensor, delta_abs) -> torch.Tensor:
+        """One descent step on the marginal NLL from ``delta``, projected."""
         step_size = self.step_size if self.step_size is not None else 2.5 * delta_abs / self.num_steps
+        lo, hi = model.input_range
+        delta = delta.detach().requires_grad_(True)
+        x_tilde = (data + delta).clamp(lo, hi)
+        nll = -log_px(model, x_tilde).mean()
+        # The input gradient only, as in PGD: no parameter gradients are
+        # written, so the step can be captured as a CUDA graph (D92).
+        (grad,) = torch.autograd.grad(nll, delta)
+        # Gradient descent on NLL (subtract, not add), back into the Lp ball
+        delta = delta.detach() - step_size * normalizing(grad, norm=self.norm)
+        return project(delta, self.norm, delta_abs)
 
-        # Initialize perturbation
-        if self.random_start:
-            delta = random_in_ball(data.shape, self.norm, delta_abs, device)
+    def _finish(self, model, data: torch.Tensor, delta: torch.Tensor):
+        """The purified inputs, clamped to the input range, and their log p(x)."""
+        lo, hi = model.input_range
+        purified = (data + delta).clamp(lo, hi).detach()
+        with torch.no_grad():
+            return purified, log_px(model, purified)
+
+    def graphed(self, model, graphs: Graphs) -> "GraphedPurification":
+        """Purification of ``model``'s inputs with each step, and the final
+        log p(x), replayed from CUDA graphs of ``graphs``; see
+        :class:`GraphedPurification`."""
+        return GraphedPurification(self, model, graphs)
+
+
+class GraphedPurification:
+    """:class:`LikelihoodPurification` on one model, its step and its final
+    log p(x) each replayed from a CUDA graph; the loop stays in Python, as in
+    :class:`bm4tc.core.attacks.GraphedPGD` (D105). Disabled graphs make this the
+    eager purification, number for number."""
+
+    def __init__(self, purifier: LikelihoodPurification, model, graphs: Graphs):
+        self.purifier = purifier
+        self.model = model
+        self.step = graphs.wrap(
+            lambda data, delta, delta_abs: purifier._step(model, data, delta, delta_abs))
+        self.finish = graphs.wrap(
+            lambda data, delta: purifier._finish(model, data, delta))
+
+    def __call__(self, data: torch.Tensor, delta_abs) -> Tuple[torch.Tensor, torch.Tensor]:
+        """(purified inputs, their log p(x)) for ``data`` on the model's device;
+        ``delta_abs`` a float, or a device scalar when the graphs are enabled."""
+        p = self.purifier
+        if p.random_start:
+            delta = random_in_ball(data.shape, p.norm, delta_abs, data.device)
         else:
             delta = torch.zeros_like(data)
-
-        # Iterative gradient descent on NLL (= gradient ascent on log p(x))
-        for _ in range(self.num_steps):
-            delta.requires_grad_(True)
-            x_tilde = (data + delta).clamp(input_range[0], input_range[1])
-
-            nll = -log_px(model, x_tilde).mean()
-            # The input gradient only, as in PGD: no parameter gradients are
-            # written, so the routine can be captured as a CUDA graph (D92).
-            (grad,) = torch.autograd.grad(nll, delta)
-            normalized_gradient = normalizing(grad, norm=self.norm)
-
-            # Gradient descent on NLL (subtract, not add)
-            delta = delta.detach() - step_size * normalized_gradient
-            # Project back into Lp ball
-            delta = project(delta, self.norm, delta_abs)
-
-        # Final purified samples, clamped to input range
-        purified = (data + delta).clamp(input_range[0], input_range[1]).detach()
-
-        # Compute final log p(x) for the purified samples
-        with torch.no_grad():
-            purified_log_px = log_px(model, purified)
-
-        return purified, purified_log_px
+        for _ in range(p.num_steps):
+            delta = self.step(data, delta, delta_abs)
+        return self.finish(data, delta)
 
 
 """Gibbs-sampling purification for ConditionalBornMachine (class-marginalized)."""

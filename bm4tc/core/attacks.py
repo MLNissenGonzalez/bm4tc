@@ -13,6 +13,7 @@ import torch
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from bm4tc.core.graphs import Graphs
 from bm4tc.core.interface import best_wrong_log_joint, nll
 
 @dataclass
@@ -102,6 +103,31 @@ class _PGD:
         in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
         return project(in_domain, self.norm, eps_abs)
 
+    def _start(self, model, naturals: torch.Tensor, eps_abs) -> torch.Tensor:
+        """The first perturbation: random in the ball and the domain, or zero."""
+        if not self.random_start:
+            return torch.zeros_like(naturals)
+        delta = random_in_ball(naturals.shape, self.norm, eps_abs, naturals.device)
+        return self._bounded_delta(delta, naturals, eps_abs, model.input_range)
+
+    def _step(self, model, naturals: torch.Tensor, labels: torch.LongTensor,
+              delta: torch.Tensor, eps_abs) -> torch.Tensor:
+        """One ascent step on the loss from ``delta``, projected."""
+        step_size = self.step_size if self.step_size is not None else 2.5 * eps_abs / self.num_steps
+        delta = delta.detach().requires_grad_(True)
+        loss = self._loss(model, naturals + delta, labels)
+        # The input gradient only: parameter gradients are left untouched, so an
+        # attack inside a training step does not disturb the gradient a
+        # micro-batched step accumulates (D79).
+        (grad,) = torch.autograd.grad(loss, delta)
+        delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
+        return self._bounded_delta(delta, naturals, eps_abs, model.input_range)
+
+    def graphed(self, model, graphs: Graphs) -> "GraphedPGD":
+        """The attack on ``model`` with each step replayed from a CUDA graph of
+        ``graphs`` (eager when they are disabled); see :class:`GraphedPGD`."""
+        return GraphedPGD(self, model, graphs)
+
     def generate(
             self,
             model,
@@ -115,28 +141,37 @@ class _PGD:
         ``eps_abs`` is an absolute model-domain budget, not a fraction.
         """
         model.to(device)
-        naturals = naturals.to(device).detach()
-        labels = labels.to(device)
+        return self.graphed(model, Graphs(enabled=False))(
+            naturals.to(device).detach(), labels.to(device), eps_abs)
 
-        step_size = self.step_size if self.step_size is not None else 2.5 * eps_abs / self.num_steps
 
-        if self.random_start:
-            delta = random_in_ball(naturals.shape, self.norm, eps_abs, device)
-            delta = self._bounded_delta(delta, naturals, eps_abs, model.input_range)
-        else:
-            delta = torch.zeros_like(naturals)
+class GraphedPGD:
+    """A :class:`_PGD` attack on one model, its step replayed from a CUDA graph.
 
-        for _ in range(self.num_steps):
-            delta.requires_grad_(True)
-            loss = self._loss(model, naturals + delta, labels)
-            # The input gradient only: parameter gradients are left untouched, so an
-            # attack inside a training step does not disturb the gradient a
-            # micro-batched step accumulates (D79).
-            (grad,) = torch.autograd.grad(loss, delta)
-            delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
-            delta = self._bounded_delta(delta, naturals, eps_abs, model.input_range)
+    The loop over steps stays in Python and the graph holds one step: a graph of
+    the whole attack holds steps × sites contractions, forward and backward, and
+    at 784 sites and 40 steps capturing it crashed the process (segmentation
+    fault) or ran out of memory (D105). The start (a random draw or zeros) and
+    the final clamp are a few eager kernels. Disabled graphs make this the eager
+    attack, number for number. Keep one per model and :class:`Graphs`, so each
+    batch shape captures once.
+    """
 
-        lo, hi = model.input_range
+    def __init__(self, attack: _PGD, model, graphs: Graphs):
+        self.attack = attack
+        self.model = model
+        self.step = graphs.wrap(
+            lambda naturals, labels, delta, eps_abs:
+                attack._step(model, naturals, labels, delta, eps_abs))
+
+    def __call__(self, naturals: torch.Tensor, labels: torch.LongTensor,
+                 eps_abs) -> torch.Tensor:
+        """Adversarial examples for ``naturals`` (on the model's device);
+        ``eps_abs`` a float, or a device scalar when the graphs are enabled."""
+        delta = self.attack._start(self.model, naturals, eps_abs)
+        for _ in range(self.attack.num_steps):
+            delta = self.step(naturals, labels, delta, eps_abs)
+        lo, hi = self.model.input_range
         return (naturals + delta).clamp(lo, hi).detach()
 
 

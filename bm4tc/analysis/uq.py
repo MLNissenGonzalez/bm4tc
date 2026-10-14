@@ -107,8 +107,9 @@ def _recover_after_failure(model) -> None:
 
 class _BatchWork:
     """The UQ evaluation's work on one batch: log p(x), the predicted class, the
-    attack and the likelihood purification, each replayed from a CUDA graph when
-    ``graphs`` are enabled (D92), one graph per batch shape. The radii are device
+    attack and the likelihood purification, each replayed from CUDA graphs when
+    ``graphs`` are enabled (D92; the attack and purification step by step, D105),
+    one graph per batch shape. The radii are device
     scalars there (float64, as in training), so one graph serves every budget;
     eager, they stay floats, as before.
     """
@@ -127,10 +128,10 @@ class _BatchWork:
 
         self.log_px = graphs.wrap(marginal)
         self.predict = graphs.wrap(predicted_class)
-        self._attack = graphs.wrap(
-            lambda x, labels, radius: attack.generate(model, x, labels, radius, device))
-        self._purify = graphs.wrap(
-            lambda x, radius: purifier.purify(model, x, radius, device))
+        # One graph per step, not per routine: a graph of the whole attack or
+        # purification crashed at 784 sites and 40 steps (D105).
+        self._attack = attack.graphed(model, graphs)
+        self._purify = purifier.graphed(model, graphs)
 
     def _radius(self, radius: float):
         if not self._captured:
