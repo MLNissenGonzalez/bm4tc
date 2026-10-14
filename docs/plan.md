@@ -360,11 +360,25 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
 
 1. **Done:** the port as it is, develop's tests, the CBM checks
    (`tests/unit/test_sampling.py`).
-2. Efficiency, each checked against step 1 (forced argmax, every conditional): (a) a
-   grid per sample, for the windows; (b) contract each site before its data; (c) the
-   physical leg left open, candidates through the site's d×d reduced density matrix;
-   (d) one layer where the variables are fixed (sampled left side, conditioning
-   input); memory: `reset` per sweep, batch chunks.
+2. **Done:** efficiency. (a) a domain per sample (the windows); (b–d) at each
+   sampled site, everything but its physical edge is contracted first (the site's
+   reduced density matrix), candidates are quadratic forms on it; ket and bra stay
+   single-layer chains wherever the variables are fixed; the bra layer is built in
+   the network (develop's copy-and-move renamed nodes quadratically). One windowed
+   sweep, 96 bins, RTX 2080 (`GibbsPurification` → `SamplingMPS.sample`):
+
+   | shape | before | after |
+   |---|---|---|
+   | spirals, B 256 | 0.02 s, 910 MiB | 0.010 s, 7 MiB |
+   | MNIST 12×12 r40, B 24 | 6.85 s, 4.3 GiB | 0.71 s, 137 MiB |
+   | MNIST 12×12 r40, B 256 | – | 0.74 s, 1.4 GiB |
+   | MNIST 12×12 r40, B 24, 1024 bins | – | 0.77 s, 322 MiB |
+   | MNIST 28×28 r40 / r80, B 24 | out of memory | 6.5 s / 6.7 s, 0.7 / 1.3 GiB |
+
+   Time is tensorkrowch's Python overhead per operation (≈ 0.2 ms, ~25 operations
+   and ~30 new nodes per site), not batch or bins. Left: `reset` deletes nodes in
+   time quadratic in nodes of one name (2.3 s of 8.4 s profiled at 784 sites; an
+   upstream candidate), and fewer operations per site.
 3. Switch `GibbsPurification` and the figures' class samples (`condition` +
    `sample`); delete `CBM.sample`, `sample_all_classes`, `condition_on_class`,
    `_make_conditioned_net`, `_h_node`/`_u_node`; re-pin where Gibbs values are pinned.
