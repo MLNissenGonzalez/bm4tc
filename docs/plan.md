@@ -328,6 +328,21 @@ left:
   (B, d, r), then the data (B, r), so B·n·r·d is stored, ≈ 27× less at r80, d 3; the
   time stays B·r²·d per site. It may be what puts d3r80 micro 128 out of memory.
   Core path (D30): the bar below applies.
+- **The forward without `reset` (Martin, 2026-10-14; not started).** `ConditionalBornMachine.forward`
+  resets before and after every call because tk's `forward` replays `_seq_ops` once
+  result nodes exist, which would skip the Python-side `_accumulate_log_norm` in
+  `_inline_contraction`. First try: call `self.contract(renormalize=True,
+  inline_mats=True)` directly, with no reset. The Python code then runs every time,
+  so the accumulator runs too, while each operation reuses its successor; `div` by a
+  tensor is keyed on the node alone (`_check_first_div`), so it reuses as well.
+  Check that it is bit-identical to the reset path (seams, `log_amp_sq`, gradients),
+  that the batch size can change, that CUDA graph capture is unaffected (captured
+  steps run no Python anyway, so the gain is for eager uses: validation, analysis,
+  log p(x)), and how it interacts with the nodes `sample` keeps (D103). If that
+  fails, explore a tk renormalisation operation with its own node and path that
+  returns the extracted log-norm as a node (so `trace` and the successor reuse cover
+  it), instead of resetting because of the accumulation; a tensorkrowch upstream
+  candidate.
 - **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
   by hand); replays do not bump version counters, so `_params_key()` is stale after
   a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during
