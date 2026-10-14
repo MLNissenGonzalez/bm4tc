@@ -36,6 +36,17 @@ def test_worst_case_threshold_separable_and_identical():
     assert all(v == pytest.approx(0.5) for v in worst_case_threshold(same, same).values())
 
 
+def test_worst_case_threshold_never_below_chance():
+    # Members score lower on every higher-is-member feature: no threshold between
+    # scores beats chance, but calling everyone (or no one) a member scores 0.5.
+    members = np.full((5, len(FEATURES)), 0.2)
+    non_members = np.full((5, len(FEATURES)), 0.8)
+    wc = worst_case_threshold(members, non_members)
+    for name in FEATURES:
+        expected = 1.0 if name in ("loss", "entropy") else 0.5
+        assert wc[name] == pytest.approx(expected), name
+
+
 @pytest.mark.slow
 def test_membership_inference_runs_end_to_end(cbm):
     torch.manual_seed(0)

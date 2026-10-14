@@ -35,6 +35,9 @@ def raw_amplitudes(cbm, data):
 @pytest.fixture(scope="session")
 def cbm():
     from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    # Seeded: the fixture is built at first use, so unseeded weights depended on
+    # which tests ran before it.
+    torch.manual_seed(0)
     cfg = CBMConfig(
         embedding="fourier",
         init_kwargs=MPSInitConfig(in_dim=DATA_DIM, bond_dim=2, std=1e-3),
