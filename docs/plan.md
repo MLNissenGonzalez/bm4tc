@@ -379,12 +379,24 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    and ~30 new nodes per site), not batch or bins. Left: `reset` deletes nodes in
    time quadratic in nodes of one name (2.3 s of 8.4 s profiled at 784 sites; an
    upstream candidate), and fewer operations per site.
-3. Switch `GibbsPurification` and the figures' class samples (`condition` +
-   `sample`); delete `CBM.sample`, `sample_all_classes`, `condition_on_class`,
-   `_make_conditioned_net`, `_h_node`/`_u_node`; re-pin where Gibbs values are pinned.
+3. Switch `GibbsPurification` (each sweep: windows around the current x, then
+   `SamplingMPS.sample(cbm, in_condition=embed(x), domain=windows,
+   renormalize=True)`; snapshots stay) and the figures' class samples (`condition`
+   + `sample`); delete `CBM.sample`, `sample_all_classes`, `condition_on_class`,
+   `_make_conditioned_net`, `_h_node`/`_u_node` (then `CBM.sample` no longer
+   shadows `SamplingMPS.sample`); re-pin where Gibbs values are pinned. Also, as
+   decided (D100): rows with no usable weight fall back to uniform with a warning
+   count (`_probabilities_from_amplitudes` still raises, as in develop), and
+   `GibbsPurification` chunks the batch to bound memory (≈ 5.7 MiB per sample per
+   sweep at MNIST 12×12 r40). Raise `gibbs.batch_size` in `defaults.yaml` once
+   measured (time no longer grows with the batch).
 4. Measure time and memory (spirals B 256, MNIST 12×12, full MNIST r40/r80) before and
    after, from a worktree of HEAD; compute.md.
-5. The develop patch (Phase 9).
+5. The develop patch (Phase 9). tensorkrowch findings for it are in commit
+   `48274abe`: connecting through a result node's inherited edge connects the leaf
+   (`reattach_edges` first); `@` refuses batch-only contractions (`einsum` works);
+   duplicate axis names become `input_0`/`input_1`; moving nodes between networks
+   and `reset` rename in time quadratic in same-named nodes.
 
 Out of scope until decided: finer grids or exact continuous draws, a
 Metropolis–Hastings correction for the windows, temperature (they change the
