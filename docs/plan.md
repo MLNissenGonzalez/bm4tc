@@ -136,8 +136,11 @@ need their `warm_from` study trained.
   analysis ≥ 10.7 GiB; the unit that starts next to a running one is the one that
   fails. Phase 8's `mnist_nat`/`mnist_at` would hit this on every launch. Since
   D105 the attack and purification are captured per step: at 784 sites, batch 64,
-  the bench peaks at 5.05 GiB reserved captured (1.52 GiB eager) on the RTX 2080,
-  each step graph keeping a pool of its own. Options:
+  the bench peaks at 2.55 / 5.05 GiB reserved captured at batch 32 / 64 (0.77 /
+  1.52 GiB eager) on the RTX 2080, ≈ 0.08 GiB per sample, each step graph keeping a
+  pool of its own; `pilot_beta28` analyses at batch 64. Graphs that never run at
+  once (attack step, purification step, log p(x), prediction) could share one pool
+  (`torch.cuda.graph(pool=...)`; their replays already return copies). Options:
   measure the analysis peak in the bench and size on it, a per-stage `--per-gpu`, or
   free each part's captured graphs before the next part.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
