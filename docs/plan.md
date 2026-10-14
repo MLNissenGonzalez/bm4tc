@@ -17,9 +17,12 @@ source of truth); the section below groups them by theme. Measured costs are in
   yet:** each died capturing the 40-step PGD (out of memory beside another unit, a
   segmentation fault alone), fixed by D105. **β = 0 trained to 0.887 only** (valid
   accuracy 0.87 by epoch 21, then swinging 0.79–0.87; best epoch 35 of 86; no NaN or
-  collapse); the other cells look normal. Likely E2a's lr (5.6e-4) too high at 784
-  sites with no density term (β = 0.01 shares it and trained well); to check by
-  retraining β = 0 at 1.7e-4 or with seed 2 (≈ 1.5 h).
+  collapse); the other cells look normal. β = 0.01 shares its lr (5.6e-4) and
+  trained well, so the generative term may act as a regulariser that pure
+  discriminative training at 784 sites lacks. Kept as a result, not retrained
+  (Martin, 2026-10-14); the accuracy knee's top is read from β = 0.001–0.1. A
+  future study can test whether β > 0 helps against overfitting in the
+  high-capacity regime.
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
@@ -33,10 +36,9 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **D104's cluster checks, then E2b's analyses** from a worktree with D105 (one
-   unit per GPU until the analysis memory at batch 256 is measured), and β = 0's
-   retrain. The ladder waits for E2b's knee shift; the AT grid {0, β\*} waits for
-   E3's verdict on purification under adaptive attacks (below, E2a).
+1. **D104's cluster checks, then E2b's analyses** from a worktree with D105
+   (analyses at batch 64, ≈ 5.5 GiB each). The ladder waits for E2b's knee shift;
+   the AT grid {0, β\*} waits for E3's verdict on purification under adaptive attacks (below, E2a).
 2. **The sampling code (D100, D101, D103) and the reset-free forward (D104): done.**
    `SamplingMPS`, develop's sampler on tk 1.1.6, keeps its nodes between calls; Gibbs
    and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
