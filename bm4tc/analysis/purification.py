@@ -286,10 +286,8 @@ class GibbsPurification:
         ):
             x_cur = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
 
-            # Clear any nodes left over from a previous contraction (sample()
-            # would warn and reset itself).
-            born.reset()
-
+            # No reset: every sweep and batch reuses the nodes of the first
+            # (SamplingMPS, D103); the log p(x) forward below removes them.
             for s in range(1, max_sweeps + 1):
                 # Candidate values per feature. Unrestricted: the shared global
                 # grid. Restricted: per sample, a grid spanning its window

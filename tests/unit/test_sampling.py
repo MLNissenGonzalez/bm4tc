@@ -7,9 +7,11 @@ that records its input, so a test sees each distribution and the path is
 deterministic. The second part checks it on the ConditionalBornMachine: the class
 is summed out or fixed, and ``sample(in_condition=x)`` is one Gibbs sweep, checked
 against the full-chain sweep that GibbsPurification ran before D101. The third part
-checks per-sample domains and the uniform fallback (D101).
+checks per-sample domains and the uniform fallback (D101), the fourth the nodes kept
+between calls (D103).
 """
 import itertools
+import warnings
 
 import pytest
 import torch
@@ -223,15 +225,20 @@ def test_sample_with_continuous_embedding():
 
 
 def test_sample_keeps_mps_usable():
+    # develop: no nodes left after sample. Here sample keeps its nodes (D103);
+    # forward removes them first.
     mps = SamplingMPS(n_features=3, phys_dim=2, bond_dim=2, boundary='obc')
-    _ = mps.sample(n_samples=4)
-    assert not mps.resultant_nodes
-    assert not mps.data_nodes
-
     data = tk.embeddings.basis(torch.randint(0, 2, (5, 3)), dim=2)\
         .to(mps.mats_env[0].dtype)
+    expected = mps(data)
+    mps.reset()
+    mps.unset_data_nodes()
+
+    _ = mps.sample(n_samples=4)
+    assert mps.resultant_nodes
     result = mps(data)
     assert result.shape == (5,)
+    assert torch.equal(result, expected)
 
 
 @pytest.mark.parametrize('out_position', [0, 1, 3])
@@ -593,3 +600,89 @@ def test_sample_with_no_usable_weight_warns_once_with_the_count():
         samples = mps.sample(n_samples=4)
     assert len([w for w in record if 'usable' in str(w.message)]) == 1
     assert samples.shape == (4, 3)
+
+
+# ── nodes kept between calls (D103) ──────────────────────────────────────────
+
+def _draws(mps, fresh, calls):
+    """Each call's draws under its own seed; ``fresh`` resets before each, so
+    every call builds its nodes, otherwise later calls reuse the first's."""
+    out = []
+    for i, kwargs in enumerate(calls):
+        if fresh:
+            mps.reset()
+        torch.manual_seed(i)
+        out.append(mps.sample(**kwargs))
+    return out
+
+
+def _sweep_calls(mps, batches):
+    calls = []
+    for batch in batches:
+        x = torch.rand(batch, len(mps.in_features))
+        windows = (x[..., None] + 0.1 * torch.linspace(-1, 1, 7)).clamp(0, 1)
+        calls.append(dict(in_condition=tk.embeddings.unit(x),
+                          domain=list(windows.unbind(1)),
+                          embedding=tk.embeddings.unit, renormalize=True))
+    return calls
+
+
+@pytest.mark.parametrize('boundary', BOUNDARY_CASES)
+@pytest.mark.parametrize('out_features', [[], [2]])
+def test_repeated_sweeps_reuse_nodes_and_draw_as_fresh(boundary, out_features):
+    mps = SamplingMPS(n_features=5, phys_dim=2, bond_dim=3, boundary=boundary,
+                      out_features=out_features)
+    calls = _sweep_calls(mps, [4, 4, 6, 2])
+    fresh = _draws(mps, True, calls)
+    mps.reset()
+
+    torch.manual_seed(0)
+    reused = [mps.sample(**calls[0])]
+    names = set(mps.nodes)
+    for i, kwargs in enumerate(calls[1:], start=1):
+        torch.manual_seed(i)
+        reused.append(mps.sample(**kwargs))
+        assert set(mps.nodes) == names          # no node built after the first call
+    for a, b in zip(fresh, reused):
+        assert torch.equal(a, b)
+
+
+@pytest.mark.parametrize('boundary', BOUNDARY_CASES)
+@pytest.mark.parametrize('canonical', [False, True])
+def test_repeated_unconditioned_samples_reuse_nodes_and_draw_as_fresh(
+        boundary, canonical):
+    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=3, boundary=boundary,
+                      out_features=[1])
+    if canonical and boundary == 'obc':
+        mps.canonicalize(oc=0, renormalize=True)
+    kwargs = dict(n_samples=5, canonical=canonical and boundary == 'obc',
+                  renormalize=True)
+    calls = [kwargs, kwargs, dict(kwargs, n_samples=3)]
+    fresh = _draws(mps, True, calls)
+    mps.reset()
+    reused = _draws(mps, False, calls)
+    for a, b in zip(fresh, reused):
+        assert torch.equal(a, b)
+
+
+def test_another_structure_rebuilds_without_warning():
+    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=3, boundary='obc')
+    sweep = _sweep_calls(mps, [3])[0]
+    shared = dict(sweep, domain=torch.linspace(0, 1, 5))
+    calls = [sweep, shared, dict(n_samples=3), sweep]
+    fresh = _draws(mps, True, calls)
+    mps.reset()
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        reused = _draws(mps, False, calls)
+    for a, b in zip(fresh, reused):
+        assert torch.equal(a, b)
+
+
+def test_failed_sample_leaves_the_mps_reset():
+    mps = SamplingMPS(n_features=3, phys_dim=2, bond_dim=2, boundary='obc')
+    _ = mps.sample(n_samples=2)
+    with pytest.raises(ValueError, match='negative'):
+        mps.sample(n_samples=2, embedding_matrices=-torch.eye(2))
+    assert not mps.resultant_nodes and not mps.data_nodes
+    assert mps.sample(n_samples=2).shape == (2, 3)

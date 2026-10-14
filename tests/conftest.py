@@ -28,8 +28,10 @@ NUM_CLASSES = 2
 def raw_amplitudes(cbm, data):
     """ψ(x, c) (B, C) by tensorkrowch's own MPS contraction, without the per-site
     norm accumulation: the reference for ``cbm.log_amp_sq`` where ψ does not
-    overflow float32."""
-    return tk.models.MPS.forward(cbm, cbm.embed(data))
+    overflow float32. Resets afterwards, as ``cbm.forward`` does."""
+    out = tk.models.MPS.forward(cbm, cbm.embed(data))
+    cbm.reset()
+    return out
 
 
 @pytest.fixture(scope="session")
