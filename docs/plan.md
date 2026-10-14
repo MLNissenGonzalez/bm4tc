@@ -328,21 +328,26 @@ left:
   (B, d, r), then the data (B, r), so B·n·r·d is stored, ≈ 27× less at r80, d 3; the
   time stays B·r²·d per site. It may be what puts d3r80 micro 128 out of memory.
   Core path (D30): the bar below applies.
-- **The forward without `reset` (Martin, 2026-10-14; not started).** `ConditionalBornMachine.forward`
-  resets before and after every call because tk's `forward` replays `_seq_ops` once
-  result nodes exist, which would skip the Python-side `_accumulate_log_norm` in
-  `_inline_contraction`. First try: call `self.contract(renormalize=True,
-  inline_mats=True)` directly, with no reset. The Python code then runs every time,
-  so the accumulator runs too, while each operation reuses its successor; `div` by a
-  tensor is keyed on the node alone (`_check_first_div`), so it reuses as well.
-  Check that it is bit-identical to the reset path (seams, `log_amp_sq`, gradients),
-  that the batch size can change, that CUDA graph capture is unaffected (captured
-  steps run no Python anyway, so the gain is for eager uses: validation, analysis,
-  log p(x)), and how it interacts with the nodes `sample` keeps (D103). If that
-  fails, explore a tk renormalisation operation with its own node and path that
-  returns the extracted log-norm as a node (so `trace` and the successor reuse cover
-  it), instead of resetting because of the accumulation; a tensorkrowch upstream
-  candidate.
+- **The forward without `reset` (Martin, 2026-10-14; prototyped, decision pending).**
+  `ConditionalBornMachine.forward` resets before and after every call: tk's `forward`
+  replays `_seq_ops` once result nodes exist, which would skip the Python-side
+  `_accumulate_log_norm` in `_inline_contraction`. Calling `contract(renormalize=True,
+  inline_mats=True)` directly, with no reset, runs the Python code every call (so the
+  accumulator too) while every operation reuses its successor (`div` by a tensor is
+  keyed on the node alone). Prototype (scratch): `log_amp_sq` and every gradient
+  bit-identical to the reset path over changing batch sizes and optimizer steps, CUDA
+  and CPU; no node added after the first call. Without more, one call's intermediates
+  stay held between calls (254 MiB at MNIST 12×12 d3r20 B 512, 645 MiB at full MNIST
+  d3r40 B 64) and the peak doubles; with tk's trace bookkeeping (first call under
+  `_tracing`, then `_traced`, so later calls free each intermediate after its last
+  use) nothing is held and the full-MNIST peak drops (674 → 612 MiB). RTX 2080:
+  no-grad forward 35 → 13 ms (MNIST 12×12 d3r20 B 512), 236 → 78 ms (full MNIST
+  d3r40 B 64); forward + backward 94 → 56 ms (MNIST 12×12 B 512). Captured steps run
+  no Python, so the gain is in eager work (validation outside graphs, analysis, log
+  p(x), CPU). The tk renormalisation node is not needed. Open for the change: the
+  hand-over between the forward's nodes and those `sample` keeps (one structure key
+  for the network), `test_graphs.py` and the seams, the callers that reset (OOM
+  recovery, `initialize`, the Trainer).
 - **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
   by hand); replays do not bump version counters, so `_params_key()` is stale after
   a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during
