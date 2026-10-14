@@ -222,11 +222,11 @@ def test_purify_snapshots_partial_batch_valid(cbm):
 def test_gibbs_stable_when_amplitudes_overflow(step_radius):
     """Gibbs weights stay correct when the raw |ψ|² would overflow to inf.
 
-    The sweep evaluates a full-chain contraction per candidate, so on a long
-    chain raw amplitudes() overflows; the old linear path then produced p=inf and
-    draw_from_grid mapped posinf->0, silently zeroing the HIGHEST-probability bins
-    so sampling ran backwards. The log-domain path (log_amp_sq + logsumexp) has no
-    such regime. Guards against a *backwards* sampler, not just NaN.
+    On a long chain raw amplitudes() overflows. An early linear path then
+    produced p=inf and mapped posinf->0, silently zeroing the HIGHEST-probability
+    bins so sampling ran backwards. The sweep now renormalizes every environment
+    per sample (SamplingMPS.sample, D100), so the weights stay finite. Guards
+    against a *backwards* sampler, not just NaN.
     """
     from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
 

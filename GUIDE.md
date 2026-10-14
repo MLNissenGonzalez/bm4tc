@@ -95,7 +95,8 @@ Learning rates and other hyperparameters never appear in names (D14).
 
 ```
 bm4tc/core/        the maths; no files, no configs
-  model.py           ConditionalBornMachine (MPS): log|ψ|², log Z, sampling, Gibbs conditionals
+  model.py           ConditionalBornMachine (MPS): log|ψ|², log Z
+  sampling.py        SamplingMPS: tk develop's condition and sample on 1.1.6 (D100, D101)
   embeddings.py      feature maps; budget conversion (rel_to_abs, fmt_budget)
   interface.py       the model interface for analysis (D69)
   objective.py       losses, mixed objective, norm control, Evaluation / evaluate()

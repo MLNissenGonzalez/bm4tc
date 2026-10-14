@@ -15,74 +15,6 @@ logger = logging.getLogger(__name__)
 _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 
 
-def draw_from_grid(p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-    """
-    Shared multinomial leaf: draw one grid value per batch element proportional to p.
-
-    Hard (non-differentiable) inverse-CDF sampling via torch.multinomial. Handles
-    degenerate inputs (NaN, inf, all-zero rows) gracefully.
-
-    Parameters
-    ----------
-    p : torch.Tensor
-        Unnormalized probability weights, shape (batch, num_bins). Must be >= 0.
-    z : torch.Tensor
-        Grid of candidate values, shape (num_bins,).
-
-    Returns
-    -------
-    torch.Tensor
-        Sampled grid values, shape (batch,).
-    """
-    p_clean = torch.nan_to_num(p.float(), nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
-    row_sums = p_clean.sum(dim=-1, keepdim=True)
-    p_clean = torch.where(row_sums > 0, p_clean, torch.ones_like(p_clean))
-    indices = torch.multinomial(p_clean, num_samples=1).squeeze(1)
-    return z[indices]
-
-
-def draw_from_grid_log(log_p: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-    """Log-domain counterpart of :func:`draw_from_grid`.
-
-    Same contract, but takes *log* weights, so callers whose weights would
-    overflow in linear space (a full-chain |ψ|² over many sites) never have to
-    materialize them. Only relative magnitudes matter: the per-row max is
-    subtracted before exponentiating, which is exact and puts every row in
-    (0, 1]. Excluded bins should be passed as ``-inf`` (they map to weight 0).
-
-    Parameters
-    ----------
-    log_p : torch.Tensor
-        Unnormalized log weights, shape (batch, num_bins). ``-inf`` allowed.
-    z : torch.Tensor
-        Grid of candidate values. Either shape (num_bins,) — one grid shared by
-        every row — or (batch, num_bins), a per-row grid, so callers whose
-        candidate values differ per sample (e.g. a window centred on each
-        sample) can sample without a shared discretization.
-
-    Returns
-    -------
-    torch.Tensor
-        Sampled grid values, shape (batch,).
-    """
-    lp = torch.nan_to_num(log_p.float(), nan=float("-inf"), posinf=float("inf"))
-    row_max = lp.amax(dim=-1, keepdim=True)
-    # Rows that are entirely -inf (e.g. a fully-masked radius window) have no
-    # admissible bin; fall back to uniform rather than producing NaN.
-    finite_row = torch.isfinite(row_max)
-    lp = torch.where(finite_row, lp - torch.where(finite_row, row_max,
-                                                  torch.zeros_like(row_max)),
-                     torch.zeros_like(lp))
-    p = lp.exp()
-    p = torch.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
-    row_sums = p.sum(dim=-1, keepdim=True)
-    p = torch.where(row_sums > 0, p, torch.ones_like(p))
-    indices = torch.multinomial(p, num_samples=1).squeeze(1)
-    if z.ndim == 1:
-        return z[indices]
-    return z.gather(1, indices.unsqueeze(1)).squeeze(1)
-
-
 @dataclass
 class MPSInitConfig:
     in_dim: int = 4
@@ -117,9 +49,9 @@ class ConditionalBornMachine(SamplingMPS):
     auto_stack=True and auto_unbind=False are hardcoded on both the main MPS
     and norm_net so they always share the same parameter view.
 
-    Sampling comes from :class:`SamplingMPS` (D100). The class-conditional
-    ``sample`` below still shadows ``SamplingMPS.sample``; it goes once the
-    callers use ``condition`` and ``SamplingMPS.sample``.
+    Sampling comes from :class:`SamplingMPS` (D100, D101): ``sample`` with the
+    class site summed out (``in_condition=x`` is one Gibbs sweep), or
+    ``condition`` on a one-hot class, then ``sample``.
     """
 
     def __init__(
@@ -236,18 +168,6 @@ class ConditionalBornMachine(SamplingMPS):
                 with torch.no_grad():
                     for t in self.tensors:
                         t.data.mul_(_scale)
-
-        # ── Sampling nodes (TK integration) ──────────────────────────────
-        # _h_node: batch × bond  — running left boundary (batch of amplitude vectors)
-        # _u_node: left × input × right  — embedded MPS site tensor
-        #   'input' carries num_bins grid bins (replaces discrete phys_dim from reference)
-        # Connected along 'bond'/'left'; tensors updated via _direct_set_tensor() per step.
-        # Pattern mirrors reference/tn4dd_bm.py:113–118.
-        H_init = torch.ones(1, 1, dtype=_dtype)
-        U_init = torch.zeros(1, 1, 1, dtype=_dtype)
-        self._h_node = tk.Node(tensor=H_init, axes_names=('batch', 'bond'))
-        self._u_node = tk.Node(tensor=U_init, axes_names=('left', 'input', 'right'))
-        self._h_node['bond'] ^ self._u_node['left']
 
         # ── Saved attributes ──────────────────────────────────────────────
         cfg.init_kwargs.out_position = _cls_pos
@@ -701,178 +621,6 @@ class ConditionalBornMachine(SamplingMPS):
             for node in self._mats_env:
                 node.tensor.data.mul_(scale)
         self._invalidate_log_Z_cache()
-
-    # ======================================================================
-    # Conditional sampling
-    # ======================================================================
-
-    def condition_on_class(self, class_idx: int) -> List[torch.Tensor]:
-        """Return data_dim raw tensors with the class site contracted and absorbed.
-
-        Contracts the class site with one_hot(class_idx) → (D_l, D_r), then merges
-        that matrix into the right neighbor (or left neighbor if cls_pos is the last
-        site). Does not mutate self._mats_env.
-        """
-        
-        if self.out_position == 0:
-            t_vec = self.tensors[0][class_idx, :] # (D_1,)
-            neighbor = self.tensors[1]             # (D_1, in_dim, D_2)
-            with torch.no_grad():
-                cond = torch.einsum('r,rij->ij', t_vec, neighbor)  # (in_dim, D_2)
-            cond_tensors = [cond] + self.tensors[2:]
-        elif self.out_position == self.n_features - 1:
-            t_vec = self.tensors[-1][:, class_idx] # (D_{n-2},)
-            neighbor = self.tensors[-2]             # (D_{n-3}, in_dim, D_{n-2})
-            with torch.no_grad():
-                cond = torch.einsum('ijr,r->ij', neighbor, t_vec)  # (D_{n-3}, in_dim)
-            cond_tensors = self.tensors[:-2] + [cond]
-        else:
-            t_mat = self.tensors[self.out_position][:, class_idx, :]  # (D_l, D_r)
-            left_neighbor = self.tensors[self.out_position - 1]
-            with torch.no_grad():
-                if left_neighbor.ndim == 2:
-                    # Left boundary (out_position==1): (phys_dim, D_l) — no left bond
-                    cond = torch.einsum('il,lr->ir', left_neighbor, t_mat)  # (phys_dim, D_r)
-                    cond_tensors = [cond] + self.tensors[self.out_position + 1:]
-                else:
-                    # Internal neighbor: (D_{l-1}, phys_dim, D_l)
-                    cond = torch.einsum('ijl,lr->ijr', left_neighbor, t_mat)  # (D_{l-1}, phys_dim, D_r)
-                    cond_tensors = self.tensors[:self.out_position - 1] + [cond] + self.tensors[self.out_position + 1:]
-        
-        return cond_tensors
-
-    def _make_conditioned_net(
-        self,
-        class_idx: int,
-        mode: str = 'svd',
-        rank: Optional[int] = None,
-        cutoff: Optional[float] = 1e-6,
-    ) -> tk.models.MPS:
-        """Return a left-canonical MPS conditioned on class_idx.
-
-        Builds a fresh tk.models.MPS from the class-conditioned tensors (no
-        shared tensors with self._mats_env), then calls canonicalize(oc=0) on
-        it. The caller owns the returned object and should delete it when done.
-        Does not mutate self._mats_env.
-
-        Two scale controls keep this usable on long chains, and BOTH are needed:
-
-        * Per-site pre-normalization rescales each tensor to unit Frobenius
-          norm. This only multiplies the whole MPS by a global scalar, but it
-          keeps the SVD inside canonicalize well-conditioned — without it the
-          decomposition raises _LinAlgError once the accumulated scale is large
-          (observed at n_features ≳ 200 with per-site scale 2).
-        * ``renormalize=True`` stops canonicalize from concentrating the product
-          of all singular-value scalings into the orthogonality center. With
-          renormalize=False site 0 reaches ~1e25 (overflowing the sampler) or
-          underflows to a denormal, depending on the input scale.
-
-        Both are invisible to sampling: the first is a global scalar, the second
-        distributes a constant c per node, so the right environment contracts to
-        c²·I instead of I — a factor uniform across grid bins, which the per-row
-        normalization in torch.multinomial divides out.
-
-        NOTE on ``cutoff``: it is an absolute singular-value threshold, so
-        pre-normalization changes its meaning — it is now relative to unit-norm
-        site tensors ("drop directions 1e-6 below a unit-norm tensor") instead of
-        scaling with the init magnitude. This is the intended semantics: with raw
-        tensors a small-std model had singular values near the cutoff itself, so
-        canonicalize could truncate a bond down to dimension 1 and silently
-        discard half the state.
-        """
-        cond_tensors = [
-            t / t.norm().clamp_min(_LOG_PROB_EPS)
-            for t in self.condition_on_class(class_idx)
-        ]
-        cond_mps = tk.models.MPS(tensors=cond_tensors)
-        cond_mps.canonicalize(oc=0, mode=mode, rank=rank, cutoff=cutoff,
-                              renormalize=True)
-        return cond_mps
-
-    def sample(
-        self,
-        class_idx: int,
-        n: int,
-        num_bins: int = 100,
-        batch_size: int = 64,
-        mode: str = 'svd',
-        rank: Optional[int] = None,
-        cutoff: Optional[float] = 1e-6,
-    ) -> torch.Tensor:
-        """Class-conditional canonical sampling.
-
-        Conditions on class_idx, builds a fresh left-canonical MPS via
-        _make_conditioned_net, then draws n samples via the sequential
-        left-to-right product rule.
-
-        _u_node is set to the pre-embedded tensor T_k_embs = einsum('ijk,bj->ibk', T_k, Φ)
-        of shape (D_l, num_bins, D_r). Grid bins act as the virtual physical dimension;
-        H @ T_embs contraction is otherwise identical to the tn4dd reference.
-
-        Returns float tensor (n, data_dim) with values in self.input_range.
-        """
-        cond_mps = self._make_conditioned_net(class_idx, mode=mode, rank=rank,
-                                              cutoff=cutoff)
-        dev = self._mats_env[0].tensor.device
-        grid = torch.linspace(*self.input_range, num_bins, device=dev)
-        Phi = self.embedding(grid).to(self.dtype)           # (bins, in_dim)
-        left = cond_mps._left_node.tensor                   # (D_left,)
-        tensors = [node.tensor for node in cond_mps._mats_env]
-
-        chunks = []
-        for start in range(0, n, batch_size):
-            N = min(batch_size, n - start)
-            H = left.unsqueeze(0).expand(N, -1).clone().to(dev)  # (N, D_left)
-            # Per-sample renormalization: sampling is invariant under per-row
-            # positive rescaling of H (multinomial normalizes each row), so we
-            # keep H at O(1) every site to avoid amplitude overflow/underflow on
-            # long chains (mirrors the per-node renorm in log_partition_function).
-            H = H / H.norm(dim=-1, keepdim=True).clamp_min(1e-30)
-            self._h_node._direct_set_tensor(H)
-            samples = torch.zeros(N, self._data_dim, device=dev)
-            for k, T in enumerate(tensors):
-                T_embs = torch.einsum('ijk,bj->ibk', T, Phi)   # (D_l, bins, D_r)
-                self._u_node._direct_set_tensor(T_embs)
-                C = (self._h_node @ self._u_node).tensor        # (N, bins, D_r)
-                p = (C * C.conj()).real.sum(-1)                 # (N, bins)
-                # Only relative magnitudes between bins matter (multinomial
-                # normalizes each row), so divide by the per-row max: this makes
-                # the epsilon below scale-free. With a bare `p + 1e-15` a row
-                # whose weights all sit far below 1e-15 would be swamped by the
-                # epsilon and sampled uniformly.
-                p = torch.nan_to_num(p, nan=0.0, posinf=0.0, neginf=0.0).clamp(min=0)
-                p = p / p.amax(dim=-1, keepdim=True).clamp_min(_LOG_PROB_EPS)
-                idx = torch.multinomial(p + 1e-15, 1).squeeze(-1)
-                samples[:, k] = grid[idx]
-                H_next = C[torch.arange(N, device=dev), idx, :]  # (N, D_r)
-                H_next = H_next / H_next.norm(dim=-1, keepdim=True).clamp_min(1e-30)
-                self._h_node._direct_set_tensor(H_next)
-            chunks.append(samples.cpu())
-        del cond_mps
-        return torch.cat(chunks, dim=0)
-
-    def sample_all_classes(
-        self,
-        n_per_class: int,
-        num_bins: int = 100,
-        batch_size: int = 64,
-        mode: str = 'svd',
-        rank: Optional[int] = None,
-        cutoff: Optional[float] = 1e-6,
-    ) -> tuple:
-        """Sample n_per_class examples from each class.
-
-        Returns:
-            samples: float (n_per_class * num_classes, data_dim) in input_range
-            labels:  long  (n_per_class * num_classes,) class indices
-        """
-        all_samples, all_labels = [], []
-        for c in range(self.out_dim):
-            s = self.sample(c, n_per_class, num_bins=num_bins, batch_size=batch_size,
-                            mode=mode, rank=rank, cutoff=cutoff)
-            all_samples.append(s)
-            all_labels.append(torch.full((n_per_class,), c, dtype=torch.long))
-        return torch.cat(all_samples, dim=0), torch.cat(all_labels, dim=0)
 
     def prepare(self, device: torch.device | None = None) -> None:
         """Reset the contraction state and move to ``device``. No tk trace: every

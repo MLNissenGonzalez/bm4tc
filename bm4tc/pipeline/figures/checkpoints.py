@@ -148,9 +148,20 @@ def class_samples(net, config: Mapping, n_per_class: int, num_bins: int,
         return torch.stack([sampler.sample_fresh(net, n_per_class, device(), class_idx=c,
                                                  num_steps=sgld_steps)
                             for c in range(net.out_dim)])
-    net.renormalize_(log_target=0.0)
-    x, y = net.sample_all_classes(n_per_class=n_per_class, num_bins=num_bins)
-    return torch.stack([x[y == c] for c in range(net.out_dim)]).cpu()
+    # Exact draws from p(x | c) on a grid per feature: the MPS with the class
+    # site fixed, sampled left to right (D100).
+    grid = torch.linspace(*net.input_range, num_bins, device=device())
+
+    def embed(values):
+        return net.embedding(values).to(net.dtype).reshape(*values.shape, -1)
+
+    xs = []
+    for c in range(net.out_dim):
+        label = torch.nn.functional.one_hot(torch.tensor(c), net.out_dim)
+        conditioned = net.condition(label.to(net.dtype).to(device()))
+        xs.append(conditioned.sample(n_samples=n_per_class, domain=grid,
+                                     embedding=embed, renormalize=True))
+    return torch.stack(xs).cpu()
 
 
 def samples(spec: Mapping[str, Any], out: Path) -> List[Path]:

@@ -130,10 +130,6 @@ class LikelihoodPurification:
 
 """Gibbs-sampling purification for ConditionalBornMachine (class-marginalized)."""
 
-import torch
-from typing import Optional, Tuple
-
-from bm4tc.core.model import draw_from_grid_log
 from bm4tc.core.embeddings import rel_to_abs
 
 
@@ -141,9 +137,11 @@ class GibbsPurification:
     """Purify adversarial examples via class-marginalized Gibbs sampling.
 
     For each feature in turn, resample it from the conditional distribution
-    p(x_i | x_{-i}), marginalizing over class label, by evaluating the CBM
-    joint amplitudes over a discrete grid.  Multiple sweeps produce a sample
-    more consistent with the model's learned distribution.
+    p(x_i | x_{-i}), marginalizing over class label, on a discrete grid of
+    candidate values.  One sweep is one ``born.sample(in_condition=x)``
+    (tensorkrowch's sampler, D100, D101): O(features) per sweep, each candidate
+    a quadratic form on the site's reduced density matrix.  Multiple sweeps
+    produce a sample more consistent with the model's learned distribution.
 
     **Attack-radius agnostic.**  ``step_delta_rel`` is a *per-sweep* L∞ step, not a
     global perturbation budget: the restriction window is re-centred on the
@@ -158,9 +156,9 @@ class GibbsPurification:
             ``step_delta_rel`` these all fall *inside* the window (see below), so
             this is the resolution of the window, not of the full input range.
         progress: Show progress bars.
-        gibbs_batch_size: Number of adversarial samples processed per batch.
-            Controls memory: gibbs_batch_size × num_bins inputs per forward pass.
-            At bs=8, bins=200: 1600 forward evals per feature per sweep.
+        gibbs_batch_size: Number of adversarial samples swept together.  Bounds
+            memory (a few MiB per sample at MNIST 12×12, r40); time per sweep
+            hardly grows with it.
         step_delta_rel: Per-sweep L∞ step as a fraction of the input range size
             (hi - lo).  Feature i is resampled on a grid spanning
             [x̄_i ± delta_abs] ∩ input_range, where delta_abs =
@@ -248,7 +246,6 @@ class GibbsPurification:
         max_sweeps = max(sweep_points)
 
         n_samples = len(x_adv)
-        data_dim = x_adv.shape[1]
         lo, hi = born.input_range
 
         # Unrestricted path: one fixed grid over the whole input range, shared by
@@ -272,6 +269,10 @@ class GibbsPurification:
             else None
         )
 
+        # The candidates' embedding, (*domain.shape, phys_dim) in the model's dtype.
+        def embed(values: torch.Tensor) -> torch.Tensor:
+            return born.embedding(values).to(born.dtype).reshape(*values.shape, -1)
+
         # Per-snapshot accumulation of purified batches (concatenated after the loop).
         snap_results: Dict[int, List[torch.Tensor]] = {s: [] for s in sweep_points}
         n_batches = (n_samples + self.gibbs_batch_size - 1) // self.gibbs_batch_size
@@ -283,65 +284,32 @@ class GibbsPurification:
             dynamic_ncols=True,
             disable=not self.progress,
         ):
-            batch = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
-            bs = len(batch)
-            x_cur = batch.clone()
+            x_cur = x_adv[batch_start : batch_start + self.gibbs_batch_size].to(device)
 
-            # Clear any data nodes left over from a previous batch. The candidate
-            # forward (log_amp_sq) is the eager norm-accumulating contraction, which
-            # resets around itself, so this is only hygiene between batches.
+            # Clear any nodes left over from a previous contraction (sample()
+            # would warn and reset itself).
             born.reset()
 
             for s in range(1, max_sweeps + 1):
-                # Snapshot at sweep start; the restriction window is centred on these
-                # values, not on within-sweep updated values. Re-centring each sweep is
-                # what makes the total budget k*delta rather than a single global ball.
-                x_bar = x_cur.clone() if delta_abs is not None else None
+                # Candidate values per feature. Unrestricted: the shared global
+                # grid. Restricted: per sample, a grid spanning its window
+                # [x̄_k ± delta] ∩ [lo, hi] around the sweep-start value x̄, so every
+                # candidate is admissible and none of the num_bins resolution is
+                # wasted outside the window. Re-centring each sweep is what makes
+                # the total budget k*delta rather than a single global ball.
+                if delta_abs is None:
+                    domain = input_space                                # (bins,)
+                else:
+                    w_lo = (x_cur - delta_abs).clamp(lo, hi)            # (bs, D)
+                    w_hi = (x_cur + delta_abs).clamp(lo, hi)
+                    windows = w_lo[..., None] + (w_hi - w_lo)[..., None] * unit_grid
+                    domain = list(windows.unbind(1))                    # D × (bs, bins)
 
-                for k in tqdm(
-                    range(data_dim),
-                    desc=f"sweep {s}/{max_sweeps}",
-                    unit="feat",
-                    leave=False,
-                    dynamic_ncols=True,
-                    disable=not self.progress,
-                ):
-                    # Candidate values for feature k. Unrestricted: the shared global
-                    # grid. Restricted: a per-sample grid spanning this sample's window
-                    # [x̄_k ± delta] ∩ [lo, hi], so every candidate is admissible by
-                    # construction and none of the num_bins resolution is wasted
-                    # outside the window.
-                    if delta_abs is None:
-                        grid_k = input_space                              # (bins,)
-                        flat_grid = input_space.repeat(bs)                # (bs*bins,)
-                    else:
-                        lo_k = (x_bar[:, k] - delta_abs).clamp(lo, hi)    # (bs,)
-                        hi_k = (x_bar[:, k] + delta_abs).clamp(lo, hi)    # (bs,)
-                        grid_k = lo_k[:, None] + (hi_k - lo_k)[:, None] * unit_grid[None, :]
-                        flat_grid = grid_k.reshape(-1)                    # (bs*bins,)
-
-                    # Build (bs × num_bins) candidate inputs: x_cur with x[:, k] = grid.
-                    x_cand = (
-                        x_cur.unsqueeze(1)
-                        .expand(bs, self.num_bins, -1)
-                        .reshape(bs * self.num_bins, -1)
-                        .clone()
-                    )
-                    x_cand[:, k] = flat_grid
-
-                    with torch.no_grad():
-                        # Sum |ψ(x,c)|² over classes → unnormalized p(x_i | x_{-i}),
-                        # computed entirely in log space. Each candidate is a full
-                        # chain contraction over every site, so the linear |ψ|²
-                        # overflows on long chains; log_amp_sq is the norm-
-                        # accumulating (overflow-safe) contraction, and
-                        # logsumexp does the class sum without leaving log space.
-                        las = born.log_amp_sq(x_cand)                      # (bs*bins, C)
-                        log_p = torch.logsumexp(las, dim=-1).view(bs, self.num_bins)
-
-                    # No masking needed: the grid *is* the window, so every bin is
-                    # admissible and no row can be entirely -inf.
-                    x_cur[:, k] = draw_from_grid_log(log_p, grid_k)
+                # One sweep: feature k is drawn given the new values left of it
+                # and x_cur right of it, the class summed out.
+                x_cur = born.sample(in_condition=born.embed(x_cur).to(born.dtype),
+                                    domain=domain, embedding=embed,
+                                    renormalize=True)
 
                 if s in snap_results:
                     snap_results[s].append(x_cur.cpu().clone())
