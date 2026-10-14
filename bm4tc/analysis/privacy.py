@@ -70,7 +70,9 @@ def worst_case_threshold(members: np.ndarray, non_members: np.ndarray) -> Dict[s
     """Best balanced accuracy, (TPR + TNR) / 2, of a single-feature threshold attack.
 
     For each feature, every midpoint between consecutive unique scores is tried as the
-    threshold; a sample is called a member when its score is at or above it.
+    threshold, and so are -inf and +inf (everyone or no one is a member, 0.5 each), so
+    the result is never below chance; a sample is called a member when its score is at
+    or above the threshold.
     """
     n_members = len(members)
     result = {}
@@ -79,10 +81,7 @@ def worst_case_threshold(members: np.ndarray, non_members: np.ndarray) -> Dict[s
         if name in _LOWER_IS_MEMBER:
             scores = -scores
         unique = np.unique(scores)
-        if len(unique) <= 1:
-            result[name] = n_members / len(scores)
-            continue
-        midpoints = (unique[:-1] + unique[1:]) / 2.0
+        midpoints = np.concatenate([[-np.inf], (unique[:-1] + unique[1:]) / 2.0, [np.inf]])
         preds = (midpoints[:, None] <= scores[None, :]).astype(np.float64)
         tpr = preds[:, :n_members].mean(axis=1)
         tnr = (1 - preds[:, n_members:]).mean(axis=1)
