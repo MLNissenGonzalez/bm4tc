@@ -118,6 +118,12 @@ need their `warm_from` study trained.
   which needs every cell's HPO.
 - **A multi-study launcher** (`run paper`-style; the executor already runs a DAG,
   one launch runs one study, D66).
+- **Analysis units need more GPU memory than training units**, but `--per-gpu`
+  sizes every slot alike. E2a's relaunch (`--per-gpu 4`) lost 3 of 12 analyses to
+  out of memory in a `uq` capture (log p(x), purification): an analyse unit held
+  6.2–6.4 GiB beside trains at 3.9 GiB. Options: measure the analysis peak in the
+  bench and size on it, a per-stage `--per-gpu`, or free each part's captured
+  graphs before the next part.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
   once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
   is/are busy or unavailable" (MPS refusing clients that connect together; retried
