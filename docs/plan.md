@@ -29,9 +29,10 @@ Next, in order:
 1. **Launch E2b** on G21G01 (a worktree at the current commit). The ladder waits
    for its knee shift; the AT grid {0, β\*} waits for E3's verdict on purification
    under adaptive attacks (below, E2a).
-2. **The sampling code (D100, D101, D103): done.** `SamplingMPS`, develop's sampler on
-   tk 1.1.6, keeps its nodes between calls; Gibbs and the figures use it; the
-   tensorkrowch patch is a local branch, not pushed
+2. **The sampling code (D100, D101, D103) and the reset-free forward (D104): done.**
+   `SamplingMPS`, develop's sampler on tk 1.1.6, keeps its nodes between calls; Gibbs
+   and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
+   Martin's fork. D104 needs its cluster checks (AGENTS.md) before a launch
    ([Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100)).
 3. **Run E3** (trimmed, with D98; ~1.5–2 h on the eGPU, launch it detached so the
    terminal can close), read it against the ceilings, then the saturation ablation

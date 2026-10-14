@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D99 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D104 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -56,23 +56,49 @@ place, no pass-through layers.
   from `environment.yml`.
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-13, evening)
+## State (2026-10-14)
 
-Branch `ousterhout`, pushed to GitHub up to `05c44cf8` (E2b written). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
-`pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
-`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates
-and the measurements since CUDA graphs.
+Branch `ousterhout`, pushed to GitHub up to `0eb73cf5` (D100–D104). Phases 0–7 of the
+refactor are done; `main` is untouched and the local tag `pre-ousterhout` marks it.
+Phase 8 (journal studies on the HPC) is in its pilots; `docs/plan.md` has the details,
+`docs/compute.md` the (pre-graph) cost estimates and the measurements since (stale
+numbers are marked there).
 
-**Start here (2026-10-13, evening): talk about E2a with Martin first** (it runs on
-G21G01 since 13:09; plan.md "Pilots", E2: knees, β\*, ladder, AT grid). **Then the
-sampling code:** the Gibbs purification rework and the comparison with tk's
-`develop` sampling (plan.md, Now step 2). E3's rerun waits for that, unless Martin
-wants it run overnight first (plan.md, Now step 3).
+**Start here (2026-10-14):**
+1. **Cluster checks for D104** (Martin runs them; list below). D104 changed the
+   amplitude forward and showed +0.8 GiB reserved per process on the laptop, and E2b
+   already loses analyses to memory (plan.md, E2b): launch nothing from a commit at or
+   after `f96c8012` before these numbers are in. E2b's own worktree predates it.
+2. **E2b** (full MNIST d3r40, running on G21G01 from `05c44cf8`) and its memory problem
+   (plan.md: a train holds ≈ 9.3 GiB per process, an analysis ≥ 10.7 GiB).
+3. **E3** (below, "Next").
+4. **The next session works intensely with tensorkrowch:** start from
+   `../tensorkrowch/TK_NOTES.md` (branch `sampling-efficiency`, pushed to Martin's fork
+   `MLNissenGonzalez/tensorkrowch`; remote over SSH), then plan.md, Efficiency and
+   Phase 9.
+
+**Cluster checks for D104** (G21G01, a worktree at `f96c8012` or later):
+1. `pytest tests/unit/test_graphs.py` (D94's rule; D104's first run under torch 2.1
+   there).
+2. `python -m tests.bench.bench_train_step`, captured, NAT and AT, at every shape that
+   will launch, memory per process against compute.md's table: MNIST12 d3r40
+   `--batch 512 --beta 0.5` (E2a; AT does not fit the laptop); full MNIST
+   `--features 784 --bond-dim 40 --batch 512 --micro-batch 256 --beta 0.5` (5.34 /
+   7.58 GiB NAT / AT before; 9.3 GiB per process in E2b's real run); d3r80
+   `--micro-batch 128` (did not fit: does it now?). If the +0.8 GiB holds, `--per-gpu`
+   changes; if it is worse at 784 sites, find the cause first (an allocator snapshot of
+   the Trainer's warm-up and validation; it is not how D104 frees tensors, and a bare
+   train/validate loop shows none).
+3. `python -m tests.bench.bench_analysis --features 784 --bond-dim 40`.
+4. A short `run ... --mps --per-gpu N` pilot: per-process memory in `nvidia-smi` with
+   several units (as D95 measured it).
+5. Gibbs on full MNIST in a real analysis (`analysis.sweep_purify.enabled`): ≈ 50 s per
+   run expected (compute.md, "Gibbs purification since D101 and D103").
 
 **Rule from D94, still binding:** studies may run with `trainer.cuda_graph` on only
 from the D94 commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.
 Martin brings tk intuition, not CUDA expertise: explain the GPU side plainly. tk's
-source is in `../tensorkrowch` (branch `develop`).
+source is in `../tensorkrowch` (branch `develop`; our work on `sampling-efficiency`).
 
 Done before (D78–D87, see decisions.md): micro-batches, AT with cw = 0, the HPO budget,
 pilot A (log Z target n·ln d / 2), **β replaces α** (D86; Martin's theory note
@@ -113,11 +139,11 @@ still shows launches without `--mps`.
 Laptop: the eGPU (RTX 2080, 8 GB) is back since 2026-10-13: the CUDA tests run here
 (full suite with the GPU: ≈ 3.5 min).
 
-Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation crashes):
+Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation crashed until D94):
 - **D91:** `clean_weight` deleted; AT is `(1-β)·L_dis(x_adv) + (β/N)·L_gen(x)`, AT
   validation attacks every sample, no `n_rob`. The AT seams were re-pinned at cw = 0
   first, then reproduced exactly.
-- **D92, captured evaluation (broken, see "Start here"):** `Graphs` (one pool per graph,
+- **D92, captured evaluation (its crash fixed by D94):** `Graphs` (one pool per graph,
   replays return copies, one warm-up stream: that fixed the 3× warm-up memory),
   `Evaluation` (the Trainer's validation, captured: crashes the training graph), and the
   analysis's per-batch work (PGD, joint PGD, likelihood purification, log p(x),
@@ -136,7 +162,7 @@ Done on 2026-10-13 (eGPU):
   of a capture on one stream (tk-free and through the Trainer), and the E2a-shape run
   captured vs eager number for number.
 
-Done on 2026-10-13 (evening; not pushed):
+Done on 2026-10-13 (evening):
 - **D96, adaptive attacks** (`bm4tc/analysis/adaptive.py`, part `adaptive`, off by
   default): `Defense` (purifier, classifier, detector at τ_q on the input or the
   purified input) and `AdaptivePGD` (BPDA + EOT through the purifier, selective PGD
@@ -162,18 +188,44 @@ Done on 2026-10-13 (evening; not pushed):
   processes at once, `nvidia-smi`: no devices): a driver or link problem, not the
   code. **Never suggest unplugging it then: that has crashed the laptop.** Reboot.
 
+Done on 2026-10-14 (session `ousterhout-sampling-efficiency`):
+- **D100–D101, sampling on tk nodes:** `SamplingMPS` (`bm4tc/core/sampling.py`) carries
+  tk develop's `condition`/`sample` to 1.1.6 and makes them efficient (a domain per
+  sample, each site's density matrix first, one layer for a sweep, uniform draw where
+  no weight is usable). `GibbsPurification` is one `born.sample(in_condition=x,
+  domain=windows)` per sweep; the figures' class samples are `condition` + `sample`;
+  the old sampler is deleted. **D102:** the privacy attack's worst case is never below
+  chance; the shared test model is seeded.
+- **D103:** `sample` keeps its tk nodes between calls (tk caches each operation's result
+  as a successor; a repeated call only recomputes tensors). Gibbs per analysis run
+  (250 points, 10 sweeps): ≈ 9 s MNIST 12×12, ≈ 50 s full MNIST (did not fit before).
+- **D104:** `ConditionalBornMachine.forward` calls `contract()` on its kept nodes
+  instead of resetting, recorded like tk's `trace`; `_nodes_key` says whether the
+  forward or a `sample` structure holds the network. Bit-identical; eager step 174 →
+  130 ms, eager analysis 81 → 53 s, captured training unchanged; reserved +0.8 GiB per
+  process (cluster check above). tk's `reset` reorders `parameters()`: compare
+  parameters by name across a reset.
+- **tensorkrowch:** branch `sampling-efficiency` on Martin's fork, one commit per bm4tc
+  sampling step in develop's names, and `TK_NOTES.md` (tk internals: successors,
+  forward's replay, trace's inverse memory, reset, node and edge rules, 1.1.6 vs
+  develop, candidates). Core issues documented there, not changed.
+
 **Next (in this order):**
-1. **E2a** with Martin (above).
-2. **The sampling code:** Gibbs purification O(n²) per sweep (plan.md, Efficiency:
-   cache the left/right environments on tk nodes, reproduce the snapshots), and the
-   comparison with tk's `develop` sampling (plan.md, Sampling). Gibbs is most of the
-   adaptive part's cost (130–416 s per budget and sweep count on spirals).
-3. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
+1. The D104 cluster checks (above), then E2b's memory problem (plan.md).
+2. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
    `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
    questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.
+   Gibbs is cheap now (D101, D103).
+3. **tensorkrowch (next session):** a norm-keeping `renormalize` (the log-norm as a
+   node; would remove bm4tc's `_inline_contraction` override, the accumulator and the
+   special forward), a public "contract with reuse", `reset`'s quadratic renaming and
+   its reordering of `parameters()`, `@` on batch-only edges, `einsum`'s connected-edge
+   rule, edge inheritance, the environment-first forward (B·n·r·d stored instead of
+   B·n·r²); then what goes upstream and how (PR to the fork's develop, then to
+   tensorkrowch).
 4. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
-   race); `select`/`run --cell` on a subset; a multi-study launcher; re-estimate
-   `docs/compute.md`.
+   race, seen again once in `test_run_in_parallel_then_status`); `select`/`run --cell`
+   on a subset; a multi-study launcher; re-estimate `docs/compute.md`.
 
 Other open items (time series, notes on the other laptop) are in `docs/plan.md`.
 
