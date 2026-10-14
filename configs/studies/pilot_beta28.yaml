@@ -1,0 +1,26 @@
+# β pilot E2b (plan.md "Beta"): do the knees E2a found on MNIST 12x12 move on full
+# MNIST (28x28)? Their shift sets the exponent of N (keep N unless both knees move by
+# more than ~1 in ln r). E2a's grid, arch and norm target; no HPO: each cell takes the
+# lr E2a selected at the same β (hparams_from; configs/hparams/pilot_beta12.yaml,
+# copied from the cluster's select). 150 epochs: E2a's runs at β ≥ 0.03 were still
+# improving at their 100-epoch cap.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1]
+config:
+  trainer.max_epoch: 150
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+archs:
+  d3r40: {trainer.micro_batch_size: 256}    # as mnist_nat (D79)
+hpo: null
+hparams_from:
+  study: pilot_beta12
+  params: [trainer.optimizer.kwargs.lr]
+budgets: [0.1]                 # read at ε = 0.1 only
+analysis:
+  joint_attack: false

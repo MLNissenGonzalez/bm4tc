@@ -1,0 +1,27 @@
+# Selected by `select pilot_beta12`: per cell, the HPO trial with the lowest
+# objective/valid (D8, D21). Written by select only; do not edit.
+# 2026-10-13T19:28:01, git f9e7cb0c76ef7cd0d2b3ba034be926cc0f9b64b3
+legendre/d3r40/b0:  # trial 8 of 13, objective/valid 0.0653937
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b0.001:  # trial 10 of 13, objective/valid 0.0532419
+  trainer.optimizer.kwargs.lr: 0.0001698670453505509
+legendre/d3r40/b0.01:  # trial 7 of 8, objective/valid 0.0650634
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b0.03:  # trial 7 of 10, objective/valid 0.0464045
+  trainer.optimizer.kwargs.lr: 0.0001698670453505509
+legendre/d3r40/b0.1:  # trial 7 of 12, objective/valid 0.000740649
+  trainer.optimizer.kwargs.lr: 0.0001698670453505509
+legendre/d3r40/b0.25:  # trial 6 of 12, objective/valid -0.130381
+  trainer.optimizer.kwargs.lr: 0.0001698670453505509
+legendre/d3r40/b0.5:  # trial 7 of 12, objective/valid -0.365996
+  trainer.optimizer.kwargs.lr: 0.0001698670453505509
+legendre/d3r40/b0.75:  # trial 6 of 12, objective/valid -0.581955
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b0.9:  # trial 6 of 12, objective/valid -0.811667
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b0.97:  # trial 6 of 12, objective/valid -0.927971
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b0.99:  # trial 6 of 11, objective/valid -0.963827
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
+legendre/d3r40/b1:  # trial 6 of 12, objective/valid -0.982292
+  trainer.optimizer.kwargs.lr: 0.0005611516415334506
