@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Text
 from omegaconf import OmegaConf
 from bm4tc.core.embeddings import embedding, range_from_embedding
+from bm4tc.core.sampling import SamplingMPS
 import logging
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ class CBMConfig:
     model_path: Optional[str] = None
 
 
-class ConditionalBornMachine(tk.models.MPS):
+class ConditionalBornMachine(SamplingMPS):
     """
     Single MPS-based model for both discriminative and generative inference.
 
@@ -115,6 +116,10 @@ class ConditionalBornMachine(tk.models.MPS):
 
     auto_stack=True and auto_unbind=False are hardcoded on both the main MPS
     and norm_net so they always share the same parameter view.
+
+    Sampling comes from :class:`SamplingMPS` (D100). The class-conditional
+    ``sample`` below still shadows ``SamplingMPS.sample``; it goes once the
+    callers use ``condition`` and ``SamplingMPS.sample``.
     """
 
     def __init__(

@@ -30,8 +30,8 @@ Next, in order:
 
 1. **Talk about E2a** (new session); decide the knees, β\*, the β ladder
    (`defaults.yaml`) and the AT grid. Then E2b (`pilot_beta28`, `hparams_from` E2a).
-2. **The sampling code:** the Gibbs purification rework (O(n²) per sweep, under
-   Efficiency) and the comparison with tensorkrowch's `develop` sampling (below).
+2. **The sampling code (D100, in progress):** `SamplingMPS`, develop's sampler on tk
+   1.1.6, step 1 done; steps 2–5 under [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100).
    Gibbs is also most of the adaptive part's cost.
 3. **Run E3** (trimmed, with D98; ~1.5–2 h on the eGPU, launch it detached so the
    terminal can close), read it against the ceilings, then the saturation ablation
@@ -256,15 +256,9 @@ The training step, validation and the analysis's per-batch work are captured
 (D90, D92, D94); the measurements and memory per unit are in compute.md. What is
 left:
 
-- **Gibbs purification is O(n²) per sweep.** `GibbsPurification.purify_snapshots`
-  (`bm4tc/analysis/purification.py`) evaluates (batch × num_bins) candidates per
-  feature, each with a full forward through all n sites: MNIST 12×12 447 s per 24
-  points; full MNIST ≈ 30× that and out of memory at batch 24 on 8 GB. Fix: cache
-  the left and right environments, so a candidate costs L_{k-1} · A_k(x) · R_{k+1},
-  and update the left one after feature k is resampled (about n× cheaper). It is
-  tensor-network maths, so it belongs in `ConditionalBornMachine` on tensorkrowch
-  nodes, and must reproduce the current snapshots (bit for bit, or to tolerance with
-  a re-pin).
+- **Gibbs purification is O(n²) per sweep** (MNIST 12×12: 6.8 s per sweep for 24
+  points; full MNIST out of memory at batch 24 on 8 GB). Being replaced by
+  `SamplingMPS.sample` (D100, under [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100)).
 - **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
   by hand); replays do not bump version counters, so `_params_key()` is stale after
   a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during
@@ -299,19 +293,30 @@ left:
   skipping` at every budget (`bm4tc/analysis/uq.py:611`, `next(iter(det.values()))`
   on empty percentiles). Harmless; guard it.
 
-## Sampling: compare with tensorkrowch's develop branch
+## Sampling: tensorkrowch develop's sampler on 1.1.6 (D100)
 
-Martin's fork of tensorkrowch has an unfinished, general sampling implementation on
-`develop` (`tensorkrowch/models/mps...`): full sampling and conditional sampling
-(imputation, purification). It is checked out read-only at `../tensorkrowch`. Before
-Phase 9 touches sampling in `ConditionalBornMachine`:
+Compared on 2026-10-14: develop's `sample(in_condition=x)` is one Gibbs sweep (O(n)),
+the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
+(`bm4tc/core/sampling.py`) carries develop's `condition` and `sample` to tk 1.1.6;
+`ConditionalBornMachine` subclasses it. Steps:
 
-1. Compare both implementations: what each can do that the other cannot (full and
-   conditional sampling, which variables can be fixed, batching, the class site,
-   embeddings and their inverse, numerical safety on long chains, speed), and how
-   each would serve Gibbs purification.
-2. Discuss with Martin: what to adopt, what to keep, and whether the shared part
-   belongs upstream (Phase 9).
+1. **Done:** the port as it is, develop's tests, the CBM checks
+   (`tests/unit/test_sampling.py`).
+2. Efficiency, each checked against step 1 (forced argmax, every conditional): (a) a
+   grid per sample, for the windows; (b) contract each site before its data; (c) the
+   physical leg left open, candidates through the site's d×d reduced density matrix;
+   (d) one layer where the variables are fixed (sampled left side, conditioning
+   input); memory: `reset` per sweep, batch chunks.
+3. Switch `GibbsPurification` and the figures' class samples (`condition` +
+   `sample`); delete `CBM.sample`, `sample_all_classes`, `condition_on_class`,
+   `_make_conditioned_net`, `_h_node`/`_u_node`; re-pin where Gibbs values are pinned.
+4. Measure time and memory (spirals B 256, MNIST 12×12, full MNIST r40/r80) before and
+   after, from a worktree of HEAD; compute.md.
+5. The develop patch (Phase 9).
+
+Out of scope until decided: finer grids or exact continuous draws, a
+Metropolis–Hastings correction for the windows, temperature (they change the
+purifier).
 
 ## Phase 9 (separate track): tensorkrowch
 
