@@ -30,7 +30,9 @@ the pipeline's own `_fit` and analysis parts on the study configs at commit
    likelihood purification, then the same again for the joint attack, takes
    ≈ 40 min per run on MNIST 12×12 and ≈ 3.6 h on full MNIST. That is ≈ 330
    GPU-h in all.
-5. **Gibbs purification on full MNIST is not affordable as written.** Each
+5. **Gibbs purification on full MNIST was not affordable as written; it is now
+   (D101, D103: ≈ 50 s per run on full MNIST, ≈ 9 s on MNIST 12×12; see
+   [Gibbs purification](#gibbs-purification-since-d101-and-d103-2026-10-14)).** Each
    one-feature update evaluates (batch × 96 bins) candidates with a full forward
    pass over all n sites, so one sweep costs O(n²). On MNIST 12×12 it takes 447 s
    for 24 points (≈ 1.3 h per run at 250 points). Full MNIST is ≈ 30× slower per
@@ -67,7 +69,8 @@ the pipeline's own `_fit` and analysis parts on the study configs at commit
 1. **Decide the batch size** (512 or larger) and the **HPO budget**. They change
    every number, pilots included.
 2. **Fix efficiency where the numbers don't change**, on the Phase 9 track (D30):
-   - Gibbs environment caching, checked bit-identical to the current code.
+   - Gibbs environment caching, checked bit-identical to the current code (done:
+     D101, D103).
    - Per-step overhead (CUDA graphs or `torch.compile`, fewer small launches).
    - Analysis batch size: it changes PGD's random draws, so it needs a re-pin.
 3. **Pilots** (PGD-5 vs 10; norm-control target) can run on the cluster at the
@@ -120,6 +123,44 @@ tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
 
 `--per-gpu` ≈ (GPU memory − other processes) / the per-process figure; E2a runs 4
 per GPU on G21G01.
+
+## Gibbs purification since D101 and D103 (2026-10-14)
+
+`GibbsPurification` through the API both versions share
+(`purify_snapshots`, 96 bins, step 0.05), RTX 2080, random model (time does not
+depend on the weights). Before: `3b6afd73` (every candidate a full-chain
+contraction, O(n²) per sweep). D101: `954fa692` (one `sample` call per sweep, the
+ket alone). D103: the nodes kept between calls. Each from its own worktree.
+
+One sweep (peak memory above the model):
+
+| Shape | Before (batch 24) | D101, batch 24 | D101, batch 64 |
+|---|---|---|---|
+| spirals d10r6, 512 points, batch 256 | 0.02 s, 31 MiB | 0.02 s, 10 MiB | – |
+| MNIST 12×12 d3r40, per point | 285 ms, 4.2 GiB | 21 ms, 79 MiB | 7.9 ms, 209 MiB |
+| MNIST 12×12 d3r20, per point | 282 ms, 1.1 GiB | – | 7.8 ms, 131 MiB |
+| full MNIST d3r40, per point | out of memory (also at batch 8) | 152 ms, 428 MiB | 57 ms, 1.1 GiB |
+| full MNIST d3r80, per point | out of memory (also at batch 4) | – | 57 ms, 2.6 GiB |
+
+A batch costs the same at 24 or 64 points (0.5 s on MNIST 12×12, 3.6 s on full
+MNIST): the time is tensorkrowch's Python work per operation, not arithmetic, so the
+largest batch that fits is the cheapest per point.
+
+Ten sweeps (snapshots 1, 3, 6, 10, the analysis default), batch 64, log p(x)
+included; the draws of D101 and D103 are identical:
+
+| Shape | D101 | D103 | Per run (250 points) |
+|---|---|---|---|
+| MNIST 12×12 d3r40, 256 points | 18.6 s | 8.6 s, 229 MiB | ≈ 9 s |
+| full MNIST d3r40, 128 points | 69.4 s | 25.4 s, 1.2 GiB | ≈ 50 s |
+| full MNIST d3r80, 128 points | 69.5 s | 26.1 s, 2.6 GiB | ≈ 52 s |
+| spirals d10r6, 512 points (batch 256) | 0.2 s | 0.1 s | – |
+
+Before D100, the same run took ≈ 12 min on MNIST 12×12 (285 ms per point and sweep)
+and did not fit on full MNIST, where takeaway 5 estimated 40–80 GPU-h per run. A
+D103 call that reuses its nodes costs ≈ 40% of one that builds them; the first sweep
+after each forward builds them (the adaptive attack classifies between purifications,
+so there only sweeps 2..k of a k-sweep purification reuse).
 
 ## Appendix: measurements
 

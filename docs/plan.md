@@ -29,9 +29,10 @@ Next, in order:
 1. **Launch E2b** on G21G01 (a worktree at the current commit). The ladder waits
    for its knee shift; the AT grid {0, β\*} waits for E3's verdict on purification
    under adaptive attacks (below, E2a).
-2. **The sampling code (D100, D101, in progress):** `SamplingMPS`, develop's sampler on
-   tk 1.1.6, steps 1–3 done (Gibbs and the figures use it); steps 4–5 under
-   [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100).
+2. **The sampling code (D100, D101, D103): done.** `SamplingMPS`, develop's sampler on
+   tk 1.1.6, keeps its nodes between calls; Gibbs and the figures use it; the
+   tensorkrowch patch is a local branch, not pushed
+   ([Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100)).
 3. **Run E3** (trimmed, with D98; ~1.5–2 h on the eGPU, launch it detached so the
    terminal can close), read it against the ceilings, then the saturation ablation
    (steps, restarts, EOT) that sets `analysis.adaptive`'s defaults.
@@ -386,9 +387,9 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    | MNIST 28×28 r40 / r80, B 24 | out of memory | 6.5 s / 6.7 s, 0.7 / 1.3 GiB |
 
    Time is tensorkrowch's Python overhead per operation (≈ 0.2 ms, ~25 operations
-   and ~30 new nodes per site), not batch or bins. Left: `reset` deletes nodes in
-   time quadratic in nodes of one name (2.3 s of 8.4 s profiled at 784 sites; an
-   upstream candidate), and fewer operations per site.
+   and ~30 new nodes per site), not batch or bins; `reset` deleted nodes in time
+   quadratic in nodes of one name (2.3 s of 8.4 s profiled at 784 sites). Step 4
+   keeps the nodes instead.
 3. **Done (D101):** `GibbsPurification` runs each sweep as one `born.sample(in_condition=x,
    domain=windows)`, the figures' class samples are `condition` + `sample`, the old
    sampler is deleted; rows with no usable weight are drawn uniformly with one
@@ -399,13 +400,27 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    ≈ 57 MiB at r40 / r80 / r160). One sweep over 512 points at batch 64: MNIST 12×12
    r40 3.95 s, full MNIST r40 / r80 29 s (1.1 / 2.7 GiB peak with the log p(x)
    forward).
-4. Measure time and memory (spirals B 256, MNIST 12×12, full MNIST r40/r80) before and
-   after, from a worktree of HEAD; compute.md.
-5. The develop patch (Phase 9). tensorkrowch findings for it are in commit
-   `48274abe`: connecting through a result node's inherited edge connects the leaf
-   (`reattach_edges` first); `@` refuses batch-only contractions (`einsum` works);
-   duplicate axis names become `input_0`/`input_1`; moving nodes between networks
-   and `reset` rename in time quadratic in same-named nodes.
+4. **Done (D103):** measured before (`3b6afd73`, before D100) and after, from
+   worktrees (compute.md, "Gibbs purification"), and `sample` keeps its nodes
+   between calls: tensorkrowch caches each operation's result node as a successor
+   of its operands, so a repeated sweep on the same nodes only recomputes tensors
+   (no new nodes, no reset; ≈ 60% of a sweep was building nodes and resetting).
+   10 sweeps, batch 64: MNIST 12×12 r40 18.6 → 8.6 s, full MNIST r40 / r80
+   69.4 → 25.4 s / 69.5 → 26.1 s (128 points), same draws.
+5. **Done:** the develop patch, branch `sampling-efficiency` in `../tensorkrowch`
+   (local, not pushed), one commit per bm4tc step (2a, 2b–2d, step 3, D103), each
+   `sampling.py` translated back to develop's names (the translation of step 1
+   reproduces develop exactly) with bm4tc's tests in develop's style: `0a079fa`,
+   `9a08f59`, `a23003e`, `e514b02`. tensorkrowch's `tests/` in the bm4tc env (torch
+   2.1): only the failures develop has there too (`to`, `to_contracted`,
+   deparameterize; `entropy` and one canonicalize test fail at random on develop as
+   well); doctests pass. Documented in `e514b02`, not changed (Martin: sampler only): connecting
+   through a result node's inherited edge connects the leaf (`reattach_edges`
+   first); `@` refuses batch-only contractions (`einsum` works); `einsum` needs
+   repeated non-batch subscripts to be connected edges; duplicate axis names
+   become `input_0`/`input_1`; moving nodes between networks and `reset` rename in
+   time quadratic in same-named nodes. Once a tensorkrowch release has it,
+   `SamplingMPS` can go (bm4tc stays on 1.1.6 until then).
 
 Out of scope until decided: finer grids or exact continuous draws, a
 Metropolis–Hastings correction for the windows, temperature (they change the
@@ -450,6 +465,3 @@ networks generatively).
 - **The Chebyshev comment** at `bm4tc/core/embeddings.py:250` cites
   `reference/chebyshev_boundary_born_machines.md`, which exists only untracked on
   the personal laptop.
-- `tests/unit/test_privacy.py::test_membership_inference_runs_end_to_end` fails when
-  only `tests/unit tests/integration` run (order-dependent on the session `cbm`
-  fixture); passes in the full suite.
