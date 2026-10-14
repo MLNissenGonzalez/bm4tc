@@ -437,3 +437,81 @@ def test_cbm_unchanged_by_sampling():
     cbm.condition(tk.embeddings.basis(torch.tensor(0), dim=3).to(cbm.dtype))
     assert torch.equal(las, cbm.log_amp_sq(x))
     assert torch.equal(log_z, cbm.log_partition_function())
+
+
+# ── per-sample domains (D100, step 2a) ───────────────────────────────────────
+
+@pytest.mark.parametrize('condition', [False, True])
+def test_per_sample_domain_equal_rows_matches_shared(captured, condition):
+    mps = SamplingMPS(n_features=4, phys_dim=3, bond_dim=3, boundary='obc',
+                      out_features=[2])
+    domain = torch.linspace(-1, 1, 5)
+    kwargs = dict(n_samples=3, embedding=tk.embeddings.poly)
+    if condition:
+        kwargs['in_condition'] = tk.embeddings.poly(
+            2 * torch.rand(3, 3) - 1, degree=2).to(mps.mats_env[0].dtype)
+
+    shared, _ = mps.sample(domain=domain, return_indices=True, **kwargs)
+    shared_probs = [p.clone() for p in captured]
+    captured.clear()
+    per_sample, _ = mps.sample(domain=domain.expand(3, -1),
+                               return_indices=True, **kwargs)
+
+    assert len(captured) == len(shared_probs) == 3
+    for p, q in zip(captured, shared_probs):
+        assert torch.allclose(p, q, atol=1e-6)
+    assert torch.equal(per_sample, shared)
+
+
+def test_per_sample_domain_values_come_from_own_row(captured):
+    mps = SamplingMPS(n_features=3, phys_dim=2, bond_dim=2, boundary='obc')
+    domain = torch.arange(3 * 4, dtype=torch.float).view(3, 4) / 12
+    samples = mps.sample(n_samples=3, domain=domain,
+                         embedding=tk.embeddings.unit)
+    for row in range(3):
+        assert torch.isin(samples[row], domain[row]).all()
+
+
+def test_per_sample_domain_rejects_wrong_rows_and_build_matrices():
+    mps = SamplingMPS(n_features=3, phys_dim=2, bond_dim=2, boundary='obc')
+    with pytest.raises(ValueError, match='`n_samples` rows'):
+        mps.sample(n_samples=3, domain=torch.rand(2, 4),
+                   embedding=tk.embeddings.unit)
+    with pytest.raises(ValueError, match='`build_matrices`'):
+        mps.sample(n_samples=2, domain=torch.rand(2, 4).sort(-1).values,
+                   embedding=tk.embeddings.unit, build_matrices=True)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "complex64"])
+@pytest.mark.parametrize("out_position", [0, 3, 6])
+def test_cbm_windowed_in_condition_is_one_windowed_gibbs_sweep(
+        captured, dtype, out_position):
+    """With a window per sample and feature, ``sample(in_condition=x)`` is one
+    sweep of GibbsPurification as the analysis runs it (``step_delta_rel``)."""
+    from bm4tc.analysis.purification import GibbsPurification
+
+    cbm = _cbm(dtype, out_position)
+    lo, hi = cbm.input_range
+    x = lo + (hi - lo) * torch.rand(4, 6)
+    bins, step = 12, 0.1
+    delta = step * (hi - lo)
+
+    gibbs = GibbsPurification(num_bins=bins, gibbs_batch_size=4,
+                              step_delta_rel=step, progress=False)
+    x_gibbs, _ = gibbs.purify(cbm, x, n_sweeps=1, device="cpu")
+    gibbs_probs = [p / p.sum(-1, keepdim=True) for p in captured]
+    captured.clear()
+
+    w_lo, w_hi = (x - delta).clamp(lo, hi), (x + delta).clamp(lo, hi)
+    unit = torch.linspace(0, 1, bins)
+    windows = w_lo[..., None] + (w_hi - w_lo)[..., None] * unit   # (B, D, bins)
+    x_tk = SamplingMPS.sample(
+        cbm, in_condition=cbm.embed(x).to(cbm.dtype),
+        domain=list(windows.unbind(1)),
+        embedding=lambda v: cbm.embedding(v).to(cbm.dtype),
+        renormalize=True)
+
+    assert len(captured) == len(gibbs_probs) == 6
+    for p_tk, p_gibbs in zip(captured, gibbs_probs):
+        assert torch.allclose(p_tk.double(), p_gibbs.double(), atol=1e-6)
+    assert torch.equal(x_tk, x_gibbs)
