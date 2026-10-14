@@ -58,7 +58,7 @@ place, no pass-through layers.
 
 ## State (2026-10-13, evening)
 
-Branch `ousterhout`, pushed to GitHub up to `f9e7cb0c` (D95). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
+Branch `ousterhout`, pushed to GitHub up to `05c44cf8` (E2b written). Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates
 and the measurements since CUDA graphs.
