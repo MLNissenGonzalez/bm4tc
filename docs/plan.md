@@ -145,6 +145,20 @@ need their `warm_from` study trained.
   (`torch.cuda.graph(pool=...)`; their replays already return copies). Options:
   measure the analysis peak in the bench and size on it, a per-stage `--per-gpu`, or
   free each part's captured graphs before the next part.
+- **Graph memory: reserved far above allocated, worst for AT (open, first in the
+  next session).** D104's check on G21G01 at `da7185e8` (D104 + D105),
+  `bench_train_step`, β 0.5, batch 512, per process (nvidia-smi):
+  MNIST12 d3r40 NAT 4.57 GiB (1.82 allocated at peak, 4.24 reserved; E2a measured
+  3.89 before D104), AT 10.92 GiB (2.76 allocated, 10.42 reserved); full MNIST
+  d3r40 micro 256 NAT 10.46 GiB (5.01 / 9.24), AT out of memory in the first
+  validation's attack warm-up (3.63 GiB allocated, 15.33 reserved but unallocated).
+  Suspects: one private pool per graph (D92) holds each graph's peak at once, and
+  D105 added graphs (the attack step in training, another in validation at the
+  valid batch shape) where AT's step was one graph; warm-ups on the side stream;
+  D104's +0.8 GiB. To measure first: the same bench at `f56365de` (D104 without
+  D105), then a shared pool for the graphs of one `Graphs` (they never run at once;
+  inputs are copied in, outputs cloned out), checked with D94's allocation tests
+  (tk's kept nodes, D104, may hold capture-time memory).
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
   once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
   is/are busy or unavailable" (MPS refusing clients that connect together; retried
