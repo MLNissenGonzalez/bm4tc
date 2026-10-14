@@ -9,12 +9,10 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 ## Now (2026-10-13, evening)
 
-- **E2a's HPO is done** on G21G01 (D95 commit `f9e7cb0c`, GPUs 5,6,7, `--per-gpu 4
-  --mps`, 13:09–15:03, 6/6 trials in every cell). Two workers failed on trials
-  started in the first second, both on GPU 7 (MPS "busy or unavailable", and an
-  "unspecified launch failure" 4 s into the other trial: the same start-up race), which skipped `select` and every train (fixed by
-  D99). Relaunch the same command without `--replace`: select, then the 12 trains
-  and analyses.
+- **E2a is read** ([Pilots](#beta--mnist-1212-e2a-ran-2026-10-13-on-f9e7cb0c)):
+  accuracy knee β ≈ 0.7, density knee β ≈ 0.03–0.1, β\* = 0.25 between them (on
+  transfer numbers). **E2b** (`pilot_beta28`, full MNIST, E2a's lr per β, 150
+  epochs) is written, not launched.
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
@@ -28,8 +26,9 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **Talk about E2a** (new session); decide the knees, β\*, the β ladder
-   (`defaults.yaml`) and the AT grid. Then E2b (`pilot_beta28`, `hparams_from` E2a).
+1. **Launch E2b** on G21G01 (a worktree at the current commit). The ladder waits
+   for its knee shift; the AT grid {0, β\*} waits for E3's verdict on purification
+   under adaptive attacks (below, E2a).
 2. **The sampling code (D100, in progress):** `SamplingMPS`, develop's sampler on tk
    1.1.6, step 1 done; steps 2–5 under [Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100).
    Gibbs is also most of the adaptive part's cost.
@@ -162,9 +161,11 @@ translation table is in the note, §7):
 β ∈ {0, 0.001, 0.01, 0.03, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97, 0.99, 1} (a factor 3 in
 the weight ratio per step).
 - E2a `pilot_beta12`, MNIST 12×12 d3r40, 100 epochs, target n·ln d / 2, lr-only HPO
-  `{log: [1e-4, 1e-2]}`, 6 trials, random search: **running**.
+  `{log: [1e-4, 1e-2]}`, 6 trials, random search: **done**, below.
 - E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same β
-  (`hparams_from`); 12 runs × ≤ 7 h. Not written yet.
+  (`hparams_from`; `configs/hparams/pilot_beta12.yaml` is the cluster's `select`
+  output, tracked so a worktree has it), 150 epochs; 12 runs × ≤ 10 h. Written, not
+  launched.
 - E2c `pilot_beta_spirals`, d10r6, 300 epochs, normal HPO: **done**, below.
 
 Read per β: test acc, $L_\text{dis}$, $L_x$, rob and purify at 0.1, detection q5,
@@ -185,6 +186,63 @@ cells, ≥ 2 between the knees); the AT grid {0, β\*}. Prediction: with $p = 1$
 
 So the accuracy knee lies in β ∈ (0.59, 0.94); the density knee is unmeasured (TPM's
 sweep sat at β ≥ 0.59). E2a measures both.
+
+### Beta / MNIST 12×12 (E2a, ran 2026-10-13 on `f9e7cb0c`)
+
+Outputs in `pilots/cluster/pilot_beta12/` (untracked). G21G01, GPUs 5–7, 4 units per
+GPU with MPS. ε = 0.1 (relative), purification radius 0.1, detection at the clean
+5th percentile (false-positive rate 0.049–0.054: calibrated). $L_x$ in nats per pixel
+(× 144 per image).
+
+| β | lr | acc | L_dis | L_x | rob | det q5 | err_passed | purify | recovery |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 5.6e-4 | 0.980 | 0.074 | +0.334 | 0.282 | 1.000 | – | 0.558 | 0.385 |
+| 0.001 | 1.7e-4 | 0.982 | 0.067 | +0.189 | 0.279 | 1.000 | – | 0.501 | 0.308 |
+| 0.01 | 5.6e-4 | 0.978 | 0.080 | −0.071 | 0.334 | 0.999 | 0.63 | 0.620 | 0.430 |
+| 0.03 | 1.7e-4 | 0.980 | 0.069 | −0.311 | 0.365 | 0.993 | 0.48 | 0.644 | 0.440 |
+| 0.1 | 1.7e-4 | 0.977 | 0.076 | −0.574 | 0.454 | 0.966 | 0.74 | 0.790 | 0.616 |
+| 0.25 | 1.7e-4 | 0.967 | 0.106 | −0.807 | 0.522 | 0.915 | 0.39 | 0.829 | 0.644 |
+| 0.5 | 1.7e-4 | 0.946 | 0.181 | −0.900 | 0.475 | 0.856 | 0.37 | 0.777 | 0.578 |
+| 0.75 | 5.6e-4 | 0.844 | 0.475 | −0.950 | 0.277 | 0.860 | 0.63 | 0.637 | 0.501 |
+| 0.9 | 5.6e-4 | 0.843 | 0.497 | −0.968 | 0.261 | 0.867 | 0.52 | 0.633 | 0.506 |
+| 0.97 | 5.6e-4 | 0.828 | 0.550 | −0.984 | 0.269 | 0.855 | 0.48 | 0.621 | 0.484 |
+| 0.99 | 5.6e-4 | 0.793 | 0.640 | −0.990 | 0.275 | 0.835 | 0.42 | 0.597 | 0.448 |
+| 1 | 5.6e-4 | 0.728 | 0.792 | −0.993 | 0.261 | 0.850 | 0.44 | 0.547 | 0.389 |
+
+- **Accuracy knee at β ≈ 0.7** (the middle of 0.98 → 0.73), between 0.5 and 0.75;
+  flat at 0.98 up to β = 0.1. As TPM (β ≈ 0.59) and pilot A at β = 1 (0.738). The
+  selected lr flips from 1.7e-4 to 5.6e-4 at the same place, but it is not the cause:
+  in the HPO trials at β ≥ 0.75 the lower lr is worse in objective and accuracy
+  (0.807 vs 0.842 at 0.75), at β = 0.5 better (0.949 vs 0.868).
+- **Density knee at β ≈ 0.03–0.1.** β = 0's $L_x$ is untrained (as E2c); $L_x$
+  crosses the middle of the range from β = 0 at ≈ 0.03 and half its β = 1 value at
+  ≈ 0.08; above 0.5 it gains only 0.09 nat per pixel.
+- **β\* = 0.25, between the knees:** purified accuracy (0.829), recovery (0.644) and
+  plain PGD robustness (0.522 vs 0.28 at β = 0) all peak there and fall back past the
+  accuracy knee. Spirals' β\* ∈ [0.9, 1] came from having no accuracy knee. The top
+  is flat (purify 0.79 / 0.83 / 0.78 at β = 0.1 / 0.25 / 0.5).
+- **Detection says little at ε = 0.1:** the untrained density at β = 0 flags every
+  attack, and detection falls to ≈ 0.85 as β grows. An L∞ step of 0.2 on every pixel
+  is easy for any density to see; the attack does not try to keep log p high.
+- **Caveats.** (1) Purification and detection are transfer numbers (the attack sees
+  neither); at β = 0 purifying with an untrained density already lifts 0.28 to 0.56,
+  so about half the purification number is the transfer gap, ≈ +0.27 is the density's.
+  (2) The rise of rob at β = 0.25 (PGD-40, one restart) is not checked for
+  saturation. (3) Every selected run with β ≥ 0.03 stopped at the 100-epoch cap with
+  its best epoch at 97–100; at β ≥ 0.75 accuracy still climbs ≈ 1 point per 10 epochs
+  (β = 1: 0.643 at epoch 50, 0.722 at 100), so the accuracy knee may move right a
+  little. (4) The lr search drew the same 6 values in every cell (1.7e-4 twice), and
+  1.7e-4, the lowest drawn, won in most cells.
+
+Decided with Martin (2026-10-14): the read above; E2b at 150 epochs. The pilot does
+not enter the paper, so its analysis is not strengthened for its own sake. One
+decision depends on the transfer numbers and is costly to undo: β\* sets the AT
+grid, i.e. AT training. It waits for E3 (spirals, against the ceilings): if
+purification holds under BPDA with the PGD warm start, the AT grid is {0, β\*}; if
+not, the `adaptive` part runs on a few E2a checkpoints (β = 0, 0.1, 0.25, 0.5; no
+retraining) before the grid is fixed. A 12×12 ladder with ≥ 2 cells between the
+knees would be {0, 0.01, 0.1, 0.25, 0.5, 0.9, 1}; the Phase 8 ladder waits for E2b's
+knee shift.
 
 ### Beta / Spirals (E2c, ran 2026-10-09 on `d127eaad`)
 
