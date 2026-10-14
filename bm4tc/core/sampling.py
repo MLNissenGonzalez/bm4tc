@@ -64,24 +64,25 @@ class SamplingMPS(tk.models.MPS):
     """:class:`tensorkrowch.models.MPS` with ``condition`` and ``sample`` (see
     the module docstring)."""
 
-    # The structure of the nodes ``sample`` keeps in the network (None: none
-    # kept), and those of its nodes that are not results of operations.
-    _sample_key: Optional[tuple] = None
+    # The contraction whose nodes the network keeps between calls (a ``sample``
+    # structure, or a subclass's own; None: none kept), and those of the
+    # sampling nodes that are not results of operations.
+    _nodes_key: Optional[tuple] = None
     _sample_nodes: dict = {}
 
     def reset(self):
         """:meth:`~tensorkrowch.TensorNetwork.reset`, which also removes the
-        nodes kept by :meth:`sample`."""
+        nodes kept between calls (see ``_nodes_key``)."""
         super().reset()
-        if self._sample_key is not None:
-            self._sample_key = None
+        if self._nodes_key is not None:
+            self._nodes_key = None
             self._sample_nodes = {}
             self.unset_data_nodes()
 
     def forward(self, data=None, *args, **kwargs):
         """:meth:`~tensorkrowch.TensorNetwork.forward`, after removing the nodes
         kept by :meth:`sample` (their operations would be replayed)."""
-        if self._sample_key is not None:
+        if self._nodes_key is not None:
             self.reset()
         return super().forward(data, *args, **kwargs)
 
@@ -195,7 +196,7 @@ class SamplingMPS(tk.models.MPS):
         """
         
         if self._resultant_nodes:
-            if self._sample_key is None:
+            if self._nodes_key is None:
                 warnings.warn(
                     'Resultant nodes will be removed before conditioning the TN')
             self.reset()
@@ -1058,16 +1059,16 @@ class SamplingMPS(tk.models.MPS):
         key = (sweep, canonical, renormalize, tuple(self._in_features),
                isinstance(in_condition, torch.Tensor),
                tuple(aux_domain.ndim for aux_domain in domains))
-        build = key != self._sample_key
+        build = key != self._nodes_key
         if build:
-            if self._resultant_nodes or self._sample_key is not None:
-                if self._sample_key is None:
+            if self._resultant_nodes or self._nodes_key is not None:
+                if self._nodes_key is None:
                     warnings.warn('Resultant nodes will be removed before '
                                   'sampling the MPS')
                 self.reset()
             if self._data_nodes:
                 self.unset_data_nodes()
-            self._sample_key = key
+            self._nodes_key = key
             self._sample_nodes = {}
 
         try:

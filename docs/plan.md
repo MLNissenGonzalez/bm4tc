@@ -328,26 +328,18 @@ left:
   (B, d, r), then the data (B, r), so B·n·r·d is stored, ≈ 27× less at r80, d 3; the
   time stays B·r²·d per site. It may be what puts d3r80 micro 128 out of memory.
   Core path (D30): the bar below applies.
-- **The forward without `reset` (Martin, 2026-10-14; prototyped, decision pending).**
-  `ConditionalBornMachine.forward` resets before and after every call: tk's `forward`
-  replays `_seq_ops` once result nodes exist, which would skip the Python-side
-  `_accumulate_log_norm` in `_inline_contraction`. Calling `contract(renormalize=True,
-  inline_mats=True)` directly, with no reset, runs the Python code every call (so the
-  accumulator too) while every operation reuses its successor (`div` by a tensor is
-  keyed on the node alone). Prototype (scratch): `log_amp_sq` and every gradient
-  bit-identical to the reset path over changing batch sizes and optimizer steps, CUDA
-  and CPU; no node added after the first call. Without more, one call's intermediates
-  stay held between calls (254 MiB at MNIST 12×12 d3r20 B 512, 645 MiB at full MNIST
-  d3r40 B 64) and the peak doubles; with tk's trace bookkeeping (first call under
-  `_tracing`, then `_traced`, so later calls free each intermediate after its last
-  use) nothing is held and the full-MNIST peak drops (674 → 612 MiB). RTX 2080:
-  no-grad forward 35 → 13 ms (MNIST 12×12 d3r20 B 512), 236 → 78 ms (full MNIST
-  d3r40 B 64); forward + backward 94 → 56 ms (MNIST 12×12 B 512). Captured steps run
-  no Python, so the gain is in eager work (validation outside graphs, analysis, log
-  p(x), CPU). The tk renormalisation node is not needed. Open for the change: the
-  hand-over between the forward's nodes and those `sample` keeps (one structure key
-  for the network), `test_graphs.py` and the seams, the callers that reset (OOM
-  recovery, `initialize`, the Trainer).
+- **The forward without `reset`: done (D104), cluster check open.** `forward` calls
+  `contract()` on its kept nodes, recorded like tk's `trace`; bit-identical, eager step
+  174 → 130 ms, eager analysis 81 → 53 s, captured training unchanged (compute.md,
+  "Since D104"). Open: reserved memory +0.8 GiB per process at E2a's shape (allocated
+  unchanged, cause not found); measure on G21G01 before packing units (handoff.md).
+- **A tk `renormalize` operation that keeps the norm (deep, hard; reduces complexity).**
+  tk's `renormalize` discards the norm; bm4tc's `_inline_contraction` override
+  computes it in Python and accumulates it beside the network. An operation that
+  returns the log-norm as a node of its own would put the accumulation on tk's
+  computational path (trace, successors, replay through `forward`), so the override,
+  the accumulator and the special forward could go. A tensorkrowch change, upstream
+  candidate.
 - **Gaps D94 left:** no test pins memory per unit at a study's shape (the bench does,
   by hand); replays do not bump version counters, so `_params_key()` is stale after
   a capture, and an eager `log_normalizer()` or `log_Z(recompute=False)` during

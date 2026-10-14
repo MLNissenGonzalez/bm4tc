@@ -424,19 +424,20 @@ def test_accumulate_gradients_match():
     cbm = _acc_cbm()
     x = torch.rand(4, 3) * 1.6 - 0.8
 
+    # By name: tk's reset re-registers the parameters, which reorders parameters().
     cbm.zero_grad()
     cbm.log_amp_sq(x).sum().backward()
-    g_acc = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
+    g_acc = {n: None if p.grad is None else p.grad.clone() for n, p in cbm.named_parameters()}
 
     cbm.zero_grad()
     amp = raw_amplitudes(cbm, x)
     (2.0 * torch.log(amp.abs().clamp(min=1e-30))).sum().backward()
-    g_ref = [None if p.grad is None else p.grad.clone() for p in cbm.parameters()]
+    g_ref = {n: None if p.grad is None else p.grad.clone() for n, p in cbm.named_parameters()}
 
-    assert [a is None for a in g_acc] == [b is None for b in g_ref]
-    for a, b in zip(g_acc, g_ref):
+    assert {n: g is None for n, g in g_acc.items()} == {n: g is None for n, g in g_ref.items()}
+    for n, a in g_acc.items():
         if a is not None:
-            assert torch.allclose(a, b, atol=1e-4)
+            assert torch.allclose(a, g_ref[n], atol=1e-4)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "complex64"])

@@ -8,6 +8,9 @@ the pipeline's own `_fit` and analysis parts on the study configs at commit
 
 ## Takeaways
 
+*Eager estimates from 2026-10-07: their per-step costs are superseded by the sections
+after them (CUDA graphs, D101/D103 for Gibbs, D104 for the eager forward).*
+
 1. **About 3,500 GPU-hours without Gibbs** (one unit per GPU, 2080 speed). Full
    MNIST is about 70% of that (`mnist_capacity`, `mnist_nat`, `mnist_at`), and MPS
    on MNIST 12×12 is about 20%. Spirals (≈ 12 h in all) and JEM (≈ 240 h) hardly
@@ -82,7 +85,10 @@ the pipeline's own `_fit` and analysis parts on the study configs at commit
 The estimates above are eager and per unit. These measurements replace their
 per-step costs; re-estimating the totals is open (plan.md, Efficiency).
 
-**Eager, where the time went** (`python -m tests.bench.profile_train_step`, laptop
+**Eager, where the time went** (*stale since D104: the forward no longer resets;
+now 130 ms per step, the log|ψ|² forward 19 ms, see
+[Since D104](#since-d104-the-forward-keeps-its-nodes-2026-10-14)*;
+`python -m tests.bench.profile_train_step`, laptop
 RTX 2080, 144 sites, d3r20, batch 512, β = 0.5, 2026-10-08): 170 ms per step, of
 which the log|ψ|² forward is 54 ms, log Z 25 ms, forward + backward 167 ms, Adam
 3 ms. Per step ≈ 9,900 kernel launches and 34,000 aten calls; the GPU is busy 74 ms
@@ -97,12 +103,13 @@ as D90): bit-identical to eager for NAT β ∈ {0, 0.5, 1}, d3r20/d3r40, 144 and
 sites, micro-batched, and AT PGD-5/10 with a fixed start (a random start draws
 from other RNG offsets). Per unit: G21G01 8.7× (NAT d3r20), 9.9× (AT PGD-10);
 laptop 3.9× / 4.5×; full MNIST (laptop) 4.0× NAT d3r20, 3.7× NAT d3r40 (micro
-128), 3.3× AT d3r20. Capture takes 0.3–8 s once.
+128), 3.3× AT d3r20. Capture takes 0.3–8 s once. (*The ratios are against the eager
+step before D104, stale: the eager step is faster now, the captured one unchanged.*)
 
 **MPS** (several captured units per GPU), G21G01, steps/s per GPU at 1/2/4/6/8
 units: NAT graph 20.5/36.5/58.4/77.6/88.3 (eager 2.4/5.0/10.0/13.2/16.8); AT
 PGD-10 graph 3.6/5.7/7.8/8.9/9.5 (eager 0.4/0.8/1.4/2.0/2.6). So ≈ 5–6× NAT and
-≈ 4–5× AT per GPU against 6 eager units.
+≈ 4–5× AT per GPU against 6 eager units. (*Eager columns stale since D104.*)
 
 **What is left per step is GPU time:** NAT d3r20 10.5k kernels (30 ms) + 15 ms
 gaps; AT 58k kernels (242 ms) + 22 ms gaps. The largest single cost (≈ 1/3) is the
@@ -111,7 +118,9 @@ tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
 (7.3 µs). Casting the divisor to complex does not help; multiplying a real view by
 1/n halves it but is not bit-identical (≈ 1e-7).
 
-**Memory per unit** (`tests.bench.bench_train_step`, captured, β = 0.5, RTX 6000):
+**Memory per unit** (`tests.bench.bench_train_step`, captured, β = 0.5, RTX 6000;
+*stale since D104, re-measure on the cluster: at E2a's shape the RTX 2080 shows
++0.8 GiB reserved per process, 3.69 → 4.49 GiB, allocated unchanged*):
 
 | Shape | ms/step | Memory |
 |---|---|---|
@@ -156,11 +165,38 @@ included; the draws of D101 and D103 are identical:
 | full MNIST d3r80, 128 points | 69.5 s | 26.1 s, 2.6 GiB | ≈ 52 s |
 | spirals d10r6, 512 points (batch 256) | 0.2 s | 0.1 s | – |
 
-Before D100, the same run took ≈ 12 min on MNIST 12×12 (285 ms per point and sweep)
+The totals include the final log p(x) forward, eager, which is faster since D104
+(so they are slightly high). Before D100, the same run took ≈ 12 min on MNIST 12×12 (285 ms per point and sweep)
 and did not fit on full MNIST, where takeaway 5 estimated 40–80 GPU-h per run. A
 D103 call that reuses its nodes costs ≈ 40% of one that builds them; the first sweep
 after each forward builds them (the adaptive attack classifies between purifications,
 so there only sweeps 2..k of a k-sweep purification reuse).
+
+## Since D104: the forward keeps its nodes (2026-10-14)
+
+`ConditionalBornMachine.forward` calls `contract()` on the nodes of its previous call
+instead of resetting (D104). Laptop RTX 2080, from a worktree of the commit before
+(`594d1193`) and the change; the same numbers out.
+
+| Measurement | Before | After |
+|---|---|---|
+| `profile_train_step` (MNIST 12×12 d3r20, B 512, β 0.5, eager): step | 173.8 ms | 130.0 ms |
+| — of which the log\|ψ\|² forward | 54.1 ms | 19.4 ms |
+| — log Z (grad), optimizer | 24.0, 3.2 ms | 23.6, 3.0 ms |
+| — kernel launches per step, GPU busy | 9,862, 73.7 ms | 9,862, 73.8 ms |
+| `bench_train_step` E2a's shape (MNIST 12×12 d3r40, B 512, β 0.5, NAT), captured | 61.7 ms/step, 1.82 GiB allocated, 3.44 reserved, 3.69 per process | 61.8 ms/step, 1.82 / 4.24 / 4.49 GiB |
+| the same, eager | 178.1 ms/step, 1.82 / 1.95 / 2.09 GiB | 140.5 ms/step, 1.82 / 2.81 / 2.95 GiB |
+| `bench_analysis` (MNIST 12×12 d3r40, 2048 points, PGD-40 + purification-40), eager | 81.0 s, 0.99 GiB reserved | 53.1 s, 0.99 GiB |
+| the same, captured | 47.2 s, 2.98 GiB | 39.3 s, 2.93 GiB |
+
+The eager forward no longer pays for building and deleting its nodes; the GPU work is
+the same (same kernels), so captured training is unchanged. **Open:** reserved memory
+grows by ≈ 0.8 GiB per process at E2a's shape although the allocated peak does not;
+not the freeing strategy (freeing in the call or after it reserve the same), and a
+bare train and validate loop shows none, so something in the Trainer's path
+(warm-up stream, validation shapes) caches more. It decides `--per-gpu` (E2a:
+4 × 4.5 GiB still fits 22 GB). Full MNIST d3r40 micro 256 and AT at E2a's shape do
+not fit the 8 GB laptop (before and after alike): cluster.
 
 ## Appendix: measurements
 

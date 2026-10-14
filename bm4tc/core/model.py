@@ -334,18 +334,39 @@ class ConditionalBornMachine(SamplingMPS):
         log-magnitude.
 
         Runs ``contract`` with ``inline_mats=True`` so the sole renorm site is the
-        overridden ``_inline_contraction``, with ``reset()`` around it: every call
-        builds its nodes afresh (eager, no tk trace reuse).
+        overridden ``_inline_contraction``. ``contract`` itself, not tk's
+        ``forward`` (which replays the recorded operations once result nodes
+        exist and would skip the accumulation): the Python code runs every call
+        while each operation reuses its node from the previous one, so nothing
+        is reset unless ``sample`` holds the network. The first call is recorded
+        as tk's ``trace`` records it and its intermediates are freed after it;
+        later calls free each intermediate after its last use (D104).
         """
-        self.reset()
+        first = self._nodes_key != ('forward',)
+        if first:
+            if self._resultant_nodes or self._nodes_key is not None:
+                self.reset()
+            self._nodes_key = ('forward',)
         if not self._data_nodes:
             self.set_data_nodes()
         self._log_norm_acc = None
         self.add_data(data)
-        result = self.contract(renormalize=True, inline_mats=True)
-        out = result.tensor                                    # (B, C), finite (running node kept O(1))
-        acc = self._log_norm_acc                               # (B, 1) class-independent step factors, or None
-        self.reset()
+        self._tracing = first
+        try:
+            out = self.contract(renormalize=True, inline_mats=True).tensor   # (B, C), finite
+        except BaseException:
+            self._tracing = False
+            self.reset()
+            raise
+        self._tracing = False
+        self._traced = True
+        if first:
+            # Free what the recorded call left in its nodes, as the traced calls
+            # after it do (tk's trace runs a second call for that).
+            for address, use in self._inverse_memory.items():
+                if use['erase']:
+                    self._memory_nodes[address] = None
+        acc = self._log_norm_acc                              # (B, 1) class-independent step factors, or None
         # Final split: the class site is contracted as a single output node, so
         # the per-step renorm never factors its (class-dependent) magnitude — it
         # sits in `out` (still O(1), finite). Fold |out| into log space so
