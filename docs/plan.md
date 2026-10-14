@@ -3,7 +3,7 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D99, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D105, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
@@ -11,8 +11,15 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 - **E2a is read** ([Pilots](#beta--mnist-1212-e2a-ran-2026-10-13-on-f9e7cb0c)):
   accuracy knee β ≈ 0.7, density knee β ≈ 0.03–0.1, β\* = 0.25 between them (on
-  transfer numbers). **E2b** (`pilot_beta28`, full MNIST, E2a's lr per β, 150
-  epochs) is written, not launched.
+  transfer numbers).
+- **E2b** (`pilot_beta28`, full MNIST, E2a's lr per β, 150 epochs) trained on
+  G21G01 from `05c44cf8` (β = 0.9 rerun in a second launch); **no analysis
+  yet:** each died capturing the 40-step PGD (out of memory beside another unit, a
+  segmentation fault alone), fixed by D105. **β = 0 trained to 0.887 only** (valid
+  accuracy 0.87 by epoch 21, then swinging 0.79–0.87; best epoch 35 of 86; no NaN or
+  collapse); the other cells look normal. Likely E2a's lr (5.6e-4) too high at 784
+  sites with no density term (β = 0.01 shares it and trained well); to check by
+  retraining β = 0 at 1.7e-4 or with seed 2 (≈ 1.5 h).
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
@@ -26,9 +33,10 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **Launch E2b** on G21G01 (a worktree at the current commit). The ladder waits
-   for its knee shift; the AT grid {0, β\*} waits for E3's verdict on purification
-   under adaptive attacks (below, E2a).
+1. **D104's cluster checks, then E2b's analyses** from a worktree with D105 (one
+   unit per GPU until the analysis memory at batch 256 is measured), and β = 0's
+   retrain. The ladder waits for E2b's knee shift; the AT grid {0, β\*} waits for
+   E3's verdict on purification under adaptive attacks (below, E2a).
 2. **The sampling code (D100, D101, D103) and the reset-free forward (D104): done.**
    `SamplingMPS`, develop's sampler on tk 1.1.6, keeps its nodes between calls; Gibbs
    and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
@@ -126,7 +134,10 @@ need their `warm_from` study trained.
   per GPU) lost its first 4 analyses and one train start the same way: a train holds
   ≈ 9.3 GiB per process (7.9 of it reserved by the allocator, unallocated), an
   analysis ≥ 10.7 GiB; the unit that starts next to a running one is the one that
-  fails. Phase 8's `mnist_nat`/`mnist_at` would hit this on every launch. Options:
+  fails. Phase 8's `mnist_nat`/`mnist_at` would hit this on every launch. Since
+  D105 the attack and purification are captured per step: at 784 sites, batch 64,
+  the bench peaks at 5.05 GiB reserved captured (1.52 GiB eager) on the RTX 2080,
+  each step graph keeping a pool of its own. Options:
   measure the analysis peak in the bench and size on it, a per-stage `--per-gpu`, or
   free each part's captured graphs before the next part.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
@@ -170,8 +181,8 @@ the weight ratio per step).
   `{log: [1e-4, 1e-2]}`, 6 trials, random search: **done**, below.
 - E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same β
   (`hparams_from`; `configs/hparams/pilot_beta12.yaml` is the cluster's `select`
-  output, tracked so a worktree has it), 150 epochs; 12 runs × ≤ 10 h. Written, not
-  launched.
+  output, tracked so a worktree has it), 150 epochs; 12 runs × ≤ 10 h. Trained,
+  analyses pending (Now, above).
 - E2c `pilot_beta_spirals`, d10r6, 300 epochs, normal HPO: **done**, below.
 
 Read per β: test acc, $L_\text{dis}$, $L_x$, rob and purify at 0.1, detection q5,

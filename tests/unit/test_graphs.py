@@ -201,13 +201,16 @@ def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
     assert len(trainer._evaluation._clean_sums._captures) == (1 if cuda_graph else 0)
     assert len(trainer._evaluation._adversarial_sums._captures) == \
         (1 if cuda_graph and evasion is not None else 0)
+    if evasion is not None:   # the attack's step: one graph per chunk shape (D105)
+        assert len(trainer._graphed_attack.step._captures) == (1 if cuda_graph else 0)
     return records, [t.detach().cpu() for t in trainer.cbm.tensors]
 
 
 @needs_cuda
 @pytest.mark.parametrize("evasion,micro_batch_size", [(None, None), (None, 4),
-                                                      (PGD_FIXED_START, None)],
-                         ids=["nat", "nat-micro", "at-fixed-start"])
+                                                      (PGD_FIXED_START, None),
+                                                      (PGD_FIXED_START, 4)],
+                         ids=["nat", "nat-micro", "at-fixed-start", "at-micro"])
 def test_captured_training_is_bit_identical_to_eager(evasion, micro_batch_size):
     eager_records, eager_tensors = _run(False, evasion, micro_batch_size)
     graph_records, graph_tensors = _run(True, evasion, micro_batch_size)
@@ -304,7 +307,8 @@ def test_captured_analysis_batch_work_is_bit_identical_to_eager(method):
             eager_purified, eager_log_px = eager.purify(adversarials, 0.05)
             assert torch.equal(purified, eager_purified)
             assert torch.equal(purified_log_px, eager_log_px)
-    for routine in (captured.log_px, captured.predict, captured._attack, captured._purify):
+    for routine in (captured.log_px, captured.predict, captured._attack.step,
+                    captured._purify.step, captured._purify.finish):
         assert len(routine._captures) == 1
 
 

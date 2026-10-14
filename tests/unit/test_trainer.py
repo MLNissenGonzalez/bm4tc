@@ -47,6 +47,10 @@ class _ShiftAttack:
     def generate(self, model, naturals, labels, eps_abs, device):
         return (naturals + self.shift).detach()
 
+    def graphed(self, model, graphs):
+        return lambda naturals, labels, eps_abs: self.generate(model, naturals, labels,
+                                                               eps_abs, None)
+
 
 def _trainer(cfg, *, n=16, batch_size=4, stub_attack=True):
     """A real Trainer on a tiny model; PGD replaced by a cheap shift."""
@@ -63,6 +67,8 @@ def _ready(t, *, norm_regularizer=None, log_target=0.0):
     t._nc_log_target = log_target
     t.norm_regularizer = norm_regularizer
     t.optimizer = torch.optim.Adam(t.cbm.parameters(), lr=1e-3)
+    if t.attack is not None:
+        t._graphed_attack = t.attack.graphed(t.cbm, Graphs(enabled=False))
     return t
 
 
@@ -385,8 +391,8 @@ class _DecompStubCBM:
 
 
 class _OnesAttack:
-    def generate(self, model, naturals, labels, eps_abs, device):
-        return torch.ones_like(naturals)
+    def graphed(self, model, graphs):
+        return lambda naturals, labels, eps_abs: torch.ones_like(naturals)
 
 
 def _stub_trainer(beta, *, attack=True):
@@ -400,6 +406,7 @@ def _stub_trainer(beta, *, attack=True):
     t._nc = t.cfg.norm_control
     t.norm_regularizer = None
     t.attack = _OnesAttack() if attack else None
+    t._graphed_attack = t.attack.graphed(cbm, Graphs(enabled=False)) if attack else None
     clean = (torch.zeros(4, 2), torch.zeros(4, dtype=torch.long))  # tag 0.0
     t.train_loader = [clean]
     t.optimizer = torch.optim.SGD([cbm.param], lr=0.0)
@@ -408,7 +415,8 @@ def _stub_trainer(beta, *, attack=True):
 
 
 def _objective(t):
-    objective, _ = t._objective(torch.zeros(4, 2), torch.zeros(4, dtype=torch.long), 0.1)
+    x, y = torch.zeros(4, 2), torch.zeros(4, dtype=torch.long)
+    objective, _ = t._objective(x, y, t._adversarials(x, y, 0.1))
     return objective
 
 
