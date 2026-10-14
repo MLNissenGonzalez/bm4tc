@@ -120,9 +120,13 @@ need their `warm_from` study trained.
 - **Analysis units need more GPU memory than training units**, but `--per-gpu`
   sizes every slot alike. E2a's relaunch (`--per-gpu 4`) lost 3 of 12 analyses to
   out of memory in a `uq` capture (log p(x), purification): an analyse unit held
-  6.2–6.4 GiB beside trains at 3.9 GiB. Options: measure the analysis peak in the
-  bench and size on it, a per-stage `--per-gpu`, or free each part's captured
-  graphs before the next part.
+  6.2–6.4 GiB beside trains at 3.9 GiB. E2b (full MNIST d3r40 micro 256, 2 units
+  per GPU) lost its first 4 analyses and one train start the same way: a train holds
+  ≈ 9.3 GiB per process (7.9 of it reserved by the allocator, unallocated), an
+  analysis ≥ 10.7 GiB; the unit that starts next to a running one is the one that
+  fails. Phase 8's `mnist_nat`/`mnist_at` would hit this on every launch. Options:
+  measure the analysis peak in the bench and size on it, a per-stage `--per-gpu`, or
+  free each part's captured graphs before the next part.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
   once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
   is/are busy or unavailable" (MPS refusing clients that connect together; retried

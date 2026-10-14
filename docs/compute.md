@@ -114,6 +114,7 @@ tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
 |---|---|---|
 | MNIST12 d3r40 batch 512 NAT (E2a) | 70 | 3.89 GiB per process on G21G01, 3.69 on the RTX 2080 (D95: CUDA context and both validation shapes included) |
 | full MNIST d3r40 micro 256 NAT | 595 | 5.34 GiB allocated (2026-10-09, before D92/D95: no context, eager validation) |
+| full MNIST d3r40 micro 256 NAT, real run (E2b, G21G01, MPS) | | ≈ 9.3 GiB per process (train); its analysis ≥ 10.7 GiB |
 | full MNIST d3r40 micro 256 AT PGD-5 | 2,600 | 7.58 GiB, likewise |
 | full MNIST d3r80 micro 128 NAT | | does not fit: validation needs ≈ 4.8 GiB beside the step's 16 GiB pool |
 
