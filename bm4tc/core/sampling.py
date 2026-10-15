@@ -63,7 +63,7 @@ Norms are discarded (``renormalize`` divides each environment by one scalar per
 sample): sampling needs only ratios between candidates, and no gradients.
 
 :class:`SamplingMPS` also carries a contraction option for tensorkrowch's
-``contract``, not in ``develop`` either: ``zipup_input`` (D111) contracts the
+``contract``, not in ``develop`` either: ``zipup_input`` (D112) contracts the
 data into the running result site by site, so autograd keeps vectors instead of
 one matrix per site (``contract``'s docstring says when it is better). The
 default is tensorkrowch's ``contract``, unchanged. ``_inline_contraction``
