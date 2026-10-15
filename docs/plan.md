@@ -464,6 +464,37 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    become `input_0`/`input_1`; moving nodes between networks and `reset` rename in
    time quadratic in same-named nodes. Once a tensorkrowch release has it,
    `SamplingMPS` can go (bm4tc stays on 1.1.6 until then).
+6. **In progress (2026-10-15): one layer only where nothing is marginalised.**
+   Martin rejected step 3's open leg (memory d_out^k for k output sites); the tk PR
+   branch `sample-density` is being rebuilt so an environment is double only if it
+   contains a summed site, with fixed sampling nodes whose tensors are updated from
+   site to site (memory independent of n except the stored right environments,
+   B·r² per double one: in Gibbs purification only those left of the class). Then
+   ported here.
+   **Open, not to be solved on the fly: float32 precision of two layers.** A
+   two-layer environment is PSD in exact arithmetic, but its float32 rounding error
+   is not: a double layer sums ket × bra products, so its error grows like the
+   square of the contraction's cancellation (κ = |l|·|A x|·|r| / |ψ|, median 10³,
+   max 8·10³ at 784 sites), against linear for one layer (amplitude, then |·|²).
+   Measured (random MPS, obc, class of 10 in the middle, poly degree 2, renormalize;
+   scratch scripts, not kept):
+   - site densities with every input fixed, worst error relative to the row's
+     largest weight: 144 sites r40, one layer 1.5e-5, two layers 2.2e-4; 784 sites
+     r40 7.6e-4 vs 3.5e-2; r80 3.6e-4 vs 2.6e-2; float64 ≤ 2e-11.
+   - `sample(in_condition)` at 784 sites r40, 4 samples, 32 candidates in a narrow
+     window (0.8–1.0), worst negative weight / row maximum over 3 seeds: tk develop
+     (two layers) −2.7e-3; the rebuilt branch −8e-2, raising "negative beyond
+     numerical tolerance" in 2 seeds; the open-leg single layer (step 3) ≥ −5e-6;
+     float64 always clean. The branch is 10–30× worse than develop here, likely
+     because it forms the site's density matrix in the embedding basis first and
+     evaluates each candidate as a quadratic form, which cancels when the whole
+     window is improbable (develop puts the candidate in before the environments,
+     at memory B·candidates·r²).
+   Possible fixes, undecided: float64 where two layers are used; environments
+   stored as a square root (ρ = F F†, a QR per site, about B·r³·d); routing
+   negative rows to the uniform draw. bm4tc's current sampler (step 3, one layer) is
+   not affected; the port is, so Gibbs purification needs a float32 check on trained
+   models before it lands.
 
 Out of scope until decided: finer grids or exact continuous draws, a
 Metropolis–Hastings correction for the windows, temperature (they change the
