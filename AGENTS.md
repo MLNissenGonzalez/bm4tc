@@ -52,8 +52,8 @@ place, no pass-through layers.
 - **Runs happen on the lab HPC**: SSH, jobs started by hand in screen, several GPUs per
   node, **no AI agents there** (D37). Everything must be operable from short commands
   and diagnosable from `status` and the log files.
-  `BM4TC_DATA_ROOT=/ceph/chercheurs/nisseng261/bm4tc`. The HPC env needs recreating
-  from `environment.yml`.
+  `BM4TC_DATA_ROOT=/ceph/chercheurs/nisseng261/bm4tc`. The HPC env `bm4tc` is built
+  from `environment.yml` (torch 2.1.0+cu121, tensorkrowch 1.1.6; checked 2026-10-15).
 - **Driving the cluster from this laptop (D109).** No agent is installed on the cluster,
   but you may run Martin's short commands there over SSH (key-based, `~/.ssh/config`
   is set up: do not read it). The commands are the ones in `docs/hpc_bm4tc.md`

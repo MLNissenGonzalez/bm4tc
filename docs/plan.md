@@ -131,14 +131,16 @@ need their `warm_from` study trained.
   which needs every cell's HPO.
 - **A multi-study launcher** (`run paper`-style; the executor already runs a DAG,
   one launch runs one study, D66).
-- **Remote launches from the laptop (D109).** The agent runs the commands of
-  `docs/hpc_bm4tc.md` over SSH (AGENTS.md, "Environment"); a test probe (screen,
-  env, exit code back to the laptop) passed on G21G01 on 2026-10-15. Open: upgrade
-  hpc-greyc's `cluster-run`, which copies a script and its local modules into a job
-  directory (fine for one-off scripts, unsuitable for studies), so that it deploys a
-  worktree of a pushed commit (`runs/<sha>`, clean sha in `run.json`), launches in a
-  named screen, and reports `status` and the failed units' logs. Until then, plain
-  SSH.
+- **A one-command deploy, outside bm4tc (D109; planned later).** Today the agent
+  runs `docs/hpc_bm4tc.md`'s commands over SSH (AGENTS.md, "Environment"; a probe
+  with screen, env and exit code passed on G21G01 on 2026-10-15). A "deploy" button
+  would help: a worktree of a pushed commit (`runs/<sha>`, clean sha in `run.json`),
+  launched in a named screen, reporting `status` and the failed units' logs. **It
+  belongs in a general tool, not in bm4tc**: bm4tc stays independent of any HPC or
+  launcher; it needs only a git checkout of a fixed commit and `BM4TC_DATA_ROOT`.
+  The candidate is a `deploy` mode in hpc-greyc's `cluster-run`, which today copies
+  a script and its local modules into a job directory (fine for one-off scripts,
+  unsuitable for studies).
 - **Analysis units need more GPU memory than training units**, but `--per-gpu`
   sizes every slot alike. E2a's relaunch (`--per-gpu 4`) lost 3 of 12 analyses to
   out of memory in a `uq` capture (log p(x), purification): an analyse unit held
