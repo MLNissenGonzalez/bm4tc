@@ -58,16 +58,15 @@ place, no pass-through layers.
 
 ## State (2026-10-15)
 
-Branch `ousterhout`, pushed to GitHub up to `da7185e8` (D105, E2b's analysis batch).
+Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D108 and this AGENTS.md update.
 Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates and
 the measurements since (stale numbers are marked there).
 
-Two sessions work in parallel: **E2b and graph capture** (handoff below) and the
-**tensorkrowch sampling rebuild** (its notes in `../tensorkrowch/_notes/`, plan.md
-"Sampling"; it has uncommitted work in `bm4tc/core/sampling.py` and
-`tests/unit/test_sampling.py`: leave those files to it).
+Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (handoff
+below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
+left uncommitted).
 
 **Start here (E2b and graph capture):**
 1. **Read E2b.** Its analyses finished on G21G01 (launched from `da7185e8`, batch
@@ -172,12 +171,14 @@ allocated, reserved and per-process memory):
   the duplication.
 
 Expected order: measurements 1–3, then B (small, certain), then A (largest gain, needs
-the allocation tests), D or E only if A fails. Record the choice as D106.
+the allocation tests), D or E only if A fails. (Recorded as D107: one pool per
+`Graphs`.)
 
 **Rule from D94, still binding:** studies may run with `trainer.cuda_graph` on only
 from the D94 commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.
 Martin brings tk intuition, not CUDA expertise: explain the GPU side plainly. tk's
-source is in `../tensorkrowch` (branch `develop`; our work on `sampling-efficiency`).
+source is in `../tensorkrowch` (branch `develop`; our work on `sampling-efficiency`,
+and the PR branch `sample-density`).
 
 Done before (D78–D87, see decisions.md): micro-batches, AT with cw = 0, the HPO budget,
 pilot A (log Z target n·ln d / 2), **β replaces α** (D86; Martin's theory note
@@ -298,13 +299,38 @@ Done on 2026-10-14 (session `E2b-and-AT-graph-capture`):
   tracked). Full-MNIST units' real memory in compute.md and plan.md.
 - **D105:** attacks and likelihood purification captured one step at a time (above).
 
+Done on 2026-10-15 (session `tk sampling rebuild`):
+- **D106, `sample`: double layers only where something is summed, fixed sampling
+  nodes** (Martin's rule; supersedes D101's open-leg sweep, whose memory grew as
+  d_out^k). An environment is double-layer only if it contains a summed site (an
+  output node; without `in_condition`, the inputs to the right); each sweep step is a
+  few fixed virtual leaves (`SamplingMPS._sample_kernel`) whose tensors are set from
+  site to site, so memory does not grow with n except the kept right environments
+  (B·r² each, only left of the class in Gibbs purification). Same draws (Gibbs golden
+  unchanged); full MNIST one sweep at batch 64: peak 1.2 → 0.43 GiB (r40), 2.0 →
+  1.4 GiB (r80), held between calls 1–2 GiB → 15–53 MiB (compute.md, "Gibbs
+  purification since D106").
+- **Open: float32 rounding of double layers** (plan.md, "Sampling" step 6): a double
+  layer is PSD in exact arithmetic only; its error grows like the square of the
+  contraction's cancellation (tk develop has it too). Random models: worst −8e-4 to
+  −4.6% of a row's maximum, no raise. **Not checked on a trained model** (none on the
+  laptop): do it on the cluster before relying on Gibbs results from D106 on (E3).
+  Martin: flag it, do not solve it on the fly.
+- **tensorkrowch:** branch `sample-density` (the PR for José) rebuilt and
+  force-pushed to Martin's fork: 4 commits on develop (tests; per-sample domain; the
+  D106 algorithm; uniform fallback). Full `test_mps.py`: only develop's 24 failures,
+  torch 2.1 and 2.14. The note to José, `../tensorkrowch/_notes/note_jose_sample_density.md`
+  (untracked), explains it; **Martin reads it and decides on the upstream PR.**
+
 **Next (in this order):**
 1. E2b's read and the graph memory problem (handoff above).
 2. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
    `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
    questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.
-   Gibbs is cheap now (D101, D103).
-3. **tensorkrowch (its own session, in progress):** a norm-keeping `renormalize` (the log-norm as a
+   Gibbs is cheap now (D101, D103, D106); check float32 on a trained model first
+   (D106, open).
+3. **tensorkrowch:** the `sample-density` PR (Martin reads the note, then decides);
+   the float32 issue of double layers (D106, open); a norm-keeping `renormalize` (the log-norm as a
    node; would remove bm4tc's `_inline_contraction` override, the accumulator and the
    special forward), a public "contract with reuse", `reset`'s quadratic renaming and
    its reordering of `parameters()`, `@` on batch-only edges, `einsum`'s connected-edge
