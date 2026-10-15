@@ -609,13 +609,13 @@ class UQEvaluation:
                     err_rate_detected[(pct, eps_rel)] = m.err_rate_detected
                     err_rate_passed[(pct, eps_rel)] = m.err_rate_passed
 
-                first = next(iter(det.values()))
-                if first.n_nonfinite:
+                first = next(iter(det.values()), None)   # None: no thresholds (sweep parts)
+                if first is not None and first.n_nonfinite:
                     logger.warning(
                         f"  eps_rel={eps_rel}: {first.n_nonfinite}/{len(adv_log_px_arr)} "
                         "non-finite log p(x_adv); detection reported as nan"
                     )
-                if first.degenerate:
+                if first is not None and first.degenerate:
                     logger.warning(
                         f"  eps_rel={eps_rel}: log p(x_adv) is constant; detection is "
                         "0.0 at every threshold by the strict < convention, not by signal"
