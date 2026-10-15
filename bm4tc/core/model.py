@@ -124,6 +124,7 @@ class ConditionalBornMachine(SamplingMPS):
         )
 
         # ── Hardcoded contraction modes ───────────────────────────────────
+        # (and ``contract`` zips the data in by default, below)
         self.auto_stack = False
         self._auto_unbind = False
 
@@ -302,15 +303,22 @@ class ConditionalBornMachine(SamplingMPS):
             contrib if self._log_norm_acc is None else self._log_norm_acc + contrib
         )
 
+    def contract(self, *args, zipup_input: bool = True, **kwargs):
+        """``SamplingMPS.contract``, with the data zipped into the running
+        vector by default (D112): every contraction of the model, tk's
+        ``forward`` and ``trace`` included, keeps (B, r) vectors per site
+        instead of tk's (B, r, r) matrices. bm4tc-wide, not a config key;
+        ``zipup_input=False`` gives tk's own contraction (the tests'
+        reference)."""
+        return super().contract(*args, zipup_input=zipup_input, **kwargs)
+
     def forward(self, data=None, *args, **kwargs):
         """The norm-accumulating contraction of embedded ``data`` →
         ``(psi_renorm (B, C), log_norm (B, C))`` with ψ = psi_renorm·exp(log_norm):
         ``psi_renorm`` is unit-modulus (pure phase/sign), ``log_norm`` the real
         log-magnitude.
 
-        Runs ``contract`` with ``zipup_input=True`` (D112): the data are
-        contracted into the running vector site by site, so autograd keeps
-        (B, r) vectors, not tk's (B, r, r) matrix per site; the sole renorm
+        Runs ``contract`` (zip-up, D112) with ``renormalize``; the sole renorm
         site is the overridden ``_renormalize_inline``. ``contract`` itself, not tk's
         ``forward`` (which replays the recorded operations once result nodes
         exist and would skip the accumulation): the Python code runs every call
@@ -330,7 +338,7 @@ class ConditionalBornMachine(SamplingMPS):
         self.add_data(data)
         self._tracing = first
         try:
-            out = self.contract(renormalize=True, zipup_input=True).tensor   # (B, C), finite
+            out = self.contract(renormalize=True).tensor   # (B, C), finite
         except BaseException:
             self._tracing = False
             self.reset()

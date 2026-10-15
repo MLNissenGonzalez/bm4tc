@@ -655,3 +655,16 @@ def test_log_Z_stays_the_normaliser_of_psi_during_training():
         opt.step()
     log_Z = float(cbm.log_partition_function())
     assert abs(log_Z - _numeric_log_Z(cbm)) < 1e-3
+
+
+def test_every_contraction_of_the_model_zips_the_data_in(cbm, x_batch):
+    """D112, bm4tc-wide: the model's ``contract`` zips by default (tk's own
+    ``forward`` and ``trace`` call it too), and gives tk's tensor."""
+    assert inspect.signature(cbm.contract).parameters["zipup_input"].default is True
+    data = cbm.embed(x_batch)
+    outs = []
+    for kwargs in ({}, {"zipup_input": False}):
+        cbm.reset()
+        outs.append(tk.models.MPS.forward(cbm, data, **kwargs))
+    cbm.reset()
+    assert torch.allclose(outs[0], outs[1], rtol=1e-5, atol=1e-7)
