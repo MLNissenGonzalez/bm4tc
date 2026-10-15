@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D108 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D109 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -54,6 +54,27 @@ place, no pass-through layers.
   and diagnosable from `status` and the log files.
   `BM4TC_DATA_ROOT=/ceph/chercheurs/nisseng261/bm4tc`. The HPC env needs recreating
   from `environment.yml`.
+- **Driving the cluster from this laptop (D109).** No agent is installed on the cluster,
+  but you may run Martin's short commands there over SSH (key-based, `~/.ssh/config`
+  is set up: do not read it). The commands are the ones in `docs/hpc_bm4tc.md`
+  (untracked):
+
+      H=N315L-G21G01.ressource.unicaen.fr; R=/ceph/chercheurs/nisseng261/bm4tc
+      ssh -o BatchMode=yes $H "source $R/bm4tc.sh && cd $R/runs/<sha> && python -m bm4tc status <study>"
+      # deploy a pushed commit:  cd $R/code && git fetch && git worktree add ../runs/<sha> <sha>
+      # launch, detached:        screen -dmS claude-<study> bash -c "source $R/bm4tc.sh; cd $R/runs/<sha>; python -m bm4tc run <study> --gpus ... --per-gpu ..."
+      # pick GPUs:               ~/0git/hpc-greyc/multitop.py gpu   (then nvidia-smi on the node)
+      # results:                 rsync as in the E2b handoff below
+
+  Wait for a remote job with a background `until ssh ... test -e <file>; do sleep ..; done`,
+  not by polling. Rules: **ask before any launch that takes GPUs** (name the node and
+  GPUs; they are shared with the lab); your screens are named `claude-*`, you may
+  create and kill those only, and remind Martin of his own screens left open; never
+  print the remote environment (`bm4tc.sh` exports the W&B key) and never read
+  `secrets/`; pushing still needs asking (a branch the agent may push to freely may come
+  later). `cluster-run` (`~/0git/hpc-greyc`) is **unsuitable for studies**: it copies
+  a script and the modules it imports into a job directory, so there is no worktree and
+  no clean sha in `run.json` (plan.md, Phase 8).
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
 ## State (2026-10-15)

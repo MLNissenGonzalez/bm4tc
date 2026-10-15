@@ -3,7 +3,7 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D108, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D109, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
@@ -71,7 +71,8 @@ Next, in order:
   pool (D38, D66). HPO: one Optuna journal per cell, 15 trials per tuned hparam,
   median pruning; `select` takes the argmin of `objective/valid` (D13, D21, D62, D81);
   CUDA failures and interrupted trials are rerun, not counted (D93, D95). W&B for
-  live curves only (D39, D47). Runs on the lab HPC by hand, no agents there (D37).
+  live curves only (D39, D47). Runs on the lab HPC by hand, no agents there (D37);
+  the agent drives it from the lab laptop over SSH with the same commands (D109).
 - **One Trainer, one selection rule.** NAT is AT without the attack (D10, D15,
   D50, D52–D54); select on the objective on validation (D8); metric keys
   `quantity/split[/budget]`, built only in `pipeline/metrics.py` (D11, D48, D64);
@@ -130,6 +131,14 @@ need their `warm_from` study trained.
   which needs every cell's HPO.
 - **A multi-study launcher** (`run paper`-style; the executor already runs a DAG,
   one launch runs one study, D66).
+- **Remote launches from the laptop (D109).** The agent runs the commands of
+  `docs/hpc_bm4tc.md` over SSH (AGENTS.md, "Environment"); a test probe (screen,
+  env, exit code back to the laptop) passed on G21G01 on 2026-10-15. Open: upgrade
+  hpc-greyc's `cluster-run`, which copies a script and its local modules into a job
+  directory (fine for one-off scripts, unsuitable for studies), so that it deploys a
+  worktree of a pushed commit (`runs/<sha>`, clean sha in `run.json`), launches in a
+  named screen, and reports `status` and the failed units' logs. Until then, plain
+  SSH.
 - **Analysis units need more GPU memory than training units**, but `--per-gpu`
   sizes every slot alike. E2a's relaunch (`--per-gpu 4`) lost 3 of 12 analyses to
   out of memory in a `uq` capture (log p(x), purification): an analyse unit held
