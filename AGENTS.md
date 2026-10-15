@@ -62,14 +62,14 @@ place, no pass-through layers.
       H=N315L-G21G01.ressource.unicaen.fr; R=/ceph/chercheurs/nisseng261/bm4tc
       ssh -o BatchMode=yes $H "source $R/bm4tc.sh && cd $R/runs/<sha> && python -m bm4tc status <study>"
       # deploy a pushed commit:  cd $R/code && git fetch && git worktree add ../runs/<sha> <sha>
-      # launch, detached:        screen -dmS claude-<study> bash -c "source $R/bm4tc.sh; cd $R/runs/<sha>; python -m bm4tc run <study> --gpus ... --per-gpu ..."
+      # launch, detached:        screen -dmS ag-<study> bash -c "source $R/bm4tc.sh; cd $R/runs/<sha>; python -m bm4tc run <study> --gpus ... --per-gpu ..."
       # pick GPUs:               ~/0git/hpc-greyc/multitop.py gpu   (then nvidia-smi on the node)
       # results:                 rsync -av --exclude '.logs/' --exclude '.replaced/' --exclude 'models/' \
       #                              --exclude 'wandb/' $H:$R/outputs/<study>/ pilots/cluster/<study>/
 
   Wait for a remote job with a background `until ssh ... test -e <file>; do sleep ..; done`,
   not by polling. Rules: **ask before any launch that takes GPUs** (name the node and
-  GPUs; they are shared with the lab); your screens are named `claude-*`, you may
+  GPUs; they are shared with the lab); your screens are named `ag-*` (never "claude" in screen, study or file names), you may
   create and kill those only, and remind Martin of his own screens left open; never
   print the remote environment (`bm4tc.sh` exports the W&B key) and never read
   `secrets/`; pushing still needs asking (a branch the agent may push to freely may come
