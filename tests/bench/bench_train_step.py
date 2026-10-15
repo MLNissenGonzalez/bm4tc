@@ -15,7 +15,7 @@ Random inputs in the embedding's input range, 10 classes; the defaults are MNIST
 D92; `--eager` turns that off); only `_train_epoch` is timed (the validation pass is
 not), and the first epoch is discarded as warm-up. The validation split is 2.5
 chunks, as a real one has full chunks and a last partial one: over the default 5
-epochs both shapes are captured, each graph with its own pool. Peak memory covers
+epochs both shapes are captured, into the graphs' one pool (D107). Peak memory covers
 the whole run, validation and capture included: allocated, reserved (the
 allocator's cache and the graphs' pools), and the process as nvidia-smi sees it at
 the end, CUDA context included: that is what one unit takes from the GPU, so

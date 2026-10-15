@@ -54,10 +54,10 @@ def test_graphed_replays_the_function_per_input_shape():
 
 
 @needs_cuda
-def test_graphs_have_their_own_pools_and_return_copies():
+def test_graphs_share_one_pool_and_return_copies():
     """Two graphs called alternately: each output stays valid after later calls,
-    so callers may keep what a call returns; each graph has a pool of its own
-    (a shared one corrupted the training graph, D92)."""
+    so callers may keep what a call returns, although the second capture may
+    reuse what the first freed: the graphs of one Graphs share a pool (D107)."""
     graphs = Graphs(enabled=True)
     squares = graphs.wrap(lambda x: (x * x).cumsum(0), warmup_calls=1)
     shifted = graphs.wrap(lambda x: (x + 1).cumsum(0), warmup_calls=1)
@@ -69,7 +69,7 @@ def test_graphs_have_their_own_pools_and_return_copies():
         assert torch.equal(square_sums, (x * x).cumsum(0))
         assert torch.equal(shifted_sums, (x + 1).cumsum(0))
     (square_capture,), (shifted_capture,) = squares._captures.values(), shifted._captures.values()
-    assert square_capture.graph.pool() != shifted_capture.graph.pool()
+    assert square_capture.graph.pool() == shifted_capture.graph.pool() == graphs.pool
 
 
 @needs_cuda
@@ -95,7 +95,7 @@ def capture_streams(monkeypatch):
     """Per captured function, the streams its capture allocated on (the
     allocator's history), the default stream left out: the static inputs are
     copied there before capture. One stream means every buffer the graph uses
-    came from its own pool."""
+    came from the graphs' pool."""
     def trace():
         return torch.cuda.memory._snapshot()["device_traces"][torch.cuda.current_device()]
 
@@ -253,6 +253,56 @@ def test_captured_training_and_validation_at_e2as_shape_match_eager():
     them in shared segments and passed. Number for number, not only no crash."""
     eager_records, eager_tensors = _run_at_e2as_shape(False)
     graph_records, graph_tensors = _run_at_e2as_shape(True)
+    assert graph_records == eager_records
+    assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
+
+
+def _run_at_at_e2as_model(cuda_graph: bool):
+    """AT PGD-5 (fixed start) on MNIST12 d3r40, batch 256 in micro-batches of
+    128, validation in 2.5 chunks, for five epochs: every graph is captured
+    (training step and attack step at 128; clean sums, attack step and
+    adversarial sums at 128 and 64), then replays. Returns the records, the
+    tensors and the pools of the captures."""
+    torch.manual_seed(0)
+    cbm = ConditionalBornMachine(CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=40)),
+                                 data_dim=144, num_classes=10)
+    lo, hi = cbm.input_range
+    g = torch.Generator().manual_seed(1)
+
+    def loader(n, batch_size, shuffle):
+        data = lo + (hi - lo) * torch.rand(n, 144, generator=g)
+        return DataLoader(TensorDataset(data, torch.randint(0, 10, (n,), generator=g)),
+                          batch_size=batch_size, shuffle=shuffle)
+
+    cfg = TrainConfig(beta=0.5, max_epoch=5, eval_every=1, batch_size=256,
+                      micro_batch_size=128,
+                      evasion={**PGD_FIXED_START, "num_steps": 5}, curriculum=True,
+                      curriculum_eps_start_rel=0.01,
+                      norm_control=NormControlConfig(soft_strength=0.1, log_target=0.0),
+                      optimizer=OptimizerConfig(kwargs={"lr": 1e-3}), cuda_graph=cuda_graph)
+    trainer = Trainer(cbm, cfg, loader(4 * 256, 256, True), loader(2 * 128 + 64, 128, False),
+                      CUDA)
+    records = []
+    trainer.train(on_epoch_end=lambda epoch, record: records.append(flatten_epoch(record)))
+    torch.cuda.synchronize()
+    evaluation = trainer._evaluation
+    captures = [c for graphed in (trainer._graphed_train_step, trainer._graphed_attack.step,
+                                  evaluation._clean_sums, evaluation._attack.step,
+                                  evaluation._adversarial_sums)
+                for c in graphed._captures.values()]
+    assert len(captures) == (8 if cuda_graph else 0)
+    return (records, [t.detach().cpu() for t in trainer.cbm.tensors],
+            {c.graph.pool() for c in captures})
+
+
+@needs_cuda
+def test_captured_at_in_one_pool_matches_eager():
+    """The eight graphs of micro-batched AT and its validation in one pool
+    (D107): each capture may reuse what earlier ones freed, so a graph that kept
+    state there between replays would show here. Number for number."""
+    eager_records, eager_tensors, _ = _run_at_at_e2as_model(False)
+    graph_records, graph_tensors, pools = _run_at_at_e2as_model(True)
+    assert len(pools) == 1
     assert graph_records == eager_records
     assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
 
