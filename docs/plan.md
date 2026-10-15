@@ -3,7 +3,7 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D105, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D108, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
@@ -18,7 +18,9 @@ source of truth); the section below groups them by theme. Measured costs are in
   transfer: 5.6e-4 fails at β = 0 *and* β = 0.01 (0.884, 0.861), and 1.7e-4 reaches
   0.98, then blows up around epoch 45. On 2026-10-14, β = 0 was kept as a result, with
   the generative term read as a regulariser. That rested on β = 0.01 having "trained
-  well" at the same lr, which the analysis contradicts. Decisions pending (below).
+  well" at the same lr, which the analysis contradicts. Decided: keep N, the ladder
+  {0, 0.01, 0.1, 0.25, 0.5, 0.9, 1} (D108), full MNIST tunes its own lr, the
+  regulariser reading dropped.
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
@@ -116,8 +118,9 @@ need their `warm_from` study trained.
 5. `python -m bm4tc figures paper`; commit `figures/journal/`.
 
 **To do before the studies run:**
-- **β grids from E2:** the ladder in `defaults.yaml` (now {0, 0.01, 0.1, 0.5, 0.9,
-  0.99, 1}) and the AT grid (now {0, 0.1, 0.5} in every AT study; planned {0, β\*}).
+- **β grids from E2:** the ladder in `defaults.yaml` is set ({0, 0.01, 0.1, 0.25,
+  0.5, 0.9, 1}, D108); the AT grid (now {0, 0.1, 0.5} in every AT study; planned
+  {0, β\*}) waits for E3.
 - **Cap HPO workers per cell.** Today workers = the launch's slots (capped at the
   cell's trials): with ≥ 15 slots every trial starts at once, TPE never sees a
   finished trial and the pruner never acts. Cap at ~1/3 of the trials; until then
@@ -337,11 +340,13 @@ per pixel (× 784 per image). "valid acc" is at epochs 50 / 100 / last.
 - **Detection** as in E2a: ≈ 1.0 with an untrained density, 0.75–0.83 above β = 0.25.
   err_passed ≈ 0.9–0.99 at β ≤ 0.75: almost every undetected attack succeeds.
 
-To decide: the exponent (proposed: keep N); the Phase 8 ladder (proposed: E2a's
-{0, 0.01, 0.1, 0.25, 0.5, 0.9, 1} for both sizes, two cells between the knees);
-full-MNIST lr (proposed: its own HPO with the range extended below 1e-4; E2a's
-lrs and the cap at 150 epochs are both unfit at 784 sites); β = 0's status (proposed:
-drop the regulariser reading).
+Decided with Martin (2026-10-15): **keep N** (p = 1); **the ladder
+{0, 0.01, 0.1, 0.25, 0.5, 0.9, 1}** for every dataset (D108, `defaults.yaml`), with
+0.25 and 0.5 between the knees at both sizes; **full MNIST tunes its own lr**:
+`mnist_capacity` and `mnist_nat` already search the default `{log: [1e-5, 1e-1]}`,
+only the pilot borrowed E2a's lr; **the regulariser reading of β = 0 is dropped** (the
+lr explains it). Open: `mnist_nat` caps at 100 epochs, and E2b's β ≥ 0.75 cells
+still climbed at 150.
 
 ### Beta / Spirals (E2c, ran 2026-10-09 on `d127eaad`)
 

@@ -43,9 +43,9 @@ def test_run_dir_is_study_rooted(data_root):
 def test_defaults_fill_the_grid():
     study = Study("mnist12_nat")
     assert study.seeds() == [1, 2, 3, 4, 5]                      # D29
-    assert sorted({c.beta for c in study.cells()}) == [0, 0.01, 0.1, 0.5, 0.9, 0.99, 1]  # D86
+    assert sorted({c.beta for c in study.cells()}) == [0, 0.01, 0.1, 0.25, 0.5, 0.9, 1]  # D86, D108
     assert all(c.eps is None for c in study.cells())             # NAT has no radius
-    assert [c.beta for c in Study("spirals_nat").cells()] == [0, 0.01, 0.1, 0.5, 0.9, 0.99, 1]
+    assert [c.beta for c in Study("spirals_nat").cells()] == [0, 0.01, 0.1, 0.25, 0.5, 0.9, 1]
 
 
 def test_at_cells_carry_the_radius():
