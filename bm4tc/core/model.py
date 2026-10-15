@@ -189,7 +189,7 @@ class ConditionalBornMachine(SamplingMPS):
         self._log_Z_cache: tuple | None = None      # ((params key, grad mode), log Z)
         # Per-forward accumulator for the norm-accumulating (overflow-safe)
         # contraction; reset/read inside forward(). None between forwards. See
-        # _inline_contraction.
+        # _renormalize_inline.
         self._log_norm_acc: torch.Tensor | None = None
 
     # ======================================================================
@@ -244,41 +244,16 @@ class ConditionalBornMachine(SamplingMPS):
     # node O(1), but *keep* the extracted norm in log space (unlike tk's
     # renormalize op, which discards it). ψ(x,c) = psi_renorm(x,c)·exp(log_norm),
     # so log|ψ|² = 2·log|psi_renorm| + 2·log_norm never materializes an
-    # overflowing amplitude. The only amplitude contraction (D89); eager, untraced.
+    # overflowing amplitude. The only amplitude contraction (D89).
 
-    def _inline_contraction(self, mats_env, renormalize=False, from_left=True):
-        """Inline MPS contraction (overrides tk's static helper).
-
-        Byte-equivalent to ``tk.models.MPS._inline_contraction`` when
-        ``renormalize=False`` (tk's own ``MPS.forward``, which the tests use as the
-        raw-amplitude reference). When
-        ``renormalize=True`` each step's bond-axis norm is computed *once*,
-        folded into ``self._log_norm_acc`` at (batch, class) granularity, and
-        used to divide the running node via the ``div`` op — no second norm, no
-        tk ``renormalize``.
-        """
-        if from_left:
-            result_node = mats_env[0]
-            for node in mats_env[1:]:
-                result_node @= node
-                if renormalize:
-                    axes = [ax for ax in result_node.axes_names if 'right' in ax]
-                    if axes:
-                        n = self._safe_bond_norm(result_node, axes)
-                        self._accumulate_log_norm(n, result_node)
-                        result_node = result_node / n
-            return result_node
-        else:
-            result_node = mats_env[-1]
-            for node in mats_env[-2::-1]:
-                result_node = node @ result_node
-                if renormalize:
-                    axes = [ax for ax in result_node.axes_names if 'left' in ax]
-                    if axes:
-                        n = self._safe_bond_norm(result_node, axes)
-                        self._accumulate_log_norm(n, result_node)
-                        result_node = result_node / n
-            return result_node
+    def _renormalize_inline(self, node, axes):
+        """One renormalization step of the inline contraction (overrides
+        ``SamplingMPS``'s, which is tk's ``renormalize``): the bond-axis norm is
+        computed *once*, folded into ``self._log_norm_acc`` at (batch, class)
+        granularity, and used to divide the running node via the ``div`` op."""
+        n = self._safe_bond_norm(node, axes)
+        self._accumulate_log_norm(n, node)
+        return node / n
 
     @staticmethod
     def _safe_bond_norm(result_node, axes) -> torch.Tensor:
@@ -334,7 +309,7 @@ class ConditionalBornMachine(SamplingMPS):
         log-magnitude.
 
         Runs ``contract`` with ``inline_mats=True`` so the sole renorm site is the
-        overridden ``_inline_contraction``. ``contract`` itself, not tk's
+        overridden ``_renormalize_inline``. ``contract`` itself, not tk's
         ``forward`` (which replays the recorded operations once result nodes
         exist and would skip the accumulation): the Python code runs every call
         while each operation reuses its node from the previous one, so nothing

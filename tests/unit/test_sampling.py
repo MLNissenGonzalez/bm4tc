@@ -724,3 +724,93 @@ def test_failed_sample_leaves_the_mps_reset():
         mps.sample(n_samples=2, embedding_matrices=-torch.eye(2))
     assert not mps.resultant_nodes and not mps.data_nodes
     assert mps.sample(n_samples=2).shape == (2, 3)
+
+
+# ── contract(zipup_input=True) ───────────────────────────────────────────────
+# The data nodes contracted into the running result site by site, instead of
+# first with every input node: the same tensor, to rounding, for every layout
+# of output nodes, either boundary and dtype, with and without renormalization;
+# the same gradients; and, from a boundary vector, a fraction of what autograd
+# keeps.
+
+ZIPUP_LAYOUTS = [[], [3], [0], [6], [1, 4], [0, 6]]
+
+
+def _zipup_pair(mps, data, **kwargs):
+    """``mps(data, **kwargs)`` without and with ``zipup_input``."""
+    outs = []
+    for zipup in (False, True):
+        mps.reset()
+        outs.append(mps(data, zipup_input=zipup, **kwargs))
+    mps.reset()
+    return outs
+
+
+@pytest.mark.parametrize('boundary', BOUNDARY_CASES)
+@pytest.mark.parametrize('out_features', ZIPUP_LAYOUTS)
+@pytest.mark.parametrize('dtype', [torch.float64, torch.complex128])
+def test_zipup_input_contracts_the_same_tensor(boundary, out_features, dtype):
+    mps = SamplingMPS(n_features=7, phys_dim=3, bond_dim=4, boundary=boundary,
+                      out_features=out_features, init_method='randn',
+                      std=0.5, dtype=dtype)
+    n_in = 7 - len(out_features)
+    data = torch.randn(5, n_in, 3, dtype=dtype)
+    default, zipped = _zipup_pair(mps, data)
+    assert zipped.shape == default.shape
+    assert torch.allclose(zipped, default, rtol=1e-10, atol=1e-12)
+    # Renormalized the same way as the inline default: each step divides the
+    # same running result by its norm.
+    default, zipped = _zipup_pair(mps, data, renormalize=True)
+    mps.reset()
+    inline = mps(data, inline_mats=True, renormalize=True)
+    assert torch.allclose(zipped, inline, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize('boundary', BOUNDARY_CASES)
+def test_zipup_input_gives_the_same_gradients(boundary):
+    mps = SamplingMPS(n_features=7, phys_dim=3, bond_dim=4, boundary=boundary,
+                      out_features=[3], init_method='randn', std=0.5,
+                      dtype=torch.float64)
+    mps.auto_stack = False     # as the CBM: stacking replaces the parameters
+    data = torch.randn(5, 6, 3, dtype=torch.float64)
+    grads = []
+    for zipup in (False, True):
+        mps.reset()
+        x = data.clone().requires_grad_(True)
+        out = mps(x, zipup_input=zipup)
+        # by name: reset reorders parameters()
+        params = [p for _, p in sorted(mps.named_parameters())]
+        grads.append(torch.autograd.grad(out.square().sum(), params + [x]))
+    mps.reset()
+    for a, b in zip(*grads):
+        assert torch.allclose(a, b, rtol=1e-10, atol=1e-12)
+
+
+def test_zipup_input_keeps_vectors_not_matrices():
+    """From a boundary vector, autograd keeps (batch, bond) vectors per site, not
+    (batch, bond, bond) matrices."""
+    mps = SamplingMPS(n_features=21, phys_dim=2, bond_dim=16, boundary='obc',
+                      out_features=[10], init_method='randn', std=0.2)
+    data = torch.randn(32, 20, 2)
+
+    def saved_bytes(zipup):
+        mps.reset()
+        saved = []
+
+        def pack(t):
+            saved.append(t.numel() * t.element_size())
+            return t
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda t: t):
+            mps(data, zipup_input=zipup).sum()
+        return sum(saved)
+
+    default, zipped = saved_bytes(False), saved_bytes(True)
+    mps.reset()
+    assert zipped < default / 4
+
+
+def test_zipup_input_does_not_marginalize_yet():
+    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=2, out_features=[1])
+    with pytest.raises(NotImplementedError, match='marginalize_output'):
+        mps(torch.randn(3, 3, 2), zipup_input=True, marginalize_output=True)
+    mps.reset()
