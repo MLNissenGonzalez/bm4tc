@@ -12,17 +12,13 @@ source of truth); the section below groups them by theme. Measured costs are in
 - **E2a is read** ([Pilots](#beta--mnist-1212-e2a-ran-2026-10-13-on-f9e7cb0c)):
   accuracy knee β ≈ 0.7, density knee β ≈ 0.03–0.1, β\* = 0.25 between them (on
   transfer numbers).
-- **E2b** (`pilot_beta28`, full MNIST, E2a's lr per β, 150 epochs) trained on
-  G21G01 from `05c44cf8` (β = 0.9 rerun in a second launch); **no analysis
-  yet:** each died capturing the 40-step PGD (out of memory beside another unit, a
-  segmentation fault alone), fixed by D105. **β = 0 trained to 0.887 only** (valid
-  accuracy 0.87 by epoch 21, then swinging 0.79–0.87; best epoch 35 of 86; no NaN or
-  collapse); the other cells look normal. β = 0.01 shares its lr (5.6e-4) and
-  trained well, so the generative term may act as a regulariser that pure
-  discriminative training at 784 sites lacks. Kept as a result, not retrained
-  (Martin, 2026-10-14); the accuracy knee's top is read from β = 0.001–0.1. A
-  future study can test whether β > 0 helps against overfitting in the
-  high-capacity regime.
+- **E2b is read** ([Pilots](#beta--full-mnist-e2b-trained-on-05c44cf8-analysed-on-da7185e8),
+  2026-10-15): accuracy knee β ≈ 0.68, a shift of ≈ −0.25 from 12×12, so p = 1 (keep
+  N). The density knee is unreadable (early stopping at low β). E2a's lr does not
+  transfer: 5.6e-4 fails at β = 0 *and* β = 0.01 (0.884, 0.861), and 1.7e-4 reaches
+  0.98, then blows up around epoch 45. On 2026-10-14, β = 0 was kept as a result, with
+  the generative term read as a regulariser. That rested on β = 0.01 having "trained
+  well" at the same lr, which the analysis contradicts. Decisions pending (below).
 - **E2c is read** ([Pilots](#pilots-evidence-so-far)): no accuracy knee, a density
   knee at the bottom of the grid, a later purification knee, β\* ∈ [0.9, 1], and
   purified accuracy above the data-only ceiling.
@@ -36,9 +32,11 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **D104's cluster checks, then E2b's analyses** from a worktree with D105
-   (analyses at batch 64, ≈ 5.5 GiB each). The ladder waits for E2b's knee shift;
-   the AT grid {0, β\*} waits for E3's verdict on purification under adaptive attacks (below, E2a).
+1. **E2b's decisions** (exponent, ladder, full-MNIST lr; below, E2b) and **the graph
+   memory problem** (AGENTS.md handoff). D104's cluster checks passed on G21G01
+   (`test_graphs` 16/16; the 784-site analysis gives the same numbers captured and
+   eager, 53 s vs 178 s, at 5.05 vs 1.52 GiB reserved). The AT grid {0, β\*} waits for
+   E3's verdict on purification under adaptive attacks (below, E2a).
 2. **The sampling code (D100, D101, D103) and the reset-free forward (D104): done.**
    `SamplingMPS`, develop's sampler on tk 1.1.6, keeps its nodes between calls; Gibbs
    and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
@@ -200,8 +198,7 @@ the weight ratio per step).
   `{log: [1e-4, 1e-2]}`, 6 trials, random search: **done**, below.
 - E2b `pilot_beta28`, full MNIST: no HPO, the lr of E2a's cell at the same β
   (`hparams_from`; `configs/hparams/pilot_beta12.yaml` is the cluster's `select`
-  output, tracked so a worktree has it), 150 epochs; 12 runs × ≤ 10 h. Trained,
-  analyses pending (Now, above).
+  output, tracked so a worktree has it), 150 epochs; 12 runs × ≤ 10 h: **done**, below.
 - E2c `pilot_beta_spirals`, d10r6, 300 epochs, normal HPO: **done**, below.
 
 Read per β: test acc, $L_\text{dis}$, $L_x$, rob and purify at 0.1, detection q5,
@@ -279,6 +276,72 @@ not, the `adaptive` part runs on a few E2a checkpoints (β = 0, 0.1, 0.25, 0.5; 
 retraining) before the grid is fixed. A 12×12 ladder with ≥ 2 cells between the
 knees would be {0, 0.01, 0.1, 0.25, 0.5, 0.9, 1}; the Phase 8 ladder waits for E2b's
 knee shift.
+
+### Beta / full MNIST (E2b, trained on `05c44cf8`, analysed on `da7185e8`)
+
+Outputs in `pilots/cluster/pilot_beta28/` (untracked). G21G01, 2 units per GPU with
+MPS; analyses at batch 64, ≈ 28 min each. Same settings as E2a (ε = 0.1 relative,
+purification radius 0.1, q5 calibrated: false-positive rate 0.046–0.054), no HPO:
+each cell takes E2a's lr at the same β. Patience 50, cap 150 epochs. $L_x$ in nats
+per pixel (× 784 per image). "valid acc" is at epochs 50 / 100 / last.
+
+| β | lr | best/last | acc | L_dis | L_x | rob | det q5 | err_passed | purify | recovery | valid acc |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 5.6e-4 | 35/86 | 0.884 | 0.371 | +0.440 | 0.042 | 0.969 | 0.99 | 0.718 | 0.706 | 0.84 / – / 0.80 |
+| 0.001 | 1.7e-4 | 41/92 | 0.979 | 0.073 | +0.542 | 0.091 | 1.000 | – | 0.530 | 0.483 | 0.86 / – / 0.92 |
+| 0.01 | 5.6e-4 | 22/73 | 0.861 | 0.449 | +0.073 | 0.045 | 0.899 | 0.99 | 0.679 | 0.664 | 0.82 / – / 0.77 |
+| 0.03 | 1.7e-4 | 23/74 | 0.979 | 0.082 | +0.414 | 0.142 | 1.000 | – | 0.570 | 0.499 | 0.96 / – / 0.93 |
+| 0.1 | 1.7e-4 | 41/92 | 0.978 | 0.082 | −0.013 | 0.128 | 0.981 | 0.90 | 0.753 | 0.716 | 0.94 / – / 0.96 |
+| 0.25 | 1.7e-4 | 115/150 | 0.915 | 0.271 | −0.840 | 0.018 | 0.828 | 0.99 | 0.665 | 0.659 | 0.88 / 0.91 / 0.87 |
+| 0.5 | 1.7e-4 | 135/150 | 0.886 | 0.379 | −1.002 | 0.050 | 0.831 | 0.98 | 0.681 | 0.664 | 0.90 / 0.88 / 0.87 |
+| 0.75 | 5.6e-4 | 72/123 | 0.688 | 0.916 | −1.132 | 0.072 | 0.754 | 0.94 | 0.468 | 0.427 | 0.67 / 0.66 / 0.65 |
+| 0.9 | 5.6e-4 | 94/145 | 0.651 | 0.996 | −1.147 | 0.110 | 0.783 | 0.90 | 0.475 | 0.411 | 0.62 / 0.64 / 0.64 |
+| 0.97 | 5.6e-4 | 126/150 | 0.634 | 1.069 | −1.151 | 0.163 | 0.788 | 0.81 | 0.452 | 0.350 | 0.58 / 0.61 / 0.62 |
+| 0.99 | 5.6e-4 | 144/150 | 0.625 | 1.074 | −1.153 | 0.246 | 0.788 | 0.69 | 0.461 | 0.292 | 0.46 / 0.58 / 0.61 |
+| 1 | 5.6e-4 | 147/150 | 0.521 | 1.324 | −1.153 | 0.295 | 0.780 | 0.60 | 0.417 | 0.182 | 0.39 / 0.48 / 0.53 |
+
+- **E2a's lr does not transfer to 784 sites.** The two low-β cells at 5.6e-4
+  (β = 0, 0.01) never pass 0.88 valid accuracy, while their neighbours at 1.7e-4
+  (β = 0.001, 0.03, 0.1) reach 0.98 by epoch 12–25. The cells at 1.7e-4 then blow
+  up: the *training* objective jumps (β = 0.001: 0.04 → 0.61 at epochs 44–48;
+  β = 0.1: 0.04 → 0.20 at the same epochs, same seed and data order), and accuracy
+  recovers only partly (0.98 → 0.79 → 0.93). This is optimisation, not
+  overfitting. No NaN and no norm excursion (log Z and log |ψ|² stay at their target).
+  So **β = 0's 0.884 is the lr, not the absence of a generative term**: β = 0.01 at
+  the same lr does as badly (0.861). The regulariser hypothesis (Now, 2026-10-14) has
+  no support from E2b.
+- **Accuracy knee at β ≈ 0.68** (ln r ≈ 0.75): the middle of 0.979 → 0.521 lies
+  between β = 0.5 (0.886) and 0.75 (0.688). E2a's knee was β ≈ 0.73 (ln r ≈ 1.0),
+  so the **shift is ≈ −0.25** (±0.5 from the grid and the lr confound). Predictions:
+  0 for p = 1, +0.85 for p = ½, +1.7 for p = 0. **p = 1 (keep N)**, and D82's
+  α = 0.01 (β = 0.89) is past the knee (0.651), as predicted. The bottom is not
+  converged (β = 1 still climbs at epoch 150, best epoch 147). A higher bottom would
+  move the middle left, not right. Accuracy also falls earlier than at 12×12
+  (0.915 / 0.886 at β = 0.25 / 0.5, against 0.967 / 0.946), on plateaus, not
+  still climbing.
+- **The density knee is not readable.** At β ≤ 0.1, selection on `objective/valid`
+  (≈ L_dis) picks epochs 22–41, before the blow-ups, when $L_x$ has barely moved
+  ($L_x$ at β = 0.1: −0.01 selected, −0.52 at epoch 92). The selected $L_x$ crosses
+  the middle of its range at β ≈ 0.15 (12×12: 0.03–0.1), a shift of ≈ +1.5 that
+  comes from early stopping. Only one knee shifts, and that one is confounded, so
+  the rule (keep N unless both shift by more than ~1) keeps N.
+- **Robustness at ε = 0.1 almost vanishes at 784 pixels:** rob 0.02–0.14 for the
+  good classifiers (12×12: 0.28–0.52), rising to 0.30 at β = 1 (at 0.52 accuracy).
+  Purification lifts β = 0.1 from 0.13 to 0.753 (recovery 0.716), but β = 0.001
+  (density untrained, $L_x$ +0.54) already reaches 0.530. So about 0.4 of that lift
+  is the transfer gap and ≈ +0.2 is the density's. Among well-trained cells,
+  purify peaks at β = 0.1 (0.753), against 0.665 / 0.681 at β = 0.25 / 0.5 on worse
+  classifiers. β\* ∈ [0.1, 0.25] fits E2a's flat top, but this is weak evidence.
+  The 5.6e-4 cells' purify (0.68–0.72) beats their 1.7e-4 neighbours' while their
+  accuracy is worse: transfer from a badly trained classifier differs.
+- **Detection** as in E2a: ≈ 1.0 with an untrained density, 0.75–0.83 above β = 0.25.
+  err_passed ≈ 0.9–0.99 at β ≤ 0.75: almost every undetected attack succeeds.
+
+To decide: the exponent (proposed: keep N); the Phase 8 ladder (proposed: E2a's
+{0, 0.01, 0.1, 0.25, 0.5, 0.9, 1} for both sizes, two cells between the knees);
+full-MNIST lr (proposed: its own HPO with the range extended below 1e-4; E2a's
+lrs and the cap at 150 epochs are both unfit at 784 sites); β = 0's status (proposed:
+drop the regulariser reading).
 
 ### Beta / Spirals (E2c, ran 2026-10-09 on `d127eaad`)
 
