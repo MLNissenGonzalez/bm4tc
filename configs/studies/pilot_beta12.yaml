@@ -22,3 +22,11 @@ hpo:                           # the lr only, 6 trials per cell, random search (
 budgets: [0.1]                 # read at ε = 0.1 only
 analysis:
   joint_attack: false
+  # E3 follow-up (plan.md, "Beta"): the adaptive part on β ∈ {0, 0.1, 0.25, 0.5}
+  # (`run --cell`), no retraining. Trimmed as E3: one threshold; the warm start from
+  # PGD (D98) as the only restart, ≈ 4 h per checkpoint (≈ 20 h at the 5 default
+  # restarts: every attack step runs the 40-step purifier).
+  percentiles: [5]
+  adaptive:
+    enabled: true
+    restarts: 1
