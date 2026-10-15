@@ -90,7 +90,28 @@ Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (done, 
 included; handoff below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
 left uncommitted).
 
-**Start here:** the cluster check of D107 + D110 **passed** (2026-10-15, G21G01 GPU 5,
+**Start here: two jobs left running on G21G01 (started 2026-10-15 15:44, worktree
+`runs/83da4cc9`, scripts and logs in `$R/ag_logs/`; both screens end on their own).**
+1. **`ag-e2a-adaptive`** (GPU 0, MPS, 3 units at a time): `pilot_beta12` (E2a's
+   checkpoints, not retrained) at β ∈ {0, 0.1, 0.25, 0.5}, `clean` + `uq` + the
+   trimmed `adaptive` part (ε 0.1, δ 0.1, q5, the PGD warm start as the only restart;
+   ≈ 4 h per wave, 2 waves). Log `$R/ag_logs/e2a_adaptive.log`, marker
+   `e2a_adaptive.done`; per run `$R/outputs/pilot_beta12/legendre/d3r40/<cell>/s1/analyse.log`.
+   The script stops its MPS daemon at the end. Copy the results to a **new** directory
+   (`pilots/cluster/pilot_beta12_adaptive/`): `pilots/cluster/pilot_beta12/` holds
+   E2a's older analysis, which these runs replace on the cluster. Read `purify_adapt`,
+   `purify_sel_adapt`, `rob_sel_adapt` against `purify`, `rob_sel` and E3
+   (`docs/adaptive.md` §6): does purification fall on MNIST 12×12 too, does detection
+   hold? That fixes the AT grid (plan.md, "Beta").
+2. **`ag-benchmarks`** (GPU 6, one process at a time): `test_graphs` (19/19 passed) and
+   the cluster check's benches again at `83da4cc9` (after D112, the zip-up forward),
+   plus the analysis at 144 sites, at 784 sites batch 128, and d3r80 batch 128 (open
+   items). Logs `$R/ag_logs/bench_83da4cc9/*.log`, marker `DONE`. First numbers:
+   MNIST12 NAT 0.13 GiB allocated at peak (1.82 at `5e41a7d3`), AT 0.18 (2.75): D112
+   shrinks memory ≈ 14×, so compute.md's `--per-gpu` table (and D111's reason) must be
+   redone from these logs.
+
+Before: the cluster check of D107 + D110 **passed** (2026-10-15, G21G01 GPU 5,
 worktree `runs/5e41a7d3`, run by the agent over SSH): `test_graphs` 19/19, every shape
 fits (full MNIST d3r40 AT 10.3 GiB per process, out of memory before; d3r80 micro 128
 AT 19.9 GiB), the 784-site analysis gives the same numbers captured and eager.
