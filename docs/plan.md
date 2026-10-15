@@ -503,9 +503,9 @@ left:
   on random models (overflowing ones included) to float tolerance; the seams re-pin
   in their own commit; the gain is measured with `bench_train_step` and
   `profile_train_step` before and after, from a `git worktree` of HEAD.
-- Minor: Gibbs/SGLD analysis parts log a spurious `Detection/attack failed: ;
-  skipping` at every budget (`bm4tc/analysis/uq.py:611`, `next(iter(det.values()))`
-  on empty percentiles). Harmless; guard it.
+- ~~Minor: Gibbs/SGLD analysis parts log a spurious `Detection/attack failed: ;
+  skipping` at every budget~~ (fixed 2026-10-15, after E3: the empty detection dict
+  is guarded; `test_uq_without_thresholds_attacks_every_budget`).
 
 ## Sampling: tensorkrowch develop's sampler on 1.1.6 (D100)
 

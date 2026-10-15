@@ -284,8 +284,12 @@ pattern, lower. At ε = 0.05 everything is within 0.06 of the ceiling (0.989).
 - **Purification does not hold under adaptive attack.** Likelihood purification and
   Gibbs fall to about the undefended model's accuracy at ε = 0.1 (0.32–0.56 against
   PGD's 0.51–0.58) and far below it at ε ≥ 0.15 (purify 0.04–0.22 against 0.34–0.45).
-  A likely reading: the purifier moves the input by up to δ = 0.1, and the attacker
-  steers that move, so the defended model faces a budget of about ε + δ.
+  The attack's input stays within ε of the clean point, like PGD's (projected onto
+  the L∞ ball and the input box at every step; `test_points_stay_in_the_ball_and_the_box`).
+  The likely reading: the purifier then moves that input by up to δ = 0.1 on its own,
+  uphill in log p(x), and the attacker places its input where that climb ends on the
+  wrong side of f's boundary. The purified point may lie up to ε + δ from the clean
+  one, but the extra δ is the defence's own move, not the attacker's.
 - **Detection holds best, and grows with β:** adaptive selective accuracy at ε = 0.1
   rises from 0.72 (β = 0) to 0.91–0.92 (β ≥ 0.5), under the selective ceiling 0.989;
   at ε = 0.15, 0.26 → 0.52 (ceiling 0.74). The detector attack (selective PGD) costs
@@ -297,10 +301,10 @@ pattern, lower. At ε = 0.05 everything is within 0.06 of the ceiling (0.989).
   one seed); purification has no β where it beats the undefended model at ε ≥ 0.1.
 - **float32 (D106):** no "negative beyond numerical tolerance" in any of the 6
   analyses (spirals models are 2 sites; not evidence for MNIST).
-- A logging bug, results unaffected: the `gibbs` and `adaptive` parts rerun the attack
-  without thresholds, and `next(iter(det.values()))` on the empty detection dict logs
-  "Detection/attack failed: ; skipping" per budget (the adversarial examples are
-  cached before it, so every number is computed); fix proposed, not made.
+- A logging bug, results unaffected: the `gibbs` part reruns the attack without
+  thresholds, and `next(iter(det.values()))` on the empty detection dict logged
+  "Detection/attack failed: ; skipping" per budget (the adversarial examples were
+  cached before it, so every number was computed). Fixed after E3.
 
 ## References
 

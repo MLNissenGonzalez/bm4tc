@@ -127,6 +127,20 @@ def test_uq_evaluate_completes(cbm, clean_loader):
     assert isinstance(results, UQResults)
 
 
+
+def test_uq_without_thresholds_attacks_every_budget(cbm, clean_loader, monkeypatch):
+    """The sweep parts run the attack with no detection thresholds: no budget may
+    be logged as failed (an empty detection dict once was, E3)."""
+    import bm4tc.analysis.uq as uq_module
+    warnings = []
+    monkeypatch.setattr(uq_module.logger, "warning", warnings.append)
+    cfg = UQConfig(eps_rel=[0.1, 0.2], delta_rel=[], percentiles=[],
+                   attack_num_steps=2, num_steps=2)
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu",
+                                         calib_loader=clean_loader)
+    assert sorted(results.adv_accuracies) == [0.1, 0.2]
+    assert warnings == []
+
 def test_uq_clean_accuracy_range(cbm, clean_loader):
     cfg = UQConfig(
         eps_rel=[0.1],
