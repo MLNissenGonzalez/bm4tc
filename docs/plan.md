@@ -40,8 +40,8 @@ Next, in order:
    128 NAT 13.6 / AT 19.9 GiB; the 784-site analysis gives the same numbers captured
    and eager. Numbers and `--per-gpu` per study shape: compute.md, "Cluster check of
    D107 + D110". D94's rule is met: AT may run with `trainer.cuda_graph` from
-   `d2aca0e5` on. Open: `analysis.batch_size` for full MNIST (the default 256 takes
-   ≈ 12 GiB per analysis, so `--per-gpu` 1; 64–128 allows 2). E2b's decisions are taken (D108). D104's cluster checks passed
+   `d2aca0e5` on. Full-MNIST studies analyse in chunks of 128 (D111; the default 256 took
+   ≈ 12 GiB per analysis), so `--per-gpu` 2 at d3r40; d3r80's analysis is unmeasured. E2b's decisions are taken (D108). D104's cluster checks passed
    on G21G01 (`test_graphs` 16/16; the 784-site analysis gives the same numbers
    captured and eager, 53 s vs 178 s). The AT grid {0, β\*} waits for E3's verdict on
    purification under adaptive attacks (below, E2a).
@@ -164,9 +164,8 @@ need their `warm_from` study trained.
   this** (one pool per `Graphs`): 2.99 GiB at batch 64 (eager 1.52); the analysis
   keeps per-shape warm-ups (D110), so ≈ 2× eager. On G21G01 (2026-10-15): 2.99 GiB
   reserved at batch 64, 10.38 at 256 (eager 1.52, 7.59), 394 vs 170 s for 2048
-  points; `--per-gpu` per study shape in compute.md. Still open: a per-stage
-  `--per-gpu`, or a smaller `analysis.batch_size` for full MNIST, since an analysis
-  at batch 256 is larger than any d3r40 train.
+  points; `--per-gpu` per study shape in compute.md. D111 sets `analysis.batch_size: 128` for full MNIST. Still open: a per-stage
+  `--per-gpu`; d3r80's analysis at 128 (≈ 20 GiB estimated) on the cluster.
 - **Graph memory: reserved far above allocated, worst for AT: fixed by D107 + D110,
   checked on G21G01 (2026-10-15; compute.md, "Cluster check of D107 + D110").** One
   transient is left: at the first capture, the epoch-1 eager tensors held by tk's

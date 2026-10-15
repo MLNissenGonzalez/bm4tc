@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D110 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D111 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -95,9 +95,9 @@ worktree `runs/5e41a7d3`, run by the agent over SSH): `test_graphs` 19/19, every
 fits (full MNIST d3r40 AT 10.3 GiB per process, out of memory before; d3r80 micro 128
 AT 19.9 GiB), the 784-site analysis gives the same numbers captured and eager.
 compute.md, "Cluster check of D107 + D110", has the table and `--per-gpu` per study
-shape (MNIST12 5, full MNIST d3r40 2 with `analysis.batch_size` ≤ 128 else 1, d3r80 1).
+shape (MNIST12 5, full MNIST d3r40 2 with D111's `analysis.batch_size` 128, d3r80 1).
 D94's rule is met: AT may run with `trainer.cuda_graph` from `d2aca0e5` on.
-Open from it (plan.md): `analysis.batch_size` for full MNIST (Martin decides); the
+Open from it (plan.md): d3r80's analysis memory at 128 (unmeasured); the
 first-capture transient (epoch-1 eager tensors held by tk's nodes beside the new pool).
 Next is **E3** (below, "Next").
 

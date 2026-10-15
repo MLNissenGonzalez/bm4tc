@@ -184,9 +184,9 @@ of a study decides, since every slot is sized alike):
 | Study shape | Largest unit | `--per-gpu` |
 |---|---|---|
 | MNIST12 d3r40 (NAT, AT) | train ≤ 3.4 GiB; analysis at 144 sites not re-measured since D107 (≤ 4 GiB expected) | 5 |
-| full MNIST d3r40, `analysis.batch_size` 64–128 | AT train 10.3 GiB, analysis ≈ 4–7 | 2 |
-| full MNIST d3r40, `analysis.batch_size` 256 (the default) | analysis ≈ 11.5–12.5 GiB | 1 (2 may fail when two analyses meet) |
-| full MNIST d3r80 | AT train 19.9 GiB | 1 |
+| full MNIST d3r40, `analysis.batch_size` 128 (the studies' setting since D111) | AT train 10.3 GiB, analysis ≈ 6.5 | 2 |
+| full MNIST d3r40, `analysis.batch_size` 256 (the default before D111) | analysis ≈ 11.5–12.5 GiB | 1 (2 may fail when two analyses meet) |
+| full MNIST d3r80 | AT train 19.9 GiB; analysis at 128 unmeasured (≈ 20 GiB by B·n·r²) | 1 |
 
 ## Gibbs purification since D101 and D103 (2026-10-14)
 
