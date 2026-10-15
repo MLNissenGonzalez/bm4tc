@@ -61,6 +61,14 @@ For 1.1.6: ``n_sites`` is ``n_features``; nodes have ``rank``, not ``ndim``;
 
 Norms are discarded (``renormalize`` divides each environment by one scalar per
 sample): sampling needs only ratios between candidates, and no gradients.
+
+:class:`SamplingMPS` also carries a contraction option for tensorkrowch's
+``contract``, not in ``develop`` either: ``zipup_input`` (D111) contracts the
+data into the running result site by site, so autograd keeps vectors instead of
+one matrix per site (``contract``'s docstring says when it is better). The
+default is tensorkrowch's ``contract``, unchanged. ``_inline_contraction``
+absorbs the data nodes, and its renormalization step is ``_renormalize_inline``,
+which a subclass that keeps the norm overrides.
 """
 import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Text, Tuple, Union
@@ -123,6 +131,171 @@ class SamplingMPS(tk.models.MPS):
             nodes_out_env[-1] = nodes_out_env[-1] @ in_results[-1]
         
         return nodes_out_env
+
+    def contract(self,
+                 inline_input: bool = False,
+                 inline_mats: bool = False,
+                 renormalize: bool = False,
+                 marginalize_output: bool = False,
+                 embedding_matrices: Optional[
+                                        Union[torch.Tensor,
+                                              Sequence[torch.Tensor]]] = None,
+                 mpo: Optional[tk.models.MPO] = None,
+                 zipup_input: bool = False) -> Node:
+        """
+        :meth:`tensorkrowch.models.MPS.contract`, with one more option,
+        ``zipup_input``. Without it (the default) this is tensorkrowch's
+        ``contract``, unchanged.
+
+        By default, every input node is first contracted with its ``data`` node,
+        giving one matrix per site (with a batch edge), and the matrices are
+        then multiplied. All of them exist at once, and autograd keeps them for
+        the backward, so memory grows like ``batch_size`` × number of sites ×
+        bond dimension².
+
+        With ``zipup_input``, the input regions are contracted the way
+        ``"zip-up"`` contracts two MPS: a single running result absorbs one
+        input node, then that node's ``data`` node, then the next input node,
+        and so on. Starting from a boundary vector (``obc``), the result stays a
+        vector per batch element, so what is kept grows like ``batch_size`` ×
+        number of sites × bond dimension (× physical dimension, if gradients
+        with respect to the data are needed). Starting from an input node
+        (``pbc``, or an input region between two output regions), the result is
+        a matrix, and nothing is saved. The number of operations is about the
+        same, but they are done one site at a time, which is slower when they
+        are small.
+
+        So ``zipup_input`` is better for long MPS with large bond dimension and
+        batch size relative to the physical dimension, where the matrices of the
+        default would not fit in memory or take most of the time. The default is
+        better for short or narrow MPS, small batches, or large physical
+        dimensions, where it does fewer, larger operations.
+
+        Parameters
+        ----------
+        zipup_input : bool
+            Boolean indicating whether input ``data`` nodes should be contracted
+            into the running result of each input region, one site at a time
+            (see above), instead of with the MPS input nodes before the regions
+            are contracted. It implies ``inline_input`` and ``inline_mats``,
+            which are then ignored. ``marginalize_output`` (and so
+            ``embedding_matrices`` and ``mpo``) is not supported with it yet.
+
+        The other parameters are those of
+        :meth:`tensorkrowch.models.MPS.contract`.
+
+        Returns
+        -------
+        Node
+        """
+        if not zipup_input:
+            return super().contract(inline_input=inline_input,
+                                    inline_mats=inline_mats,
+                                    renormalize=renormalize,
+                                    marginalize_output=marginalize_output,
+                                    embedding_matrices=embedding_matrices,
+                                    mpo=mpo)
+        if marginalize_output:
+            raise NotImplementedError(
+                '`zipup_input` does not support `marginalize_output` yet')
+
+        # The input nodes keep their data nodes connected:
+        # ``_inline_contraction`` absorbs each one right after its input node
+        in_env = self.in_env
+        in_results = []
+        for region in self.in_regions:
+            result = self._contract_envs_inline(mats_env=in_env[:len(region)],
+                                                renormalize=renormalize)
+            in_env = in_env[len(region):]
+            in_results.append(result)
+
+        if not self.out_regions:
+            # If there is only input region, in_results has only 1 node
+            result = in_results[0]
+        else:
+            nodes_out_env = self._absorb_in_results_in_out_regions(in_results)
+            result = self._inline_contraction(mats_env=nodes_out_env,
+                                              renormalize=renormalize)
+
+        # As tensorkrowch's ``contract`` ends: contract periodic edge, put
+        # batch edges in first positions
+        if result.is_connected_to(result):
+            result @= result
+
+        batch_edges = []
+        other_edges = []
+        for i, edge in enumerate(result.edges):
+            if edge.is_batch():
+                batch_edges.append(i)
+            else:
+                other_edges.append(i)
+
+        all_edges = batch_edges + other_edges
+        if all_edges != list(range(len(all_edges))):
+            result = tk.permute(result, tuple(all_edges))
+
+        return result
+
+    def _inline_contraction(self,
+                            mats_env: List[AbstractNode],
+                            renormalize: bool = False,
+                            from_left: bool = True) -> Node:
+        """Contracts sequence of MPS nodes (matrices) inline. A node whose
+        ``"input"`` edge still leads to a ``data`` node (``zipup_input``) is
+        followed by that data node; otherwise this is tensorkrowch's
+        ``_inline_contraction``."""
+        if from_left:
+            result_node = self._absorb_data(mats_env[0], mats_env[0])
+            for node in mats_env[1:]:
+                result_node @= node
+                result_node = self._absorb_data(result_node, node)
+
+                if renormalize:
+                    right_axes = []
+                    for ax_name in result_node.axes_names:
+                        if 'right' in ax_name:
+                            right_axes.append(ax_name)
+                    if right_axes:
+                        result_node = self._renormalize_inline(result_node,
+                                                               right_axes)
+
+            return result_node
+
+        else:
+            result_node = self._absorb_data(mats_env[-1], mats_env[-1])
+            for node in mats_env[-2::-1]:
+                result_node = node @ result_node
+                result_node = self._absorb_data(result_node, node)
+
+                if renormalize:
+                    left_axes = []
+                    for ax_name in result_node.axes_names:
+                        if 'left' in ax_name:
+                            left_axes.append(ax_name)
+                    if left_axes:
+                        result_node = self._renormalize_inline(result_node,
+                                                               left_axes)
+
+            return result_node
+
+    @staticmethod
+    def _absorb_data(result_node: AbstractNode,
+                     node: AbstractNode) -> AbstractNode:
+        """Contracts ``result_node`` with the ``data`` node at ``node``'s
+        ``"input"`` edge, if there is one (batch edge first, as in
+        ``_input_contraction``)."""
+        if 'input' in node.axes_names:
+            data_node = node.neighbours('input')
+            if (data_node is not None) and data_node.is_data():
+                return data_node @ result_node
+        return result_node
+
+    @staticmethod
+    def _renormalize_inline(node: AbstractNode,
+                            axes: List[Text]) -> Node:
+        """One renormalization step of ``_inline_contraction``. A subclass that
+        keeps the norm overrides it."""
+        return node.renormalize(axis=axes)
 
     def condition(self,
                   data: Union[torch.Tensor, Sequence[torch.Tensor]]) -> 'MPS':
