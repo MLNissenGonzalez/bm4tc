@@ -54,6 +54,36 @@ def test_graphed_replays_the_function_per_input_shape():
 
 
 @needs_cuda
+def test_phased_graphs_warm_up_everything_then_capture():
+    """warm_up_first: every call is eager until start_capture(); then a shape
+    run once captures at its next call, a new shape warms up first (D110)."""
+    total, reference = torch.zeros((), device=CUDA), torch.zeros((), device=CUDA)
+
+    def accumulate(state, x):
+        state.add_(x.sum())
+        return state * 2
+
+    graphs = Graphs(enabled=True, warm_up_first=True)
+    graphed = graphs.wrap(lambda x: accumulate(total, x), warmup_calls=2)
+
+    def call(n, i):
+        x = torch.arange(n, dtype=torch.float32, device=CUDA) + i
+        assert torch.equal(graphed(x), accumulate(reference, x))
+
+    for i in range(5):                                  # more than warmup_calls
+        call(4, i)
+    assert not graphed._captures
+    graphs.start_capture()
+    call(4, 5)                                          # seen once: captures now
+    assert list(graphed._captures) == [(((4,), torch.float32),)]
+    call(2, 6)
+    call(2, 7)                                          # new shape: two warm-ups
+    assert len(graphed._captures) == 1
+    call(2, 8)
+    assert len(graphed._captures) == 2
+
+
+@needs_cuda
 def test_graphs_share_one_pool_and_return_copies():
     """Two graphs called alternately: each output stays valid after later calls,
     so callers may keep what a call returns, although the second capture may
@@ -172,11 +202,13 @@ def test_a_host_sync_fails_capture_with_its_own_error():
     assert child.returncode == 0, child.stderr[-3000:]
 
 
-def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
-    """Three epochs of a tiny complex MPS on CUDA, validated every epoch (two
-    batches of one shape: three warm-up calls, captured in the second
-    validation); the AT radius follows the curriculum (a new device scalar each
-    epoch). Returns the logged records and the best tensors."""
+def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0, eval_every=1):
+    """Three epochs of a tiny complex MPS on CUDA, validated every
+    ``eval_every`` epochs (two batches of one shape); epoch 1 eager, its
+    validation too (a warm-up validation when it does not validate), every
+    graph captured in epoch 2 (D110). The AT radius follows the curriculum (a
+    new device scalar each epoch). Returns the logged records and the best
+    tensors."""
     torch.manual_seed(seed)
     cbm = ConditionalBornMachine(
         CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=3, bond_dim=4)),
@@ -189,7 +221,7 @@ def _run(cuda_graph: bool, evasion=None, micro_batch_size=None, seed=0):
         return DataLoader(TensorDataset(data, torch.randint(0, 3, (n,), generator=g)),
                           batch_size=8, drop_last=drop_last)
 
-    cfg = TrainConfig(beta=0.5, max_epoch=3, eval_every=1, batch_size=8,
+    cfg = TrainConfig(beta=0.5, max_epoch=3, eval_every=eval_every, batch_size=8,
                       micro_batch_size=micro_batch_size, evasion=evasion,
                       curriculum=evasion is not None, curriculum_eps_start_rel=0.01,
                       norm_control=NormControlConfig(soft_strength=1e-2, log_target=0.0),
@@ -220,8 +252,8 @@ def test_captured_training_is_bit_identical_to_eager(evasion, micro_batch_size):
 
 def _run_at_e2as_shape(cuda_graph: bool):
     """MNIST12 d3r40, batch 512, β 0.5, as E2a trains it, for three epochs:
-    validation (four batches) captured in the first epoch, then training
-    replays again."""
+    epoch 1 eager, then the training step and validation (four batches)
+    captured in epoch 2, then training replays again."""
     torch.manual_seed(0)
     cbm = ConditionalBornMachine(CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=40)),
                                  data_dim=144, num_classes=10)
@@ -303,6 +335,18 @@ def test_captured_at_in_one_pool_matches_eager():
     eager_records, eager_tensors, _ = _run_at_at_e2as_model(False)
     graph_records, graph_tensors, pools = _run_at_at_e2as_model(True)
     assert len(pools) == 1
+    assert graph_records == eager_records
+    assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
+
+
+@needs_cuda
+def test_a_warm_up_validation_keeps_the_records_eager():
+    """eval_every 2: epoch 1 does not validate, so a warm-up validation runs
+    before capture starts (D110); its result is not logged or used for
+    selection, so captured AT is eager's number for number."""
+    eager_records, eager_tensors = _run(False, PGD_FIXED_START, 4, eval_every=2)
+    graph_records, graph_tensors = _run(True, PGD_FIXED_START, 4, eval_every=2)
+    assert [("acc/valid" in r) for r in graph_records] == [False, True, False]
     assert graph_records == eager_records
     assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
 
