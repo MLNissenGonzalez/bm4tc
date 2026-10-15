@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D109 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D110 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -64,7 +64,8 @@ place, no pass-through layers.
       # deploy a pushed commit:  cd $R/code && git fetch && git worktree add ../runs/<sha> <sha>
       # launch, detached:        screen -dmS claude-<study> bash -c "source $R/bm4tc.sh; cd $R/runs/<sha>; python -m bm4tc run <study> --gpus ... --per-gpu ..."
       # pick GPUs:               ~/0git/hpc-greyc/multitop.py gpu   (then nvidia-smi on the node)
-      # results:                 rsync as in the E2b handoff below
+      # results:                 rsync -av --exclude '.logs/' --exclude '.replaced/' --exclude 'models/' \
+      #                              --exclude 'wandb/' $H:$R/outputs/<study>/ pilots/cluster/<study>/
 
   Wait for a remote job with a background `until ssh ... test -e <file>; do sleep ..; done`,
   not by polling. Rules: **ask before any launch that takes GPUs** (name the node and
@@ -79,121 +80,73 @@ place, no pass-through layers.
 
 ## State (2026-10-15)
 
-Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D108 and this AGENTS.md update.
+Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D108; D109 (Martin) and
+D110 are local until Martin says to push.
 Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates and
 the measurements since (stale numbers are marked there).
 
-Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (handoff
-below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
+Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (done up to
+the cluster check; handoff below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
 left uncommitted).
 
-**Start here (E2b and graph capture):**
-1. **Read E2b.** Its analyses finished on G21G01 (launched from `da7185e8`, batch
-   64). Copy it, then read it like E2a (plan.md, "Beta / MNIST 12×12"): the knee shift
-   between 12×12 and 28×28 decides the exponent of N and the Phase 8 ladder (plan.md,
-   "E2, the β pilots").
-2. **The graph memory problem** (below): measure first, then fix. AT cannot launch at
-   full MNIST until it is solved, and every `--per-gpu` depends on it.
-3. **E3** and the rest (below, "Next").
+**Start here (graph capture, cluster check):**
+1. **Cluster check of D107 + D110** (D94's rule: no AT launch with `trainer.cuda_graph`
+   before it). D110 must be pushed first (ask Martin), then deployed as a worktree
+   (`runs/<sha>`, D109 commands above). **Ask before taking GPUs** (name node and
+   indices). Run in one `claude-d110-check` screen, output to
+   `$R/d110_checks/*.log`:
+   - `pytest -q -p no:logging tests/unit/test_graphs.py` (19 tests).
+   - `python -m tests.bench.bench_train_step --beta 0.5 --bond-dim 40 --snapshot <file>`
+     at the four shapes of the table below (MNIST12 batch 512 NAT and AT; full MNIST
+     `--features 784 --batch 512 --micro-batch 256` NAT and AT), each `--regime`
+     alone, plus `--eager` at the full-MNIST shapes. Then d3r80 micro 128 (`--bond-dim
+     80 --micro-batch 128`, open since D104: does it fit now?).
+   - `python -m tests.bench.bench_analysis --features 784 --batch 64` (and 256: how
+     far can `analysis.batch_size` go at 784 sites?).
+   Compare with the "before" table; set `--per-gpu` from per-process memory; update
+   `docs/compute.md` ("Since CUDA graphs") and plan.md.
+2. **E3** and the rest (below, "Next").
 
-### Handoff: E2b and graph capture (2026-10-15)
+### Handoff: graph capture (2026-10-15, evening)
 
-**E2b** (`pilot_beta28`: full MNIST d3r40 micro 256, E2a's 12 β with E2a's lr per β,
-150 epochs, one seed). Trained from `05c44cf8` (β = 0.9 in a second launch);
-analysed from `da7185e8` with `analysis.batch_size: 64`. Copy it with
+Done today (session `E2b-and-AT-graph-capture`): E2b read and decided (D108, plan.md
+"Beta / full MNIST"); `bench_train_step --snapshot` (memory per graph pool); **D107**,
+one memory pool per `Graphs`; **D110**, the Trainer's graphs warm up everything (epoch 1
+eager, plus a discarded warm-up validation when epoch 1 does not validate), then
+capture. Martin's idea; it replaced Claude's "capture cold after the first capture"
+rule (decisions.md D110 has the rejected options).
 
-    H=nisseng261@N315L-G21G01.ressource.unicaen.fr; R=/ceph/chercheurs/nisseng261/bm4tc
-    rsync -av --exclude '.logs/' --exclude '.replaced/' --exclude 'models/' --exclude 'wandb/' \
-        $H:$R/outputs/pilot_beta28/ pilots/cluster/pilot_beta28/
+The mechanism, plainly: a capture's memory comes from the pool, eager code (warm-ups)
+from the general cache, and neither can use the other's free memory. Per-graph pools
+made reserved the sum of the graphs' peaks (D107 fixes); eager warm-ups after a
+capture added their peak to the pool's (D110 fixes). Peak is now about max(eager,
+pool), plus ≈ 0.6 GiB per process for the graphs themselves.
 
-β = 0 trained to 0.887 only (valid accuracy 0.87 by epoch 21, then swinging
-0.79–0.87; no NaN or collapse) while β = 0.01, with the same lr, trained well. Martin:
-keep it as a result, not retrained; β > 0 may act as a regulariser, a future study can
-test that in the high-capacity regime (plan.md). Read the accuracy knee's top from
-β = 0.001–0.1. Ask Martin for `$BM4TC_DATA_ROOT/d104_checks/*.log` (his D104 checks on
-G21G01 at `da7185e8`; the train benches are in the table below): `graphs.log`
-(test_graphs on the cluster) and `analysis784.log` were not seen here.
-
-**What happened with graph capture.** Every E2b analysis died capturing the 40-step
-PGD: out of memory beside another unit, a segmentation fault alone on a 22 GB GPU. A
-graph of the whole loop holds steps × sites contractions (784 × 40 ≈ 31,000; E2a's
-144 × 40 worked). **D105** captures one step and replays it (`GraphedPGD`,
-`GraphedPurification`), in the analysis, the Trainer's validation and AT training (the
-Trainer attacks every micro-batch before the step; `Trainer._adversarials`). Eager
-numbers and every seam unchanged; captured = eager bit for bit with a fixed start. On
-the eGPU at 784 sites the analysis now runs (48 s vs 143 s eager) at 2.55 / 5.05 GiB
-reserved for batch 32 / 64 (0.77 / 1.52 eager): ≈ 0.08 GiB per sample.
-
-**What is still wrong: reserved memory far above allocated, worst for AT.**
-`bench_train_step` on G21G01 at `da7185e8` (D104 + D105), β 0.5, batch 512, per
-process (nvidia-smi):
+Before (G21G01 at `da7185e8`, β 0.5, batch 512, per process, nvidia-smi):
 
 | Shape | Allocated (peak) | Reserved | Per process |
 |---|---|---|---|
-| MNIST12 d3r40 NAT | 1.82 GiB | 4.24 GiB | 4.57 GiB (E2a, before D104: 3.89) |
+| MNIST12 d3r40 NAT | 1.82 GiB | 4.24 GiB | 4.57 GiB |
 | MNIST12 d3r40 AT | 2.76 GiB | 10.42 GiB | 10.92 GiB |
-| full MNIST d3r40 micro 256 NAT | 5.01 GiB | 9.24 GiB | 10.46 GiB (E2b's real trains: ≈ 9.3) |
-| full MNIST d3r40 micro 256 AT | 3.63 GiB | 15.33 GiB unallocated | out of memory in the first validation's attack warm-up |
+| full MNIST d3r40 micro 256 NAT | 5.01 GiB | 9.24 GiB | 10.46 GiB |
+| full MNIST d3r40 micro 256 AT | 3.63 GiB | 15.33 GiB unallocated | out of memory |
 
-Why, as far as the code shows (not yet measured):
-- **One private pool per graph** (D92): every graph keeps its own peak reserved, so
-  reserved ≈ the sum of the graphs' peaks, not the largest.
-- **D105 added graphs to AT.** Before, AT's step (PGD-5 on each chunk + loss +
-  backward + optimizer) was one graph. Now: the training step, the training attack's
-  step (`Trainer._graphed_attack`), the validation's clean sums, the validation's
-  attack step (`Evaluation._attack`, a second `GraphedPGD` on the same model) and the
-  forward on the attacked batch. Validation runs in chunks of the micro-batch (D79),
-  so at full MNIST the training and validation attacks capture **the same shape
-  (256) twice, in two pools**, and the last, smaller validation chunk adds a third
-  shape per graph.
-- Warm-ups run eagerly on the side stream (D94); the allocator keeps their blocks
-  cached for that stream.
-- D104 adds ≈ 0.8 GiB per process (tk's kept nodes).
+After, on the eGPU (8 GB; full MNIST micro 256 does not fit there even eagerly for
+AT, so these are the nearest shapes): MNIST12 NAT batch 512 3.12 GiB per process, AT
+batch 256 1.93, AT batch 512 3.36 (D107); full MNIST NAT chunk 256 5.03 / 5.50 GiB
+allocated / reserved (eager 5.02 / 5.34), AT micro 128 3.90 / 5.92 (eager 3.89 /
+5.88) (D110). Step time: full-MNIST AT micro 128 1.8 s captured vs 5.1 s eager.
 
-**Measurements to take first** (cluster, one free GPU; `bench_train_step` prints
-allocated, reserved and per-process memory):
-1. **Attribute D104 vs D105:** the same four shapes at `f56365de` (D104, no D105) and
-   at `05c44cf8` (neither). Whatever D105 added is the graph structure; whatever D104
-   added is tk's kept nodes.
-2. **Per-graph accounting:** after training and one validation, the allocator's
-   snapshot (`torch.cuda.memory._snapshot()`, segments carry their pool id), summed per
-   pool, mapped to the `Graphed` objects (train step, training attack step, clean
-   sums, validation attack step, adversarial sums; each per shape). A bench option
-   that pickles the snapshot is fine (`tests/bench/`); the viewer is
-   `torch.cuda.memory._memory_viz`.
-3. **Eager baseline:** `--eager` at the same shapes, to separate what capture costs
-   from what the computation needs.
-4. Still open from D104's list: d3r80 micro 128 (did it fit?), and Gibbs on full
-   MNIST in a real analysis (≈ 50 s per run expected).
-
-**Possible solutions** (to propose to Martin with numbers; recommended first):
-- **A. One pool per `Graphs`** (`torch.cuda.graph_pool_handle()` passed to every
-  capture of one task). The graphs of a task never run at once, inputs are copied in
-  and outputs cloned out (D92), so reserved becomes ≈ the largest graph's peak
-  instead of the sum. Risk: memory that outlives a capture, allocated inside it
-  (tk's kept nodes and successors, D104; the log Z cache), could be reused by the
-  next capture. Check with D94's allocation tests (`test_graphs.py`: every allocation
-  of a capture in its pool) extended to two graphs, plus captured = eager.
-- **B. One `GraphedPGD` for training and validation.** The Trainer passes its attack
-  graph to `Evaluation`: same model, same graphs, same chunk shape at full MNIST, so
-  one capture and one pool instead of two. Cheap; AT only.
-- **C. Several steps per graph** instead of one: a graph of k steps with
-  k × sites under a bound (PGD-5 training at 784 sites ≈ 3,900 site-steps worked
-  before D105). Fewer graphs and launches, still bounded; adds a rule to tune.
-- **D. Free a task's graphs after use:** drop validation's captures (and
-  `empty_cache`) after each validation, re-capturing next time (seconds per
-  validation). Trades capture time for memory; simplest fallback for validation.
-- **E. Eager AT validation** (`eval_every` 5: a fifth of the epochs): no validation
-  graphs at all. Costs validation time, no risk.
-- **F. Smaller graphs at the source:** tk's environment-first forward (B·n·r·d stored
-  instead of B·n·r², the tensorkrowch track) lowers every graph's peak; not a fix for
-  the duplication.
-
-Expected order: measurements 1–3, then B (small, certain), then A (largest gain, needs
-the allocation tests), D or E only if A fails. (Recorded as D107: one pool per
-`Graphs`.)
+Open:
+- The analysis keeps per-shape warm-ups (its parts run in stages, so there is no
+  early cycle to warm up): ≈ 2× eager (784 sites, batch 64: 2.99 vs 1.52 GiB),
+  bounded by `analysis.batch_size`.
+- The dominant tensor at 784 sites is B·n·r² complex64 (2.39 GiB at B = 256, r = 40):
+  tk's environment-first forward (B·n·r·d, the tensorkrowch track) would shrink it
+  ≈ 13×.
+- Gibbs on full MNIST in a real analysis (≈ 50 s per run expected), from D104's list.
 
 **Rule from D94, still binding:** studies may run with `trainer.cuda_graph` on only
 from the D94 commit on, after the cluster check; never on `5c2db9cd`..`fc9d452e`.
@@ -304,7 +257,7 @@ Done on 2026-10-14 (session `ousterhout-sampling-efficiency`):
   instead of resetting, recorded like tk's `trace`; `_nodes_key` says whether the
   forward or a `sample` structure holds the network. Bit-identical; eager step 174 →
   130 ms, eager analysis 81 → 53 s, captured training unchanged; reserved +0.8 GiB per
-  process (cluster check above). tk's `reset` reorders `parameters()`: compare
+  process (checked on G21G01). tk's `reset` reorders `parameters()`: compare
   parameters by name across a reset.
 - **tensorkrowch:** branch `sampling-efficiency` on Martin's fork, one commit per bm4tc
   sampling step in develop's names, and `TK_NOTES.md` (tk internals: successors,
@@ -318,7 +271,9 @@ Done on 2026-10-14 (session `E2b-and-AT-graph-capture`):
   `Unit.after`); a CUDA-failed worker no longer skips select and every train.
 - **E2b written and run** (`pilot_beta28`, 150 epochs; `configs/hparams/pilot_beta12.yaml`
   tracked). Full-MNIST units' real memory in compute.md and plan.md.
-- **D105:** attacks and likelihood purification captured one step at a time (above).
+- **D105:** attacks and likelihood purification captured one step at a time (D105 in
+  decisions.md: a graph of the whole 40-step PGD at 784 sites crashed or ran out of
+  memory).
 
 Done on 2026-10-15 (session `tk sampling rebuild`):
 - **D106, `sample`: double layers only where something is summed, fixed sampling
@@ -344,7 +299,8 @@ Done on 2026-10-15 (session `tk sampling rebuild`):
   (untracked), explains it; **Martin reads it and decides on the upstream PR.**
 
 **Next (in this order):**
-1. E2b's read and the graph memory problem (handoff above).
+1. The cluster check of D107 + D110 (Start here, above), then `--per-gpu` for the
+   Phase 8 units.
 2. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
    `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
    questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.

@@ -3,7 +3,7 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D109, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D110, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
@@ -34,11 +34,12 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **E2b's decisions** (exponent, ladder, full-MNIST lr; below, E2b) and **the graph
-   memory problem** (AGENTS.md handoff). D104's cluster checks passed on G21G01
-   (`test_graphs` 16/16; the 784-site analysis gives the same numbers captured and
-   eager, 53 s vs 178 s, at 5.05 vs 1.52 GiB reserved). The AT grid {0, β\*} waits for
-   E3's verdict on purification under adaptive attacks (below, E2a).
+1. **The cluster check of D107 + D110** (AGENTS.md, "Start here"; D109 lets the agent
+   run it over SSH): `test_graphs` and the benches on G21G01, then `--per-gpu` for
+   the Phase 8 units. E2b's decisions are taken (D108). D104's cluster checks passed
+   on G21G01 (`test_graphs` 16/16; the 784-site analysis gives the same numbers
+   captured and eager, 53 s vs 178 s). The AT grid {0, β\*} waits for E3's verdict on
+   purification under adaptive attacks (below, E2a).
 2. **The sampling code (D100, D101, D103) and the reset-free forward (D104): done.**
    `SamplingMPS`, develop's sampler on tk 1.1.6, keeps its nodes between calls; Gibbs
    and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
@@ -154,11 +155,16 @@ need their `warm_from` study trained.
   1.52 GiB eager) on the RTX 2080, ≈ 0.08 GiB per sample, each step graph keeping a
   pool of its own; `pilot_beta28` analyses at batch 64. Graphs that never run at
   once (attack step, purification step, log p(x), prediction) could share one pool
-  (`torch.cuda.graph(pool=...)`; their replays already return copies). Options:
-  measure the analysis peak in the bench and size on it, a per-stage `--per-gpu`, or
-  free each part's captured graphs before the next part.
-- **Graph memory: reserved far above allocated, worst for AT (open, first in the
-  next session).** D104's check on G21G01 at `da7185e8` (D104 + D105),
+  (`torch.cuda.graph(pool=...)`; their replays already return copies). **D107 does
+  this** (one pool per `Graphs`): 2.99 GiB at batch 64 (eager 1.52); the analysis
+  keeps per-shape warm-ups (D110), so ≈ 2× eager. Still open: size `--per-gpu` on the
+  cluster benches (a per-stage `--per-gpu` if analyses stay larger than trains).
+- **Graph memory: reserved far above allocated, worst for AT: fixed by D107 + D110,
+  cluster check pending.** Per-pool accounting (`bench_train_step --snapshot`)
+  showed reserved = the sum of private pools (D107: one pool per `Graphs`) and eager
+  warm-ups after a capture adding their peak to the pool's (D110: the Trainer warms
+  everything up in epoch 1, then captures). eGPU: full-MNIST AT micro 128 5.92 GiB
+  reserved (eager 5.88), NAT chunk 256 5.50 (eager 5.34). Before, D104's check on G21G01 at `da7185e8` (D104 + D105),
   `bench_train_step`, β 0.5, batch 512, per process (nvidia-smi):
   MNIST12 d3r40 NAT 4.57 GiB (1.82 allocated at peak, 4.24 reserved; E2a measured
   3.89 before D104), AT 10.92 GiB (2.76 allocated, 10.42 reserved); full MNIST
@@ -170,7 +176,8 @@ need their `warm_from` study trained.
   D104's +0.8 GiB. To measure first: the same bench at `f56365de` (D104 without
   D105), then a shared pool for the graphs of one `Graphs` (they never run at once;
   inputs are copied in, outputs cloned out), checked with D94's allocation tests
-  (tk's kept nodes, D104, may hold capture-time memory).
+  (tk's kept nodes, D104, may hold capture-time memory). Measured instead per pool;
+  the attribution to D104 vs D105 was not needed.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
   once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
   is/are busy or unavailable" (MPS refusing clients that connect together; retried
@@ -178,9 +185,9 @@ need their `warm_from` study trained.
 - **Gibbs purification on full MNIST** (≈ 40–80 GPU-h per run, out of memory at
   batch 24): the rework under Efficiency, or enable `analysis.sweep_purify` only
   where the paper reads it (`paper.yaml`'s `mnist_sweep_purify`).
-- **Full-MNIST d3r80 (micro 128) does not fit**: validation needs ≈ 4.8 GiB beside
-  the step's 16 GiB pool. Smaller validation chunks or micro 64; `mnist_capacity`
-  decides.
+- **Full-MNIST d3r80 (micro 128) did not fit**: validation needed ≈ 4.8 GiB beside
+  the step's 16 GiB pool, exactly what D107 + D110 remove. Recheck in the cluster
+  check; `mnist_capacity` decides.
 - **Adaptive attacks:** implemented (D96, D98); E3 and its saturation ablation set
   `analysis.adaptive`'s defaults (Now, step 3).
 - **Re-estimate compute.md** with graphs, MPS and the HPO budget (D81 cuts the HPO
