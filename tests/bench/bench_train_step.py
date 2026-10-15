@@ -21,7 +21,14 @@ allocator's cache and the graphs' pools), and the process as nvidia-smi sees it 
 the end, CUDA context included: that is what one unit takes from the GPU, so
 `--per-gpu` is about (GPU memory - other processes) / this (D95; E2a's units held
 3.9 GiB each on <node> where reserved said 2.9).
+
+`--snapshot FILE` pickles the allocator's state after training (the viewer is
+`python -m torch.cuda._memory_viz`) and prints what each memory pool holds then:
+the graphs' pools (each named by the captures in it: the Trainer's attribute and
+the input shape) and the general cache, per stream (the default stream, and the side stream that ran
+the warm-ups, D94).
 """
+import pickle
 import argparse
 import os
 import statistics
@@ -81,10 +88,50 @@ def process_gpu_memory() -> Optional[int]:
     return None
 
 
-def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, int, Optional[int]]:
+def _graphed(trainer: Trainer) -> dict:
+    """The Trainer's captured functions by name, after train()."""
+    graphed = {"train step": trainer._graphed_train_step}
+    if trainer._graphed_attack is not None:
+        graphed["train attack step"] = trainer._graphed_attack.step
+    evaluation = trainer._evaluation
+    graphed["valid clean sums"] = evaluation._clean_sums
+    if evaluation._attack is not None:
+        graphed["valid attack step"] = evaluation._attack.step
+        graphed["valid adversarial sums"] = evaluation._adversarial_sums
+    return graphed
+
+
+def pool_report(trainer: Trainer, snapshot: dict) -> list[tuple[str, int, int]]:
+    """(name, reserved, allocated) [bytes] per memory pool in ``snapshot``: the
+    graphs' pools, named by the captures in each, then the general cache per
+    stream."""
+    graphs_in = {}
+    for name, graphed in _graphed(trainer).items():
+        for key, capture in graphed._captures.items():
+            graphs_in.setdefault(capture.graph.pool(), []).append(f"{name} {list(key[0][0])}")
+    names = {pool: ", ".join(graphs) for pool, graphs in graphs_in.items()}
+    side = trainer._graphed_train_step.graphs.side_stream.cuda_stream
+    totals = {}
+    for segment in snapshot["segments"]:
+        pool = tuple(segment["segment_pool_id"])
+        if pool in names:
+            name = names[pool]
+        elif pool == (0, 0):
+            stream = segment["stream"]
+            name = ("cache, default stream" if stream == 0 else
+                    "cache, side stream (warm-ups)" if stream == side else f"cache, stream {stream}")
+        else:
+            name = f"pool {pool} (not a Trainer graph)"
+        reserved, allocated = totals.get(name, (0, 0))
+        totals[name] = (reserved + segment["total_size"], allocated + segment["allocated_size"])
+    return [(name, *totals[name]) for name in sorted(totals, key=lambda n: -totals[n][0])]
+
+
+def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, int, Optional[int], list]:
     """Seconds per training step, one value per timed epoch, the peak memory
-    allocated and reserved, and the process's GPU memory at the end [bytes]
-    (0, 0, None on CPU)."""
+    allocated and reserved, the process's GPU memory at the end [bytes]
+    (0, 0, None on CPU), and with ``--snapshot`` the pools after training
+    (:func:`pool_report`)."""
     torch.manual_seed(0)
     born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=args.bond_dim))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, args.features, N_CLASSES, device)
@@ -114,9 +161,16 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, in
         torch.cuda.reset_peak_memory_stats(device)
     trainer.train()
     if device.type != "cuda":
-        return times[1:], 0, 0, None
+        return times[1:], 0, 0, None, []
+    pools = []
+    if args.snapshot is not None:
+        snapshot = torch.cuda.memory._snapshot()
+        path = args.snapshot.with_name(f"{args.snapshot.stem}_{regime}{args.snapshot.suffix}")
+        with open(path, "wb") as f:
+            pickle.dump(snapshot, f)
+        pools = pool_report(trainer, snapshot)
     return (times[1:], torch.cuda.max_memory_allocated(device),
-            torch.cuda.max_memory_reserved(device), process_gpu_memory())
+            torch.cuda.max_memory_reserved(device), process_gpu_memory(), pools)
 
 
 def main():
@@ -132,6 +186,9 @@ def main():
     parser.add_argument("--micro-batch", type=int, default=None)
     parser.add_argument("--beta", type=float, default=0.0)
     parser.add_argument("--eager", action="store_true", help="do not capture the step")
+    parser.add_argument("--snapshot", type=Path, default=None,
+                        help="pickle the allocator state after training to FILE_{regime}.pickle "
+                             "and print the memory per pool")
     args = parser.parse_args()
     device = torch.device(args.device)
 
@@ -141,13 +198,16 @@ def main():
           f"batch {args.batch}, micro-batch {args.micro_batch}, β {args.beta}, {mode}, "
           f"{args.steps} steps x {args.epochs - 1} timed epochs, {name}")
     for regime in (["nat", "at"] if args.regime == "both" else [args.regime]):
-        times, allocated, reserved, process = bench(regime, args, device)
+        times, allocated, reserved, process, pools = bench(regime, args, device)
         ms = [1e3 * t for t in times]
         unit = "" if process is None else f", {process / 2**30:.2f} GiB per process (nvidia-smi)"
         print(f"  {regime}: {statistics.mean(ms):8.1f} ms/step  "
               f"(min {min(ms):.1f}, max {max(ms):.1f}, {len(ms)} epochs), "
               f"peak {allocated / 2**30:.2f} GiB allocated, {reserved / 2**30:.2f} GiB reserved"
               f"{unit}")
+        for name, pool_reserved, pool_allocated in pools:
+            print(f"    {pool_reserved / 2**30:6.2f} GiB reserved, {pool_allocated / 2**30:6.2f} "
+                  f"allocated: {name}")
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
