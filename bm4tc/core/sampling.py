@@ -68,7 +68,11 @@ data into the running result site by site, so autograd keeps vectors instead of
 one matrix per site (``contract``'s docstring says when it is better). The
 default is tensorkrowch's ``contract``, unchanged. ``_inline_contraction``
 absorbs the data nodes, and its renormalization step is ``_renormalize_inline``,
-which a subclass that keeps the norm overrides.
+which a subclass that keeps the norm overrides. The option is ported to
+tensorkrowch ``develop`` on the fork's branch ``zipup-input`` (``5aa81c6``),
+where ``marginalize_output`` works with it too; here it raises, as nothing in
+bm4tc needs it. ``_renormalize_inline`` has no tensorkrowch counterpart: it
+goes when tensorkrowch's ``renormalize`` keeps the norm (plan.md).
 """
 import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Text, Tuple, Union
