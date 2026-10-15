@@ -5,7 +5,7 @@ for a study's shape before a launch (D90: units share a GPU under MPS, so memory
 per unit bounds `--per-gpu`). Not collected by pytest; run by hand on the GPU and
 put the numbers in the commit message:
 
-    python -m tests.bench.bench_train_step [--steps 20] [--epochs 3] [--device cuda]
+    python -m tests.bench.bench_train_step [--steps 20] [--epochs 5] [--device cuda]
     python -m tests.bench.bench_train_step --features 784 --bond-dim 40 --batch 512 \
         --micro-batch 256 --beta 0.5          # full MNIST d3r40, as mnist_capacity trains it
 
@@ -13,9 +13,10 @@ Random inputs in the embedding's input range, 10 classes; the defaults are MNIST
 (144 features), d3r20, batch 256, β = 0. The Trainer runs through its public
 `train()` with its defaults (on CUDA the step and the validation are captured, D90,
 D92; `--eager` turns that off); only `_train_epoch` is timed (the validation pass is
-not), and the first epoch is discarded as warm-up. The validation split is 2.5
-chunks, as a real one has full chunks and a last partial one: over the default 5
-epochs both shapes are captured, into the graphs' one pool (D107). Peak memory covers
+not), and the first two epochs are discarded: epoch 1 runs eagerly, epoch 2
+captures (D110). The validation split is 2.5 chunks, as a real one has full
+chunks and a last partial one, so both shapes are captured, into the graphs' one
+pool (D107). Peak memory covers
 the whole run, validation and capture included: allocated, reserved (the
 allocator's cache and the graphs' pools), and the process as nvidia-smi sees it at
 the end, CUDA context included: that is what one unit takes from the GPU, so
@@ -47,6 +48,7 @@ from bm4tc.core.train import Trainer, TrainConfig
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 N_CLASSES = 10
+WARM_EPOCHS = 2   # untimed: epoch 1 eager, epoch 2 captures (D110)
 
 
 def _config(path: Path, **overrides):
@@ -161,7 +163,7 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, in
         torch.cuda.reset_peak_memory_stats(device)
     trainer.train()
     if device.type != "cuda":
-        return times[1:], 0, 0, None, []
+        return times[WARM_EPOCHS:], 0, 0, None, []
     pools = []
     if args.snapshot is not None:
         snapshot = torch.cuda.memory._snapshot()
@@ -169,7 +171,7 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, in
         with open(path, "wb") as f:
             pickle.dump(snapshot, f)
         pools = pool_report(trainer, snapshot)
-    return (times[1:], torch.cuda.max_memory_allocated(device),
+    return (times[WARM_EPOCHS:], torch.cuda.max_memory_allocated(device),
             torch.cuda.max_memory_reserved(device), process_gpu_memory(), pools)
 
 
@@ -177,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--steps", type=int, default=20, help="training steps per epoch")
     parser.add_argument("--epochs", type=int, default=5,
-                        help="epochs, the first is warm-up (5 capture both validation shapes)")
+                        help="epochs, the first two untimed (eager, then capture)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--regime", choices=["nat", "at", "both"], default="both")
     parser.add_argument("--features", type=int, default=144, help="sites (MNIST12 144, MNIST 784)")
@@ -196,7 +198,7 @@ def main():
     mode = "eager" if args.eager or device.type != "cuda" else "captured"
     print(f"legendre d3r{args.bond_dim} c64, {args.features} features, {N_CLASSES} classes, "
           f"batch {args.batch}, micro-batch {args.micro_batch}, β {args.beta}, {mode}, "
-          f"{args.steps} steps x {args.epochs - 1} timed epochs, {name}")
+          f"{args.steps} steps x {args.epochs - WARM_EPOCHS} timed epochs, {name}")
     for regime in (["nat", "at"] if args.regime == "both" else [args.regime]):
         times, allocated, reserved, process, pools = bench(regime, args, device)
         ms = [1e3 * t for t in times]

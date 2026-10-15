@@ -30,6 +30,16 @@ then scratch that a later capture of the task may reuse. A graph must therefore
 not carry state from one replay to the next in memory it allocated during its
 capture: such state lives in tensors made outside capture (parameters,
 gradients and optimizer state from the eager warm-ups) or in its outputs.
+
+Warm up everything, then capture (D110). Eager code cannot use the pool's free
+memory, so an eager warm-up that runs after a capture adds its peak to the
+pool's: a run peaked near twice a chunk's eager memory (full MNIST d3r40, chunk
+256: out of memory on 8 GB in validation's first warm-up, the training step's
+capture having left ≈ 5.3 GiB of free pool memory). A :class:`Graphs` made with
+``warm_up_first`` runs every call eagerly until :meth:`Graphs.start_capture`;
+the Trainer calls it after epoch 1, once every function has run at every shape.
+The pool then fills only after the eager work ends, and the peak is about the
+larger of the two (full-MNIST AT, micro 128: 5.92 GiB reserved, eager 5.88).
 """
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
@@ -63,12 +73,24 @@ class Graphs:
     their autograd nodes (module docstring, D94). Every graph captures into one
     memory pool, so the task reserves about its largest graph's memory, not the
     sum (module docstring, D107).
+
+    With ``warm_up_first``, every call runs eagerly (a warm-up) until
+    :meth:`start_capture`; from then on a function captures at its next call
+    at any shape it has run at once, and a shape it has not seen warms up
+    ``warmup_calls`` times first, as without the phase (module docstring,
+    D110). Without it, each function and shape warms up on its own.
     """
 
-    def __init__(self, enabled: bool):
+    def __init__(self, enabled: bool, warm_up_first: bool = False):
         self.enabled = enabled
         self._side_stream = None
         self._pool = None
+        self.capturing = not warm_up_first
+
+    def start_capture(self):
+        """End the warm-up phase: from the next call on, the functions capture
+        and replay."""
+        self.capturing = True
 
     @property
     def side_stream(self) -> "torch.cuda.Stream":
@@ -101,7 +123,8 @@ class Graphed:
     Per input shape, the first ``warmup_calls`` calls run eagerly on a side
     stream (capture needs the library handles and autograd's streams set up),
     the next one captures the graph and replays it, and every later call
-    replays it. Every call does the function's work exactly once, so the warm-up
+    replays it; in a phased :class:`Graphs`, every call before
+    :meth:`Graphs.start_capture` is eager and one is enough. Every call does the function's work exactly once, so the warm-up
     calls are real calls (training steps, for a training step).
     """
 
@@ -110,6 +133,7 @@ class Graphed:
         self.graphs = graphs
         self.warmup_calls = warmup_calls
         self._eager_calls: Dict[tuple, int] = {}
+        self._warmed_in_phase: set = set()   # shapes run before start_capture (D110)
         self._captures: Dict[tuple, _Capture] = {}
 
     @property
@@ -123,8 +147,11 @@ class Graphed:
         capture = self._captures.get(key)
         if capture is None:
             calls = self._eager_calls.get(key, 0)
-            if calls < self.warmup_calls:
+            ready = calls >= self.warmup_calls or key in self._warmed_in_phase
+            if not (self.graphs.capturing and ready):
                 self._eager_calls[key] = calls + 1
+                if not self.graphs.capturing:
+                    self._warmed_in_phase.add(key)
                 return self._warm_up(inputs)
             capture = self._captures[key] = self._capture(inputs)
         for static, x in zip(capture.inputs, inputs):

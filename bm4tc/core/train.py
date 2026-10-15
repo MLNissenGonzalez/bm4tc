@@ -422,7 +422,7 @@ class Trainer:
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
-        graphs = Graphs(enabled=cfg.cuda_graph and on_cuda)
+        graphs = Graphs(enabled=cfg.cuda_graph and on_cuda, warm_up_first=True)
         self._graphed_train_step = graphs.wrap(self._train_step)
         if self.attack is not None:
             self._graphed_attack = self.attack.graphed(self.cbm, graphs)
@@ -471,6 +471,14 @@ class Trainer:
 
             if validated:
                 self._update(valid)
+            if not graphs.capturing:
+                # Epoch 1 ran every call eagerly (D110). Validation must have
+                # run once too: when this epoch did not validate (AT validates
+                # every 5 epochs), a warm-up validation runs, its result unused,
+                # so the records and the selection are eager's.
+                if not validated:
+                    self._validate()
+                graphs.start_capture()
             self.epoch_times.append(time.perf_counter() - epoch_start)
 
             if self.patience_counter > cfg.patience:
