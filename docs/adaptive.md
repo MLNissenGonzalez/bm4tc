@@ -252,6 +252,56 @@ in particular E2c's 0.82 at high β and ε = 0.1? Does detection survive the ada
 attack, against its higher ceiling? Which β is best under adaptive attack? Then the
 saturation ablation (steps, restarts, EOT) sets `analysis.adaptive`'s defaults.
 
+## 6. E3 (2026-10-15): the trimmed pilot
+
+Run on G21G01 (GPU 3, 6 units under MPS, worktree `runs/34acaa91`, 55 min for the
+study); results in `pilots/cluster/pilot_adaptive_spirals/` (untracked). Spirals,
+d10r6, E2c's lr, one seed, 6 β; detection at q5, likelihood purification at δ = 0.1,
+Gibbs at 1 and 6 sweeps (250 points), adaptive attacks with D98's warm start, EOT 8.
+Clean accuracy 1.0 (0.9995 at β ≥ 0.9); clean purified 1.0, clean Gibbs k6
+0.976–1.0.
+
+At ε = 0.1 (ceiling: test 0.676, population 0.655; selective population 0.989):
+
+| β | PGD (`rob`) | purify: transfer / adaptive | Gibbs k1 | Gibbs k6 | detect q5 (`rob_sel`): transfer / adaptive |
+|---|---|---|---|---|---|
+| 0 | 0.579 | 0.610 / 0.465 | 0.676 / 0.335 | 0.696 / 0.514 | 0.822 / 0.720 |
+| 0.01 | 0.511 | 0.622 / 0.443 | 0.648 / 0.325 | 0.704 / 0.475 | 0.893 / 0.881 |
+| 0.1 | 0.559 | 0.689 / 0.421 | 0.684 / 0.319 | 0.732 / 0.471 | 0.925 / 0.902 |
+| 0.5 | 0.523 | 0.716 / 0.493 | 0.728 / 0.350 | 0.744 / 0.512 | 0.939 / 0.908 |
+| 0.9 | 0.543 | 0.828 / 0.555 | 0.824 / 0.369 | 0.828 / 0.555 | 0.947 / 0.914 |
+| 1 | 0.544 | 0.842 / 0.397 | 0.832 / 0.396 | 0.844 / 0.505 | 0.945 / 0.918 |
+
+At ε = 0.15 (ceiling 0.630 / 0.602; selective 0.74): PGD 0.35–0.45; purify transfer
+0.46–0.70, adaptive 0.08–0.22; Gibbs k6 transfer 0.57–0.72, adaptive 0.21–0.30;
+detection transfer 0.55–0.91, adaptive 0.26 (β 0) to 0.52 (β 1). At ε = 0.2 the same
+pattern, lower. At ε = 0.05 everything is within 0.06 of the ceiling (0.989).
+
+- **Every adaptive number is under both ceilings, at every β and ε.** The transfer
+  numbers were not: purification at β ≥ 0.9 and ε = 0.1 (0.83–0.84, E2c's 0.82) and
+  detection at ε = 0.15–0.2 (up to 0.91 and 0.84, ceilings 0.74 and 0.655) are above
+  what any classifier can reach. They measured a weak attack, not the defence.
+- **Purification does not hold under adaptive attack.** Likelihood purification and
+  Gibbs fall to about the undefended model's accuracy at ε = 0.1 (0.32–0.56 against
+  PGD's 0.51–0.58) and far below it at ε ≥ 0.15 (purify 0.04–0.22 against 0.34–0.45).
+  A likely reading: the purifier moves the input by up to δ = 0.1, and the attacker
+  steers that move, so the defended model faces a budget of about ε + δ.
+- **Detection holds best, and grows with β:** adaptive selective accuracy at ε = 0.1
+  rises from 0.72 (β = 0) to 0.91–0.92 (β ≥ 0.5), under the selective ceiling 0.989;
+  at ε = 0.15, 0.26 → 0.52 (ceiling 0.74). The detector attack (selective PGD) costs
+  detection 0.01–0.1 at ε = 0.1 and 0.25–0.4 at ε ≥ 0.15 against the transfer attack.
+- **D98 works:** the adaptive attack is never weaker than the transfer attack for the
+  deterministic defences. The one exception, Gibbs k6 at β = 1 and ε = 0.05 (0.956 vs
+  0.952), is one point of 250, within Gibbs's sampling noise.
+- **β:** under adaptive attack, detection prefers β ≥ 0.5 (0.5, 0.9 and 1 agree within
+  one seed); purification has no β where it beats the undefended model at ε ≥ 0.1.
+- **float32 (D106):** no "negative beyond numerical tolerance" in any of the 6
+  analyses (spirals models are 2 sites; not evidence for MNIST).
+- A logging bug, results unaffected: the `gibbs` and `adaptive` parts rerun the attack
+  without thresholds, and `next(iter(det.values()))` on the empty detection dict logs
+  "Detection/attack failed: ; skipping" per budget (the adversarial examples are
+  cached before it, so every number is computed); fix proposed, not made.
+
 ## References
 
 - A. Athalye, N. Carlini, D. Wagner. Obfuscated gradients give a false sense of security.

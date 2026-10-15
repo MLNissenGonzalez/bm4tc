@@ -292,7 +292,7 @@ Done on 2026-10-15 (session `tk sampling rebuild`):
 
 **Next (in this order):**
 1. ~~The cluster check of D107 + D110~~ (passed; Start here, above).
-2. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
+2. ~~E3~~ (run on G21G01 and read: `docs/adaptive.md` §6; purification falls under adaptive attack, detection holds). Was: **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
    `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
    questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.
    Gibbs is cheap now (D101, D103, D106); check float32 on a trained model first

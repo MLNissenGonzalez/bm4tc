@@ -50,9 +50,14 @@ Next, in order:
    and the figures use it; the tensorkrowch patch is branch `sampling-efficiency` on
    Martin's fork. D104 needs its cluster checks (AGENTS.md) before a launch
    ([Sampling](#sampling-tensorkrowch-develops-sampler-on-116-d100)).
-3. **Run E3** (trimmed, with D98; ~1.5–2 h on the eGPU, launch it detached so the
-   terminal can close), read it against the ceilings, then the saturation ablation
-   (steps, restarts, EOT) that sets `analysis.adaptive`'s defaults.
+3. **E3: run and read (2026-10-15, G21G01, `docs/adaptive.md` §6).** Every adaptive
+   number is under the ceilings; the transfer numbers above them (E2c's 0.82) measured
+   a weak attack. Purification (likelihood and Gibbs) does not hold under adaptive
+   attack (about the undefended model at ε = 0.1, far below at ε ≥ 0.15); detection
+   does, and grows with β (0.72 → 0.92 at ε = 0.1). By the rule below (E2a's
+   decision), the AT grid now waits for the `adaptive` part on a few E2a checkpoints.
+   Then the saturation ablation (steps, restarts, EOT) for `analysis.adaptive`'s
+   defaults.
 4. Before Phase 8 (below): cap HPO workers per cell, `select`/`run --cell` on a
    subset, a multi-study launcher.
 5. Phase 8 studies.
@@ -630,7 +635,7 @@ networks generatively).
 
 - **Adaptive attacks** a reviewer will ask for: implemented for likelihood
   purification, Gibbs/SGLD and the detector (D96), started from the transfer attack
-  (D98); E3 to run (`docs/adaptive.md` §5).
+  (D98); E3 read (`docs/adaptive.md` §6): purification falls, detection holds.
 - **Time series** (D6): datasets, grids and studies (NAT and AT; JEM if wanted).
 - **Trainer unification** for MPS and JEM: noted, not decided (decisions.md, under
   the table).
