@@ -164,8 +164,10 @@ def test_sample_with_in_condition_matches_exact_conditionals(captured,
             prefixes[batch].append(indices[batch, step].item())
 
 
-def test_sample_canonical_matches_right_environments(captured):
-    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=2, boundary='obc')
+@pytest.mark.parametrize('out_features', [[], [0], [1]])
+def test_sample_canonical_matches_right_environments(captured, out_features):
+    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=2, boundary='obc',
+                      out_features=out_features)
     mps.canonicalize(oc=0, mode='svd')
 
     mps.sample(n_samples=2, canonical=False)
@@ -177,6 +179,41 @@ def test_sample_canonical_matches_right_environments(captured):
     assert len(environment_probs) == len(canonical_probs)
     for probs_env, probs_canonical in zip(environment_probs, canonical_probs):
         assert torch.allclose(probs_env, probs_canonical, atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.parametrize('boundary', BOUNDARY_CASES)
+@pytest.mark.parametrize('conditioned', [False, True])
+def test_sample_many_marginalized_sites(captured, boundary, conditioned):
+    # 20 output sites of dimension 3 around 4 inputs. Summing each output
+    # inside |psi|^2 joins ket and bra there; a single layer would carry one
+    # vector per combination of output values (3**20).
+    in_features = [0, 7, 16, 23]
+    mps = SamplingMPS(n_features=24,
+                      phys_dim=[2 if site in in_features else 3
+                                for site in range(24)],
+                      bond_dim=3, boundary=boundary,
+                      out_features=[site for site in range(24)
+                                    if site not in in_features],
+                      dtype=torch.float64)
+    condition_ids = torch.tensor([[1, 0, 1, 1], [0, 1, 0, 0]])
+    kwargs = dict(n_samples=1)
+    if conditioned:
+        kwargs = dict(in_condition=tk.embeddings.basis(condition_ids, dim=2)
+                      .to(torch.float64))
+
+    configs, probs = _exact_input_distribution(mps)
+    _, indices = mps.sample(renormalize=True, return_indices=True, **kwargs)
+
+    assert len(captured) == 4
+    for row in range(indices.shape[0]):
+        prefix = []
+        for step, local_probs in enumerate(captured):
+            expected = _conditional_probs_from_exact(
+                configs, probs, step, prefix, 2,
+                condition=condition_ids[row] if conditioned else None)
+            assert torch.allclose(local_probs[row], expected.to(local_probs),
+                                  atol=1e-5, rtol=1e-5)
+            prefix.append(indices[row, step].item())
 
 
 @pytest.mark.parametrize(
@@ -649,10 +686,11 @@ def test_repeated_sweeps_reuse_nodes_and_draw_as_fresh(boundary, out_features):
 
 @pytest.mark.parametrize('boundary', BOUNDARY_CASES)
 @pytest.mark.parametrize('canonical', [False, True])
+@pytest.mark.parametrize('out_features', [[], [1]])
 def test_repeated_unconditioned_samples_reuse_nodes_and_draw_as_fresh(
-        boundary, canonical):
+        boundary, canonical, out_features):
     mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=3, boundary=boundary,
-                      out_features=[1])
+                      out_features=out_features)
     if canonical and boundary == 'obc':
         mps.canonicalize(oc=0, renormalize=True)
     kwargs = dict(n_samples=5, canonical=canonical and boundary == 'obc',
