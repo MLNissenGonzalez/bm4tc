@@ -447,15 +447,15 @@ The training step, validation and the analysis's per-batch work are captured
 (D90, D92, D94); the measurements and memory per unit are in compute.md. What is
 left:
 
-- **The forward stores B·n·r² (noted, not scheduled).** `log_amp_sq` (training,
-  validation, log p(x)) runs tk 1.1.6's `contract`: every site is contracted with its
-  data first, into a (B, r, r) matrix, and all are kept (autograd keeps them for the
-  backward). Measured: 153 MiB per point at 784 sites, r160 (exactly n·r²·8 bytes),
-  38 MiB per point at r80 with 10 classes. Environment first, as develop's `norm`
-  zips up and the Gibbs sweep does (D101): the running vector absorbs the site
-  (B, d, r), then the data (B, r), so B·n·r·d is stored, ≈ 27× less at r80, d 3; the
-  time stays B·r²·d per site. It may be what puts d3r80 micro 128 out of memory.
-  Core path (D30): the bar below applies.
+- **The forward stored B·n·r²: done (D112).** `log_amp_sq` contracts with
+  `zipup_input=True`: the running vector absorbs each site, then its data, so autograd
+  keeps (B, r) vectors, not a (B, r, r) matrix per site. Full MNIST d3r40 trains at
+  batch 512 without micro-batches on the 8 GB eGPU (257 ms/step NAT, 1.49 GiB per
+  process; micro 128: 881 ms). Open: the two chains as one stacked chain (≤ 2× where
+  launch-bound); fewer kernels per site (≈ 30, most of them the renormalization: a
+  renormalize that keeps the log norm, below); whether micro-batches (D79) and D111's
+  `analysis.batch_size: 128` (sized for data first's memory) are still needed (Martin
+  decides); the cluster numbers for `--per-gpu`.
 - **The forward without `reset`: done (D104), cluster check open.** `forward` calls
   `contract()` on its kept nodes, recorded like tk's `trace`; bit-identical, eager step
   174 → 130 ms, eager analysis 81 → 53 s, captured training unchanged (compute.md,

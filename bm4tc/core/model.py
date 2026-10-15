@@ -308,8 +308,10 @@ class ConditionalBornMachine(SamplingMPS):
         ``psi_renorm`` is unit-modulus (pure phase/sign), ``log_norm`` the real
         log-magnitude.
 
-        Runs ``contract`` with ``inline_mats=True`` so the sole renorm site is the
-        overridden ``_renormalize_inline``. ``contract`` itself, not tk's
+        Runs ``contract`` with ``zipup_input=True`` (D112): the data are
+        contracted into the running vector site by site, so autograd keeps
+        (B, r) vectors, not tk's (B, r, r) matrix per site; the sole renorm
+        site is the overridden ``_renormalize_inline``. ``contract`` itself, not tk's
         ``forward`` (which replays the recorded operations once result nodes
         exist and would skip the accumulation): the Python code runs every call
         while each operation reuses its node from the previous one, so nothing
@@ -328,7 +330,7 @@ class ConditionalBornMachine(SamplingMPS):
         self.add_data(data)
         self._tracing = first
         try:
-            out = self.contract(renormalize=True, inline_mats=True).tensor   # (B, C), finite
+            out = self.contract(renormalize=True, zipup_input=True).tensor   # (B, C), finite
         except BaseException:
             self._tracing = False
             self.reset()

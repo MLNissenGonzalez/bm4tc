@@ -286,6 +286,29 @@ bare train and validate loop shows none, so something in the Trainer's path
 4 × 4.5 GiB still fits 22 GB). Full MNIST d3r40 micro 256 and AT at E2a's shape do
 not fit the 8 GB laptop (before and after alike): cluster.
 
+## Since D112: the data zipped into the running vector (2026-10-15)
+
+`log_amp_sq` contracts with `zipup_input=True` (D112): autograd keeps (B, r) vectors
+per site instead of a (B, r, r) matrix. Laptop RTX 2080, `bench_train_step --beta 0.5
+--bond-dim 40 --batch 512`, captured, from a worktree of the commit before (`9fd8a22a`)
+and the change. Memory: allocated peak / reserved / per process (nvidia-smi).
+
+| Shape | Before | After |
+|---|---|---|
+| MNIST 12×12 NAT | 61.7 ms/step, 1.82 / 2.87 / 3.12 GiB | 49.0 ms/step, 0.13 / 0.20 / 0.46 GiB |
+| MNIST 12×12 AT | 303.0 ms, 2.75 / 2.93 / 3.31 | 182.1 ms, 0.18 / 0.27 / 0.67 |
+| full MNIST micro 128 NAT | 887.9 ms, 2.64 / 4.08 / 4.66 | 880.6 ms, 0.33 / 0.50 / 2.26 |
+| full MNIST micro 128 AT | 3635.9 ms, 3.90 / 5.93 / 7.59 | 3464.0 ms, 0.40 / 0.56 / 3.56 |
+| full MNIST, no micro-batches, NAT | out of memory (8 GB) | 256.8 ms, 0.66 / 0.85 / 1.49 |
+| full MNIST, no micro-batches, AT | out of memory | 1293.6 ms, 0.86 / 1.12 / 2.53 |
+
+The allocated peak drops 7–14×; per process, what remains is mostly the CUDA context
+and the graphs. At full MNIST the step is launch-bound, so micro-batches now cost
+3–3.5× in time and buy nothing. Where each path wins (a 33-shape sweep of the
+amplitude contraction alone, D112): in memory always, for d < r; in captured time from
+B·r² ≈ 3·10⁵ up, 1.1–1.3× slower below; eager ≈ 1.3× slower. The cluster numbers
+(`--per-gpu`) are not measured yet.
+
 ## Appendix: measurements
 
 RTX 2080, torch 2.1.0, one unit alone unless stated. Epoch time is the mean over
