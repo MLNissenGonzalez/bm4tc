@@ -80,34 +80,26 @@ place, no pass-through layers.
 
 ## State (2026-10-15)
 
-Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D108; D109 (Martin) and
-D110 are local until Martin says to push.
+Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D110 (`5e41a7d3`).
 Phases 0–7 of the refactor are done; `main` is untouched and the local tag
 `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
 `docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates and
 the measurements since (stale numbers are marked there).
 
-Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (done up to
-the cluster check; handoff below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
+Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (done, cluster check
+included; handoff below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
 left uncommitted).
 
-**Start here (graph capture, cluster check):**
-1. **Cluster check of D107 + D110** (D94's rule: no AT launch with `trainer.cuda_graph`
-   before it). D110 must be pushed first (ask Martin), then deployed as a worktree
-   (`runs/<sha>`, D109 commands above). **Ask before taking GPUs** (name node and
-   indices). Run in one `claude-d110-check` screen, output to
-   `$R/d110_checks/*.log`:
-   - `pytest -q -p no:logging tests/unit/test_graphs.py` (19 tests).
-   - `python -m tests.bench.bench_train_step --beta 0.5 --bond-dim 40 --snapshot <file>`
-     at the four shapes of the table below (MNIST12 batch 512 NAT and AT; full MNIST
-     `--features 784 --batch 512 --micro-batch 256` NAT and AT), each `--regime`
-     alone, plus `--eager` at the full-MNIST shapes. Then d3r80 micro 128 (`--bond-dim
-     80 --micro-batch 128`, open since D104: does it fit now?).
-   - `python -m tests.bench.bench_analysis --features 784 --batch 64` (and 256: how
-     far can `analysis.batch_size` go at 784 sites?).
-   Compare with the "before" table; set `--per-gpu` from per-process memory; update
-   `docs/compute.md` ("Since CUDA graphs") and plan.md.
-2. **E3** and the rest (below, "Next").
+**Start here:** the cluster check of D107 + D110 **passed** (2026-10-15, G21G01 GPU 5,
+worktree `runs/5e41a7d3`, run by the agent over SSH): `test_graphs` 19/19, every shape
+fits (full MNIST d3r40 AT 10.3 GiB per process, out of memory before; d3r80 micro 128
+AT 19.9 GiB), the 784-site analysis gives the same numbers captured and eager.
+compute.md, "Cluster check of D107 + D110", has the table and `--per-gpu` per study
+shape (MNIST12 5, full MNIST d3r40 2 with `analysis.batch_size` ≤ 128 else 1, d3r80 1).
+D94's rule is met: AT may run with `trainer.cuda_graph` from `d2aca0e5` on.
+Open from it (plan.md): `analysis.batch_size` for full MNIST (Martin decides); the
+first-capture transient (epoch-1 eager tensors held by tk's nodes beside the new pool).
+Next is **E3** (below, "Next").
 
 ### Handoff: graph capture (2026-10-15, evening)
 
@@ -299,8 +291,7 @@ Done on 2026-10-15 (session `tk sampling rebuild`):
   (untracked), explains it; **Martin reads it and decides on the upstream PR.**
 
 **Next (in this order):**
-1. The cluster check of D107 + D110 (Start here, above), then `--per-gpu` for the
-   Phase 8 units.
+1. ~~The cluster check of D107 + D110~~ (passed; Start here, above).
 2. **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
    `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
    questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.

@@ -34,9 +34,14 @@ source of truth); the section below groups them by theme. Measured costs are in
 
 Next, in order:
 
-1. **The cluster check of D107 + D110** (AGENTS.md, "Start here"; D109 lets the agent
-   run it over SSH): `test_graphs` and the benches on G21G01, then `--per-gpu` for
-   the Phase 8 units. E2b's decisions are taken (D108). D104's cluster checks passed
+1. **The cluster check of D107 + D110: passed (2026-10-15)**, run by the agent over
+   SSH (D109) on G21G01 GPU 5 at `5e41a7d3`: `test_graphs` 19/19; every shape fits,
+   full MNIST d3r40 AT at 10.3 GiB per process (out of memory before), d3r80 micro
+   128 NAT 13.6 / AT 19.9 GiB; the 784-site analysis gives the same numbers captured
+   and eager. Numbers and `--per-gpu` per study shape: compute.md, "Cluster check of
+   D107 + D110". D94's rule is met: AT may run with `trainer.cuda_graph` from
+   `d2aca0e5` on. Open: `analysis.batch_size` for full MNIST (the default 256 takes
+   ≈ 12 GiB per analysis, so `--per-gpu` 1; 64–128 allows 2). E2b's decisions are taken (D108). D104's cluster checks passed
    on G21G01 (`test_graphs` 16/16; the 784-site analysis gives the same numbers
    captured and eager, 53 s vs 178 s). The AT grid {0, β\*} waits for E3's verdict on
    purification under adaptive attacks (below, E2a).
@@ -157,10 +162,17 @@ need their `warm_from` study trained.
   once (attack step, purification step, log p(x), prediction) could share one pool
   (`torch.cuda.graph(pool=...)`; their replays already return copies). **D107 does
   this** (one pool per `Graphs`): 2.99 GiB at batch 64 (eager 1.52); the analysis
-  keeps per-shape warm-ups (D110), so ≈ 2× eager. Still open: size `--per-gpu` on the
-  cluster benches (a per-stage `--per-gpu` if analyses stay larger than trains).
+  keeps per-shape warm-ups (D110), so ≈ 2× eager. On G21G01 (2026-10-15): 2.99 GiB
+  reserved at batch 64, 10.38 at 256 (eager 1.52, 7.59), 394 vs 170 s for 2048
+  points; `--per-gpu` per study shape in compute.md. Still open: a per-stage
+  `--per-gpu`, or a smaller `analysis.batch_size` for full MNIST, since an analysis
+  at batch 256 is larger than any d3r40 train.
 - **Graph memory: reserved far above allocated, worst for AT: fixed by D107 + D110,
-  cluster check pending.** Per-pool accounting (`bench_train_step --snapshot`)
+  checked on G21G01 (2026-10-15; compute.md, "Cluster check of D107 + D110").** One
+  transient is left: at the first capture, the epoch-1 eager tensors held by tk's
+  nodes coexist with the new pool (full MNIST NAT 7.80 GiB peak reserved vs 5.49 at
+  the end; d3r80 NAT 16.04 vs 11.51). Dropping those references before the first
+  capture would remove it. Per-pool accounting (`bench_train_step --snapshot`)
   showed reserved = the sum of private pools (D107: one pool per `Graphs`) and eager
   warm-ups after a capture adding their peak to the pool's (D110: the Trainer warms
   everything up in epoch 1, then captures). eGPU: full-MNIST AT micro 128 5.92 GiB

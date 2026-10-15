@@ -131,7 +131,62 @@ tk `renormalize`), forward and backward, on PyTorch's slow mixed-dtype kernel
 | full MNIST d3r80 micro 128 NAT | | does not fit: validation needs ≈ 4.8 GiB beside the step's 16 GiB pool |
 
 `--per-gpu` ≈ (GPU memory − other processes) / the per-process figure; E2a runs 4
-per GPU on G21G01.
+per GPU on G21G01. (*This table is superseded by the cluster check of D107 + D110,
+next section.*)
+
+## Cluster check of D107 + D110 (2026-10-15)
+
+G21G01, GPU 5 alone, worktree `runs/5e41a7d3`, one process at a time; logs in
+`$R/d110_checks/` (copied to `pilots/cluster/d110_checks/`, untracked).
+`tests/unit/test_graphs.py` passes 19/19. `bench_train_step --beta 0.5 --bond-dim
+{40,80} --batch 512`, 20 steps × 5 epochs (epoch 1 eager, 2 captures, 3–5 timed),
+GiB:
+
+| Shape | ms/step captured (eager) | Peak allocated | Peak reserved | Reserved at end | Per process (end, nvidia-smi) | Per process before (`da7185e8`) |
+|---|---|---|---|---|---|---|
+| MNIST12 d3r40 NAT | 63.8 | 1.82 | 2.87 | 2.87 | 3.20 | 4.57 |
+| MNIST12 d3r40 AT | 283 | 2.75 | 2.93 | 2.93 | 3.42 | 10.92 |
+| full MNIST d3r40 micro 256 NAT | 545 (1,824) | 5.03 | 7.80 | 5.49 | 6.71 (peak ≈ 9.0) | 10.46 |
+| full MNIST d3r40 micro 256 AT | 2,486 (6,682) | 7.56 | 8.06 | 8.06 | 10.32 | out of memory |
+| full MNIST d3r80 micro 128 NAT | 1,431 | 10.46 | 16.04 | 11.51 | 13.62 (peak ≈ 18.2) | out of memory |
+| full MNIST d3r80 micro 128 AT | 6,311 | 15.38 | 16.44 | 16.43 | 19.93 | not tried |
+
+Eager at the full-MNIST d3r40 shapes: NAT 5.02 / 5.34 / 5.54 GiB (allocated,
+reserved, per process), AT 7.55 / 7.89 / 8.10. Captured is 3.3× (NAT) and 2.7× (AT)
+faster per step.
+
+- **Reserved now follows allocated**, except for a transient at the first capture in
+  NAT: `torch.cuda.graph` empties the cache when it starts, but the epoch-1 eager
+  tensors still held by tk's nodes are freed only once the capture has replaced them,
+  so the pool and those leftovers coexist for a moment (full MNIST NAT 7.80 GiB peak
+  vs 5.49 at the end; d3r80 16.04 vs 11.51). "Peak ≈" in the table adds the
+  process's non-allocator memory (per process − reserved at end) to the peak
+  reserved. Open: dropping those references before the first capture would remove
+  it (not done; plan.md).
+- **Outside the allocator**, a process holds 0.3–0.5 GiB at 144 sites and 1.2–3.5 GiB
+  at 784 (CUDA context and the graphs' executables, which grow with the number of
+  kernels captured).
+
+`bench_analysis --features 784` (d3r40, 2048 points, PGD-40 + purification-40 at
+ε = 0.1): the same numbers captured and eager (rob 0.104, purify 0.104).
+
+| `analysis.batch_size` | Eager | Captured |
+|---|---|---|
+| 64 | 1,472 s, 1.52 GiB reserved | 394 s, 2.99 GiB |
+| 256 | 434 s, 7.59 GiB | 170 s, 10.38 GiB |
+
+Captured ≈ 0.04 GiB per point, plus ≈ 0.5; add ≈ 1–2 GiB per process outside the
+allocator.
+
+**`--per-gpu` on G21G01** (22 GB usable, the GPU otherwise empty; the largest unit
+of a study decides, since every slot is sized alike):
+
+| Study shape | Largest unit | `--per-gpu` |
+|---|---|---|
+| MNIST12 d3r40 (NAT, AT) | train ≤ 3.4 GiB; analysis at 144 sites not re-measured since D107 (≤ 4 GiB expected) | 5 |
+| full MNIST d3r40, `analysis.batch_size` 64–128 | AT train 10.3 GiB, analysis ≈ 4–7 | 2 |
+| full MNIST d3r40, `analysis.batch_size` 256 (the default) | analysis ≈ 11.5–12.5 GiB | 1 (2 may fail when two analyses meet) |
+| full MNIST d3r80 | AT train 19.9 GiB | 1 |
 
 ## Gibbs purification since D101 and D103 (2026-10-14)
 
