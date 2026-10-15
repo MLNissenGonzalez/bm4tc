@@ -8,7 +8,8 @@ to the eager step), and with NVIDIA MPS several units share a GPU.
 :class:`Graphed` hides what capture needs: eager warm-up calls on a side stream,
 one graph per tuple of input shapes and dtypes, and static input buffers.
 :class:`Graphs` groups the graphed functions of one task (a training step and its
-validation; an analysis part), D92. Each graph has a memory pool of its own.
+validation; an analysis part), D92. The graphs of one :class:`Graphs` share
+one memory pool (D107).
 
 Warm-ups and captures run on one side stream per :class:`Graphs` (D94). Autograd
 runs a parameter's gradient accumulation on the stream where its AccumulateGrad
@@ -17,6 +18,18 @@ warm-ups' autograd graphs, hence those nodes, alive. Captured on another stream,
 the backward's summing buffers came from the general cache instead of the graph's
 pool; later eager calls reused them and the next capture's ``empty_cache``
 released them while the graph still wrote there (D92's illegal memory access).
+
+One pool for a task's graphs (D107): with a pool per graph, the reserved memory
+was the sum of every graph's peak (AT at MNIST12 batch 256: 8 graphs, 5.3 GiB
+reserved where the largest needs 1.4), although between replays a graph's pool
+holds only its outputs. Sharing is safe because the graphs of one task replay
+one at a time on one stream, each replay's outputs are copied out and its
+static outputs are never freed, and no graph reads another's memory (inputs are
+copied into static buffers allocated outside the pool). What a capture frees is
+then scratch that a later capture of the task may reuse. A graph must therefore
+not carry state from one replay to the next in memory it allocated during its
+capture: such state lives in tensors made outside capture (parameters,
+gradients and optimizer state from the eager warm-ups) or in its outputs.
 """
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Tuple
@@ -47,19 +60,28 @@ class Graphs:
     allocator caches freed memory per stream, so a new stream per call would
     reserve the function's peak memory once per call (three warm-up steps held
     three steps' memory, D92); and a capture must run where the warm-ups made
-    their autograd nodes (module docstring, D94). Each graph captures into a
-    memory pool of its own.
+    their autograd nodes (module docstring, D94). Every graph captures into one
+    memory pool, so the task reserves about its largest graph's memory, not the
+    sum (module docstring, D107).
     """
 
     def __init__(self, enabled: bool):
         self.enabled = enabled
         self._side_stream = None
+        self._pool = None
 
     @property
     def side_stream(self) -> "torch.cuda.Stream":
         if self._side_stream is None:
             self._side_stream = torch.cuda.Stream()
         return self._side_stream
+
+    @property
+    def pool(self):
+        """The memory pool every graph of this task captures into."""
+        if self._pool is None:
+            self._pool = torch.cuda.graph_pool_handle()
+        return self._pool
 
     def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
         return Graphed(function, self, warmup_calls)
@@ -125,7 +147,7 @@ class Graphed:
         static_inputs = tuple(x.clone() for x in inputs)
         graph = torch.cuda.CUDAGraph()
         try:
-            with torch.cuda.graph(graph, stream=self.graphs.side_stream):
+            with torch.cuda.graph(graph, pool=self.graphs.pool, stream=self.graphs.side_stream):
                 outputs = self.function(*static_inputs)
         except RuntimeError as e:
             raise GraphCaptureError(f"CUDA graph capture failed: {e}") from e
