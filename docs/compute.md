@@ -172,6 +172,39 @@ D103 call that reuses its nodes costs ≈ 40% of one that builds them; the first
 after each forward builds them (the adaptive attack classifies between purifications,
 so there only sweeps 2..k of a k-sweep purification reuse).
 
+## Gibbs purification since D106 (2026-10-15)
+
+D106 replaces D101's open-leg sweep: an environment is double only where it contains
+a summed site (in a sweep, the class), and each step of the sweep is a few fixed
+nodes whose tensors are reset from site to site. RTX 2080, random model (legendre
+d3, complex64), 96-bin windows of step 0.05, batch 64; before = HEAD `918b7c34`
+(D103) from a worktree, after = D106. The draws are identical (same checksums).
+
+One sweep, `born.sample` alone (peak above the model; held = what stays allocated
+until the next call):
+
+| Shape | D103: first / later call | D106: first / later call |
+|---|---|---|
+| MNIST 12×12 d3r40 | 0.53 / 0.19 s, peak 205–226 MiB, held 205 MiB | 0.37 / 0.20 s, peak 83–92 MiB, held 15 MiB |
+| full MNIST d3r40 | 2.51 / 1.02 s, peak 1.1–1.2 GiB, held 1.1 GiB | 1.15 / 1.11 s, peak 430–439 MiB, held 15 MiB |
+| full MNIST d3r80 | 2.49 / 1.02 s, peak 1.9–2.0 GiB, held 1.9 GiB | 1.15 / 1.12 s, peak 1.3–1.4 GiB, held 53 MiB |
+
+Most of D106's peak is the double right environments kept for the sweep, left of
+the class: batch × n/2 × r² complex values (64 × 392 × 80² × 8 B ≈ 1.3 GB at r80,
+0.3 GB at r40). Nothing else grows with the number of sites.
+
+`GibbsPurification.purify_snapshots`, log p(x) forward included: one sweep of 64
+points (first call) MNIST 12×12 r40 0.84 → 0.59 s, full MNIST r40 4.16 → 1.98 s,
+r80 4.23 → 1.94 s; ten sweeps (snapshots 1, 3, 6, 10) MNIST 12×12 r40 (256 points)
+8.2 → 8.5 s, full MNIST r40 / r80 (128 points) 24.6 → 23.9 s / 24.7 → 24.2 s. Peak
+in the ten-sweep run: 238 → 136 MiB, 1.30 → 0.73 GiB, 2.82 → 2.89 GiB; at r80 it is
+the log p(x) forward's, not the sampler's. So the per-process memory of an analysis
+does not grow (E2b's and E3's settings unchanged); between Gibbs calls the sampler
+now holds megabytes instead of 1–2 GiB.
+
+Open (plan.md, "Sampling" step 6): float32 rounding of double layers. On random
+models these runs gave no negative weights; trained models are not checked yet.
+
 ## Since D104: the forward keeps its nodes (2026-10-14)
 
 `ConditionalBornMachine.forward` calls `contract()` on the nodes of its previous call

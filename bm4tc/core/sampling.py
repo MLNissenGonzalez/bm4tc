@@ -16,42 +16,54 @@ For 1.1.6: ``n_sites`` is ``n_features``; nodes have ``rank``, not ``ndim``;
 
 - **One domain per sample.** A domain may be ``(n_samples, domain_size)``, e.g. a
   window around each sample's current value (Gibbs purification).
-- **Candidates through a density matrix.** At each sampled site everything but
-  the site's physical edge is contracted first: ket and bra halves joined through
-  the right environment give the site's reduced density matrix (``phys_dim`` ×
-  ``phys_dim`` per sample), and each candidate costs one quadratic form on it.
-  ``develop`` contracted every candidate with the environments, so time and
-  memory grew with ``domain_size`` × bond dimension².
-- **One layer for a sweep.** With ``in_condition`` every variable but the one
-  being sampled is fixed (the sites to its left already drawn, those to its
-  right given). The ket alone then suffices, contracted environment first: one
-  vector per sample and value of the open output edges, so memory per sample is
-  linear in the bond dimension. Each site's density is that ket joined with its
-  conjugate, ρ = Σ_c w_c w_c†, which sums the outputs out. Unconditioned
-  sampling sums the right part out: there a bra layer is needed, the right
-  environments are double-layer but have no batch edge (bond dimension² once,
-  not per sample), and the drawn left part stays two single-layer chains.
-- **No edge surgery.** ``canonical`` joins the two right bonds on views, and pbc
-  rings stay connected, so nothing is disconnected and restored.
-- **The bra layer, when needed, is built in this network.** ``develop`` copied the MPS into a
-  new network and moved it here; moving renames nodes in time quadratic in the
-  number of sites.
+- **The site's weights first.** At each sampled site everything but the site's
+  physical edge is contracted first, so the cost does not depend on the number
+  of candidates: with both environments single-layer, one amplitude per
+  candidate (the weight is its squared modulus); otherwise the site's reduced
+  density matrix (``phys_dim`` × ``phys_dim`` per sample) and one quadratic form
+  per candidate. ``develop`` contracted every candidate with the environments,
+  so time and memory grew with ``domain_size`` × bond dimension².
+- **Double layers only where something is summed** (Martin's rule). An
+  environment is double-layer (ket and bra contracted together) only if it
+  contains a summed site: an output node, or, without ``in_condition``, an input
+  to the right of the drawn site. Elsewhere it is the ket alone. So:
+
+  - *Gibbs refinement* (``in_condition``, no output node): single-layer
+    throughout;
+  - *normal sampling* (no ``in_condition``, no output node): single left, double
+    right environments without batch edge (bond dimension² once, not per
+    sample);
+  - *sampling from a marginal* (an output node, e.g. the class for Gibbs
+    purification): the environments that contain it are double; with
+    ``in_condition`` and the class in the middle, exactly one of the two at each
+    site, and the right ones kept for the sweep cost batch × bond dimension²
+    each, left of the class.
+- **Fixed sampling nodes.** Each step of the sweep (a right environment absorbing
+  a site, the left one absorbing a drawn or summed site, a site's weights) is a
+  small fixed network of virtual leaves built at its first use; later sites only
+  set the leaves' tensors, so tensorkrowch reuses the steps' result nodes
+  (successors) and only recomputes tensors. Memory does not grow with the number
+  of sites, except for the right environments kept for the sweep. Nothing is
+  copied from the MPS and no edge of its nodes is touched.
 - **No usable weight, uniform draw.** A row of candidate probabilities that is
   all zero or not finite is drawn uniformly, with one warning per call that
   counts such draws; ``develop`` raises.
-- **Nodes kept between calls.** Every tensorkrowch operation caches its result
-  node as a successor of its operands: called again on the same nodes, it only
-  recomputes the tensor. ``sample`` keeps its nodes in the MPS instead of
-  resetting, so a later call with the same structure (a further Gibbs sweep)
-  refills the candidate and condition nodes, any batch size, and repeats the
-  same operations: no new nodes, no edges connected, no reset. ``reset``, and
-  ``forward`` through it, removes them; ``develop`` built and reset every call.
+- **Nodes kept between calls.** The steps' nodes stay in the MPS instead of
+  being reset, so a later call (a further Gibbs sweep, any batch size) only sets
+  tensors and repeats the same operations: no new nodes, no edges connected, no
+  reset. ``reset``, and ``forward`` through it, removes them; ``develop`` built
+  and reset every call.
+- **Float32 precision (open, plan.md "Sampling" step 6).** A double layer is
+  positive semi-definite in exact arithmetic, not after float32 rounding: its
+  error grows like the square of the contraction's cancellation (one layer:
+  linearly), so long chains with improbable candidate windows can give negative
+  weights, which raise past tolerance.
 
 Norms are discarded (``renormalize`` divides each environment by one scalar per
 sample): sampling needs only ratios between candidates, and no gradients.
 """
 import warnings
-from typing import Callable, List, Optional, Sequence, Text, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Text, Tuple, Union
 
 import torch
 
@@ -64,9 +76,9 @@ class SamplingMPS(tk.models.MPS):
     """:class:`tensorkrowch.models.MPS` with ``condition`` and ``sample`` (see
     the module docstring)."""
 
-    # The contraction whose nodes the network keeps between calls (a ``sample``
-    # structure, or a subclass's own; None: none kept), and those of the
-    # sampling nodes that are not results of operations.
+    # The contraction whose nodes the network keeps between calls (``sample``'s,
+    # or a subclass's own; None: none kept), and the leaves of ``sample``'s
+    # steps, by step (see ``_sample_kernel``).
     _nodes_key: Optional[tuple] = None
     _sample_nodes: dict = {}
 
@@ -85,26 +97,6 @@ class SamplingMPS(tk.models.MPS):
         if self._nodes_key is not None:
             self.reset()
         return super().forward(data, *args, **kwargs)
-
-    def _sample_node(self,
-                     role: Text,
-                     site: int,
-                     tensor: torch.Tensor,
-                     axes_names: Sequence[Text]) -> Tuple[Node, bool]:
-        """The node ``sample`` keeps for ``role`` at ``site``, holding
-        ``tensor``, and whether it was just created (its edges still to be
-        connected). Virtual, so ``reset`` deletes it and ``add_data`` skips it."""
-        node = self._sample_nodes.get((role, site))
-        if node is not None:
-            node.tensor = tensor
-            return node, False
-        node = Node(tensor=tensor,
-                    axes_names=axes_names,
-                    name='virtual_result_sample_' + role,
-                    network=self,
-                    virtual=True)
-        self._sample_nodes[(role, site)] = node
-        return node, True
 
     def _absorb_in_results_in_out_regions(self,
                                           in_results: List[Node]
@@ -268,38 +260,6 @@ class SamplingMPS(tk.models.MPS):
         
         return cond_mps
 
-    def _copy_sample_mps(self) -> Tuple[List[AbstractNode],
-                                        Optional[AbstractNode],
-                                        Optional[AbstractNode]]:
-        """Builds a virtual, tensor-sharing copy of the MPS in this network,
-        connected like the MPS (the bra layer).
-
-        develop copies the whole MPS into a new network and moves it here;
-        moving renames every node, which tensorkrowch does in time quadratic in
-        the number of sites (3 s of a 6.6 s sweep at 400 sites). Building the
-        copies here avoids it.
-        """
-        nodes = list(self._mats_env)
-        if self._boundary == 'obc':
-            nodes = [self._left_node] + nodes + [self._right_node]
-
-        copied = []
-        for node in nodes:
-            copied_node = node.__class__(shape=node._shape,
-                                         axes_names=node.axes_names,
-                                         name='virtual_result_sample_copy',
-                                         network=self,
-                                         virtual=True)
-            copied_node.set_tensor_from(node)
-            copied.append(copied_node)
-
-        for left, right in zip(copied[:-1], copied[1:]):
-            left['right'] ^ right['left']
-        if self._boundary == 'pbc':
-            copied[-1]['right'] ^ copied[0]['left']
-            return copied, None, None
-        return copied[1:-1], copied[0], copied[-1]
-
     @staticmethod
     def _renormalize_sample_env(node: AbstractNode) -> AbstractNode:
         """Divides a sweep environment by its norm over all non-batch axes.
@@ -311,35 +271,6 @@ class SamplingMPS(tk.models.MPS):
         if axes:
             node = node.renormalize(axis=axes)
         return node
-
-    def _contract_sample_site(self,
-                              node: AbstractNode,
-                              copied_node: AbstractNode,
-                              env: Optional[AbstractNode],
-                              matrix_node: Optional[AbstractNode] = None,
-                              renormalize: bool = False) -> Node:
-        """Absorbs one double-layer (marginalized) site into a right
-        environment: ket site, physical metric, then bra site."""
-        result = node if env is None else node @ env
-        if matrix_node is not None:
-            result = result @ matrix_node
-        result = result @ copied_node
-        if renormalize:
-            result = self._renormalize_sample_env(result)
-        return result
-
-    @staticmethod
-    def _sample_candidate(node: AbstractNode, axis_name: Text) -> Node:
-        """A view of ``node`` whose physical edge is its own, open and named
-        ``axis_name``. Bond edges stay shared with the environments, so the
-        view contracts with them. A repeated call returns the same view."""
-        candidate = node.permute(tuple(range(node.rank)))
-        if axis_name in candidate.axes_names:
-            return candidate
-        candidate.reattach_edges(axes=['input'])
-        candidate.disconnect('input')
-        candidate.get_axis('input').name = axis_name
-        return candidate
 
     @staticmethod
     def _trapezoidal_weights(domain: torch.Tensor) -> torch.Tensor:
@@ -698,190 +629,265 @@ class SamplingMPS(tk.models.MPS):
 
         return in_condition, n_samples
 
-    def _build_sample_right_chain(self,
-                                  data_nodes: List[Optional[Node]],
-                                  right_ket: Optional[AbstractNode],
-                                  renormalize: bool
-                                  ) -> List[Optional[AbstractNode]]:
-        """Right environments of a sweep, built right to left.
+    def _sample_kernel(self,
+                       kernels: Dict,
+                       key: Tuple,
+                       leaves: Dict[Text, Tuple[Tuple[Text, ...],
+                                                torch.Tensor]],
+                       edges: Sequence[Tuple[Tuple[Text, Text],
+                                             Tuple[Text, Text]]]
+                       ) -> Dict[Text, Node]:
+        """The leaves of one step of the sampling sweep: a small fixed network.
 
-        Every input node to the right is fixed by its data, so the environment
-        is one single-layer chain: a vector per sample (and per value of the
-        open output edges), contracted environment first, so it never holds
-        more than bond × physical dimension per sample. Entry ``site`` holds the
-        environment of the sites right of ``site``.
+        Built at the step's first use, from ``leaves`` (name: axes and tensor)
+        connected by ``edges`` (pairs of (leaf, axis)). Later uses only set the
+        leaves' tensors, so the step's operations reuse their result nodes
+        (successors) and only recompute tensors: the number of nodes, and the
+        memory they hold, do not grow with the number of sites.
         """
-        right_envs = [None] * self._n_features
-        right_envs[-1] = right_ket
-
-        for site in range(self._n_features - 1, 0, -1):
-            node = self._mats_env[site]
-            right_ket = node if right_ket is None else node @ right_ket
-            if data_nodes[site] is not None:
-                right_ket = right_ket @ data_nodes[site]
-            if renormalize:
-                right_ket = self._renormalize_sample_env(right_ket)
-            right_envs[site - 1] = right_ket
-
-        return right_envs
-
-    def _build_sample_right_envs(self,
-                                 bra_nodes: List[AbstractNode],
-                                 matrix_nodes: List[Optional[Node]],
-                                 right_env: Optional[AbstractNode],
-                                 renormalize: bool) -> List[Optional[Node]]:
-        """Right environments for unconditioned sampling, built right to left.
-
-        The sites to the right are marginalized, so each is absorbed as a
-        double layer through its physical metric. Nothing here depends on the
-        samples: the environments have no batch edge and are built once.
-        Entry ``site`` holds the environment of the sites right of ``site``.
-        """
-        right_envs = [None] * self._n_features
-        right_envs[-1] = right_env
-
-        for site in range(self._n_features - 1, 0, -1):
-            right_env = self._contract_sample_site(
-                node=self._mats_env[site],
-                copied_node=bra_nodes[site],
-                env=right_env,
-                matrix_node=matrix_nodes[site],
-                renormalize=renormalize)
-            right_envs[site - 1] = right_env
-
-        return right_envs
-
-    @staticmethod
-    def _sample_sweep_density(half: AbstractNode,
-                              right_env: Optional[AbstractNode]) -> Node:
-        """The reduced density matrix of one site in a sweep.
-
-        ``half`` is the left environment contracted with the site's candidate
-        view; with the right environment it gives the ket ``w``: one vector over
-        the candidate edge per sample and value of the open output edges. The
-        density is ``w`` joined with its conjugate over the output edges,
-        ρ = Σ_c w_c w_c†, which sums the outputs out.
-        """
-        if right_env is None:
-            ket = half.permute(tuple(range(half.rank)))
+        nodes = kernels.get(key)
+        if nodes is None:
+            nodes = {name: Node(tensor=tensor,
+                                axes_names=axes,
+                                name='virtual_result_sample_' + name.lower(),
+                                network=self,
+                                virtual=True)
+                     for name, (axes, tensor) in leaves.items()}
+            for (node1, axis1), (node2, axis2) in edges:
+                nodes[node1][axis1] ^ nodes[node2][axis2]
+            kernels[key] = nodes
         else:
-            ket = half @ right_env
-        open_axes = [axis.name for axis in ket.axes
-                     if (not axis.is_batch()) and (axis.name != 'candidate')]
-        bra = ket.conj()
-        if 'candidate_copy' not in bra.axes_names:
-            bra.reattach_edges(axes=open_axes + ['candidate'])
-            bra.get_axis('candidate').name = 'candidate_copy'
-            if open_axes:
-                ket.reattach_edges(axes=open_axes)
-                for name in open_axes:
-                    ket[name] ^ bra[name]
-        return SamplingMPS._join_layers(ket, bra)
+            for name, (_, tensor) in leaves.items():
+                nodes[name]._direct_set_tensor(tensor)
+        return nodes
 
-    @staticmethod
-    def _sample_density(half: AbstractNode,
-                        bra_half: AbstractNode,
-                        right_env,
-                        canonical: bool) -> Node:
-        """The reduced density matrix of one site's physical edge.
+    def _sample_env_axes(self,
+                         bond: Text,
+                         double: bool,
+                         batched: bool = True,
+                         bra: bool = False) -> Tuple[Text, ...]:
+        """Axis names of a sweep environment: its open bond (``right`` for a
+        left environment, ``left`` for a right one), the closing bond ``loop``
+        with PBC, and their ``_copy`` on the bra layer when it is double (or
+        when it is the bra of a single one)."""
+        names = [bond] + (['loop'] if self._boundary == 'pbc' else [])
+        if bra:
+            names = [name + '_copy' for name in names]
+        elif double:
+            names = names + [name + '_copy' for name in names]
+        return (('batch',) if batched else ()) + tuple(names)
 
-        ``half`` is the left environment contracted with the site's candidate
-        view (ket), ``bra_half`` its conjugate. Joined through the right
-        environment they give a node with axes ``candidate`` and
-        ``candidate_copy`` (and ``batch``): the Born weights of every value of
-        the site, given the rest, as a quadratic form. Joining ket and bra also
-        closes the output edges between them, which marginalizes the outputs.
+    def _sample_env_tensor(self,
+                           node: AbstractNode,
+                           axes: Tuple[Text, ...],
+                           renormalize: bool) -> torch.Tensor:
+        """The tensor of a new environment, its axes in the order ``axes``."""
+        if renormalize:
+            node = self._renormalize_sample_env(node)
+        return node.tensor.permute([node.get_axis_num(axis) for axis in axes])
+
+    def _sample_right_step(self,
+                           kernels: Dict,
+                           site: int,
+                           right: torch.Tensor,
+                           double: bool,
+                           batched: bool,
+                           data: Optional[torch.Tensor],
+                           matrix: Optional[torch.Tensor],
+                           renormalize: bool) -> torch.Tensor:
+        """Absorbs ``site`` into a right environment (moving left).
+
+        With ``data`` (a given input) each layer contracts it into the site
+        first, and a single environment stays single. Otherwise the site is
+        summed (through ``matrix``, its physical metric, for an input; directly
+        for an output), which makes the environment double.
         """
-        if canonical:
-            # Right-canonical form: the right environment is the identity,
-            # i.e. the two right bonds joined directly (on views, so the
-            # halves keep their bonds to the next site).
-            half = half.permute(tuple(range(half.rank)))
-            bra_half = bra_half.permute(tuple(range(bra_half.rank)))
-            if half['right'] is not bra_half['right']:
-                for aux_half in (half, bra_half):
-                    aux_half.reattach_edges(axes=['right'])
-                    aux_half.disconnect('right')
-                half['right'] ^ bra_half['right']
-        elif isinstance(right_env, tuple):
-            right_ket, right_bra = right_env
-            if right_ket is not None:
-                half = half @ right_ket
-                bra_half = bra_half @ right_bra
-        elif right_env is not None:
-            half = half @ right_env
-        return SamplingMPS._join_layers(half, bra_half)
+        tensor = self._mats_env[site].tensor
+        site_axes, bra_axes = ('left', 'input', 'right'), \
+            ('left_copy', 'input_copy', 'right_copy')
+        env_axes = self._sample_env_axes('left', double, batched)
+        leaves = {'A': (site_axes, tensor), 'R': (env_axes, right)}
+        edges = [(('A', 'right'), ('R', 'left'))]
+        summed = data is None
+        new_double = double or summed
+        if double or summed:
+            leaves['Ab'] = (bra_axes, tensor.conj())
+            if double:
+                edges.append((('Ab', 'right_copy'), ('R', 'left_copy')))
+            else:
+                leaves['Rb'] = (self._sample_env_axes('left', False, batched,
+                                                      bra=True),
+                                right.conj())
+                edges.append((('Ab', 'right_copy'), ('Rb', 'left_copy')))
+        if summed:
+            if matrix is None:
+                edges.append((('A', 'input'), ('Ab', 'input_copy')))
+            else:
+                leaves['M'] = (('input', 'input_copy'), matrix)
+                edges += [(('A', 'input'), ('M', 'input')),
+                          (('M', 'input_copy'), ('Ab', 'input_copy'))]
+        else:
+            leaves['D'] = (('batch', 'feature'), data)
+            edges.append((('A', 'input'), ('D', 'feature')))
+            if double:
+                leaves['Db'] = (('batch', 'feature'), data.conj())
+                edges.append((('Ab', 'input_copy'), ('Db', 'feature')))
 
-    @staticmethod
-    def _join_layers(ket: AbstractNode, bra: AbstractNode) -> Node:
-        """Contracts a ket node with a bra node. When nothing connects them
-        (no output edge, no bond left open: a product of the two layers), only
-        their batch edges are shared, which ``@`` does not accept; ``einsum``
-        then takes the product, batch edge by batch edge."""
-        if ket.is_connected_to(bra):
-            return ket @ bra
-        letters = iter('abcdefghijklmnopqrstuvwxyz')
-        index = {}
-        strings = []
-        for node in (ket, bra):
-            string = ''
-            for axis in node.axes:
-                key = axis.name if axis.is_batch() else (id(node), axis.name)
-                if key not in index:
-                    index[key] = next(letters)
-                string += index[key]
-            strings.append(string)
-        out = ''.join(dict.fromkeys(strings[0] + strings[1]))
-        return tk.einsum(f'{strings[0]},{strings[1]}->{out}', ket, bra)
+        key = ('right', tensor.shape, double, batched, summed,
+               matrix is None)
+        n = self._sample_kernel(kernels, key, leaves, edges)
+        if not summed:
+            if double:
+                result = ((n['A'] @ n['D']) @ n['R']) @ (n['Ab'] @ n['Db'])
+            else:
+                result = (n['A'] @ n['R']) @ n['D']
+        else:
+            half = n['A'] @ n['R']
+            if matrix is not None:
+                half = half @ n['M']
+            if double:
+                result = half @ n['Ab']
+            else:
+                result = half @ (n['Ab'] @ n['Rb'])
+        return self._sample_env_tensor(
+            result, self._sample_env_axes('left', new_double, batched),
+            renormalize)
 
-    def _sample_probabilities(self,
-                              site: int,
-                              density: AbstractNode,
-                              embedded: torch.Tensor,
-                              per_sample: bool) -> torch.Tensor:
-        """Evaluates the density's quadratic form at every embedded candidate:
-        ``(rows, domain_size)``, with one row, or one per sample."""
-        axes_names = ('batch', 'domain_batch', 'feature') if per_sample \
+    def _sample_left_step(self,
+                          kernels: Dict,
+                          site: int,
+                          left: torch.Tensor,
+                          double: bool,
+                          selected: Optional[torch.Tensor],
+                          renormalize: bool) -> torch.Tensor:
+        """Absorbs ``site`` into the left environment (moving right): the
+        drawn values ``selected`` of an input, contracted on each layer, or an
+        output, summed, which makes the environment double."""
+        tensor = self._mats_env[site].tensor
+        site_axes, bra_axes = ('left', 'input', 'right'), \
+            ('left_copy', 'input_copy', 'right_copy')
+        leaves = {'A': (site_axes, tensor),
+                  'L': (self._sample_env_axes('right', double), left)}
+        edges = [(('L', 'right'), ('A', 'left'))]
+        summed = selected is None
+        if double or summed:
+            leaves['Ab'] = (bra_axes, tensor.conj())
+            if double:
+                edges.append((('L', 'right_copy'), ('Ab', 'left_copy')))
+            else:
+                leaves['Lb'] = (self._sample_env_axes('right', False,
+                                                      bra=True),
+                                left.conj())
+                edges.append((('Lb', 'right_copy'), ('Ab', 'left_copy')))
+        if summed:
+            edges.append((('A', 'input'), ('Ab', 'input_copy')))
+        else:
+            leaves['S'] = (('batch', 'feature'), selected)
+            edges.append((('A', 'input'), ('S', 'feature')))
+            if double:
+                leaves['Sb'] = (('batch', 'feature'), selected.conj())
+                edges.append((('Ab', 'input_copy'), ('Sb', 'feature')))
+
+        key = ('left', tensor.shape, double, summed)
+        n = self._sample_kernel(kernels, key, leaves, edges)
+        if not summed:
+            if double:
+                result = (n['L'] @ (n['A'] @ n['S'])) @ (n['Ab'] @ n['Sb'])
+            else:
+                result = (n['L'] @ n['A']) @ n['S']
+        elif double:
+            result = (n['L'] @ n['A']) @ n['Ab']
+        else:
+            result = (n['L'] @ n['A']) @ (n['Lb'] @ n['Ab'])
+        return self._sample_env_tensor(
+            result, self._sample_env_axes('right', double or summed),
+            renormalize)
+
+    def _sample_site_weights(self,
+                             kernels: Dict,
+                             site: int,
+                             left: torch.Tensor,
+                             left_double: bool,
+                             right: torch.Tensor,
+                             right_double: bool,
+                             right_batched: bool,
+                             embedded: torch.Tensor) -> torch.Tensor:
+        """The Born weight of every candidate value of ``site`` given the
+        rest, ``(n_samples, domain_size)``.
+
+        Everything but the site's physical edge is contracted first, so the
+        cost does not depend on the number of candidates. With both
+        environments single (nothing summed) that is one amplitude per
+        candidate, whose squared modulus is the weight. Otherwise it is the
+        site's reduced density matrix, and each weight is a quadratic form on
+        it.
+        """
+        tensor = self._mats_env[site].tensor
+        pbc = self._boundary == 'pbc'
+        per_sample = embedded.ndim == 3
+        candidate_axes = ('batch', 'domain_batch', 'feature') if per_sample \
             else ('domain_batch', 'feature')
-        candidate_data, new = self._sample_node('candidate', site, embedded,
-                                                axes_names)
-        copied_candidate_data, _ = self._sample_node('candidate_copy', site,
-                                                     embedded, axes_names)
-        copied_candidate_data = copied_candidate_data.conj()
-        if new:
-            copied_candidate_data.reattach_edges(axes=['feature'])
-            density.reattach_edges(axes=['candidate', 'candidate_copy'])
-            candidate_data['feature'] ^ density['candidate']
-            copied_candidate_data['feature'] ^ density['candidate_copy']
-        probs_node = (candidate_data @ density) @ copied_candidate_data
+        leaves = {
+            'A': (('left', 'input', 'right'), tensor),
+            'L': (self._sample_env_axes('right', left_double), left),
+            'R': (self._sample_env_axes('left', right_double, right_batched),
+                  right),
+            'C': (candidate_axes, embedded)}
+        edges = [(('L', 'right'), ('A', 'left')),
+                 (('A', 'right'), ('R', 'left')),
+                 (('A', 'input'), ('C', 'feature'))]
+        if pbc:
+            edges.append((('L', 'loop'), ('R', 'loop')))
+
+        density = left_double or right_double
+        if density:
+            leaves['Ab'] = (('left_copy', 'input_copy', 'right_copy'),
+                            tensor.conj())
+            leaves['Cb'] = (candidate_axes, embedded.conj())
+            edges.append((('Ab', 'input_copy'), ('Cb', 'feature')))
+            # Each layer's bonds go to the environment that holds that layer.
+            if left_double:
+                bra_left = ('L', 'right_copy'), ('L', 'loop_copy')
+            else:
+                leaves['Lb'] = (self._sample_env_axes('right', False,
+                                                      bra=True),
+                                left.conj())
+                bra_left = ('Lb', 'right_copy'), ('Lb', 'loop_copy')
+            if right_double:
+                bra_right = ('R', 'left_copy'), ('R', 'loop_copy')
+            else:
+                leaves['Rb'] = (self._sample_env_axes('left', False,
+                                                      right_batched,
+                                                      bra=True),
+                                right.conj())
+                bra_right = ('Rb', 'left_copy'), ('Rb', 'loop_copy')
+            edges += [(bra_left[0], ('Ab', 'left_copy')),
+                      (('Ab', 'right_copy'), bra_right[0])]
+            if pbc:
+                edges.append((bra_left[1], bra_right[1]))
+
+        key = ('site', tensor.shape, left_double, right_double,
+               right_batched, per_sample)
+        n = self._sample_kernel(kernels, key, leaves, edges)
+        if not density:
+            amplitudes = ((n['L'] @ n['A']) @ n['R']) @ n['C']
+            weights = amplitudes.tensor
+            weights = weights.real ** 2 + weights.imag ** 2 \
+                if torch.is_complex(weights) else weights ** 2
+            probs_node = amplitudes
+        else:
+            if left_double and right_double:
+                rho = ((n['L'] @ n['A']) @ n['R']) @ n['Ab']
+            elif left_double:
+                rho = (n['L'] @ (n['A'] @ n['R'])) @ (n['Ab'] @ n['Rb'])
+            else:
+                rho = ((n['L'] @ n['A']) @ n['R']) @ (n['Lb'] @ n['Ab'])
+            probs_node = (rho @ n['C']) @ n['Cb']
+            weights = probs_node.tensor
 
         domain_axis = probs_node.get_axis_num('domain_batch')
-        probs = probs_node.tensor.movedim(domain_axis, -1)
-        return probs.reshape(-1, embedded.shape[-2])
-
-    def _sample_absorb(self,
-                       site: int,
-                       half: AbstractNode,
-                       axis_name: Text,
-                       embedded: torch.Tensor,
-                       conj: bool,
-                       renormalize: bool) -> Node:
-        """Closes a half's open physical edge with the drawn values: the next
-        left environment of the ket (or, with ``conj``, of the bra)."""
-        selected_data, new = self._sample_node(
-            'selected_copy' if conj else 'selected', site, embedded,
-            ('batch', 'feature'))
-        if conj:
-            selected_data = selected_data.conj()
-        if new:
-            if conj:
-                selected_data.reattach_edges(axes=['feature'])
-            half.reattach_edges(axes=[axis_name])
-            selected_data['feature'] ^ half[axis_name]
-        result = half @ selected_data
-        if renormalize:
-            result = self._renormalize_sample_env(result)
-        return result
+        weights = weights.movedim(domain_axis, -1)
+        return weights.reshape(-1, embedded.shape[-2])
 
     @torch.no_grad()
     def sample(self,
@@ -911,17 +917,30 @@ class SamplingMPS(tk.models.MPS):
         conditional on fixed values, use :meth:`condition` first and then call
         :meth:`sample` on the returned MPS.
 
+        An environment is double-layer (ket and bra contracted together) only
+        if it contains a summed site: an output node, or, without
+        ``in_condition``, an input to the right of the drawn site. Elsewhere
+        it is the ket alone. So without output nodes, ``in_condition`` fixes
+        every site but the one being drawn (a Gibbs refinement, e.g. after a
+        first draw from this MPS or from one returned by :meth:`condition`)
+        and every environment is single-layer; unconditioned, the right
+        environments are double-layer (identities when ``canonical``). With
+        an output node, the environments that contain it are double-layer,
+        which costs more than a draw without one: memory bond_dim² instead of
+        bond_dim per sample and site for the right environments kept during
+        the sweep. A sweep reuses a few fixed nodes from site to site, so the
+        other memory does not grow with the number of sites.
+
         When ``build_matrices`` is ``True`` and a floating-point domain is
         given, numerical marginalization uses the trapezoidal rule over that
         domain. The same quadrature weights are included in the categorical
         probabilities used to sample each domain point.
 
-        The nodes this method builds (environments, candidates, and for
-        unconditioned sampling a bra layer) stay in the network: a later call
-        with the same structure refills them and repeats the same operations,
-        which tensorkrowch then computes from their successors without
-        building nodes. :meth:`~tensorkrowch.TensorNetwork.reset`, and
-        ``forward`` through it, removes them.
+        The nodes this method builds stay in the network: a later call sets
+        their tensors and repeats the same operations, which tensorkrowch then
+        computes from their successors without building nodes.
+        :meth:`~tensorkrowch.TensorNetwork.reset`, and ``forward`` through it,
+        removes them.
 
         Parameters
         ----------
@@ -1053,14 +1072,9 @@ class SamplingMPS(tk.models.MPS):
             build_matrices=build_matrices,
             n_samples=n_samples)
 
-        # The nodes of an earlier call are reused when the structure is the
-        # same; the batch and domain sizes may differ (batch edges).
-        sweep = in_condition is not None
-        key = (sweep, canonical, renormalize, tuple(self._in_features),
-               isinstance(in_condition, torch.Tensor),
-               tuple(aux_domain.ndim for aux_domain in domains))
-        build = key != self._nodes_key
-        if build:
+        # The steps of an earlier call are reused (any batch and domain sizes:
+        # batch edges); each kind of step builds its nodes at its first use.
+        if self._nodes_key != ('sample',):
             if self._resultant_nodes or self._nodes_key is not None:
                 if self._nodes_key is None:
                     warnings.warn('Resultant nodes will be removed before '
@@ -1068,12 +1082,11 @@ class SamplingMPS(tk.models.MPS):
                 self.reset()
             if self._data_nodes:
                 self.unset_data_nodes()
-            self._nodes_key = key
+            self._nodes_key = ('sample',)
             self._sample_nodes = {}
 
         try:
             samples, sample_indices, n_unusable = self._sample_sweep(
-                build=build,
                 in_condition=in_condition,
                 n_samples=n_samples,
                 domains=domains,
@@ -1097,7 +1110,6 @@ class SamplingMPS(tk.models.MPS):
         return samples
 
     def _sample_sweep(self,
-                      build: bool,
                       in_condition,
                       n_samples: int,
                       domains: List[torch.Tensor],
@@ -1108,155 +1120,117 @@ class SamplingMPS(tk.models.MPS):
                       renormalize: bool,
                       generator: Optional[torch.Generator]
                       ) -> Tuple[torch.Tensor, torch.Tensor, int]:
-        """The body of :meth:`sample`: ``(samples, indices, unusable draws)``.
+        """The body of :meth:`sample`: ``(samples, indices, unusable draws)``."""
+        # An environment is double-layer (ket and bra contracted together)
+        # only if it contains a summed site: an output node, or, without
+        # ``in_condition``, an input to the right of the drawn site. Everywhere
+        # else (drawn or given sites) it is the ket alone, one vector per
+        # sample.
+        n_features = self._n_features
+        conditioned = in_condition is not None
+        out_sites = [site for site in range(n_features)
+                     if site not in self._in_features]
+        first_out = min(out_sites, default=n_features)
+        last_out = max(out_sites, default=-1)
+        last_in = max(self._in_features)
 
-        With ``build`` the nodes are created and connected; otherwise the kept
-        ones are refilled and the same operations repeated.
-        """
-        # With ``in_condition`` every variable but the one being sampled is
-        # fixed (a sweep): the ket alone suffices, one vector per sample and
-        # value of the open output edges, and each site's density is the ket
-        # joined with its own conjugate. Otherwise the sites to the right are
-        # summed out, which needs a bra layer (a conjugated copy) in this
-        # network; output nodes join ket and bra through their physical edges,
-        # so contracting the two layers marginalizes them.
-        sweep = in_condition is not None
-        if sweep:
-            if build:
-                tk.TensorNetwork.set_data_nodes(
-                    self,
-                    input_edges=[node['input'] for node in self.in_env],
-                    num_batch_edges=1)
-            self.add_data(in_condition)
-            data_nodes = [None] * self._n_features
-            for site, data_node in zip(self._in_features,
-                                       self.data_nodes.values()):
-                data_nodes[site] = data_node
+        def left_double(site):
+            return site > first_out
 
-            left_ket, left_bra = None, None
-            if self._boundary == 'obc':
-                left_ket = self._left_node
-            right_envs = self._build_sample_right_chain(
-                data_nodes=data_nodes,
-                right_ket=self._right_node if self._boundary == 'obc' else None,
-                renormalize=renormalize)
+        def right_double(site):
+            return canonical or (site < last_out) or \
+                ((not conditioned) and (site < last_in))
+
+        reference = self._mats_env[0].tensor
+        pbc = self._boundary == 'pbc'
+        if pbc:
+            loop_dim = self._mats_env[0].shape[0]
+            left = torch.eye(loop_dim, device=reference.device,
+                             dtype=reference.dtype)
+            right = left
         else:
-            if build:
-                self._sample_nodes['bra'] = self._copy_sample_mps()
-            copied_nodes, bra_left, bra_right = self._sample_nodes['bra']
-            bra_nodes = [node.conj() for node in copied_nodes]
-            if self._boundary == 'obc':
-                bra_left = bra_left.conj()
-                bra_right = bra_right.conj()
+            left = self._left_node.tensor
+            right = self._right_node.tensor
+        left = left.expand(n_samples, *left.shape)
+        if conditioned:
+            right = right.expand(n_samples, *right.shape)
 
-            # Physical metrics join ket and bra at input nodes.
-            matrix_nodes = [None] * self._n_features
-            input_idx = 0
-            for site, (node, bra_node) in enumerate(zip(self._mats_env,
-                                                        bra_nodes)):
-                if build:
-                    bra_node.reattach_edges(axes=['input'])
-                if site in self._in_features:
-                    matrix_node, _ = self._sample_node(
-                        'mat', site, matrices[input_idx],
-                        ('input', 'input_copy'))
-                    if build:
-                        node['input'] ^ matrix_node['input']
-                        matrix_node['input_copy'] ^ bra_node['input']
-                    matrix_nodes[site] = matrix_node
-                    input_idx += 1
-                elif build:
-                    node['input'] ^ bra_node['input']
-
-            # Right environments: one batch-free double layer, or none when
-            # canonical.
-            left_ket, left_bra = None, None
-            if self._boundary == 'obc':
-                left_ket, left_bra = self._left_node, bra_left
-            if canonical:
-                right_envs = [None] * self._n_features
+        data = [None] * n_features
+        matrix = [None] * n_features
+        for idx, site in enumerate(self._in_features):
+            if conditioned:
+                data[site] = in_condition[idx] \
+                    if isinstance(in_condition, list) \
+                    else in_condition[:, idx]
             else:
-                right_envs = self._build_sample_right_envs(
-                    bra_nodes=bra_nodes,
-                    matrix_nodes=matrix_nodes,
-                    right_env=(self._right_node % bra_right
-                               if self._boundary == 'obc' else None),
-                    renormalize=renormalize)
+                matrix[site] = matrices[idx]
 
-        # Sweep from left to right, sampling one input node at a time. The left
-        # environment is always single-layer: every site to the left is fixed.
+        # Right environments of the drawn sites, built right to left (or
+        # identities in right-canonical form). Only those are kept.
+        kernels = self._sample_nodes
+        right_envs = {}
+        if canonical:
+            for site in self._in_features:
+                bond = self._mats_env[site].shape[2]
+                eye = torch.eye(bond, device=reference.device,
+                                dtype=reference.dtype)
+                right_envs[site] = eye
+        else:
+            right_envs[n_features - 1] = right
+            for site in range(n_features - 1, 0, -1):
+                right = self._sample_right_step(
+                    kernels, site, right,
+                    double=right_double(site),
+                    batched=conditioned,
+                    data=data[site],
+                    matrix=matrix[site],
+                    renormalize=renormalize)
+                if (site - 1) in self._in_features:
+                    right_envs[site - 1] = right
+
+        # Sweep from left to right, sampling one input node at a time.
         samples = []
         sample_indices = []
         input_idx = 0
         n_unusable = 0
 
-        for site in range(self._n_features):
-            node = self._mats_env[site]
-            if site in self._in_features:
-                # Contract everything but the site's physical edge, then
-                # evaluate the candidates on that small density matrix.
-                half = self._sample_candidate(node, 'candidate')
-                if left_ket is not None:
-                    half = left_ket @ half
-                if sweep:
-                    density = self._sample_sweep_density(half,
-                                                         right_envs[site])
-                else:
-                    bra_half = self._sample_candidate(bra_nodes[site],
-                                                      'candidate_copy')
-                    if left_bra is not None:
-                        bra_half = left_bra @ bra_half
-                    density = self._sample_density(half, bra_half,
-                                                   right_envs[site],
-                                                   canonical)
-                per_sample = domains[input_idx].ndim == 2
-                probs = self._sample_probabilities(
-                    site, density, embeddings[input_idx], per_sample)
-                if probs.shape[0] == 1 and n_samples > 1:
-                    probs = probs.expand(n_samples, -1)
+        for site in range(n_features):
+            if site not in self._in_features:
+                left = self._sample_left_step(
+                    kernels, site, left, left_double(site), None,
+                    renormalize)
+                continue
 
-                probs = probs * quadrature_weights[input_idx].reshape(1, -1)
-                probs, unusable = self._probabilities_from_amplitudes(probs)
-                n_unusable += unusable
-                ids = torch.multinomial(probs,
-                                        num_samples=1,
-                                        replacement=True,
-                                        generator=generator).squeeze(1)
+            per_sample = domains[input_idx].ndim == 2
+            probs = self._sample_site_weights(
+                kernels, site, left, left_double(site),
+                right_envs.pop(site), right_double(site),
+                right_batched=conditioned and not canonical,
+                embedded=embeddings[input_idx])
 
-                sample_indices.append(ids)
-                if per_sample:
-                    rows = torch.arange(n_samples, device=ids.device)
-                    samples.append(domains[input_idx][rows, ids])
-                    selected_embedding = embeddings[input_idx][rows, ids]
-                else:
-                    samples.append(domains[input_idx][ids])
-                    selected_embedding = embeddings[input_idx][ids]
+            probs = probs * quadrature_weights[input_idx].reshape(1, -1)
+            probs, unusable = self._probabilities_from_amplitudes(probs)
+            n_unusable += unusable
+            ids = torch.multinomial(probs,
+                                    num_samples=1,
+                                    replacement=True,
+                                    generator=generator).squeeze(1)
 
-                # Absorb the drawn values into the left environments.
-                left_ket = self._sample_absorb(site, half, 'candidate',
-                                               selected_embedding,
-                                               conj=False,
-                                               renormalize=renormalize)
-                if not sweep:
-                    left_bra = self._sample_absorb(site, bra_half,
-                                                   'candidate_copy',
-                                                   selected_embedding,
-                                                   conj=True,
-                                                   renormalize=renormalize)
-                input_idx += 1
-
+            sample_indices.append(ids)
+            if per_sample:
+                rows = torch.arange(n_samples, device=ids.device)
+                samples.append(domains[input_idx][rows, ids])
+                selected_embedding = embeddings[input_idx][rows, ids]
             else:
-                # An output node: its physical edge stays open (to the bra,
-                # or dangling in a sweep) until a density closes it.
-                left_ket = node if left_ket is None else left_ket @ node
-                if renormalize:
-                    left_ket = self._renormalize_sample_env(left_ket)
-                if not sweep:
-                    bra_node = bra_nodes[site]
-                    left_bra = bra_node if left_bra is None \
-                        else left_bra @ bra_node
-                    if renormalize:
-                        left_bra = self._renormalize_sample_env(left_bra)
+                samples.append(domains[input_idx][ids])
+                selected_embedding = embeddings[input_idx][ids]
+
+            input_idx += 1
+            if site == last_in:
+                break
+            left = self._sample_left_step(
+                kernels, site, left, left_double(site), selected_embedding,
+                renormalize)
 
         # Collect values in the order of ``in_features``.
         samples = torch.stack(samples, dim=1)

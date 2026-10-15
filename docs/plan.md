@@ -527,13 +527,15 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
    become `input_0`/`input_1`; moving nodes between networks and `reset` rename in
    time quadratic in same-named nodes. Once a tensorkrowch release has it,
    `SamplingMPS` can go (bm4tc stays on 1.1.6 until then).
-6. **In progress (2026-10-15): one layer only where nothing is marginalised.**
-   Martin rejected step 3's open leg (memory d_out^k for k output sites); the tk PR
-   branch `sample-density` is being rebuilt so an environment is double only if it
-   contains a summed site, with fixed sampling nodes whose tensors are updated from
-   site to site (memory independent of n except the stored right environments,
-   B·r² per double one: in Gibbs purification only those left of the class). Then
-   ported here.
+6. **Done (D106, 2026-10-15): double layers only where something is summed, fixed
+   sampling nodes.** Martin rejected step 3's open leg (memory d_out^k for k output
+   sites). An environment is double only if it contains a summed site; each step of
+   the sweep is a few fixed virtual nodes whose tensors are set from site to site,
+   so memory does not grow with n except the right environments kept for the sweep
+   (B·r² each, in Gibbs purification only left of the class). Same draws; the
+   sampler holds megabytes between calls instead of 1–2 GiB (compute.md, "Gibbs
+   purification since D106"). The tk PR branch `sample-density` has the same code
+   (`../tensorkrowch/_notes/note_jose_sample_density.md`).
    **Open, not to be solved on the fly: float32 precision of two layers.** A
    two-layer environment is PSD in exact arithmetic, but its float32 rounding error
    is not: a double layer sums ket × bra products, so its error grows like the
@@ -548,16 +550,22 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
      window (0.8–1.0), worst negative weight / row maximum over 3 seeds: tk develop
      (two layers) −2.7e-3; the rebuilt branch −8e-2, raising "negative beyond
      numerical tolerance" in 2 seeds; the open-leg single layer (step 3) ≥ −5e-6;
-     float64 always clean. The branch is 10–30× worse than develop here, likely
-     because it forms the site's density matrix in the embedding basis first and
-     evaluates each candidate as a quadratic form, which cancels when the whole
-     window is improbable (develop puts the candidate in before the environments,
-     at memory B·candidates·r²).
+     float64 always clean. That branch (two layers everywhere) was 10–30× worse
+     than develop here, likely because it forms the site's density matrix in the
+     embedding basis first and evaluates each candidate as a quadratic form, which
+     cancels when the whole window is improbable (develop puts the candidate in
+     before the environments, at memory B·candidates·r²). D106 (one of the two
+     environments double, one layer elsewhere): −8e-4, no raise; with 24 samples
+     and per-sample windows around one value (the case that raised on that
+     branch, −11.5%) −4.6%, no raise.
    Possible fixes, undecided: float64 where two layers are used; environments
    stored as a square root (ρ = F F†, a QR per site, about B·r³·d); routing
-   negative rows to the uniform draw. bm4tc's current sampler (step 3, one layer) is
-   not affected; the port is, so Gibbs purification needs a float32 check on trained
-   models before it lands.
+   negative rows to the uniform draw. **Still to check: float32 on trained models**
+   (none on the laptop; random full-MNIST models at r40 / r80 ran ten sweeps with no
+   negative weight beyond tolerance). Check before relying on Gibbs results from
+   D106 on (E3): e.g. one purification at the analysis settings on a trained full
+   MNIST checkpoint on the cluster, watching for "negative beyond numerical
+   tolerance".
 
 Out of scope until decided: finer grids or exact continuous draws, a
 Metropolis–Hastings correction for the windows, temperature (they change the
