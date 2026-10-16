@@ -50,7 +50,7 @@ def test_defaults_fill_the_grid():
 
 def test_at_cells_carry_the_radius():
     cells = Study("spirals_at").cells()
-    assert [(c.beta, c.eps) for c in cells] == [(0.0, 0.1), (0.1, 0.1), (0.5, 0.1)]
+    assert [(c.beta, c.eps) for c in cells] == [(0.0, 0.1), (0.25, 0.1), (0.5, 0.1)]  # D113
 
 
 def test_embedding_settings_apply_per_cell():
@@ -105,9 +105,9 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
 def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
     monkeypatch.setattr(runs, "HPARAMS", tmp_path)
     study = Study("jem_mnist12_at")
-    cell = next(c for c in study.cells() if c.beta == 0.1 and c.arch == "d3r20")
+    cell = next(c for c in study.cells() if c.beta == 0.25 and c.arch == "d3r20")
     (tmp_path / "jem_mnist12_nat.yaml").write_text(
-        "raw/d3r20/b0.1:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
+        "raw/d3r20/b0.25:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
         "  jem.sampler.step_size: 0.02\n  jem.sampler.noise_std: 0.003\n"
         "  jem.sampler.num_steps: 40\n")
     (tmp_path / "jem_mnist12_at.yaml").write_text(

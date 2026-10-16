@@ -159,7 +159,7 @@ init: warm                  # cold | warm; AT is always warm
 warm_from: mnist12_nat      # default [jem_]{dataset}_nat
 grid:                       # each axis overrides the default
   arch: [d3r20, d3r40]
-  beta: [0, 0.1, 0.5]
+  beta: [0, 0.25, 0.5]
   eps: [0.1]                # AT only; must be in budgets
 config:                     # fixed run-config values, any schema key
   trainer.max_epoch: 100

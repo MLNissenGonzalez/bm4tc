@@ -8,7 +8,7 @@ init: warm
 grid:
   embedding: [raw]
   arch: [d3r20, d3r40]
-  beta: [0, 0.1, 0.5]
+  beta: [0, 0.25, 0.5]          # D113, as mnist12_at
 config:
   trainer.max_epoch: 150       # D88: full radius from epoch 105
   trainer.batch_size: 512

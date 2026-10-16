@@ -4,7 +4,7 @@ regime: at
 init: warm
 grid:
   arch: [d10r6]
-  beta: [0, 0.1, 0.5]           # D86, revisit after the β pilots
+  beta: [0, 0.25, 0.5]          # D113: plain AT, β* of E2a under adaptive attack, the last β before the accuracy knee
 config:
   trainer.max_epoch: 200
   trainer.batch_size: 256
