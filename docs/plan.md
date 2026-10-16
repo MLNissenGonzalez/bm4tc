@@ -3,11 +3,41 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D110, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D114, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
-## Now (2026-10-13, evening)
+## Now (2026-10-16)
+
+- **E2a under adaptive attack is read** (`docs/adaptive.md` §7, 2026-10-16): on MNIST
+  12×12 likelihood purification loses only 0.02–0.07 (β = 0.25: 0.829 → 0.780; one
+  restart, so an upper bound), detection 0.24–0.30 (0.89 → 0.65). The opposite of
+  spirals. β\* = 0.25 stands.
+- **Decided:** the AT grid is {0, 0.25, 0.5} for every dataset (**D113**); active
+  defences are reported under the adaptive attack, transfer numbers as diagnostics
+  (**D114**). The adaptive part's settings and test points come from the saturation
+  ablation (Next, step 1).
+- **D112 on the cluster** (compute.md, "Since D112, on G21G01"): 10–15× less memory,
+  captured training 3–33% faster, eager 1.45–2.1× slower; `--per-gpu` redone (8 / 4 / 3
+  for MNIST 12×12 / full MNIST d3r40 / d3r80).
+
+Next, in order:
+
+1. **The saturation ablation of the adaptive attack** (D114), on E2a's β = 0.25
+   checkpoint and E3's spirals models: restarts (1, 5), steps (100, 200), EOT for
+   Gibbs, and the number of test points (1000 gives ±0.013); first question: does
+   MNIST 12×12 purification hold at 5 restarts? Then set `analysis.adaptive`'s
+   defaults, add its test subsample, and capture its steps (D105's per-step graphs;
+   the part is eager today, 4.3 h per checkpoint for the purifier attack).
+2. **Turn adaptive on** in the Phase 8 studies; `configs/papers/` reads the `_adapt`
+   keys (D114).
+3. Martin decides: micro-batches (D79) and `analysis.batch_size: 128` (D111) after
+   D112 (Efficiency, below).
+4. Before Phase 8: cap HPO workers per cell, `select`/`run --cell` on a subset, a
+   multi-study launcher.
+5. Phase 8 studies.
+
+## Before (2026-10-13, evening)
 
 - **E2a is read** ([Pilots](#beta--mnist-1212-e2a-ran-2026-10-13-on-f9e7cb0c)):
   accuracy knee β ≈ 0.7, density knee β ≈ 0.03–0.1, β\* = 0.25 between them (on
@@ -57,7 +87,8 @@ Next, in order:
    does, and grows with β (0.72 → 0.92 at ε = 0.1). By the rule below (E2a's
    decision), the AT grid now waits for the `adaptive` part on a few E2a checkpoints.
    Then the saturation ablation (steps, restarts, EOT) for `analysis.adaptive`'s
-   defaults.
+   defaults. *(Done 2026-10-16: the adaptive part on E2a's checkpoints, `docs/adaptive.md`
+   §7; the AT grid is D113. Now, above.)*
 4. Before Phase 8 (below): cap HPO workers per cell, `select`/`run --cell` on a
    subset, a multi-study launcher.
 5. Phase 8 studies.
@@ -130,9 +161,8 @@ need their `warm_from` study trained.
 5. `python -m bm4tc figures paper`; commit `figures/journal/`.
 
 **To do before the studies run:**
-- **β grids from E2:** the ladder in `defaults.yaml` is set ({0, 0.01, 0.1, 0.25,
-  0.5, 0.9, 1}, D108); the AT grid (now {0, 0.1, 0.5} in every AT study; planned
-  {0, β\*}) waits for E3.
+- ~~**β grids from E2**~~ (done): the ladder in `defaults.yaml` ({0, 0.01, 0.1, 0.25,
+  0.5, 0.9, 1}, D108); the AT grid {0, 0.25, 0.5} in every AT study (D113).
 - **Cap HPO workers per cell.** Today workers = the launch's slots (capped at the
   cell's trials): with ≥ 15 slots every trial starts at once, TPE never sees a
   finished trial and the pruner never acts. Cap at ~1/3 of the trials; until then
@@ -152,60 +182,30 @@ need their `warm_from` study trained.
   The candidate is a `deploy` mode in hpc-greyc's `cluster-run`, which today copies
   a script and its local modules into a job directory (fine for one-off scripts,
   unsuitable for studies).
-- **Analysis units need more GPU memory than training units**, but `--per-gpu`
-  sizes every slot alike. E2a's relaunch (`--per-gpu 4`) lost 3 of 12 analyses to
-  out of memory in a `uq` capture (log p(x), purification): an analyse unit held
-  6.2–6.4 GiB beside trains at 3.9 GiB. E2b (full MNIST d3r40 micro 256, 2 units
-  per GPU) lost its first 4 analyses and one train start the same way: a train holds
-  ≈ 9.3 GiB per process (7.9 of it reserved by the allocator, unallocated), an
-  analysis ≥ 10.7 GiB; the unit that starts next to a running one is the one that
-  fails. Phase 8's `mnist_nat`/`mnist_at` would hit this on every launch. Since
-  D105 the attack and purification are captured per step: at 784 sites, batch 64,
-  the bench peaks at 2.55 / 5.05 GiB reserved captured at batch 32 / 64 (0.77 /
-  1.52 GiB eager) on the RTX 2080, ≈ 0.08 GiB per sample, each step graph keeping a
-  pool of its own; `pilot_beta28` analyses at batch 64. Graphs that never run at
-  once (attack step, purification step, log p(x), prediction) could share one pool
-  (`torch.cuda.graph(pool=...)`; their replays already return copies). **D107 does
-  this** (one pool per `Graphs`): 2.99 GiB at batch 64 (eager 1.52); the analysis
-  keeps per-shape warm-ups (D110), so ≈ 2× eager. On G21G01 (2026-10-15): 2.99 GiB
-  reserved at batch 64, 10.38 at 256 (eager 1.52, 7.59), 394 vs 170 s for 2048
-  points; `--per-gpu` per study shape in compute.md. D111 sets `analysis.batch_size: 128` for full MNIST. Still open: a per-stage
-  `--per-gpu`; d3r80's analysis at 128 (≈ 20 GiB estimated) on the cluster.
-- **Graph memory: reserved far above allocated, worst for AT: fixed by D107 + D110,
-  checked on G21G01 (2026-10-15; compute.md, "Cluster check of D107 + D110").** One
-  transient is left: at the first capture, the epoch-1 eager tensors held by tk's
-  nodes coexist with the new pool (full MNIST NAT 7.80 GiB peak reserved vs 5.49 at
-  the end; d3r80 NAT 16.04 vs 11.51). Dropping those references before the first
-  capture would remove it. Per-pool accounting (`bench_train_step --snapshot`)
-  showed reserved = the sum of private pools (D107: one pool per `Graphs`) and eager
-  warm-ups after a capture adding their peak to the pool's (D110: the Trainer warms
-  everything up in epoch 1, then captures). eGPU: full-MNIST AT micro 128 5.92 GiB
-  reserved (eager 5.88), NAT chunk 256 5.50 (eager 5.34). Before, D104's check on G21G01 at `da7185e8` (D104 + D105),
-  `bench_train_step`, β 0.5, batch 512, per process (nvidia-smi):
-  MNIST12 d3r40 NAT 4.57 GiB (1.82 allocated at peak, 4.24 reserved; E2a measured
-  3.89 before D104), AT 10.92 GiB (2.76 allocated, 10.42 reserved); full MNIST
-  d3r40 micro 256 NAT 10.46 GiB (5.01 / 9.24), AT out of memory in the first
-  validation's attack warm-up (3.63 GiB allocated, 15.33 reserved but unallocated).
-  Suspects: one private pool per graph (D92) holds each graph's peak at once, and
-  D105 added graphs (the attack step in training, another in validation at the
-  valid batch shape) where AT's step was one graph; warm-ups on the side stream;
-  D104's +0.8 GiB. To measure first: the same bench at `f56365de` (D104 without
-  D105), then a shared pool for the graphs of one `Graphs` (they never run at once;
-  inputs are copied in, outputs cloned out), checked with D94's allocation tests
-  (tk's kept nodes, D104, may hold capture-time memory). Measured instead per pool;
-  the attribution to D104 vs D105 was not needed.
+- **Analysis units need more GPU memory than training units: not since D112.** On
+  G21G01 (compute.md, "Since D112, on G21G01") the captured full-MNIST analysis holds
+  0.46 / 0.80 GiB reserved at batch 128 / 256 (before: 2.99 at 64, 10.38 at 256), d3r80
+  at 128 1.01 GiB; the largest unit of a study is now an AT train (3.2 GiB per process at
+  full MNIST d3r40, 5.4 at d3r80). `--per-gpu` 8 / 4 / 3 for MNIST 12×12 / full MNIST
+  d3r40 / d3r80. History: E2a's relaunch and E2b lost analyses to out of memory beside
+  trains, which D105, D107, D110 and D111 addressed. A per-stage `--per-gpu` is no
+  longer needed.
+- **Graph memory: fixed by D107 + D110, then shrunk by D112** (compute.md). Left: the
+  first-capture transient (epoch-1 eager tensors held by tk's nodes beside the new
+  pool), ≈ 10× smaller since D112; outside the allocator a process holds 1.3–3.8 GiB
+  at 784 sites (CUDA context, graph executables), now most of its memory.
 - **Staggered unit starts**, so a launch does not put every warm-up peak on a GPU at
   once; at E2a's launch two units on one GPU failed with "CUDA-capable device(s)
   is/are busy or unavailable" (MPS refusing clients that connect together; retried
   by D93).
-- **Gibbs purification on full MNIST** (≈ 40–80 GPU-h per run, out of memory at
-  batch 24): the rework under Efficiency, or enable `analysis.sweep_purify` only
-  where the paper reads it (`paper.yaml`'s `mnist_sweep_purify`).
-- **Full-MNIST d3r80 (micro 128) did not fit**: validation needed ≈ 4.8 GiB beside
-  the step's 16 GiB pool, exactly what D107 + D110 remove. Recheck in the cluster
-  check; `mnist_capacity` decides.
-- **Adaptive attacks:** implemented (D96, D98); E3 and its saturation ablation set
-  `analysis.adaptive`'s defaults (Now, step 3).
+- **Gibbs purification on full MNIST is affordable** (D101, D103, D106: ≈ 50 s per run);
+  enable `analysis.sweep_purify` where the paper reads it (`paper.yaml`'s
+  `mnist_sweep_purify`), and under the adaptive attack (D114) its EOT cost counts.
+- **Full-MNIST d3r80 fits** (AT 5.4 GiB per process since D112); `mnist_capacity`
+  decides.
+- **Adaptive attacks:** implemented (D96, D98); every active defence is reported under
+  them (D114); the saturation ablation sets `analysis.adaptive`'s defaults and its test
+  points (Now, step 1).
 - **Re-estimate compute.md** with graphs, MPS and the HPO budget (D81 cuts the HPO
   share to ≈ 40% of the 3,500 GPU-h estimate's).
 - **Review the study settings** copied from the old sweeps (epochs, patience, HPO
@@ -313,6 +313,15 @@ not, the `adaptive` part runs on a few E2a checkpoints (β = 0, 0.1, 0.25, 0.5; 
 retraining) before the grid is fixed. A 12×12 ladder with ≥ 2 cells between the
 knees would be {0, 0.01, 0.1, 0.25, 0.5, 0.9, 1}; the Phase 8 ladder waits for E2b's
 knee shift.
+
+**Under adaptive attack (2026-10-16, `docs/adaptive.md` §7; outputs in
+`pilots/cluster/pilot_beta12_adaptive/`).** E3 showed purification falling on spirals,
+so the `adaptive` part ran on β ∈ {0, 0.1, 0.25, 0.5} (100 steps, one restart from the
+PGD example): purification 0.535 / 0.756 / **0.780** / 0.712 (transfer 0.558 / 0.790 /
+0.829 / 0.777), detection 0.663 / 0.611 / 0.648 / 0.556 (transfer 0.936 / 0.902 /
+0.890 / 0.858). Purification holds on MNIST 12×12 at this attack strength and β\* = 0.25
+stands; detection falls. Decided (Martin asked Claude to choose): the AT grid
+{0, 0.25, 0.5} (D113); active defences under the adaptive attack (D114).
 
 ### Beta / full MNIST (E2b, trained on `05c44cf8`, analysed on `da7185e8`)
 
@@ -460,12 +469,16 @@ left:
   launch-bound); fewer kernels per site (≈ 30, most of them the renormalization: a
   renormalize that keeps the log norm, below); whether micro-batches (D79) and D111's
   `analysis.batch_size: 128` (sized for data first's memory) are still needed (Martin
-  decides); the cluster numbers for `--per-gpu`.
-- **The forward without `reset`: done (D104), cluster check open.** `forward` calls
+  decides: on G21G01 the analysis at batch 256 holds 0.80 GiB and is 1.5× faster than
+  at 128; training without micro-batches is unmeasured there, 3–3.5× faster on the
+  laptop). The cluster numbers and `--per-gpu`: done (compute.md, "Since D112, on
+  G21G01"). Eager is 1.45–2.1× slower since D112, which the eager parts pay (Gibbs, JEM,
+  `adaptive`).
+- **The forward without `reset`: done (D104), cluster check passed.** `forward` calls
   `contract()` on its kept nodes, recorded like tk's `trace`; bit-identical, eager step
   174 → 130 ms, eager analysis 81 → 53 s, captured training unchanged (compute.md,
-  "Since D104"). Open: reserved memory +0.8 GiB per process at E2a's shape (allocated
-  unchanged, cause not found); measure on G21G01 before packing units (handoff.md).
+  "Since D104"). Its +0.8 GiB reserved per process at E2a's shape is moot since D112
+  (0.20 GiB reserved there on G21G01).
 - **A tk `renormalize` operation that keeps the norm (deep, hard; reduces complexity).**
   tk's `renormalize` discards the norm; bm4tc's `_inline_contraction` override
   computes it in Python and accumulates it beside the network. An operation that
@@ -635,7 +648,9 @@ networks generatively).
 
 - **Adaptive attacks** a reviewer will ask for: implemented for likelihood
   purification, Gibbs/SGLD and the detector (D96), started from the transfer attack
-  (D98); E3 read (`docs/adaptive.md` §6): purification falls, detection holds.
+  (D98); the reported numbers for every active defence (D114). E3 (spirals,
+  `docs/adaptive.md` §6): purification falls, detection holds; E2a (MNIST 12×12, §7):
+  purification holds at one restart, detection falls. Saturation ablation next.
 - **Time series** (D6): datasets, grids and studies (NAT and AT; JEM if wanted).
 - **Trainer unification** for MPS and JEM: noted, not decided (decisions.md, under
   the table).

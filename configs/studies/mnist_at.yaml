@@ -4,7 +4,7 @@ regime: at
 init: warm
 grid:
   arch: ???                    # the rank mnist_capacity selects (D44)
-  beta: [0, 0.1, 0.5]           # D86, revisit after the β pilots
+  beta: [0, 0.25, 0.5]          # D113: plain AT, β* of E2a under adaptive attack, the last β before the accuracy knee
 config:
   trainer.max_epoch: 150       # D88: full radius from epoch 105
   trainer.batch_size: 512

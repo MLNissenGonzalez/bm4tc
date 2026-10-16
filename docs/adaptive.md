@@ -306,6 +306,45 @@ pattern, lower. At ε = 0.05 everything is within 0.06 of the ceiling (0.989).
   "Detection/attack failed: ; skipping" per budget (the adversarial examples were
   cached before it, so every number was computed). Fixed after E3.
 
+## 7. E2a's checkpoints under adaptive attack (MNIST 12×12, 2026-10-16)
+
+E3's follow-up (plan.md, "Beta"): the `adaptive` part on four of E2a's checkpoints,
+not retrained. G21G01 GPU 0, 3 units under MPS, worktree `runs/83da4cc9`, 14.3 h for
+the four; results in `pilots/cluster/pilot_beta12_adaptive/` (untracked; E2a's older
+analysis stays in `pilots/cluster/pilot_beta12/`). d3r40, all 7000 test points, ε = 0.1,
+likelihood purification at δ = 0.1, detection at q5, the adaptive attack trimmed: 100
+steps, **one restart, the PGD example** (D98; E3 had 5), no Gibbs.
+
+| β | acc | PGD (`rob`) | purify: transfer / adaptive | detect q5 (`rob_sel`): transfer / adaptive | purify + detect (`purify_sel`): transfer / adaptive |
+|---|---|---|---|---|---|
+| 0 | 0.980 | 0.282 | 0.558 / 0.535 | 0.936 / 0.663 | 0.566 / 0.539 |
+| 0.1 | 0.977 | 0.454 | 0.790 / 0.756 | 0.902 / 0.611 | 0.787 / 0.752 |
+| 0.25 | 0.967 | 0.522 | 0.829 / **0.780** | 0.890 / 0.648 | 0.827 / 0.779 |
+| 0.5 | 0.946 | 0.475 | 0.777 / 0.712 | 0.858 / 0.556 | 0.775 / 0.712 |
+
+The opposite of spirals on both counts:
+
+- **Purification loses little: 0.02–0.07.** It stays well above PGD at every β (0.78
+  against 0.52 at β = 0.25), and β\* = 0.25 is unchanged. This is an upper bound with
+  a weaker attack than E3's: one restart, where on spirals five restarts took
+  purification down to the undefended model. MNIST has no ceiling to check it against
+  (§2.4). Whether it holds at more restarts is the first question of the saturation
+  ablation.
+- **Detection falls by 0.24–0.30** (0.89 → 0.65 at β = 0.25), still above PGD; on
+  spirals it lost 0.01–0.1 at ε = 0.1. On MNIST it does not grow with β (0.66, 0.61,
+  0.65, 0.56): the untrained density at β = 0 flags every transfer example (detection
+  1.0, E2a), and the adaptive attack walks around it as easily as around a trained one.
+  An L∞ step of 0.2 on 144 pixels has room to keep log p(x) above τ_q.
+- **Detecting after purification adds nothing** (`purify_sel` ≈ `purify`, under both
+  attacks): the purified point is already above τ_q.
+- **Cost.** Per checkpoint, the attack through the purifier took 4.3 h, the one through
+  purifier and detector 3.3 h, the one through the detector alone 9 min (every attack
+  step runs the 40-step purifier; the part is eager). D114 has the levers.
+
+The AT grid follows (D113): {0, 0.25, 0.5}. D114: active defences are reported under
+the adaptive attack, since transfer numbers overstate them (on spirals above the
+ceiling, here by up to 0.30 for detection).
+
 ## References
 
 - A. Athalye, N. Carlini, D. Wagner. Obfuscated gradients give a false sense of security.
