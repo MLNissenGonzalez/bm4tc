@@ -11,12 +11,13 @@ parts ran before it (a resumed analysis reproduces them).
     gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
     adaptive   PGD and the adaptive attack against purifier and detector (D96; if
-               analysis.adaptive.enabled; eager)
+               analysis.adaptive.enabled; on analysis.adaptive.subsample)
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
-work (forwards, PGD, likelihood purification) replays from CUDA graphs, one set
-per part (D92); JEM's stays eager.
+work (forwards, PGD, likelihood purification, the adaptive attack's steps)
+replays from CUDA graphs, one set per part (D92, D117); JEM's stays eager, and so
+does the sweep purification (Gibbs, SGLD) with its adaptive attack.
 """
 import hashlib
 import json
@@ -245,8 +246,8 @@ def sgld(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
                   _sweep_purifier(cbm, analysis)[1])
 
 
-def _likelihood_purified(purifier, model, delta_abs, device, x):
-    return purifier.purify(model, x, delta_abs, device)[0]
+def _likelihood_purified(purifier, delta_abs, x):
+    return purifier(x, delta_abs)[0]
 
 
 def _sweep_purified(purifier, model, sweeps, device, x):
@@ -254,28 +255,31 @@ def _sweep_purified(purifier, model, sweeps, device, x):
 
 
 def _subsample(n: int, size: Optional[int]) -> torch.Tensor:
-    """The fixed test subsample of the sweep purification (the same points as
-    UQEvaluation's, seed 0)."""
+    """A fixed test subsample (seed 0): the sweep purification's (the same points
+    as UQEvaluation's) or the adaptive part's. The smaller is a prefix of the
+    larger."""
     if size is None or size >= n:
         return torch.arange(n)
     return torch.from_numpy(np.random.default_rng(0).permutation(n)[:size])
 
 
-def _defences(cbm, analysis, thresholds, range_size, device):
+def _defences(cbm, analysis, thresholds, range_size, graphs: Graphs, device):
     """(key name, setting, Defense, selective, test subsample) for every defence:
     likelihood purification, the detector at each threshold, both, and the sweep
-    purification if it is on."""
-    likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps)
+    purification if it is on. The likelihood purifier replays from ``graphs``."""
+    likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps
+                                        ).graphed(cbm, graphs)
+    size = analysis.adaptive.subsample
     out = []
     for delta in analysis.purify_delta:
-        purify = partial(_likelihood_purified, likelihood, cbm, rel_to_abs(delta, range_size),
-                         device)
-        out.append(("purify", f"d{delta:g}", Defense(cbm, purify), False, None))
+        purify = partial(_likelihood_purified, likelihood,
+                         graphs.scalar(rel_to_abs(delta, range_size), device))
+        out.append(("purify", f"d{delta:g}", Defense(cbm, purify), False, size))
         for q, tau in thresholds.items():
             out.append(("purify_sel", f"d{delta:g}_q{q:g}",
-                        Defense(cbm, purify, tau, detect_on="purified"), True, None))
+                        Defense(cbm, purify, tau, detect_on="purified"), True, size))
     for q, tau in thresholds.items():
-        out.append(("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True, None))
+        out.append(("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True, size))
     p = analysis.sweep_purify
     if p.enabled:
         name, purifier = _sweep_purifier(cbm, analysis, progress=False)
@@ -291,7 +295,12 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     by the adaptive attack (``_adapt``, D96), which starts its first restart from the
     PGD example (D98). Robust accuracy for the purifiers,
     selective robust accuracy (``rob_sel``, ``purify_sel``) where a detector may
-    reject. PGD on the purifiers alone is the ``uq`` and sweep parts' already."""
+    reject. PGD on the purifiers alone is the ``uq`` and sweep parts' already.
+
+    On the test subsample ``analysis.adaptive.subsample`` (D117), the sweep
+    purification on its own. On CUDA, PGD, the likelihood purifier and the adaptive
+    attack's steps replay from the part's graphs; a random purifier's attack stays
+    eager (its sampler is Python per site)."""
     a = analysis.adaptive
     cbm.to(device)
     cbm.log_normalizer()
@@ -299,19 +308,28 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
                                        list(analysis.percentiles), device)
     X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
     range_size = range_size_of(cbm)
-    pgd = ProjectedGradientDescent(norm="inf", num_steps=analysis.attack_steps)
+    graphs, eager = _graphs(cbm, device), Graphs(enabled=False)
+    pgd = ProjectedGradientDescent(norm="inf", num_steps=analysis.attack_steps
+                                   ).graphed(cbm, graphs)
     attack = AdaptivePGD(steps=a.steps, restarts=a.restarts, eot=a.eot)
-    defences = _defences(cbm, analysis, thresholds, range_size, device)
+    defences = _defences(cbm, analysis, thresholds, range_size, graphs, device)
+    # one graphed attack per defence, captured once for every budget
+    attacks = [(attack.graphed(d[2], g), g)
+               for d, g in ((d, eager if d[2].random else graphs) for d in defences)]
+    # PGD on the points some defence is scored on (sorted); the other rows stay nan
+    attacked = torch.unique(torch.cat([_subsample(len(X), d[4]) for d in defences]))
     out = {}
     for eps in budgets:
         eps_abs = rel_to_abs(eps, range_size)
-        x_pgd = torch.cat([pgd.generate(cbm, X[i:i + analysis.batch_size],
-                                        y[i:i + analysis.batch_size], eps_abs, device).cpu()
-                           for i in range(0, len(X), analysis.batch_size)])
-        for name, setting, defense, selective, subsample in defences:
+        x_pgd = torch.full_like(X, float("nan"))
+        for i in range(0, len(attacked), analysis.batch_size):
+            b = attacked[i:i + analysis.batch_size]
+            x_pgd[b] = pgd(X[b].to(device), y[b].to(device),
+                           graphs.scalar(eps_abs, device)).cpu()
+        for (name, setting, defense, selective, subsample), (adapt, g) in zip(defences, attacks):
             idx = _subsample(len(X), subsample)
-            crafts = {"_adapt": lambda xb, yb, b: attack.generate(defense, xb, yb, eps_abs,
-                                                                  start=x_pgd[b])}
+            radius = g.scalar(eps_abs, device)
+            crafts = {"_adapt": lambda xb, yb, b: adapt(xb, yb, radius, start=x_pgd[b])}
             if selective:
                 crafts[""] = None   # the PGD examples
             for suffix, craft in crafts.items():

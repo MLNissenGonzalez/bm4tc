@@ -47,7 +47,8 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
                                          on a fixed test subsample
     purify_sgld, recovery_sgld           the same for SGLD purification (JEM)
 
-Adaptive attacks (part `adaptive`, D96; docs/adaptive.md). `_adapt` on a name means
+Adaptive attacks (part `adaptive`, D96; docs/adaptive.md), on the test subsample
+`analysis.adaptive.subsample` (D117). `_adapt` on a name means
 the attack through the whole defence instead of PGD on the classifier. Selective
 robust accuracy counts a point when its clean input is accepted and right and its
 attacked input is rejected or right:

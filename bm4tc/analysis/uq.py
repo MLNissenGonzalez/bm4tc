@@ -116,7 +116,7 @@ class _BatchWork:
 
     def __init__(self, model, attack, purifier, graphs: Graphs, device):
         self.device = device
-        self._captured = graphs.enabled
+        self._graphs = graphs
 
         def marginal(x):
             with torch.no_grad():
@@ -133,17 +133,12 @@ class _BatchWork:
         self._attack = attack.graphed(model, graphs)
         self._purify = purifier.graphed(model, graphs)
 
-    def _radius(self, radius: float):
-        if not self._captured:
-            return radius
-        return torch.tensor(radius, dtype=torch.float64, device=self.device)
-
     def attack(self, x, labels, eps_abs: float) -> torch.Tensor:
-        return self._attack(x, labels, self._radius(eps_abs))
+        return self._attack(x, labels, self._graphs.scalar(eps_abs, self.device))
 
     def purify(self, x, delta_abs: float) -> Tuple[torch.Tensor, torch.Tensor]:
         """(purified x, its log p(x))."""
-        return self._purify(x, self._radius(delta_abs))
+        return self._purify(x, self._graphs.scalar(delta_abs, self.device))
 
 
 def _batched_forward(fn, x: torch.Tensor, batch_size: Optional[int], device) -> torch.Tensor:

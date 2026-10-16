@@ -62,3 +62,5 @@ analysis:
     restarts: 5
     eot: 16                    # draws per step for Gibbs / SGLD
     eval_draws: 32             # fresh draws scoring their examples
+    subsample: 1000            # test points (fixed subset, seed 0; ±0.013), null = all (D117);
+                               # Gibbs / SGLD use sweep_purify.subsample

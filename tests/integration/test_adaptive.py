@@ -45,7 +45,7 @@ def test_backward_is_the_gradient_at_the_purified_point(model, data):
     defense = Defense(model, purify=lambda v: (v + 0.1).clamp(0, 1))
 
     xg = x.clone().requires_grad_(True)
-    loss, _ = defense.attack_step(xg, y, draws=1)
+    loss, _ = defense.attack_step(xg, y, defense.purified(xg, 1))
     (got,) = torch.autograd.grad(loss.sum(), xg)
 
     z = (x + 0.1).clamp(0, 1).requires_grad_(True)
@@ -76,7 +76,10 @@ class _Scripted:
     def __init__(self, model, hit):
         self.model, self.hit, self.calls, self.seen = model, hit, 0, []
 
-    def attack_step(self, x, labels, draws):
+    def purified(self, x, draws):
+        return None
+
+    def attack_step(self, x, labels, purified):
         self.calls += 1
         self.seen.append(x.detach().clone())
         rate = torch.full((len(x),), float(self.calls == self.hit))

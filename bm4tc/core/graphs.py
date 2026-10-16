@@ -108,6 +108,14 @@ class Graphs:
     def wrap(self, function: Callable, warmup_calls: int = 3) -> "Graphed":
         return Graphed(function, self, warmup_calls)
 
+    def scalar(self, value: float, device):
+        """``value`` as the graphed functions take it: a float64 device scalar
+        when enabled (a graph's inputs are tensors, so one graph serves every
+        radius), the float itself when eager."""
+        if not self.enabled:
+            return value
+        return torch.tensor(value, dtype=torch.float64, device=device)
+
 
 class Graphed:
     """``function(*inputs)`` replayed from a CUDA graph of its :class:`Graphs`;

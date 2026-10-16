@@ -13,10 +13,12 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from bm4tc.analysis.purification import LikelihoodPurification
+from bm4tc.analysis.adaptive import AdaptivePGD, Defense
+from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
 from bm4tc.analysis.uq import UQConfig, UQEvaluation, _BatchWork
 from bm4tc.core.attacks import EvasionConfig, build_attack
 from bm4tc.core.graphs import Graphed, Graphs
+from bm4tc.core.interface import log_px
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig
 from bm4tc.core.objective import NormControlConfig, OptimizerConfig
 from bm4tc.core.train import TrainConfig, Trainer
@@ -404,6 +406,46 @@ def test_captured_analysis_batch_work_is_bit_identical_to_eager(method):
     for routine in (captured.log_px, captured.predict, captured._attack.step,
                     captured._purify.step, captured._purify.finish):
         assert len(routine._captures) == 1
+
+
+def _adaptive_defences(cbm, graphs):
+    """The adaptive part's deterministic defences, the purifier on ``graphs``:
+    likelihood purification, the detector, both."""
+    purifier = LikelihoodPurification(num_steps=3).graphed(cbm, graphs)
+    radius = graphs.scalar(0.1, CUDA)
+    purify = lambda x: purifier(x, radius)[0]
+    data, _ = _batches(cbm, 1)[0]
+    with torch.no_grad():
+        tau = float(log_px(cbm, data).median())
+    return [Defense(cbm, purify), Defense(cbm, purify, tau, detect_on="purified"),
+            Defense(cbm, threshold=tau)]
+
+
+@needs_cuda
+def test_captured_adaptive_attack_is_bit_identical_to_eager():
+    """The adaptive attack (D117) through each deterministic defence, its steps
+    and the likelihood purifier replayed from graphs, against the eager attack,
+    started from a fixed point (the random restarts draw at other RNG offsets
+    when captured, as PGD's start, D105). Then a Gibbs sweep builds the model's
+    sampling nodes (``_nodes_key``, D104), as the part's Gibbs defence does, and
+    the graphs captured on the forward's nodes still replay to the eager numbers."""
+    cbm = _analysed_cbm()
+    attack = AdaptivePGD(steps=3, restarts=1)
+    graphs = Graphs(enabled=True)
+    captured = [attack.graphed(d, graphs) for d in _adaptive_defences(cbm, graphs)]
+    eager_graphs = Graphs(enabled=False)
+    eager = [attack.graphed(d, eager_graphs) for d in _adaptive_defences(cbm, eager_graphs)]
+    eps = torch.tensor(0.2, dtype=torch.float64, device=CUDA)
+    gibbs = GibbsPurification(num_bins=4, progress=False)
+    for n, (data, labels) in enumerate(_batches(cbm, 6)):
+        if n == 5:
+            gibbs.purify_snapshots(cbm, data, [1], CUDA)
+        start = (data + 0.1).clamp(*cbm.input_range)
+        for c, e in zip(captured, eager):
+            assert torch.equal(c(data, labels, eps, start=start),
+                               e(data, labels, 0.2, start=start))
+    for c in captured:
+        assert len(c.step._captures) == 1
 
 
 def _uq_run(captured: bool):
