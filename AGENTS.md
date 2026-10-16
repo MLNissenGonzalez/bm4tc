@@ -89,8 +89,7 @@ place, no pass-through layers.
 
 ## State (2026-10-16)
 
-Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to `83da4cc9` (D112); the
-commits since are local. Phases 0–7 of the refactor are done; `main` is untouched and
+Branch `ousterhout`, pushed to GitHub on 2026-10-16 up to `bdb4531c` (D116). Phases 0–7 of the refactor are done; `main` is untouched and
 the local tag `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its
 pilots; `docs/plan.md` ("Now") has the details, `docs/compute.md` the cost estimates and
 the measurements since (stale numbers are marked there).
@@ -100,8 +99,8 @@ the measurements since (stale numbers are marked there).
 CUDA checks (`tests/unit/test_graphs.py`, benches) run on G21G01: from `$R/ag_dev/`
 while debugging (D116), from a pushed commit's worktree for numbers that are kept.
 
-Done on 2026-10-16 (commits `3848319d`..HEAD,
-**not pushed**: ask Martin to push before anything is kept from the cluster):
+Done on 2026-10-16 (commits `3848319d`..`bdb4531c`, pushed; deploy a worktree of the
+pushed head for numbers that are kept):
 - E2a's checkpoints under adaptive attack, read (`docs/adaptive.md` §7, results in
   `pilots/cluster/pilot_beta12_adaptive/`): MNIST 12×12 purification loses 0.02–0.07
   (one restart: an upper bound), detection 0.24–0.30. **D113:** the AT grid is
