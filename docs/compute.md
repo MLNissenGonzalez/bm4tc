@@ -349,6 +349,10 @@ so more units may add little there.
 | full MNIST d3r40, `analysis.batch_size` 128 or 256 | AT train 3.2 GiB; analysis ≈ 0.5–0.8 reserved + ≤ 3.8 | 4 (memory allows 5) |
 | full MNIST d3r80 (micro 128) | AT train 5.4 GiB; analysis ≈ 1.0 reserved + ≤ 3.8 | 3 (memory allows 4, tightly) |
 
+The full-MNIST rows are in micro-batches, as measured. D115 removes micro-batches from
+the studies (whole batches of 512); their memory on the cluster is not measured yet,
+so measure it before the first full-MNIST launch and redo these two rows.
+
 ## Appendix: measurements
 
 RTX 2080, torch 2.1.0, one unit alone unless stated. Epoch time is the mean over

@@ -3,7 +3,7 @@
 The `ousterhout` branch rebuilds bm4tc (main = the code behind the rejected NeurIPS
 submission 27079, tag `pre-ousterhout`) for the journal version. The refactor
 (Phases 0–7) is done; Phase 8 runs the paper's studies on the lab HPC and is in its
-pilots. Every decision is in [decisions.md](decisions.md) (D1–D114, chronological, the
+pilots. Every decision is in [decisions.md](decisions.md) (D1–D116, chronological, the
 source of truth); the section below groups them by theme. Measured costs are in
 [compute.md](compute.md).
 
@@ -21,20 +21,30 @@ source of truth); the section below groups them by theme. Measured costs are in
   captured training 3–33% faster, eager 1.45–2.1× slower; `--per-gpu` redone (8 / 4 / 3
   for MNIST 12×12 / full MNIST d3r40 / d3r80).
 
+- **D115:** no micro-batches in the full-MNIST studies (whole batches of 512 up to
+  d3r80); a larger batch for every study is an open question (Phase 8, below).
+  **D116:** the agent debugs on the cluster without asking each time (one free GPU,
+  `$R/ag_dev/`), since there is no eGPU off-site.
+
 Next, in order:
 
-1. **The saturation ablation of the adaptive attack** (D114), on E2a's β = 0.25
-   checkpoint and E3's spirals models: restarts (1, 5), steps (100, 200), EOT for
-   Gibbs, and the number of test points (1000 gives ±0.013); first question: does
-   MNIST 12×12 purification hold at 5 restarts? Then set `analysis.adaptive`'s
-   defaults, add its test subsample, and capture its steps (D105's per-step graphs;
-   the part is eager today, 4.3 h per checkpoint for the purifier attack).
-2. **Turn adaptive on** in the Phase 8 studies; `configs/papers/` reads the `_adapt`
+1. **Capture the adaptive attack** (AGENTS.md, "Start here", has the plan): the
+   `adaptive` part is eager, and so is the likelihood purifier inside it (4.3 h per
+   MNIST 12×12 checkpoint for the attack through the purifier). Per-step graphs as
+   D105 did for PGD and purification; checked number for number against eager (as
+   `test_graphs`), then on the cluster at 144 and 784 sites (D116: debugging on
+   G21G01, no eGPU). Add the part's test subsample at the same time (D114).
+2. **The saturation ablation of the adaptive attack** (D114; asked first: it takes
+   GPUs for hours), on E2a's β = 0.25 checkpoint and E3's spirals models: restarts
+   (1, 5), steps (100, 200), EOT for Gibbs, and the number of test points (1000 gives
+   ±0.013); first question: does MNIST 12×12 purification hold at 5 restarts? It
+   sets `analysis.adaptive`'s defaults.
+3. **Turn adaptive on** in the Phase 8 studies; `configs/papers/` reads the `_adapt`
    keys (D114).
-3. Martin decides: micro-batches (D79) and `analysis.batch_size: 128` (D111) after
-   D112 (Efficiency, below).
-4. Before Phase 8: cap HPO workers per cell, `select`/`run --cell` on a subset, a
-   multi-study launcher.
+4. Before Phase 8: full MNIST without micro-batches on the cluster (D115: memory and
+   `--per-gpu`); the batch-size question (below); `analysis.batch_size` 128 vs 256
+   (D111; Martin decides); cap HPO workers per cell, `select`/`run --cell` on a
+   subset, a multi-study launcher.
 5. Phase 8 studies.
 
 ## Before (2026-10-13, evening)
@@ -161,6 +171,14 @@ need their `warm_from` study trained.
 5. `python -m bm4tc figures paper`; commit `figures/journal/`.
 
 **To do before the studies run:**
+- **The batch size** (D115's follow-up, not decided). Since D112 a captured step costs
+  nearly the same at any batch until the GPU is busy (full MNIST, laptop: batch 512 in
+  257 ms, against 881 ms for the same batch in micro-batches of 128), so a larger batch
+  (1024, 2048) may cut Phase 8's wall time considerably. It changes the optimisation
+  (fewer steps per epoch; the lr range of the HPO), so it needs a pilot: e.g. E2a's
+  β = 0.25 cell at 512 / 1024 / 2048 with its own lr search, compared on `objective/valid`,
+  accuracy and time to the best epoch. Then one batch for every study, or one per
+  dataset.
 - ~~**β grids from E2**~~ (done): the ladder in `defaults.yaml` ({0, 0.01, 0.1, 0.25,
   0.5, 0.9, 1}, D108); the AT grid {0, 0.25, 0.5} in every AT study (D113).
 - **Cap HPO workers per cell.** Today workers = the launch's slots (capped at the
@@ -467,11 +485,9 @@ left:
   batch 512 without micro-batches on the 8 GB eGPU (257 ms/step NAT, 1.49 GiB per
   process; micro 128: 881 ms). Open: the two chains as one stacked chain (≤ 2× where
   launch-bound); fewer kernels per site (≈ 30, most of them the renormalization: a
-  renormalize that keeps the log norm, below); whether micro-batches (D79) and D111's
-  `analysis.batch_size: 128` (sized for data first's memory) are still needed (Martin
-  decides: on G21G01 the analysis at batch 256 holds 0.80 GiB and is 1.5× faster than
-  at 128; training without micro-batches is unmeasured there, 3–3.5× faster on the
-  laptop). The cluster numbers and `--per-gpu`: done (compute.md, "Since D112, on
+  renormalize that keeps the log norm, below). Micro-batches are gone from the studies
+  (D115); D111's `analysis.batch_size: 128` is still to decide (Martin: on G21G01 the
+  analysis at batch 256 holds 0.80 GiB and is 1.5× faster than at 128). The cluster numbers and `--per-gpu`: done (compute.md, "Since D112, on
   G21G01"). Eager is 1.45–2.1× slower since D112, which the eager parts pay (Gibbs, JEM,
   `adaptive`).
 - **The forward without `reset`: done (D104), cluster check passed.** `forward` calls
