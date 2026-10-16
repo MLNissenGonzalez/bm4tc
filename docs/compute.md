@@ -43,7 +43,9 @@ after them (CUDA graphs, D101/D103 for Gibbs, D104 for the eager forward).*
    The fix is to cache the left and right environments, which makes each update cost
    one site instead of n (see `docs/plan.md`). Until then, run Gibbs only where the
    paper reads it: `mnist_sweep_purify` uses `mnist_nat` α = 0.01 only.
-6. **Memory decides where full-MNIST runs can go.** At batch 512, d3r20 needs
+6. *(Stale since D112: d3r80 AT trains at 5.4 GiB per process on G21G01, d3r40 at
+   3.2; [Since D112, on G21G01](#since-d112-on-g21g01-2026-10-15).)*
+   **Memory decides where full-MNIST runs can go.** At batch 512, d3r20 needs
    2.5 GB, d3r40 ≈ 10.4 GB and d3r80 ≈ 41 GB (memory grows with batch × r²).
    - d3r40 fits only the RTX 6000s (G21G01, 2 per GPU). It is too tight for a 1080 Ti.
    - **d3r80 fits no GPU at batch 512.** Drop it from `mnist_capacity`, or give it
@@ -138,55 +140,22 @@ next section.*)
 
 G21G01, GPU 5 alone, worktree `runs/5e41a7d3`, one process at a time; logs in
 `$R/d110_checks/` (copied to `pilots/cluster/d110_checks/`, untracked).
-`tests/unit/test_graphs.py` passes 19/19. `bench_train_step --beta 0.5 --bond-dim
-{40,80} --batch 512`, 20 steps × 5 epochs (epoch 1 eager, 2 captures, 3–5 timed),
-GiB:
+`tests/unit/test_graphs.py` passed 19/19, every shape fitted (full MNIST d3r40 AT and
+d3r80 for the first time), and the 784-site analysis gave the same numbers captured
+and eager. *Its numbers are superseded by D112: they are the "before" column of
+[Since D112, on G21G01](#since-d112-on-g21g01-2026-10-15), and its `--per-gpu`
+table is replaced there.* What it showed about the mechanism still holds:
 
-| Shape | ms/step captured (eager) | Peak allocated | Peak reserved | Reserved at end | Per process (end, nvidia-smi) | Per process before (`da7185e8`) |
-|---|---|---|---|---|---|---|
-| MNIST12 d3r40 NAT | 63.8 | 1.82 | 2.87 | 2.87 | 3.20 | 4.57 |
-| MNIST12 d3r40 AT | 283 | 2.75 | 2.93 | 2.93 | 3.42 | 10.92 |
-| full MNIST d3r40 micro 256 NAT | 545 (1,824) | 5.03 | 7.80 | 5.49 | 6.71 (peak ≈ 9.0) | 10.46 |
-| full MNIST d3r40 micro 256 AT | 2,486 (6,682) | 7.56 | 8.06 | 8.06 | 10.32 | out of memory |
-| full MNIST d3r80 micro 128 NAT | 1,431 | 10.46 | 16.04 | 11.51 | 13.62 (peak ≈ 18.2) | out of memory |
-| full MNIST d3r80 micro 128 AT | 6,311 | 15.38 | 16.44 | 16.43 | 19.93 | not tried |
-
-Eager at the full-MNIST d3r40 shapes: NAT 5.02 / 5.34 / 5.54 GiB (allocated,
-reserved, per process), AT 7.55 / 7.89 / 8.10. Captured is 3.3× (NAT) and 2.7× (AT)
-faster per step.
-
-- **Reserved now follows allocated**, except for a transient at the first capture in
+- **Reserved follows allocated**, except for a transient at the first capture in
   NAT: `torch.cuda.graph` empties the cache when it starts, but the epoch-1 eager
   tensors still held by tk's nodes are freed only once the capture has replaced them,
-  so the pool and those leftovers coexist for a moment (full MNIST NAT 7.80 GiB peak
-  vs 5.49 at the end; d3r80 16.04 vs 11.51). "Peak ≈" in the table adds the
-  process's non-allocator memory (per process − reserved at end) to the peak
-  reserved. Open: dropping those references before the first capture would remove
-  it (not done; plan.md).
-- **Outside the allocator**, a process holds 0.3–0.5 GiB at 144 sites and 1.2–3.5 GiB
-  at 784 (CUDA context and the graphs' executables, which grow with the number of
-  kernels captured).
-
-`bench_analysis --features 784` (d3r40, 2048 points, PGD-40 + purification-40 at
-ε = 0.1): the same numbers captured and eager (rob 0.104, purify 0.104).
-
-| `analysis.batch_size` | Eager | Captured |
-|---|---|---|
-| 64 | 1,472 s, 1.52 GiB reserved | 394 s, 2.99 GiB |
-| 256 | 434 s, 7.59 GiB | 170 s, 10.38 GiB |
-
-Captured ≈ 0.04 GiB per point, plus ≈ 0.5; add ≈ 1–2 GiB per process outside the
-allocator.
-
-**`--per-gpu` on G21G01** (22 GB usable, the GPU otherwise empty; the largest unit
-of a study decides, since every slot is sized alike):
-
-| Study shape | Largest unit | `--per-gpu` |
-|---|---|---|
-| MNIST12 d3r40 (NAT, AT) | train ≤ 3.4 GiB; analysis at 144 sites not re-measured since D107 (≤ 4 GiB expected) | 5 |
-| full MNIST d3r40, `analysis.batch_size` 128 (the studies' setting since D111) | AT train 10.3 GiB, analysis ≈ 6.5 | 2 |
-| full MNIST d3r40, `analysis.batch_size` 256 (the default before D111) | analysis ≈ 11.5–12.5 GiB | 1 (2 may fail when two analyses meet) |
-| full MNIST d3r80 | AT train 19.9 GiB; analysis at 128 unmeasured (≈ 20 GiB by B·n·r²) | 1 |
+  so the pool and those leftovers coexist for a moment (at `5e41a7d3`: full MNIST NAT
+  7.80 GiB peak reserved vs 5.49 at the end; d3r80 16.04 vs 11.51). Since D112 the
+  tensors are ≈ 10× smaller, and so is the transient.
+- **Outside the allocator**, a process holds the CUDA context and the graphs'
+  executables, which grow with the number of kernels captured, not with the batch:
+  0.3–0.5 GiB at 144 sites, 1.2–3.8 GiB at 784. Since D112 this is most of a
+  process's memory.
 
 ## Gibbs purification since D101 and D103 (2026-10-14)
 
@@ -278,7 +247,9 @@ instead of resetting (D104). Laptop RTX 2080, from a worktree of the commit befo
 | the same, captured | 47.2 s, 2.98 GiB | 39.3 s, 2.93 GiB |
 
 The eager forward no longer pays for building and deleting its nodes; the GPU work is
-the same (same kernels), so captured training is unchanged. **Open:** reserved memory
+the same (same kernels), so captured training is unchanged. **Moot since D112** (E2a's
+shape reserves 0.20 GiB on G21G01, 0.52 per process; [Since D112, on
+G21G01](#since-d112-on-g21g01-2026-10-15)); was open: reserved memory
 grows by ≈ 0.8 GiB per process at E2a's shape although the allocated peak does not;
 not the freeing strategy (freeing in the call or after it reserve the same), and a
 bare train and validate loop shows none, so something in the Trainer's path
@@ -306,8 +277,73 @@ The allocated peak drops 7–14×; per process, what remains is mostly the CUDA 
 and the graphs. At full MNIST the step is launch-bound, so micro-batches now cost
 3–3.5× in time and buy nothing. Where each path wins (a 33-shape sweep of the
 amplitude contraction alone, D112): in memory always, for d < r; in captured time from
-B·r² ≈ 3·10⁵ up, 1.1–1.3× slower below; eager ≈ 1.3× slower. The cluster numbers
-(`--per-gpu`) are not measured yet.
+B·r² ≈ 3·10⁵ up, 1.1–1.3× slower below; eager ≈ 1.3× slower.
+
+### Since D112, on G21G01 (2026-10-15)
+
+G21G01, GPU 6 alone, one process at a time. Before: `runs/5e41a7d3` (D107 + D110,
+the cluster check above; logs `pilots/cluster/d110_checks/`). After: `runs/83da4cc9`
+(D112; logs `$R/ag_logs/bench_83da4cc9/`, copied to `pilots/cluster/bench_83da4cc9/`,
+both untracked). `tests/unit/test_graphs.py` passes 19/19 at `83da4cc9`.
+`bench_train_step --beta 0.5 --batch 512`, 20 steps × 5 epochs (epoch 1 eager, 2
+captures, 3–5 timed); d3r40 unless stated; full MNIST in micro-batches of 256, d3r80
+of 128; per process = nvidia-smi at the end.
+
+| Shape | Step, captured | Allocated (peak) | Reserved (peak) | Per process |
+|---|---|---|---|---|
+| MNIST 12×12 NAT | 63.8 → 58.7 ms | 1.82 → 0.13 GiB | 2.87 → 0.20 GiB | 3.20 → 0.52 GiB |
+| MNIST 12×12 AT | 283 → 196 ms | 2.75 → 0.18 | 2.93 → 0.27 | 3.42 → 0.79 |
+| full MNIST NAT | 545 → 531 ms | 5.03 → 0.40 | 7.80 → 0.63 | 6.71 → 1.91 |
+| full MNIST AT | 2,486 → 2,220 ms | 7.56 → 0.54 | 8.06 → 0.71 | 10.32 → 3.16 |
+| full MNIST d3r80 NAT | 1,431 → 1,183 ms | 10.46 → 1.13 | 16.04 → 1.58 | 13.62 → 3.79 |
+| full MNIST d3r80 AT | 6,311 → 4,208 ms | 15.38 → 1.25 | 16.44 → 1.64 | 19.93 → 5.43 |
+| full MNIST NAT, eager | 1,824 → 2,651 ms | 5.02 → 0.39 | 5.34 → 0.41 | 5.54 → 0.61 |
+| full MNIST AT, eager | 6,682 → 10,020 ms | 7.55 → 0.52 | 7.89 → 0.54 | 8.10 → 0.74 |
+
+`bench_analysis` (2048 points, PGD-40 then likelihood purification-40 at ε 0.1; the
+same numbers captured and eager at every shape, before and after: rob 0.104, purify
+0.104 at 784 sites, 0.106 at 144):
+
+| Shape, `analysis.batch_size` | Captured | Eager | Peak reserved, captured (eager) |
+|---|---|---|---|
+| MNIST 12×12, 256 | 21.7 s | 119.4 s | 0.18 GiB (0.09) |
+| full MNIST, 64 | 394 → 431 s | 1,472 → 3,131 s | 2.99 → 0.29 GiB (1.52 → 0.17) |
+| full MNIST, 128 | 232 s | 1,611 s | 0.46 (0.27) |
+| full MNIST, 256 | 170 → 152 s | 434 → 797 s | 10.38 → 0.80 (7.59 → 0.43) |
+| full MNIST d3r80, 128 (unmeasured before; ≈ 20 GiB estimated) | 256 s | 1,316 s | 1.01 (0.66) |
+
+- **Memory: 10–15× less allocated, at every shape.** d3r80 AT, which needed a whole
+  RTX 6000 (19.9 GiB), takes 5.4 GiB per process.
+- **Captured training is 3–33% faster** (most at AT and r80, where the step was
+  heaviest); the captured analysis is within ±10%.
+- **Eager is 1.45–2.1× slower** (full MNIST NAT 1.82 → 2.65 s per step, AT 6.7 → 10.0 s;
+  the eager analysis at batch 64 1,472 → 3,131 s): the zip-up issues more, smaller
+  operations, and tk's Python overhead per operation is paid in eager mode only. Captured
+  runs are the default; eager matters for the parts that stay eager (Gibbs, JEM, the
+  `adaptive` part).
+- **Per process, the graphs dominate now:** per process minus reserved is 0.3–0.5 GiB
+  at 144 sites and 1.3–3.8 GiB at 784 (CUDA context plus the graphs' executables, which
+  scale with kernels captured, not with the batch). An analysis's share outside the
+  allocator was not measured (`bench_analysis` reports reserved only); the estimates
+  below take training's.
+- **D111's reason is gone:** the analysis at batch 256 holds 0.80 GiB reserved
+  (10.38 before), and is 1.5× faster than at 128 (152 vs 232 s). Whether micro-batches
+  (D79) and `analysis.batch_size: 128` go is open (plan.md, Efficiency; Martin decides).
+  Without micro-batches the laptop's full-MNIST step was 3–3.5× faster (above); not
+  measured on the cluster.
+
+**`--per-gpu` on G21G01** (22 GB usable, the GPU otherwise empty; replaces the D107 +
+D110 table). Memory no longer binds at 144 sites; there the limits are CPU threads
+(80 on G21G01, ≈ 10 per GPU) and MPS throughput, which saturates (MNIST 12×12 NAT,
+steps/s per GPU: 77.6 at 6 units, 88.3 at 8, "Since CUDA graphs"). Throughput under
+MPS at 784 sites is not measured: a captured full-MNIST AT step is GPU-bound (2.2 s),
+so more units may add little there.
+
+| Study shape | Largest unit (per process) | `--per-gpu` |
+|---|---|---|
+| MNIST 12×12 d3r20/d3r40 (NAT, AT) | AT train 0.8 GiB; analysis ≈ 0.2 reserved + ≈ 0.5 | 8 (threads, MPS throughput) |
+| full MNIST d3r40, `analysis.batch_size` 128 or 256 | AT train 3.2 GiB; analysis ≈ 0.5–0.8 reserved + ≤ 3.8 | 4 (memory allows 5) |
+| full MNIST d3r80 (micro 128) | AT train 5.4 GiB; analysis ≈ 1.0 reserved + ≤ 3.8 | 3 (memory allows 4, tightly) |
 
 ## Appendix: measurements
 
