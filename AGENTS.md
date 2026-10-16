@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D111 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D114 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -48,7 +48,8 @@ place, no pass-through layers.
 - The full suite takes ~3 min: run it in the background and wait for it once.
 - Point `BM4TC_DATA_ROOT` at a scratch directory for experiments, to keep datasets
   and outputs out of the repo.
-- Local GPU: an RTX 2080 (8 GB); tests must fit in it.
+- Local GPU: an RTX 2080 eGPU (8 GB), at the lab only (none off-site, since 2026-10-16);
+  tests must fit in it.
 - **Runs happen on the lab HPC**: SSH, jobs started by hand in screen, several GPUs per
   node, **no AI agents there** (D37). Everything must be operable from short commands
   and diagnosable from `status` and the log files.
@@ -78,49 +79,34 @@ place, no pass-through layers.
   no clean sha in `run.json` (plan.md, Phase 8).
 - `git add` with a pathspec that no longer exists aborts the whole add.
 
-## State (2026-10-15)
+## State (2026-10-16)
 
-Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to D110 (`5e41a7d3`).
-Phases 0–7 of the refactor are done; `main` is untouched and the local tag
-`pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its pilots;
-`docs/plan.md` has the details, `docs/compute.md` the (pre-graph) cost estimates and
+Branch `ousterhout`, pushed to GitHub on 2026-10-15 up to `83da4cc9` (D112); the
+commits since are local. Phases 0–7 of the refactor are done; `main` is untouched and
+the local tag `pre-ousterhout` marks it. Phase 8 (journal studies on the HPC) is in its
+pilots; `docs/plan.md` ("Now") has the details, `docs/compute.md` the cost estimates and
 the measurements since (stale numbers are marked there).
 
-Two sessions worked in parallel on 2026-10-15: **E2b and graph capture** (done, cluster check
-included; handoff below) and the **tensorkrowch sampling rebuild** (done: D106, below; nothing of it is
-left uncommitted).
+**Since 2026-10-16 Martin works off-site:** the cluster over VPN + SSH as before (D109),
+**no eGPU**. Locally the suite runs on CPU (CUDA tests skip: 570 passed, 21 skipped);
+CUDA checks (`tests/unit/test_graphs.py`, benches) run on G21G01 from a worktree.
 
-**Start here: two jobs left running on G21G01 (started 2026-10-15 15:44, worktree
-`runs/83da4cc9`, scripts and logs in `$R/ag_logs/`; both screens end on their own).**
-1. **`ag-e2a-adaptive`** (GPU 0, MPS, 3 units at a time): `pilot_beta12` (E2a's
-   checkpoints, not retrained) at β ∈ {0, 0.1, 0.25, 0.5}, `clean` + `uq` + the
-   trimmed `adaptive` part (ε 0.1, δ 0.1, q5, the PGD warm start as the only restart;
-   ≈ 4 h per wave, 2 waves). Log `$R/ag_logs/e2a_adaptive.log`, marker
-   `e2a_adaptive.done`; per run `$R/outputs/pilot_beta12/legendre/d3r40/<cell>/s1/analyse.log`.
-   The script stops its MPS daemon at the end. Copy the results to a **new** directory
-   (`pilots/cluster/pilot_beta12_adaptive/`): `pilots/cluster/pilot_beta12/` holds
-   E2a's older analysis, which these runs replace on the cluster. Read `purify_adapt`,
-   `purify_sel_adapt`, `rob_sel_adapt` against `purify`, `rob_sel` and E3
-   (`docs/adaptive.md` §6): does purification fall on MNIST 12×12 too, does detection
-   hold? That fixes the AT grid (plan.md, "Beta").
-2. **`ag-benchmarks`** (GPU 6, one process at a time): `test_graphs` (19/19 passed) and
-   the cluster check's benches again at `83da4cc9` (after D112, the zip-up forward),
-   plus the analysis at 144 sites, at 784 sites batch 128, and d3r80 batch 128 (open
-   items). Logs `$R/ag_logs/bench_83da4cc9/*.log`, marker `DONE`. First numbers:
-   MNIST12 NAT 0.13 GiB allocated at peak (1.82 at `5e41a7d3`), AT 0.18 (2.75): D112
-   shrinks memory ≈ 14×, so compute.md's `--per-gpu` table (and D111's reason) must be
-   redone from these logs.
+**Start here.** Nothing of the agent's is running on G21G01 (no `ag-*` screen). Done
+on 2026-10-16:
+- E2a's checkpoints under adaptive attack, read (`docs/adaptive.md` §7, results in
+  `pilots/cluster/pilot_beta12_adaptive/`): MNIST 12×12 purification loses 0.02–0.07
+  (one restart: an upper bound), detection 0.24–0.30. **D113:** the AT grid is
+  {0, 0.25, 0.5}. **D114:** active defences are reported under the adaptive attack.
+- D112 on the cluster (compute.md, "Since D112, on G21G01"; logs in
+  `pilots/cluster/bench_83da4cc9/`): 10–15× less memory, `--per-gpu` 8 / 4 / 3.
+- D106's float32 check on six trained checkpoints (plan.md, "Sampling" step 6;
+  `pilots/cluster/f32_83da4cc9/`): one negative weight in 18.1 M rows (−9e-8 of its
+  row's maximum), none beyond tolerance, so Gibbs results from D106 on stand. Left:
+  the imaginary-part warning (threshold 1e-5) fires at 784 sites (up to 3e-3).
 
-Before: the cluster check of D107 + D110 **passed** (2026-10-15, G21G01 GPU 5,
-worktree `runs/5e41a7d3`, run by the agent over SSH): `test_graphs` 19/19, every shape
-fits (full MNIST d3r40 AT 10.3 GiB per process, out of memory before; d3r80 micro 128
-AT 19.9 GiB), the 784-site analysis gives the same numbers captured and eager.
-compute.md, "Cluster check of D107 + D110", has the table and `--per-gpu` per study
-shape (MNIST12 5, full MNIST d3r40 2 with D111's `analysis.batch_size` 128, d3r80 1).
-D94's rule is met: AT may run with `trainer.cuda_graph` from `d2aca0e5` on.
-Open from it (plan.md): d3r80's analysis memory at 128 (unmeasured); the
-first-capture transient (epoch-1 eager tensors held by tk's nodes beside the new pool).
-Next is **E3** (below, "Next").
+Next: the saturation ablation of the adaptive attack (plan.md, "Now", step 1; it takes
+GPUs: ask first), then `adaptive` on in the Phase 8 studies. Martin decides whether
+micro-batches (D79) and D111's `analysis.batch_size: 128` go after D112.
 
 ### Handoff: graph capture (2026-10-15, evening)
 
@@ -203,7 +189,8 @@ clients `CUDA_VISIBLE_DEVICES=0`; `--mps` handles it. Martin's notes `docs/hpc_*
 `docs/interpolation.md` and `pilots/` are untracked on purpose; `docs/hpc_bm4tc.md`
 still shows launches without `--mps`.
 
-Laptop: the eGPU (RTX 2080, 8 GB) is back since 2026-10-13: the CUDA tests run here
+Laptop: the eGPU (RTX 2080, 8 GB) was back from 2026-10-13 to 2026-10-15 (off-site since
+2026-10-16: none): the CUDA tests ran here
 (full suite with the GPU: ≈ 3.5 min).
 
 Done on 2026-10-09, late (CPU suite green; on CUDA, D92's captured validation crashed until D94):
@@ -311,22 +298,17 @@ Done on 2026-10-15 (session `tk sampling rebuild`):
   torch 2.1 and 2.14. The note to José, `../tensorkrowch/_notes/note_jose_sample_density.md`
   (untracked), explains it; **Martin reads it and decides on the upstream PR.**
 
-**Next (in this order):**
-1. ~~The cluster check of D107 + D110~~ (passed; Start here, above).
-2. ~~E3~~ (run on G21G01 and read: `docs/adaptive.md` §6; purification falls under adaptive attack, detection holds). Was: **E3:** run it detached (`setsid nohup ... &`, so the terminal can close; scratch
-   `BM4TC_DATA_ROOT`), read it against the ceilings (`docs/adaptive.md` §5 lists its
-   questions), then the saturation ablation that sets `analysis.adaptive`'s defaults.
-   Gibbs is cheap now (D101, D103, D106); check float32 on a trained model first
-   (D106, open).
-3. **tensorkrowch:** the `sample-density` PR (Martin reads the note, then decides);
-   the float32 issue of double layers (D106, open); a norm-keeping `renormalize` (the log-norm as a
-   node; would remove bm4tc's `_inline_contraction` override, the accumulator and the
-   special forward), a public "contract with reuse", `reset`'s quadratic renaming and
-   its reordering of `parameters()`, `@` on batch-only edges, `einsum`'s connected-edge
-   rule, edge inheritance, the environment-first forward (B·n·r·d stored instead of
-   B·n·r²); then what goes upstream and how (PR to the fork's develop, then to
-   tensorkrowch).
-4. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
+**Next (in this order):** see "Start here" above and plan.md, "Now". Still open from
+2026-10-15:
+1. **tensorkrowch:** the `sample-density` PR (Martin reads the note, then decides); the
+   zip-up PR (Martin, another session; the cluster numbers are in compute.md, "Since
+   D112, on G21G01"); a norm-keeping `renormalize` (the log-norm as a node; would
+   remove bm4tc's `_inline_contraction` override, the accumulator and the special
+   forward), a public "contract with reuse", `reset`'s quadratic renaming and its
+   reordering of `parameters()`, `@` on batch-only edges, `einsum`'s connected-edge
+   rule, edge inheritance; then what goes upstream and how (PR to the fork's develop,
+   then to tensorkrowch).
+2. The rest of the efficiency list (plan.md): cap HPO workers per cell (also the 16/15
    race, seen again once in `test_run_in_parallel_then_status`); `select`/`run --cell`
    on a subset; a multi-study launcher; re-estimate `docs/compute.md`.
 

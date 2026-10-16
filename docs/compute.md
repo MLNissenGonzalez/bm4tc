@@ -226,8 +226,12 @@ the log p(x) forward's, not the sampler's. So the per-process memory of an analy
 does not grow (E2b's and E3's settings unchanged); between Gibbs calls the sampler
 now holds megabytes instead of 1–2 GiB.
 
-Open (plan.md, "Sampling" step 6): float32 rounding of double layers. On random
-models these runs gave no negative weights; trained models are not checked yet.
+Float32 rounding of double layers (plan.md, "Sampling" step 6): checked on six
+trained E2a / E2b checkpoints on G21G01 (2026-10-16): one negative weight in 18.1 M
+rows (−9e-8 of its row's maximum), none beyond tolerance; the imaginary part reaches
+3e-3 of the row's scale at 784 sites. The `gibbs` part took 51 s per checkpoint at 144
+sites and 636–676 s at 784 (most of it the eager PGD on the 7000 test points; peak
+0.55 GiB allocated).
 
 ## Since D104: the forward keeps its nodes (2026-10-14)
 

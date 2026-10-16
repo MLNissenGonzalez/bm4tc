@@ -612,12 +612,19 @@ the same distributions as `GibbsPurification` (O(n²·bins)). `SamplingMPS`
      branch, −11.5%) −4.6%, no raise.
    Possible fixes, undecided: float64 where two layers are used; environments
    stored as a square root (ρ = F F†, a QR per site, about B·r³·d); routing
-   negative rows to the uniform draw. **Still to check: float32 on trained models**
-   (none on the laptop; random full-MNIST models at r40 / r80 ran ten sweeps with no
-   negative weight beyond tolerance). Check before relying on Gibbs results from
-   D106 on (E3): e.g. one purification at the analysis settings on a trained full
-   MNIST checkpoint on the cluster, watching for "negative beyond numerical
-   tolerance".
+   negative rows to the uniform draw. **Checked on trained models (2026-10-16): no
+   fix needed for the draws.** G21G01 GPU 3, worktree `runs/83da4cc9`, the `gibbs`
+   part at the analysis settings (PGD at ε 0.1, then 10 sweeps with snapshots 1, 3, 6,
+   10, 96 bins, step 0.05, 250 points, PGD examples and clean points) on E2a's β 0.25
+   and 1 and E2b's β 0.1, 0.25, 0.5 and 1 (d3r40), recording every weight row the
+   sampler cleans (a scratch script, `pilots/cluster/f32_83da4cc9/`, untracked):
+   18.1 M rows, **one negative row** (E2b β 0.5, −9e-8 of its maximum), **none beyond
+   tolerance**. The rounding shows in the imaginary part instead, which a double
+   layer has only through rounding: up to 4e-5 / 2e-4 of the row's scale at 144 sites
+   and 6e-4 to 3e-3 at 784, above the sampler's 1e-5 threshold for "Probabilities
+   have a non-negligible imaginary part", which therefore warns in full-MNIST Gibbs
+   runs (the draws use the real part; the check bypassed the warning). Open, minor:
+   that threshold is too tight for double layers; scale it, or drop the warning.
 
 Out of scope until decided: finer grids or exact continuous draws, a
 Metropolis–Hastings correction for the windows, temperature (they change the
