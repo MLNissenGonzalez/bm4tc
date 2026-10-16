@@ -1,7 +1,7 @@
 # Notes for coding agents
 
 Read [README.md](README.md), then [GUIDE.md](GUIDE.md) (concepts, pipeline, code
-map). Design decisions D1–D114 are in [docs/decisions.md](docs/decisions.md), the
+map). Design decisions D1–D116 are in [docs/decisions.md](docs/decisions.md), the
 source of truth; what is left to do is in [docs/plan.md](docs/plan.md). The code
 follows Ousterhout's *A Philosophy of Software Design*
 ([docs/ousterhout.md](docs/ousterhout.md)): deep modules, information hidden in one
@@ -67,10 +67,18 @@ place, no pass-through layers.
       # pick GPUs:               ~/0git/hpc-greyc/multitop.py gpu   (then nvidia-smi on the node)
       # results:                 rsync -av --exclude '.logs/' --exclude '.replaced/' --exclude 'models/' \
       #                              --exclude 'wandb/' $H:$R/outputs/<study>/ pilots/cluster/<study>/
+      # debugging copy (D116):    git ls-files -z | rsync -a --from0 --files-from=- ./ $H:$R/ag_dev/
+      #                           then: source $R/bm4tc.sh && cd $R/ag_dev && pytest -q -p no:logging tests/unit/test_graphs.py
 
-  Wait for a remote job with a background `until ssh ... test -e <file>; do sleep ..; done`,
-  not by polling. Rules: **ask before any launch that takes GPUs** (name the node and
-  GPUs; they are shared with the lab); your screens are named `ag-*` (never "claude" in screen, study or file names), you may
+  A script outside the checkout needs `PYTHONPATH=$PWD` there too. Wait for a remote
+  job with a background `until ssh ... test -e <file>; do sleep ..; done`, not by
+  polling (and delete a stale marker before relaunching). Rules: **debugging is free,
+  launches are asked (D116).** Without asking: SSH queries, the `$R/ag_dev/` copy
+  (tracked files only), short debugging jobs (tests, benches, one analysis) on **one
+  free GPU** at a time (check `nvidia-smi` first; other users' processes run there).
+  Ask first, naming the node and GPUs (shared with the lab): studies, ablations,
+  anything on several GPUs or for hours. Results that are kept (studies, ablations,
+  benches quoted in compute.md) come from a worktree of a pushed commit. Your screens are named `ag-*` (never "claude" in screen, study or file names), you may
   create and kill those only, and remind Martin of his own screens left open; never
   print the remote environment (`bm4tc.sh` exports the W&B key) and never read
   `secrets/`; pushing still needs asking (a branch the agent may push to freely may come
@@ -89,24 +97,100 @@ the measurements since (stale numbers are marked there).
 
 **Since 2026-10-16 Martin works off-site:** the cluster over VPN + SSH as before (D109),
 **no eGPU**. Locally the suite runs on CPU (CUDA tests skip: 570 passed, 21 skipped);
-CUDA checks (`tests/unit/test_graphs.py`, benches) run on G21G01 from a worktree.
+CUDA checks (`tests/unit/test_graphs.py`, benches) run on G21G01: from `$R/ag_dev/`
+while debugging (D116), from a pushed commit's worktree for numbers that are kept.
 
-**Start here.** Nothing of the agent's is running on G21G01 (no `ag-*` screen). Done
-on 2026-10-16:
+Done on 2026-10-16 (commits `3848319d`..HEAD,
+**not pushed**: ask Martin to push before anything is kept from the cluster):
 - E2a's checkpoints under adaptive attack, read (`docs/adaptive.md` §7, results in
   `pilots/cluster/pilot_beta12_adaptive/`): MNIST 12×12 purification loses 0.02–0.07
   (one restart: an upper bound), detection 0.24–0.30. **D113:** the AT grid is
   {0, 0.25, 0.5}. **D114:** active defences are reported under the adaptive attack.
 - D112 on the cluster (compute.md, "Since D112, on G21G01"; logs in
-  `pilots/cluster/bench_83da4cc9/`): 10–15× less memory, `--per-gpu` 8 / 4 / 3.
+  `pilots/cluster/bench_83da4cc9/`): 10–15× less memory, `--per-gpu` 8 / 4 / 3. The
+  before/after table is the evidence for the tk zip-up PR (Martin, another session).
 - D106's float32 check on six trained checkpoints (plan.md, "Sampling" step 6;
   `pilots/cluster/f32_83da4cc9/`): one negative weight in 18.1 M rows (−9e-8 of its
   row's maximum), none beyond tolerance, so Gibbs results from D106 on stand. Left:
   the imaginary-part warning (threshold 1e-5) fires at 784 sites (up to 3e-3).
+- **D115:** no micro-batches in the full-MNIST studies (whole batches of 512 up to
+  d3r80; their cluster memory is unmeasured); a larger batch for every study is open
+  (plan.md, Phase 8, "The batch size"). **D116:** debugging on the cluster without
+  asking each time (Environment, above).
 
-Next: the saturation ablation of the adaptive attack (plan.md, "Now", step 1; it takes
-GPUs: ask first), then `adaptive` on in the Phase 8 studies. Martin decides whether
-micro-batches (D79) and D111's `analysis.batch_size: 128` go after D112.
+Nothing of the agent's is running on G21G01 (no `ag-*` screen).
+
+### Start here: capture the adaptive attack (plan.md, "Now", step 1)
+
+**Goal.** The `adaptive` analysis part (D96, D98) runs eager, and costs ≈ 7.6 h per
+MNIST 12×12 checkpoint at E2a's trimmed settings (4.3 h for the attack through
+likelihood purification, 3.3 h through purifier and detector, 9 min through the
+detector alone); full MNIST would be several times that. D114 makes it the attack of
+every active defence in Phase 8, so it must be captured first. **Then**, once it is
+debugged and runs smoothly on the cluster, the saturation ablation (step 2; ask
+Martin first: GPUs for hours).
+
+**Where the time goes** (`bm4tc/analysis/adaptive.py`, `bm4tc/pipeline/analyse.py`):
+`adaptive()` → `AdaptivePGD.generate` loops restarts × (steps + 1) in Python; each
+step calls `Defense.attack_step` → `_draw`, which (1) purifies through
+`_likelihood_purified` → `LikelihoodPurification.purify`, which builds
+`self.graphed(model, Graphs(enabled=False))`, i.e. an **eager** 40-step purification
+per attack step; (2) runs `log_joint` (and `log_px` for a detector) forward and
+backward. The `uq` part already replays the same purifier and PGD from graphs (D92,
+D105: ≈ 5.5× at 144 sites, ≈ 7× at 784, `bench_analysis`).
+
+**The pattern to follow** is D105: one graph per *step*, the loop in Python
+(`GraphedPGD` in `bm4tc/core/attacks.py`, `GraphedPurification` in
+`bm4tc/analysis/purification.py`, made by `Graphs.wrap`; one `Graphs` per part,
+`analyse._graphs(cbm, device)`; budgets as device scalars). A sketch to discuss with
+Martin before writing it (his rule for interface choices: show options first):
+1. The defence's purifier replays: `_defences` hands `Defense` a purify callable built
+   on the part's `Graphs` (`purifier.graphed(model, graphs)`), not
+   `LikelihoodPurification.purify`.
+2. One graph for the attack step of a deterministic defence: from (x, labels, delta,
+   purified, best_x, best_rate) to the next delta and the updated best, with the
+   loss, `torch.autograd.grad`, the sign step and the projection inside. The purified
+   point is computed outside (BPDA: P forward, identity backward), so the step graph
+   never contains the purifier's 40 steps (D105: whole-attack graphs crashed at 784
+   sites). Host syncs to remove: the masked writes `best_x[better] = ...` (use
+   `torch.where`), Python floats in the step (`eps_abs`, `step` as device scalars).
+3. Random defences (Gibbs, SGLD; `Defense.random`) keep their sampler eager (tk's
+   Python per site; JEM is eager anyway, `_graphs`); only their classifier and
+   detector work could replay, inside the EOT loop. Decide with Martin whether that
+   is worth it now.
+4. `Defense.rates` (the scoring) is a few forwards per batch: capture it if it is
+   simple, otherwise leave it.
+5. Add `analysis.adaptive.subsample` (D114: a fixed test subsample, as
+   `sweep_purify.subsample`; `_subsample` exists) in the same change; it enters the
+   part's hash (`SETTINGS`).
+
+**The bar** (D26, D51, D105): captured = eager number for number on fixed seeds, as
+`test_captured_analysis_batch_work_is_bit_identical_to_eager` does for PGD and
+purification; a new case in `tests/unit/test_graphs.py` (a failed capture poisons
+the process in torch 2.1: such tests run in a child process there). Measure with
+`tests/bench/bench_analysis.py` extended by an adaptive option (eager vs captured,
+time and peak reserved). On CPU every graph is disabled, so the local suite checks
+only that the eager path is unchanged.
+
+**No eGPU: debug on G21G01 (D116).** Every CUDA run is remote, so keep the cycle short:
+edit and run the CPU suite locally; sync the tracked files to `$R/ag_dev/`
+(Environment, above); run `tests/unit/test_graphs.py -k <new test>` there on one free
+GPU (check `nvidia-smi` first; on 2026-10-16 another user's process held 1.5 GiB
+on GPU 6), short runs directly over SSH, longer ones in an `ag-dev` screen
+with a marker file. Small shapes first (MNIST 12×12 d3r20, batch 32), then 784 sites.
+Pitfalls known from D90–D112: capture needs no host sync anywhere in the step; one
+side stream per `Graphs` for warm-ups (D94) and one pool (D107); the analysis's
+per-shape warm-ups cost ≈ 2× eager memory (D110); the forward keeps tk nodes between
+calls (D104) and `sample` builds other ones (`_nodes_key`), so check that a graph
+captured on the forward's nodes still replays correctly after a Gibbs defence has
+called `sample` in the same part (`_defences` puts Gibbs last).
+
+**Confirm on the cluster**, then report to Martin: the full suite's CUDA tests in
+`$R/ag_dev/` (`test_graphs`, the seams); one E2a checkpoint (β 0.25,
+`pilot_beta12`, trimmed settings, a subsample of 1000) captured against eager on the
+same subsample (eager ≈ 40 min for the purifier attack); the time per checkpoint at
+144 and 784 sites. From a pushed commit's worktree for the numbers that go into
+compute.md. Then the saturation ablation: ask first.
 
 ### Handoff: graph capture (2026-10-15, evening)
 
