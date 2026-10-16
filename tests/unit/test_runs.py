@@ -1,5 +1,6 @@
 """bm4tc/pipeline/runs.py: names (D14), grids, hparams, run.json (D17), warm starts (D19)."""
 import json
+import shutil
 
 import pytest
 
@@ -252,9 +253,16 @@ def test_prune_old_deletes_the_archive(data_root):
     assert stages.prune_plan(study, "old") == []
 
 
-def test_arch_settings_apply_to_their_arch_only():
+def test_arch_settings_apply_to_their_arch_only(tmp_path, monkeypatch):
     """``archs:`` sets run config per arch, over the study's ``config`` (D79)."""
-    study = Study("mnist_capacity")
+    configs = tmp_path / "configs"   # compose() needs the whole config tree
+    shutil.copytree(runs.CONFIGS, configs)
+    (configs / "studies" / "x.yaml").write_text(
+        "dataset: mnist\nregime: nat\ngrid: {arch: [d3r10, d3r40, d3r80], beta: [0]}\n"
+        "archs:\n  d3r40: {trainer.micro_batch_size: 256}\n"
+        "  d3r80: {trainer.micro_batch_size: 128}\n")
+    monkeypatch.setattr(runs, "CONFIGS", configs)
+    study = Study("x")
     micro = {c.arch: Job(study, c, 1).compose(hparams={}).trainer.micro_batch_size
-             for c in study.cells() if c.beta == 0}
-    assert micro == {"d3r10": None, "d3r20": None, "d3r40": 256, "d3r80": 128}
+             for c in study.cells()}
+    assert micro == {"d3r10": None, "d3r40": 256, "d3r80": 128}
