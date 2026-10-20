@@ -248,7 +248,7 @@ class ConditionalBornMachine(SamplingMPS):
     # overflowing amplitude. The only amplitude contraction (D89).
 
     def _renormalize_inline(self, node, axes):
-        """One renormalization step of the inline contraction (overrides
+        """One renormalization step of the inline contractions (overrides
         ``SamplingMPS``'s, which is tk's ``renormalize``): the bond-axis norm is
         computed *once*, folded into ``self._log_norm_acc`` at (batch, class)
         granularity, and used to divide the running node via the ``div`` op."""

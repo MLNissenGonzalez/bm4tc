@@ -731,7 +731,7 @@ def test_failed_sample_leaves_the_mps_reset():
 # first with every input node: the same tensor, to rounding, for every layout
 # of output nodes, either boundary and dtype, with and without renormalization;
 # the same gradients; and, from a boundary vector, a fraction of what autograd
-# keeps.
+# keeps. With ``inline_input`` it raises.
 
 ZIPUP_LAYOUTS = [[], [3], [0], [6], [1, 4], [0, 6]]
 
@@ -813,4 +813,12 @@ def test_zipup_input_does_not_marginalize_yet():
     mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=2, out_features=[1])
     with pytest.raises(NotImplementedError, match='marginalize_output'):
         mps(torch.randn(3, 3, 2), zipup_input=True, marginalize_output=True)
+    mps.reset()
+
+
+def test_zipup_input_with_inline_input_raises():
+    """Exclusive options raise rather than one being ignored (José's rule)."""
+    mps = SamplingMPS(n_features=4, phys_dim=2, bond_dim=2, out_features=[1])
+    with pytest.raises(ValueError, match='inline_input'):
+        mps(torch.randn(3, 3, 2), zipup_input=True, inline_input=True)
     mps.reset()
