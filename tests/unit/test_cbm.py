@@ -709,13 +709,15 @@ def test_renormalizing_every_k_sites_changes_only_rounding(monkeypatch, k):
             assert torch.allclose(grad, expected_grad, rtol=1e-4, atol=1e-5)
 
 
-def test_the_forward_renormalizes_every_k_steps(monkeypatch):
-    import bm4tc.core.model as model_module
-    cbm = _tiny_cbm(data_dim=9, num_classes=3)
+@pytest.mark.parametrize("embedding, n_calls", [("fourier", 4), ("legendre", 2)])
+def test_the_forward_renormalizes_every_k_steps_of_its_embedding(monkeypatch,
+                                                                 embedding, n_calls):
+    """k = 4 by default, 8 for Legendre (D120): 17 input sites renormalize
+    after steps 4, 8, 12 and 16, or 8 and 16."""
+    cbm = _tiny_cbm(embedding=embedding, data_dim=17, num_classes=3)
     calls = []
     norm = ConditionalBornMachine._safe_bond_norm
     monkeypatch.setattr(ConditionalBornMachine, "_safe_bond_norm",
                         staticmethod(lambda node, axes: calls.append(1) or norm(node, axes)))
-    monkeypatch.setattr(model_module, "RENORMALIZE_EVERY", 4)
-    cbm.log_amp_sq(torch.rand(2, 9))
-    assert len(calls) == 2          # 9 input sites: after the 4th and the 8th step
+    cbm.log_amp_sq(torch.rand(2, 17))
+    assert len(calls) == n_calls

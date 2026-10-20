@@ -22,6 +22,10 @@ _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 # canonical init, at 144 and 784 sites), 6 for the trained E2a/E2b models; 8
 # sites would reach 42. 1 renormalizes at every site.
 RENORMALIZE_EVERY: int = 4
+# Embeddings measured safe over more sites (D120). Legendre over 8 sites: |log|
+# 9 forward and 16 log Z on random inits, 11 and 18 on the trained E2a/E2b
+# models (all Legendre).
+RENORMALIZE_EVERY_BY_EMBEDDING: dict[str, int] = {"legendre": 8}
 
 
 @dataclass
@@ -202,7 +206,7 @@ class ConditionalBornMachine(SamplingMPS):
         # _renormalize_inline.
         self._log_norm_acc: torch.Tensor | None = None
         # Steps of the forward's running node since the forward began, to
-        # renormalize every RENORMALIZE_EVERY of them (_renormalize_inline).
+        # renormalize every _renormalize_every of them (_renormalize_inline).
         self._renorm_step: int = 0
 
     # ======================================================================
@@ -259,16 +263,22 @@ class ConditionalBornMachine(SamplingMPS):
     # so log|ψ|² = 2·log|psi_renorm| + 2·log_norm never materializes an
     # overflowing amplitude. The only amplitude contraction (D89).
 
+    @property
+    def _renormalize_every(self) -> int:
+        """Sites between renormalizations of the forward and log Z (D119, D120)."""
+        return RENORMALIZE_EVERY_BY_EMBEDDING.get(self.embedding_name.lower(),
+                                                  RENORMALIZE_EVERY)
+
     def _renormalize_inline(self, node, axes):
         """One renormalization step of the inline contractions (overrides
         ``SamplingMPS``'s, which is tk's ``renormalize``): the bond-axis norm is
         computed *once*, folded into ``self._log_norm_acc`` at (batch, class)
         granularity, and used to divide the running node via the ``div`` op.
-        Only every ``RENORMALIZE_EVERY``-th step of a forward: in between the
+        Only every ``_renormalize_every``-th step of a forward: in between the
         node is returned as it is, and its norm is folded in at the next
         renormalization (or, after the last one, by ``forward``)."""
         self._renorm_step += 1
-        if self._renorm_step % RENORMALIZE_EVERY:
+        if self._renorm_step % self._renormalize_every:
             return node
         n = self._safe_bond_norm(node, axes)
         self._accumulate_log_norm(n, node)
@@ -481,9 +491,10 @@ class ConditionalBornMachine(SamplingMPS):
         # O(L·D⁴) — the difference between fitting and OOM at large bond dim.
         # Mathematically identical to the old inline-transfer-matrix order; only
         # the contraction order differs. Mirrors tn4dd TTTN.norm zip-up.
-        # Renormalized every RENORMALIZE_EVERY sites and at the last (D119).
+        # Renormalized every _renormalize_every sites and at the last (D119).
         log_Z = 0
         result_node = None
+        every = self._renormalize_every
         last = len(all_nodes) - 1
         for i, (node, copied_node) in enumerate(zip(all_nodes, copied_nodes)):
             if i == 0:
@@ -491,7 +502,7 @@ class ConditionalBornMachine(SamplingMPS):
             else:
                 result_node = result_node @ node          # transient (D,d,D)
                 result_node = result_node @ copied_node    # back to (D,D)
-            if (i + 1) % RENORMALIZE_EVERY == 0 or i == last:
+            if (i + 1) % every == 0 or i == last:
                 log_Z += result_node.norm().log()
                 result_node = result_node.renormalize()
 

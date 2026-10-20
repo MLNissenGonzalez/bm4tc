@@ -17,7 +17,7 @@ into amplitudes ψ(x, c) (complex64 by default, D4). The Born rule gives
 
 so p(c | x), log p(x) and their gradients are all exact. Long chains (MNIST: 145
 sites) overflow float32, so contractions run in the log domain with norm
-accumulation (the only amplitude path, D89; renormalized every 4 sites, D119), and `log Z` is computed by a zip-up contraction.
+accumulation (the only amplitude path, D89; renormalized every 8 sites for Legendre, every 4 otherwise, D119, D120), and `log Z` is computed by a zip-up contraction.
 These caches belong to the model, keyed on the parameters' versions (D31, D55). This
 numerical core is not touched outside a dedicated track (D30, docs/plan.md Phase 9).
 
