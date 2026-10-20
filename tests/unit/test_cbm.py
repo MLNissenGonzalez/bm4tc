@@ -201,8 +201,8 @@ def test_marginal_log_prob_no_eps_param():
 
 def test_large_amplitude_numerical_stability():
     """logsumexp path stays finite when |ψ| > sqrt(float32_max) ≈ 1.84e19 (amp² overflows)."""
-    cbm = _tiny_cbm()
-    x = torch.rand(4, 2)
+    cbm = _tiny_cbm(data_dim=_OVERFLOW_FEATURES)
+    x = torch.rand(4, _OVERFLOW_FEATURES)
     y = torch.randint(0, 2, (4,))
 
     with torch.no_grad():
@@ -273,9 +273,18 @@ def _acc_cbm(dtype="float32", data_dim=3, num_classes=2, bond_dim=3,
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
 
 
-def _overflow_scale_(cbm, scale=1e10):
-    """Blow up the amplitude past float32 (no single contraction step overflows,
-    so the accumulate/log_Z paths stay finite; the raw product does not)."""
+# An amplitude past float32 from many moderate sites (D119): the product over
+# the chain overflows the raw contraction (32 sites x ln 30 ≈ 109 > 88.7), while
+# RENORMALIZE_EVERY = 4 sites of it stay far inside (ln ≈ 14; log Z, squared,
+# ≈ 27), as the accumulating contraction needs since D119.
+_OVERFLOW_FEATURES = 31
+_OVERFLOW_SCALE = 30.0
+
+
+def _overflow_scale_(cbm, scale=_OVERFLOW_SCALE):
+    """Blow up the amplitude past float32 (no window of RENORMALIZE_EVERY steps
+    overflows, so the accumulate/log_Z paths stay finite; the raw product
+    does not)."""
     with torch.no_grad():
         for node in cbm._mats_env:
             node.tensor.data.mul_(scale)
@@ -389,12 +398,12 @@ def testlog_amp_sq_overflow_safe():
     """When the raw amplitude overflows to inf, log_amp_sq stays finite and
     equals the pre-scale value plus the analytic shift 2·n_sites·log(scale)."""
     torch.manual_seed(4)
-    cbm = _acc_cbm(data_dim=4)
-    x = torch.rand(3, 4) * 1.6 - 0.8
+    cbm = _acc_cbm(data_dim=_OVERFLOW_FEATURES)
+    x = torch.rand(3, _OVERFLOW_FEATURES) * 1.6 - 0.8
     las_base = cbm.log_amp_sq(x).detach().clone()
     # Per-site scale whose product over the chain overflows the amplitude, while
-    # no single contraction step does (that would overflow the norm itself).
-    scale = 1e10
+    # no window of RENORMALIZE_EVERY steps does (that would overflow the norm).
+    scale = _OVERFLOW_SCALE
     with torch.no_grad():
         for node in cbm._mats_env:
             node.tensor.data.mul_(scale)
@@ -500,12 +509,10 @@ def test_mixed_nll_finite_on_overflow(beta):
     """mixed_nll stays finite when the raw amplitude overflows (both the
     discriminative and generative ends)."""
     torch.manual_seed(11)
-    cbm = _acc_cbm(data_dim=4)
-    x = torch.rand(3, 4) * 1.6 - 0.8
+    cbm = _acc_cbm(data_dim=_OVERFLOW_FEATURES)
+    x = torch.rand(3, _OVERFLOW_FEATURES) * 1.6 - 0.8
     y = torch.randint(0, cbm.out_dim, (3,))
-    # 1e8 overflows the raw amplitude (product over 5 sites > float32 max) while
-    # keeping log_Z finite.
-    _overflow_scale_(cbm, scale=1e8)
+    _overflow_scale_(cbm)       # overflows the raw amplitude, keeps log_Z finite
 
     assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
     assert torch.isfinite(cbm.mixed_nll(x, y, beta=beta)[0])
@@ -515,8 +522,8 @@ def test_class_probabilities_finite_on_overflow():
     """class_probabilities stays finite and normalized when the raw amplitude
     overflows (covers eval / all class_probabilities consumers)."""
     torch.manual_seed(12)
-    cbm = _acc_cbm(data_dim=4, num_classes=3)
-    x = torch.rand(4, 4) * 1.6 - 0.8
+    cbm = _acc_cbm(data_dim=_OVERFLOW_FEATURES, num_classes=3)
+    x = torch.rand(4, _OVERFLOW_FEATURES) * 1.6 - 0.8
     _overflow_scale_(cbm)
     probs = cbm.class_probabilities(x)
     assert torch.isfinite(probs).all()
@@ -533,9 +540,9 @@ def test_evaluate_finite_on_overflow():
     the MNIST-resize symptom (stable training, nan valid) that motivated routing
     eval through the same log_amp_sq as the loss."""
     torch.manual_seed(14)
-    cbm = _acc_cbm(data_dim=4, num_classes=3)
-    _overflow_scale_(cbm, scale=1e8)  # overflows the raw amplitude, keeps log_Z finite
-    x = torch.rand(9, 4) * 1.6 - 0.8
+    cbm = _acc_cbm(data_dim=_OVERFLOW_FEATURES, num_classes=3)
+    _overflow_scale_(cbm)  # overflows the raw amplitude, keeps log_Z finite
+    x = torch.rand(9, _OVERFLOW_FEATURES) * 1.6 - 0.8
     assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
     ds = TensorDataset(x, torch.randint(0, 3, (9,)))
     loader = DataLoader(ds, batch_size=4)
@@ -571,10 +578,10 @@ def test_marginal_log_probability_finite_on_overflow():
     """marginal_log_probability stays finite when the raw amplitude overflows —
     the log-density primitive behind purification/UQ/MIA, so it must not go inf."""
     torch.manual_seed(16)
-    cbm = _acc_cbm(data_dim=4, num_classes=3)
-    _overflow_scale_(cbm, scale=1e8)
+    cbm = _acc_cbm(data_dim=_OVERFLOW_FEATURES, num_classes=3)
+    _overflow_scale_(cbm)
     cbm.cache_log_Z()
-    x = torch.rand(4, 4) * 1.6 - 0.8
+    x = torch.rand(4, _OVERFLOW_FEATURES) * 1.6 - 0.8
 
     assert (~torch.isfinite(raw_amplitudes(cbm, x))).any(), "scale did not overflow"
     assert torch.isfinite(cbm.marginal_log_probability(x)).all()

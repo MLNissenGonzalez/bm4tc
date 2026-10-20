@@ -18,8 +18,10 @@ _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 # RENORMALIZE_EVERY sites instead of at every site (D119), keeping the norm in
 # log space either way: in between, the node grows or shrinks by the sites'
 # norms, which must stay well inside float32 (a norm squares its entries, so
-# |log| up to about 40). 1 renormalizes at every site.
-RENORMALIZE_EVERY: int = 1
+# |log| up to about 44). Measured worst over 4 sites: |log| 21 (Hermite,
+# canonical init, at 144 and 784 sites), 6 for the trained E2a/E2b models; 8
+# sites would reach 42. 1 renormalizes at every site.
+RENORMALIZE_EVERY: int = 4
 
 
 @dataclass
