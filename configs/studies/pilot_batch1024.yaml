@@ -1,0 +1,20 @@
+# Batch-size pilot (plan.md, Phase 8, "The batch size"; D115's follow-up): E2a's
+# β* cell (MNIST 12x12 d3r40, β = 0.25) at batch 1024, with the Phase 8 HPO (15
+# trials, median pruning, the default lr range). pilot_batch{512,1024,2048} differ
+# only in the batch; compared on objective/valid, accuracy and epochs to the best
+# epoch. 200 epochs so that a larger batch (fewer steps per epoch) is not cut short.
+dataset: mnist12
+regime: nat
+seeds: 3
+grid:
+  arch: [d3r40]
+  beta: [0.25]
+config:
+  trainer.max_epoch: 200
+  trainer.batch_size: 1024
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+budgets: [0.1]                 # a sanity check at ε = 0.1; the question is training
+analysis:
+  joint_attack: false
+  percentiles: [5]
