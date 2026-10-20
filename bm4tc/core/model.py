@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 # All normal float32 amplitudes pass through with correct gradients.
 _LOG_PROB_EPS: float = float(torch.finfo(torch.float32).tiny)
 
+# The amplitude forward and log Z renormalize their running node every
+# RENORMALIZE_EVERY sites instead of at every site (D119), keeping the norm in
+# log space either way: in between, the node grows or shrinks by the sites'
+# norms, which must stay well inside float32 (a norm squares its entries, so
+# |log| up to about 40). 1 renormalizes at every site.
+RENORMALIZE_EVERY: int = 1
+
 
 @dataclass
 class MPSInitConfig:
@@ -192,6 +199,9 @@ class ConditionalBornMachine(SamplingMPS):
         # contraction; reset/read inside forward(). None between forwards. See
         # _renormalize_inline.
         self._log_norm_acc: torch.Tensor | None = None
+        # Steps of the forward's running node since the forward began, to
+        # renormalize every RENORMALIZE_EVERY of them (_renormalize_inline).
+        self._renorm_step: int = 0
 
     # ======================================================================
     # Auxiliary network sync
@@ -251,7 +261,13 @@ class ConditionalBornMachine(SamplingMPS):
         """One renormalization step of the inline contractions (overrides
         ``SamplingMPS``'s, which is tk's ``renormalize``): the bond-axis norm is
         computed *once*, folded into ``self._log_norm_acc`` at (batch, class)
-        granularity, and used to divide the running node via the ``div`` op."""
+        granularity, and used to divide the running node via the ``div`` op.
+        Only every ``RENORMALIZE_EVERY``-th step of a forward: in between the
+        node is returned as it is, and its norm is folded in at the next
+        renormalization (or, after the last one, by ``forward``)."""
+        self._renorm_step += 1
+        if self._renorm_step % RENORMALIZE_EVERY:
+            return node
         n = self._safe_bond_norm(node, axes)
         self._accumulate_log_norm(n, node)
         return node / n
@@ -335,6 +351,7 @@ class ConditionalBornMachine(SamplingMPS):
         if not self._data_nodes:
             self.set_data_nodes()
         self._log_norm_acc = None
+        self._renorm_step = 0
         self.add_data(data)
         self._tracing = first
         try:
@@ -462,16 +479,19 @@ class ConditionalBornMachine(SamplingMPS):
         # O(L·D⁴) — the difference between fitting and OOM at large bond dim.
         # Mathematically identical to the old inline-transfer-matrix order; only
         # the contraction order differs. Mirrors tn4dd TTTN.norm zip-up.
+        # Renormalized every RENORMALIZE_EVERY sites and at the last (D119).
         log_Z = 0
         result_node = None
+        last = len(all_nodes) - 1
         for i, (node, copied_node) in enumerate(zip(all_nodes, copied_nodes)):
             if i == 0:
                 result_node = node @ copied_node
             else:
                 result_node = result_node @ node          # transient (D,d,D)
                 result_node = result_node @ copied_node    # back to (D,D)
-            log_Z += result_node.norm().log()
-            result_node = result_node.renormalize()
+            if (i + 1) % RENORMALIZE_EVERY == 0 or i == last:
+                log_Z += result_node.norm().log()
+                result_node = result_node.renormalize()
 
         if result_node.is_connected_to(result_node):       # PBC self-loop
             result_node @= result_node

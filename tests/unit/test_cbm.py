@@ -668,3 +668,47 @@ def test_every_contraction_of_the_model_zips_the_data_in(cbm, x_batch):
         outs.append(tk.models.MPS.forward(cbm, data, **kwargs))
     cbm.reset()
     assert torch.allclose(outs[0], outs[1], rtol=1e-5, atol=1e-7)
+
+
+# ── renormalization every k sites (D119) ─────────────────────────────────────
+
+def _values_and_gradients(cbm, x):
+    cbm.reset()
+    las = cbm.log_amp_sq(x)
+    log_Z = cbm.log_partition_function()
+    params = [p for _, p in sorted(cbm.named_parameters()) if p.requires_grad]
+    grads = torch.autograd.grad(las.sum() + log_Z, params, allow_unused=True)
+    return las.detach(), log_Z.detach(), grads
+
+
+@pytest.mark.parametrize("k", [2, 3, 8, 1000])
+def test_renormalizing_every_k_sites_changes_only_rounding(monkeypatch, k):
+    """log|ψ|², log Z and their gradients are those of k = 1: the norm is kept
+    in log space whenever the running node is renormalized."""
+    import bm4tc.core.model as model_module
+    torch.manual_seed(0)
+    cbm = _tiny_cbm(dtype="complex64", data_dim=9, num_classes=3, bond_dim=4,
+                    std=0.3)
+    x = torch.rand(5, 9)
+    expected = _values_and_gradients(cbm, x)
+    monkeypatch.setattr(model_module, "RENORMALIZE_EVERY", k)
+    result = _values_and_gradients(cbm, x)
+    assert torch.allclose(result[0], expected[0], rtol=1e-5, atol=1e-5)
+    assert torch.allclose(result[1], expected[1], rtol=1e-5, atol=1e-5)
+    for grad, expected_grad in zip(result[2], expected[2]):
+        if expected_grad is None:
+            assert grad is None
+        else:
+            assert torch.allclose(grad, expected_grad, rtol=1e-4, atol=1e-5)
+
+
+def test_the_forward_renormalizes_every_k_steps(monkeypatch):
+    import bm4tc.core.model as model_module
+    cbm = _tiny_cbm(data_dim=9, num_classes=3)
+    calls = []
+    norm = ConditionalBornMachine._safe_bond_norm
+    monkeypatch.setattr(ConditionalBornMachine, "_safe_bond_norm",
+                        staticmethod(lambda node, axes: calls.append(1) or norm(node, axes)))
+    monkeypatch.setattr(model_module, "RENORMALIZE_EVERY", 4)
+    cbm.log_amp_sq(torch.rand(2, 9))
+    assert len(calls) == 2          # 9 input sites: after the 4th and the 8th step
