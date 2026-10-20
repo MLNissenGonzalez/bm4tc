@@ -521,16 +521,10 @@ class SamplingMPS(tk.models.MPS):
         return torch.trapezoid(grid_basis, x=domain, dim=0)
 
     @staticmethod
-    def _probabilities_from_amplitudes(probs: torch.Tensor
-                                       ) -> Tuple[torch.Tensor, int]:
-        """Cleans and row-normalizes Born probabilities.
-
-        A row with no usable weight (all zero, or any value non-finite) is
-        made uniform; returns the probabilities and the number of such rows.
-        """
-        unusable = ~torch.isfinite(probs).all(dim=1)
-        probs = torch.where(unusable[:, None], torch.zeros_like(probs), probs)
-
+    def _probabilities_from_amplitudes(probs: torch.Tensor) -> torch.Tensor:
+        """Cleans finite Born weights: their real part, clamped at zero, each
+        row divided by its maximum (which keeps the row's sum finite). A row
+        without weight stays zero."""
         if torch.is_complex(probs):
             scale = probs.abs().max().detach()
             imag = probs.imag.abs().max().detach()
@@ -551,14 +545,9 @@ class SamplingMPS(tk.models.MPS):
             raise ValueError(
                 'Some probabilities are negative beyond numerical tolerance')
 
-        # Dividing by the row maximum first keeps the sum finite.
         probs = probs.clamp_min(0)
         row_max = probs.amax(dim=1, keepdim=True)
-        unusable = unusable | (row_max.squeeze(1) <= 0)
-        probs = torch.where(unusable[:, None], torch.ones_like(probs),
-                            probs / row_max.clamp_min(finfo.tiny))
-        n_unusable = int(unusable.sum())
-        return probs / probs.sum(dim=1, keepdim=True), n_unusable
+        return probs / row_max.clamp_min(finfo.tiny)
 
     def _sample_apply_embedding(self,
                                 domain: torch.Tensor,
@@ -1443,8 +1432,18 @@ class SamplingMPS(tk.models.MPS):
                 embedded=embeddings[input_idx])
 
             probs = probs * quadrature_weights[input_idx].reshape(1, -1)
-            probs, unusable = self._probabilities_from_amplitudes(probs)
-            n_unusable += unusable
+            # A row with no usable weight (a value non-finite, or all zero) is
+            # drawn uniformly instead of raising, so that one sample does not
+            # stop the others. Counted on the device, warned about at the end
+            unusable = ~torch.isfinite(probs).all(dim=1)
+            probs = torch.where(unusable[:, None], torch.zeros_like(probs),
+                                probs)
+            probs = self._probabilities_from_amplitudes(probs)
+            unusable = unusable | (probs.amax(dim=1) <= 0)
+            probs = torch.where(unusable[:, None], torch.ones_like(probs),
+                                probs)
+            probs = probs / probs.sum(dim=1, keepdim=True)
+            n_unusable = n_unusable + unusable.sum()
             ids = torch.multinomial(probs,
                                     num_samples=1,
                                     replacement=True,
@@ -1469,4 +1468,4 @@ class SamplingMPS(tk.models.MPS):
         # Collect values in the order of ``in_features``.
         samples = torch.stack(samples, dim=1)
         sample_indices = torch.stack(sample_indices, dim=1)
-        return samples, sample_indices, n_unusable
+        return samples, sample_indices, int(n_unusable)
