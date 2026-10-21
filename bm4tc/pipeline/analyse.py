@@ -11,7 +11,8 @@ parts ran before it (a resumed analysis reproduces them).
     gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
     adaptive   PGD and the adaptive attack against purifier and detector (D96; if
-               analysis.adaptive.enabled; on analysis.adaptive.subsample)
+               analysis.adaptive.enabled, on the runs of analysis.adaptive.seeds,
+               D129; on analysis.adaptive.subsample)
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -81,21 +82,26 @@ SETTINGS = {
 
 
 def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
-    """What makes a part's results reusable: its settings, the budgets, the run."""
+    """What makes a part's results reusable: its settings, the budgets, the run.
+    ``adaptive.seeds`` says which runs get the part, not how, so it is left out."""
     settings = {k: OmegaConf.to_container(analysis, resolve=True)[k] for k in SETTINGS[name]}
+    if "adaptive" in settings:
+        settings["adaptive"].pop("seeds", None)
     blob = json.dumps({"part": name, "settings": settings, "budgets": list(budgets),
                        "run": run_hash, "seed": SEED}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def parts(analysis, model: str = "mps") -> Dict[str, Callable]:
-    """The parts the settings ask for, in order."""
+def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str, Callable]:
+    """The parts the settings ask for, in order, for the run of ``seed``: the
+    adaptive part only on ``analysis.adaptive.seeds`` when it lists some (D129)."""
     out = {"clean": clean, "uq": uq}
     if analysis.joint_attack:
         out["uq_joint"] = uq_joint
     if analysis.sweep_purify.enabled:
         out.update({"sgld": sgld} if model == "jem" else {"gibbs": gibbs})
-    if analysis.adaptive.enabled:
+    seeds = analysis.adaptive.seeds
+    if analysis.adaptive.enabled and (seeds is None or seed in seeds):
         out["adaptive"] = adaptive
     return out
 

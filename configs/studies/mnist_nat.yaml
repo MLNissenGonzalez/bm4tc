@@ -9,4 +9,4 @@ config:
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
 analysis:
-  batch_size: 128              # D111; no micro-batches since D115 (whole batches of 512 up to d3r80)
+  adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell

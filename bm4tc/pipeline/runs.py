@@ -122,6 +122,7 @@ class AdaptiveConfig:
     eot: int = MISSING          # draws per step for a random purifier (Gibbs, SGLD)
     eval_draws: int = MISSING   # fresh draws scoring a random purifier's examples
     subsample: Optional[int] = MISSING   # test points (fixed, seed 0; D117); None = all
+    seeds: Optional[List[int]] = MISSING # the seed runs it analyses (D129); None = every one
 
 
 @dataclass

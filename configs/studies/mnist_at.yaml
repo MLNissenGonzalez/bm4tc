@@ -15,4 +15,4 @@ hpo:                           # the lr only (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)
 analysis:
-  batch_size: 128              # D111; no micro-batches since D115 (whole batches of 512 up to d3r80)
+  adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell

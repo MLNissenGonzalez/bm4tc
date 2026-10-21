@@ -440,7 +440,7 @@ def analyse(job: Job) -> Dict[str, float]:
     path = job.run_dir / "analysis.json"
     stored = json.loads(path.read_text()) if path.exists() else {}
 
-    todo = {name: part for name, part in parts_.parts(analysis, job.study.cfg.model).items()
+    todo = {name: part for name, part in parts_.parts(analysis, job.study.cfg.model, job.seed).items()
             if stored.get(name, {}).get("hash") != parts_.part_hash(name, analysis, budgets, run_hash)}
     if todo and job.pruned:
         raise LookupError(f"{job.name}: parts {sorted(todo)} need the checkpoint, which was "
@@ -475,7 +475,7 @@ def analysed(job: Job) -> Optional[Dict[str, float]]:
     analysis, budgets = job.study.cfg.analysis, list(job.study.cfg.budgets)
     stored = json.loads(path.read_text())
     out = {}
-    for name in parts_.parts(analysis, job.study.cfg.model):
+    for name in parts_.parts(analysis, job.study.cfg.model, job.seed):
         part = stored.get(name, {})
         if part.get("hash") != parts_.part_hash(name, analysis, budgets, run_hash):
             return None
