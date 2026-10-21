@@ -535,6 +535,13 @@ def logs_dir(study: Study) -> Path:
     return outputs_root() / study.name / ".logs"
 
 
+def max_hpo_workers(study: Study) -> int:
+    """At most a third of a cell's trials run at once (D125), so TPE sees finished
+    trials and the median pruner acts; with every trial started together neither
+    does, and parallel workers overshoot the count."""
+    return math.ceil(study.n_trials / 3)
+
+
 def units(study: Study, stages: Sequence[str], cells: List[Cell],
           seeds: Optional[List[int]] = None, workers: int = 1,
           replace: bool = False) -> List["Unit"]:
@@ -556,7 +563,7 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
     jobs = [j for j in study.jobs() if j.cell in cells and (not seeds or j.seed in seeds)]
     out, hpo_names = [], []
     if "hpo" in stages and has_hpo:
-        n = min(workers, study.n_trials)
+        n = min(workers, max_hpo_workers(study))
         for cell in cells:
             for w in range(n):
                 hpo_names.append(f"hpo/{cell.name}/w{w}")

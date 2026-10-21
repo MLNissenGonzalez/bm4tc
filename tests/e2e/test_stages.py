@@ -37,14 +37,14 @@ def test_hpo_select_train(scratch):
     stages.hpo(nat, nat.cells())
     for cell in nat.cells():
         hpo_dir = nat.hpo_dir(cell)
-        assert _states(nat, cell) == [optuna.trial.TrialState.COMPLETE] * 3
-        assert sorted(p.name for p in hpo_dir.glob("t*")) == ["t0", "t1", "t2"]
+        assert _states(nat, cell) == [optuna.trial.TrialState.COMPLETE] * nat.n_trials
+        assert sorted(p.name for p in hpo_dir.glob("t*")) == [f"t{i}" for i in range(nat.n_trials)]
         assert not list(hpo_dir.rglob("models/model"))           # D22: no checkpoints
         assert (hpo_dir / "t0" / "log.json").exists()
 
     # Relaunching finds every trial done.
     stages.hpo(nat, nat.cells())
-    assert all(len(_states(nat, c)) == 3 for c in nat.cells())
+    assert all(len(_states(nat, c)) == nat.n_trials for c in nat.cells())
 
     path = stages.select(nat)
     selected = yaml.safe_load(path.read_text())
@@ -161,7 +161,7 @@ def test_analyse_caches_each_part(scratch):
 
 @pytest.mark.slow
 def test_run_in_parallel_then_status(scratch):
-    """`run` with two parallel units: HPO workers share each cell's journal."""
+    """`run` with parallel units: two HPO workers share each cell's journal."""
     import os
     import subprocess
     import sys
@@ -179,11 +179,11 @@ def test_run_in_parallel_then_status(scratch):
     finally:
         path.unlink(missing_ok=True)
     for cell in nat.cells():
-        assert len(_states(nat, cell)) == 3                         # not 3 per worker
+        assert len(_states(nat, cell)) == nat.n_trials              # not n_trials per worker
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:
         assert len(list(csv.DictReader(f))) == 2
     report = stages.status(nat)
-    assert "legendre/d4r3/b0" in report and "3/3" in report and "failed" not in report
+    assert "legendre/d4r3/b0" in report and "6/6" in report and "failed" not in report
 
 
 def test_select_runs_after_failed_hpo_workers():
@@ -192,9 +192,9 @@ def test_select_runs_after_failed_hpo_workers():
     budget itself (D99). train still needs select to succeed."""
     nat = Study("tests/stages_nat")
     todo = {u.name: u for u in stages.units(nat, ["hpo", "select", "train"], nat.cells(),
-                                            workers=2)}
+                                            workers=8)}
     hpo_names = [n for n in todo if n.startswith("hpo/")]
-    assert len(hpo_names) == 2 * len(nat.cells())
+    assert len(hpo_names) == 2 * len(nat.cells())      # 6 trials: at most 2 workers (D125)
     assert todo["select"].deps == [] and todo["select"].after == hpo_names
     assert all(u.deps == ["select"] for n, u in todo.items() if n.startswith("train/"))
 
@@ -206,7 +206,7 @@ def test_pruner_follows_the_config():
     assert (pruner._n_startup_trials, pruner._n_warmup_steps) == (6, 2)
     nat.cfg.hpo.pruning.enabled = False
     assert isinstance(stages._pruner(nat, nat.cells()[0]), optuna.pruners.NopPruner)
-    assert nat.n_trials == 3                           # trials_per_param 3 x one hparam
+    assert nat.n_trials == 6                           # trials_per_param 6 x one hparam
 
 
 @pytest.mark.slow
@@ -264,14 +264,14 @@ def test_cuda_failures_are_retried(scratch, monkeypatch, error):
     monkeypatch.setattr(stages, "_fit", first_runs_out_of_memory)
     with pytest.raises(stages.CUDAFailure, match="trial 0 ended in a CUDA error"):
         stages.hpo(nat, [cell])
-    assert "0/3" in stages.status(nat)
+    assert f"0/{nat.n_trials}" in stages.status(nat)
 
     stages.hpo(nat, [cell])                            # the relaunch
     trials = stages._optuna_study(nat, cell).get_trials()
     assert trials[0].state == optuna.trial.TrialState.FAIL
     assert trials[0].user_attrs[stages.CUDA_FAILURE]
     assert [t.state for t in trials[1:]] == [optuna.trial.TrialState.COMPLETE] * nat.n_trials
-    assert "3/3" in stages.status(nat)
+    assert f"{nat.n_trials}/{nat.n_trials}" in stages.status(nat)
     stages.hpo(nat, nat.cells()[1:])                   # select needs every cell
     selected = yaml.safe_load(stages.select(nat).read_text())
     assert cell.name in selected
