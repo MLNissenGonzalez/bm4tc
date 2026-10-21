@@ -1,7 +1,7 @@
 """The pipeline stages of a study: hpo, select, train (D21, D22, D23).
 
     python -m bm4tc hpo    <study> [--cell C] [--replace]
-    python -m bm4tc select <study>
+    python -m bm4tc select <study> [--cell C]
     python -m bm4tc train  <study> [--cell C] [--seed S] [--replace]
     python -m bm4tc analyse <study> [--cell C] [--seed S]
 
@@ -18,6 +18,7 @@ archives the journal and starts over (D95). Warm studies need their
 """
 import contextlib
 import datetime
+import fcntl
 import hashlib
 import json
 import logging
@@ -335,40 +336,82 @@ def hpo(study: Study, cells: List[Cell], replace: bool = False) -> None:
 
 # ── select ──────────────────────────────────────────────────────────────────
 
-def select(study: Study) -> Path:
-    """Write every cell's best trial to ``configs/hparams/<study>.yaml`` (D21, D34).
-    Refuses while a cell's HPO is unfinished or has no finite trial."""
+def select(study: Study, cells: Optional[List[Cell]] = None) -> Path:
+    """Write each cell's best trial to ``configs/hparams/<study>.yaml`` (D21, D34):
+    the given cells (default every cell), keeping the other cells' entries, so a
+    cell whose HPO is done trains without waiting for the others (D130). Refuses
+    while a given cell's HPO is unfinished or has no finite trial."""
     if study.cfg.hpo is None:
         raise ValueError(f"{study.name} has no HPO (hpo: null): nothing to select")
-    n_trials = study.n_trials
-    lines = [f"# Selected by `select {study.name}`: per cell, the HPO trial with the lowest",
-             "# objective/valid (D8, D21). Written by select only; do not edit.",
-             f"# {datetime.datetime.now().isoformat(timespec='seconds')}, git {_git_version()}"]
-    for cell in study.cells():
-        if not (study.hpo_dir(cell) / "journal.log").exists():
-            raise LookupError(f"{study.name}/{cell.name}: no HPO; run `hpo {study.name}` first")
-        trials = _optuna_study(study, cell).get_trials(deepcopy=False)
-        states = [t.state for t in trials]
-        finished = len(_counted(trials, _FINISHED))
-        if finished < n_trials or optuna.trial.TrialState.RUNNING in states:
-            raise LookupError(f"{study.name}/{cell.name}: HPO unfinished ({finished} of "
-                              f"{n_trials} trials); run `hpo {study.name}`")
-        complete = [t for t in trials if t.state == optuna.trial.TrialState.COMPLETE
-                    and math.isfinite(t.value)]
-        if not complete:
-            raise LookupError(f"{study.name}/{cell.name}: no trial reached a finite "
-                              f"objective/valid; see {study.hpo_dir(cell)}/t*/train.log")
-        best = min(complete, key=lambda t: t.value)
-        lines.append(f"{cell.name}:  # trial {best.number} of {len(trials)}, "
-                     f"objective/valid {best.value:.6g}")
-        for key in sorted(best.params):
-            value = yaml.safe_dump(best.params[key], default_flow_style=True).strip()
-            lines.append(f"  {key}: {value.removesuffix('...').strip()}")
+    cells = study.cells() if cells is None else cells
+    blocks = {cell.name: _selected_block(study, cell) for cell in cells}
     path = study.hparams_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
-    logger.info(f"Wrote {path}")
+    with _select_lock(study):                  # parallel select units of one launch
+        kept = _cell_blocks(path.read_text()) if path.exists() else {}
+        kept.update(blocks)
+        lines = [f"# Selected by `select {study.name}`: per cell, the HPO trial with the "
+                 "lowest", "# objective/valid (D8, D21). Written by select only; do not edit.",
+                 f"# {datetime.datetime.now().isoformat(timespec='seconds')}, git "
+                 f"{_git_version()}"]
+        for cell in study.cells():
+            lines += kept.get(cell.name, [])
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text("\n".join(lines) + "\n")
+        tmp.replace(path)
+    logger.info(f"Wrote {path} ({', '.join(blocks)})")
     return path
+
+
+def _selected_block(study: Study, cell: Cell) -> List[str]:
+    """The lines of one cell's entry: its best finished trial's hparams."""
+    n_trials = study.n_trials
+    if not (study.hpo_dir(cell) / "journal.log").exists():
+        raise LookupError(f"{study.name}/{cell.name}: no HPO; run `hpo {study.name}` first")
+    trials = _optuna_study(study, cell).get_trials(deepcopy=False)
+    states = [t.state for t in trials]
+    finished = len(_counted(trials, _FINISHED))
+    if finished < n_trials or optuna.trial.TrialState.RUNNING in states:
+        raise LookupError(f"{study.name}/{cell.name}: HPO unfinished ({finished} of "
+                          f"{n_trials} trials); run `hpo {study.name}`")
+    complete = [t for t in trials if t.state == optuna.trial.TrialState.COMPLETE
+                and math.isfinite(t.value)]
+    if not complete:
+        raise LookupError(f"{study.name}/{cell.name}: no trial reached a finite "
+                          f"objective/valid; see {study.hpo_dir(cell)}/t*/train.log")
+    best = min(complete, key=lambda t: t.value)
+    lines = [f"{cell.name}:  # trial {best.number} of {len(trials)}, "
+             f"objective/valid {best.value:.6g}"]
+    for key in sorted(best.params):
+        value = yaml.safe_dump(best.params[key], default_flow_style=True).strip()
+        lines.append(f"  {key}: {value.removesuffix('...').strip()}")
+    return lines
+
+
+def _cell_blocks(text: str) -> Dict[str, List[str]]:
+    """A select file's entries by cell: an unindented ``<cell>:`` line and the
+    indented lines under it (comments at the top are dropped)."""
+    blocks: Dict[str, List[str]] = {}
+    current = None
+    for line in text.splitlines():
+        if line and not line[0].isspace() and not line.startswith("#"):
+            current = line.split(":", 1)[0]
+            blocks[current] = [line]
+        elif current is not None and line.strip():
+            blocks[current].append(line)
+    return blocks
+
+
+@contextlib.contextmanager
+def _select_lock(study: Study) -> Iterator[None]:
+    path = logs_dir(study) / "select.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 # ── analyse ─────────────────────────────────────────────────────────────────
@@ -547,11 +590,11 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
           replace: bool = False) -> List["Unit"]:
     """The units of the given stages of a study, as subprocesses of ``_unit``.
 
-    select waits for every HPO worker to end, train for select, analyse for its
-    train, each only when that stage is part of the launch. A failed HPO worker
-    does not skip select: its trial is run again by the others (D93), and select
-    checks every cell's budget itself (D99). Studies without HPO have no hpo or
-    select units.
+    A cell's select waits for its HPO workers to end, its trains for its select
+    (D130), analyse for its train, each only when that stage is part of the launch.
+    A failed HPO worker does not skip select: its trial is run again by the others
+    (D93), and select checks the cell's budget itself (D99). Studies without HPO
+    have no hpo or select units.
     """
     from bm4tc.pipeline.executor import Unit
 
@@ -561,24 +604,26 @@ def units(study: Study, stages: Sequence[str], cells: List[Cell],
 
     has_hpo = study.cfg.hpo is not None
     jobs = [j for j in study.jobs() if j.cell in cells and (not seeds or j.seed in seeds)]
-    out, hpo_names = [], []
+    out, hpo_names = [], {cell.name: [] for cell in cells}
     if "hpo" in stages and has_hpo:
         n = min(workers, max_hpo_workers(study))
         for cell in cells:
             for w in range(n):
-                hpo_names.append(f"hpo/{cell.name}/w{w}")
-                out.append(unit(hpo_names[-1], "hpo", study.name, "--cell", cell.name,
-                                "--worker", str(w)))
-    select_deps = []
-    if "select" in stages and has_hpo:
-        out.append(unit("select", "select", study.name, after=hpo_names))
-        select_deps = ["select"]
+                hpo_names[cell.name].append(f"hpo/{cell.name}/w{w}")
+                out.append(unit(hpo_names[cell.name][-1], "hpo", study.name,
+                                "--cell", cell.name, "--worker", str(w)))
+    selects = "select" in stages and has_hpo
+    if selects:
+        for cell in cells:
+            out.append(unit(f"select/{cell.name}", "select", study.name, "--cell", cell.name,
+                            after=hpo_names[cell.name]))
     for job in jobs:
         name = f"{job.cell.name}/s{job.seed}"
         cell_args = ("--cell", job.cell.name, "--seed", str(job.seed))
         if "train" in stages:
             out.append(unit(f"train/{name}", "train", study.name, *cell_args,
-                            *(["--replace"] if replace else []), deps=select_deps))
+                            *(["--replace"] if replace else []),
+                            deps=[f"select/{job.cell.name}"] if selects else []))
         if "analyse" in stages:
             deps = [f"train/{name}"] if "train" in stages else []
             out.append(unit(f"analyse/{name}", "analyse", study.name, *cell_args, deps=deps))
@@ -591,7 +636,7 @@ def run_unit(study: Study, kind: str, cell: Optional[Cell], seed: Optional[int],
     if kind == "hpo":
         hpo_worker(study, cell, worker)
     elif kind == "select":
-        select(study)
+        select(study, [cell] if cell is not None else None)
     elif kind in ("train", "analyse"):
         job = Job(study, cell, seed)
         train(job, replace) if kind == "train" else analyse(job)

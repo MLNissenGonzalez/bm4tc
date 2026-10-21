@@ -46,8 +46,13 @@ def test_hpo_select_train(scratch):
     stages.hpo(nat, nat.cells())
     assert all(len(_states(nat, c)) == nat.n_trials for c in nat.cells())
 
+    # One cell at a time keeps the other cells' entries (D130).
+    first, second = nat.cells()
+    assert set(yaml.safe_load(stages.select(nat, [second]).read_text())) == {second.name}
+    one_by_one = yaml.safe_load(stages.select(nat, [first]).read_text())
     path = stages.select(nat)
     selected = yaml.safe_load(path.read_text())
+    assert selected == one_by_one
     assert set(selected) == {c.name for c in nat.cells()}
     for cell in nat.cells():
         opt = stages._optuna_study(nat, cell)
@@ -187,16 +192,20 @@ def test_run_in_parallel_then_status(scratch):
 
 
 def test_select_runs_after_failed_hpo_workers():
-    """select waits for the HPO workers to end, not to succeed: a worker stopped by
-    a CUDA error leaves its trial to the others (D93), and select checks the
-    budget itself (D99). train still needs select to succeed."""
+    """A cell's select waits for its HPO workers to end, not to succeed: a worker
+    stopped by a CUDA error leaves its trial to the others (D93), and select checks
+    the budget itself (D99). train still needs its cell's select to succeed."""
     nat = Study("tests/stages_nat")
     todo = {u.name: u for u in stages.units(nat, ["hpo", "select", "train"], nat.cells(),
                                             workers=8)}
     hpo_names = [n for n in todo if n.startswith("hpo/")]
     assert len(hpo_names) == 2 * len(nat.cells())      # 6 trials: at most 2 workers (D125)
-    assert todo["select"].deps == [] and todo["select"].after == hpo_names
-    assert all(u.deps == ["select"] for n, u in todo.items() if n.startswith("train/"))
+    for cell in nat.cells():                           # a select per cell (D130)
+        select = todo[f"select/{cell.name}"]
+        assert select.deps == [] and select.after == [f"hpo/{cell.name}/w0",
+                                                      f"hpo/{cell.name}/w1"]
+    assert all(u.deps == [f"select/{n.removeprefix('train/').rsplit('/', 1)[0]}"]
+               for n, u in todo.items() if n.startswith("train/"))
 
 
 def test_pruner_follows_the_config():
@@ -272,6 +281,6 @@ def test_cuda_failures_are_retried(scratch, monkeypatch, error):
     assert trials[0].user_attrs[stages.CUDA_FAILURE]
     assert [t.state for t in trials[1:]] == [optuna.trial.TrialState.COMPLETE] * nat.n_trials
     assert f"{nat.n_trials}/{nat.n_trials}" in stages.status(nat)
-    stages.hpo(nat, nat.cells()[1:])                   # select needs every cell
+    stages.hpo(nat, nat.cells()[1:])                   # select of every cell needs each HPO
     selected = yaml.safe_load(stages.select(nat).read_text())
     assert cell.name in selected

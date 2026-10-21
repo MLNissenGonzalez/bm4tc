@@ -95,7 +95,7 @@ def main(argv=None):
         cells = [c for c in cells if c.name in args.cell]
 
     if args.verb == "select":
-        stages.select(study)
+        stages.select(study, cells)
     elif args.verb == "status":
         print(stages.status(study))
     elif args.verb == "prune":
