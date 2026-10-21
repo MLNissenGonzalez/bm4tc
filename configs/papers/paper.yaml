@@ -183,7 +183,7 @@ items:
 
   spirals_defenses:
     kind: bars
-    eps: [0.1, 0.2, 0.3]
+    eps: [0.05, 0.1, 0.2]       # D122's budgets
     models: &spirals_models
       - {study: spirals_nat, where: {beta: 0}, label: "$\\beta=0$"}
       - {study: spirals_nat, where: {beta: 0.5}, label: "$\\beta=0.5$"}
@@ -198,7 +198,7 @@ items:
 
   spirals_summary:
     kind: table
-    eps: [0.1, 0.2, 0.3]
+    eps: [0.05, 0.1, 0.2]
     models: *spirals_models
     metrics: *headline_metrics
 

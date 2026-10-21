@@ -27,5 +27,6 @@ analysis:
   attack_steps: 10
   rob_ceiling: false
   percentiles: [5]
+  adaptive: {enabled: false}   # the seams pin the transfer parts
   purify_steps: 10
   sweep_purify: {enabled: true, sweeps: [1, 2], subsample: 50, sgld: {steps: 5}}

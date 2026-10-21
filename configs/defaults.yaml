@@ -30,7 +30,7 @@ hpo:
 
 # One radius grid (fractions of the input range) for robustness, detection and
 # purification (D3, D20).
-budgets: [0.05, 0.1, 0.15, 0.2, 0.3]
+budgets: [0.05, 0.1, 0.2]      # D122: three, for the adaptive part's cost
 
 # Post-hoc analysis of every seed run (the `analyse` stage), on the test split.
 # The settings of the submission's analysis (sweep.py, gibbs.py on MNIST).
@@ -39,7 +39,7 @@ analysis:
   joint_attack: true           # also attack class and log p(x) jointly (JOINT_PGD)
   rob_ceiling: true            # data-only bound on robust accuracy (two-class data only)
   rob_ceiling_cells: 200       # grid cells per axis for the population ceiling (2-D data with a known law, D97)
-  percentiles: [1, 5, 10, 20]  # detection thresholds: percentiles of clean log p(x)
+  percentiles: [1, 5, 10, 20]  # detection thresholds: percentiles of clean log p(x) (transfer parts)
   purify_delta: [0.1]          # likelihood-purification radius (fraction of the input range)
   purify_steps: 40
   batch_size: 256              # forward chunk size; bounds GPU memory on MNIST
@@ -57,10 +57,11 @@ analysis:
       noise_std: 0.005
       batch_size: 256
   adaptive:                    # PGD through purifier and detector (D96, docs/adaptive.md)
-    enabled: false
-    steps: 100
+    enabled: true              # D114: active defences are reported under it
+    steps: 100                 # D121: 200 changes nothing; restarts bind (saturation ablation)
     restarts: 5
-    eot: 16                    # draws per step for Gibbs / SGLD
+    percentile: 5              # D122: the one threshold attacked (an attack per threshold)
+    eot: 16                    # draws per step for Gibbs / SGLD (D121: 8 is weaker, 32 no stronger)
     eval_draws: 32             # fresh draws scoring their examples
     subsample: 1000            # test points (fixed subset, seed 0; ±0.013), null = all (D117);
                                # Gibbs / SGLD use sweep_purify.subsample

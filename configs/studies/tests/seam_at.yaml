@@ -25,4 +25,5 @@ analysis:
   joint_attack: false
   rob_ceiling: false
   percentiles: [5]
+  adaptive: {enabled: false}   # the seams pin the transfer parts
   purify_steps: 10

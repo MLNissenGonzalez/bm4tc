@@ -75,8 +75,8 @@ SETTINGS = {
     "uq_joint": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
     "gibbs": ("attack_steps", "batch_size", "sweep_purify"),
     "sgld": ("attack_steps", "batch_size", "sweep_purify"),
-    "adaptive": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size",
-                 "sweep_purify", "adaptive"),
+    "adaptive": ("attack_steps", "purify_delta", "purify_steps", "batch_size", "sweep_purify",
+                 "adaptive"),
 }
 
 
@@ -265,8 +265,10 @@ def _subsample(n: int, size: Optional[int]) -> torch.Tensor:
 
 def _defences(cbm, analysis, thresholds, range_size, graphs: Graphs, device):
     """(key name, setting, Defense, selective, test subsample) for every defence:
-    likelihood purification, the detector at each threshold, both, and the sweep
-    purification if it is on. The likelihood purifier replays from ``graphs``."""
+    likelihood purification, the detector at its threshold, and the sweep
+    purification if it is on (the detector on the purified input is not attacked,
+    D122: it matched purification alone). The likelihood purifier replays from
+    ``graphs``."""
     likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps
                                         ).graphed(cbm, graphs)
     size = analysis.adaptive.subsample
@@ -275,9 +277,6 @@ def _defences(cbm, analysis, thresholds, range_size, graphs: Graphs, device):
         purify = partial(_likelihood_purified, likelihood,
                          graphs.scalar(rel_to_abs(delta, range_size), device))
         out.append(("purify", f"d{delta:g}", Defense(cbm, purify), False, size))
-        for q, tau in thresholds.items():
-            out.append(("purify_sel", f"d{delta:g}_q{q:g}",
-                        Defense(cbm, purify, tau, detect_on="purified"), True, size))
     for q, tau in thresholds.items():
         out.append(("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True, size))
     p = analysis.sweep_purify
@@ -293,9 +292,10 @@ def _defences(cbm, analysis, thresholds, range_size, graphs: Graphs, device):
 def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     """Each defence at each budget, attacked by PGD on the classifier (no suffix) and
     by the adaptive attack (``_adapt``, D96), which starts its first restart from the
-    PGD example (D98). Robust accuracy for the purifiers,
-    selective robust accuracy (``rob_sel``, ``purify_sel``) where a detector may
-    reject. PGD on the purifiers alone is the ``uq`` and sweep parts' already.
+    PGD example (D98). Robust accuracy for the purifiers, selective robust
+    accuracy (``rob_sel``) for the detector at ``analysis.adaptive.percentile``
+    (D122: an attack per threshold, so one). PGD on the purifiers alone is the
+    ``uq`` and sweep parts' already.
 
     On the test subsample ``analysis.adaptive.subsample`` (D117), the sweep
     purification on its own. On CUDA, PGD, the likelihood purifier and the adaptive
@@ -305,7 +305,7 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     cbm.to(device)
     cbm.log_normalizer()
     thresholds, _ = compute_thresholds(cbm, datahandler.classification["valid"],
-                                       list(analysis.percentiles), device)
+                                       [a.percentile], device)
     X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
     range_size = range_size_of(cbm)
     graphs, eager = _graphs(cbm, device), Graphs(enabled=False)

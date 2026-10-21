@@ -54,10 +54,8 @@ robust accuracy counts a point when its clean input is accepted and right and it
 attacked input is rejected or right:
 
     purify_adapt/test/{eps}/d{r}         likelihood purification, adaptive attack
-    rob_sel[_adapt]/test/{eps}/q{p}      detector at q{p}: selective robust accuracy
-    purify_sel[_adapt]/test/{eps}/d{r}_q{p}
-                                         purification, then the detector on the
-                                         purified input: selective robust accuracy
+    rob_sel[_adapt]/test/{eps}/q{p}      detector at q{p} (analysis.adaptive.percentile):
+                                         selective robust accuracy
     purify_gibbs_adapt/test/{eps}/k{n}   Gibbs (MPS) / SGLD (JEM, purify_sgld_adapt),
                                          adaptive attack, on the sweep subsample
 

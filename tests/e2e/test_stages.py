@@ -139,9 +139,9 @@ def test_analyse_caches_each_part(scratch):
               "purify_gibbs/test/0/k1",
               "rob_ceiling/test/0.1", "rob_ceiling_sel/test/0.1", "rob_ceiling/pop/0.1",
               "rob_ceiling_sel/pop/0.1", "purify_adapt/test/0.1/d0.1", "rob_sel/test/0.1/q10",
-              "rob_sel_adapt/test/0.1/q10", "purify_sel/test/0.1/d0.1_q10",
-              "purify_sel_adapt/test/0.1/d0.1_q10", "purify_gibbs_adapt/test/0.1/k1"):
+              "rob_sel_adapt/test/0.1/q10", "purify_gibbs_adapt/test/0.1/k1"):
         assert k in metrics, k
+    assert not any(k.startswith("purify_sel") for k in metrics)    # D122
 
     path = job.run_dir / "analysis.json"
     before = json.loads(path.read_text())

@@ -118,6 +118,7 @@ class AdaptiveConfig:
     enabled: bool = MISSING
     steps: int = MISSING
     restarts: int = MISSING
+    percentile: float = MISSING  # the detector's one threshold attacked (D122)
     eot: int = MISSING          # draws per step for a random purifier (Gibbs, SGLD)
     eval_draws: int = MISSING   # fresh draws scoring a random purifier's examples
     subsample: Optional[int] = MISSING   # test points (fixed, seed 0; D117); None = all
