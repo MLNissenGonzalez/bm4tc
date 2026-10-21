@@ -6,7 +6,9 @@ its slot's GPU, or with ``mps`` that GPU's MPS daemon (:mod:`bm4tc.pipeline.mps`
 started if it is not running). Without GPUs there are ``per_gpu`` unpinned slots. A unit
 starts when every unit in its ``deps`` succeeded and every unit in its ``after``
 ended, in any state; when a unit fails, everything that depends on it is skipped
-and the rest goes on. The state of every unit is written to a JSON file as it
+and the rest goes on. Units start on one GPU at least ``stagger`` seconds apart
+(D130), so their warm-up peaks do not coincide and its MPS daemon is not asked to
+take several clients at once. The state of every unit is written to a JSON file as it
 changes, for ``status``.
 
 The pool knows nothing about studies: :mod:`bm4tc.pipeline.stages` builds the units.
@@ -24,6 +26,7 @@ from typing import Dict, List, Optional, Sequence
 logger = logging.getLogger(__name__)
 
 PENDING, RUNNING, DONE, FAILED, SKIPPED = "pending", "running", "done", "failed", "skipped"
+STAGGER = 10.0  # seconds between two starts on one GPU (D130)
 
 
 @dataclass
@@ -48,7 +51,7 @@ def _now() -> str:
 
 def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: int = 1,
             state_file: Optional[Path] = None, poll: float = 0.5,
-            mps: bool = False) -> Dict[str, str]:
+            mps: bool = False, stagger: float = STAGGER) -> Dict[str, str]:
     """Run the units; returns each unit's final state (done, failed or skipped)."""
     if mps:
         if not gpus:
@@ -66,6 +69,7 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
     state = {u.name: {"state": PENDING, "log": str(u.log)} for u in units}
     free = slots(gpus, per_gpu)
     running: Dict[str, tuple] = {}  # name -> (process, slot gpu, log handle)
+    last_start: Dict[str, float] = {}  # gpu -> time of its last start
 
     def save():
         if state_file is not None:
@@ -94,7 +98,14 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                      and all(state[d]["state"] == DONE for d in u.deps)
                      and all(state[d]["state"] in (DONE, FAILED, SKIPPED) for d in u.after)]
             while ready and free:
-                u, gpu = ready.pop(0), free.pop(0)
+                now = time.monotonic()
+                slot = next((i for i, g in enumerate(free) if g is None
+                             or now - last_start.get(g, -stagger) >= stagger), None)
+                if slot is None:
+                    break                   # every free slot's GPU started a unit just now
+                u, gpu = ready.pop(0), free.pop(slot)
+                if gpu is not None:
+                    last_start[gpu] = now
                 u.log.parent.mkdir(parents=True, exist_ok=True)
                 handle = open(u.log, "w")
                 env = dict(os.environ)
@@ -106,7 +117,7 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                 running[u.name] = (proc, gpu, handle)
                 set_state(u.name, RUNNING, started=_now(), gpu=gpu)
                 logger.info(f"start {u.name}" + (f" on GPU {gpu}" if gpu is not None else ""))
-            if not running:
+            if not running and not (ready and free):
                 break
             time.sleep(poll)
             for name, (proc, gpu, handle) in list(running.items()):

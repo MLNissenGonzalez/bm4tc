@@ -54,9 +54,20 @@ def test_after_waits_for_the_end_in_any_state(tmp_path):
 def test_each_slot_pins_its_gpu(tmp_path):
     code = "import os; print(os.environ.get('CUDA_VISIBLE_DEVICES'))"
     units = [_unit(tmp_path, f"u{i}", code) for i in range(4)]
-    execute(units, gpus=["3", "5"], per_gpu=1, poll=0.05)
+    execute(units, gpus=["3", "5"], per_gpu=1, poll=0.05, stagger=0)
     seen = {(tmp_path / f"u{i}.log").read_text().strip() for i in range(4)}
     assert seen == {"3", "5"}
+
+
+def test_starts_on_one_gpu_are_staggered(tmp_path):
+    """D130: units start on one GPU at least ``stagger`` seconds apart, on
+    different GPUs at once."""
+    code = "import time; print(time.monotonic())"
+    units = [_unit(tmp_path, f"u{i}", code) for i in range(4)]
+    execute(units, gpus=["3", "5"], per_gpu=2, poll=0.05, stagger=0.5)
+    starts = sorted(float((tmp_path / f"u{i}.log").read_text()) for i in range(4))
+    assert starts[1] - starts[0] < 0.4                 # one unit on each GPU at once
+    assert starts[2] - starts[0] >= 0.45               # then the second on each
 
 
 def test_mps_units_use_their_gpus_daemon(tmp_path, monkeypatch):
@@ -69,7 +80,8 @@ def test_mps_units_use_their_gpus_daemon(tmp_path, monkeypatch):
             "os.environ['CUDA_MPS_PIPE_DIRECTORY'])")
     units = [_unit(tmp_path, f"u{i}", code) for i in range(4)]
     state_file = tmp_path / "status.json"
-    execute(units, gpus=["3", "5"], per_gpu=2, state_file=state_file, poll=0.05, mps=True)
+    execute(units, gpus=["3", "5"], per_gpu=2, state_file=state_file, poll=0.05, mps=True,
+            stagger=0)
     assert ensured == ["3", "5"]
     seen = {tuple((tmp_path / f"u{i}.log").read_text().split()) for i in range(4)}
     assert seen == {("0", str(mps.pipe_directory("3"))), ("0", str(mps.pipe_directory("5")))}
