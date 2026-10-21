@@ -5,8 +5,11 @@
 # Main text: full-resolution MNIST (mnist_*; arch from mnist_capacity, D44), so no
 # arch filter is needed there. JEM on full MNIST needs studies jem_mnist_{nat,at}
 # (not written yet; jem_mnist12_* exist). Appendix: spirals, MNIST 12x12, (TS: D6).
-# The beta values are placeholders: the ladder cells nearest to the TPM paper's alpha
-# choices (D86); pick them again after the beta pilots.
+# The beta values are cells of the ladder {0, 0.01, 0.1, 0.25, 0.5, 0.9, 1} (D108) and
+# the AT grid {0, 0.25, 0.5} (D113). Active defences (purification, the detector) are
+# reported under the adaptive attack (`_adapt` keys, D114: on seed 1 only on full MNIST,
+# D129); their transfer numbers (PGD on the classifier, then the defence) appear only as
+# diagnostics, marked "transfer".
 out: figures/journal
 
 items:
@@ -20,9 +23,9 @@ items:
     series:
       - {study: mnist_nat, key: acc/test, label: Clean}
       - {study: mnist_nat, key: "rob/test/{eps}", label: Robust}
-      - {study: mnist_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
-      - {study: mnist_nat, key: "rob_joint/test/{eps}", label: "Robust (joint attack)", style: "--"}
-      - {study: mnist_nat, key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint attack)", style: "--"}
+      - {study: mnist_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: mnist_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
+      - {study: mnist_nat, key: "purify/test/{eps}/d0.1", label: "Purified (transfer)", style: "--"}
 
   mnist_beta_nll:
     kind: curve
@@ -38,8 +41,8 @@ items:
     eps: 0.1
     models: &mnist_models
       - {study: mnist_nat, where: {beta: 0}, label: "MPS $\\beta=0$"}
+      - {study: mnist_nat, where: {beta: 0.25}, label: "MPS $\\beta=0.25$"}
       - {study: mnist_nat, where: {beta: 0.9}, label: "MPS $\\beta=0.9$"}
-      - {study: mnist_nat, where: {beta: 0.99}, label: "MPS $\\beta=0.99$"}
       - {study: mnist_nat, where: {beta: 1}, label: "MPS $\\beta=1$"}
       - {study: mnist_at, where: {beta: 0}, label: "MPS AT"}
       - {study: mnist_at, where: {beta: 0.5}, label: "MPS AT $\\beta=0.5$"}
@@ -50,8 +53,9 @@ items:
     metrics: &headline_metrics
       - {key: acc/test, label: Clean, best: max}
       - {key: "rob/test/{eps}", label: Robust, best: max}
-      - {key: "purify/test/{eps}/d0.1", label: Purified, best: max}
-      - {key: "purify/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain, best: max}
+      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified, best: max}
+      - {key: "purify_adapt/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain, best: max}
+      - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector", best: max}
 
   mnist_defenses:
     kind: bars
@@ -65,9 +69,9 @@ items:
     metrics:
       - {key: acc/test, label: Clean}
       - {key: "rob/test/{eps}", label: Robust}
-      - {key: "purify/test/{eps}/d0.1", label: Purified}
-      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
-      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)"}
+      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified}
+      - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$)"}
+      - {key: "purify/test/{eps}/d0.1", label: "Purified (transfer)"}
 
   mnist_capacity:
     kind: curve
@@ -89,7 +93,8 @@ items:
       - {study: mnist_at, where: {beta: 0.5}, label: "MPS AT $\\beta=0.5$"}
       - {study: jem_mnist_nat, where: {beta: 0.9}, label: "JEM $\\beta=0.9$"}
 
-  mnist_detection:        # fraction of PGD examples flagged at the clean q-th percentile (D2)
+  mnist_detection:        # transfer: fraction of PGD examples flagged at the clean q-th percentile (D2);
+                          # then selective robust accuracy at q5, transfer and adaptive (D114)
     kind: table
     eps: 0.1
     models: *mnist_models
@@ -99,8 +104,10 @@ items:
       - {key: "detect/test/{eps}/q5", label: "$q=5$", best: max}
       - {key: "detect/test/{eps}/q10", label: "$q=10$", best: max}
       - {key: "detect/test/{eps}/q20", label: "$q=20$", best: max}
+      - {key: "rob_sel/test/{eps}/q5", label: "selective, $q=5$ (transfer)", best: max}
+      - {key: "rob_sel_adapt/test/{eps}/q5", label: "selective, $q=5$", best: max}
 
-  mnist_joint:            # the detector-aware attack minus PGD
+  mnist_joint:            # transfer diagnostics: the detector-aware attack minus PGD
     kind: table
     eps: [0.1, 0.2]
     models: *mnist_models
@@ -116,9 +123,9 @@ items:
     ylabel: Accuracy
     ylim: [0, 1.02]
     series:
-      - {study: mnist_nat, where: {beta: 0}, key: "purify/test/{x}/d0.1", label: "purified, $\\beta=0$"}
-      - {study: mnist_nat, where: {beta: 0.9}, key: "purify/test/{x}/d0.1", label: "purified, $\\beta=0.9$"}
-      - {study: mnist_at, where: {beta: 0.5}, key: "purify/test/{x}/d0.1", label: "purified, AT"}
+      - {study: mnist_nat, where: {beta: 0}, key: "purify_adapt/test/{x}/d0.1", label: "purified, $\\beta=0$"}
+      - {study: mnist_nat, where: {beta: 0.9}, key: "purify_adapt/test/{x}/d0.1", label: "purified, $\\beta=0.9$"}
+      - {study: mnist_at, where: {beta: 0.5}, key: "purify_adapt/test/{x}/d0.1", label: "purified, AT"}
       - {study: mnist_nat, where: {beta: 0}, key: "rob/test/{x}", label: "robust, $\\beta=0$", style: "--", color: C0}
       - {study: mnist_nat, where: {beta: 0.9}, key: "rob/test/{x}", label: "robust, $\\beta=0.9$", style: "--", color: C1}
       - {study: mnist_at, where: {beta: 0.5}, key: "rob/test/{x}", label: "robust, AT", style: "--", color: C2}
@@ -129,15 +136,17 @@ items:
     eps: 0.1
     ylabel: Accuracy
     series:
-      - {study: mnist_nat, where: {beta: 0.9}, key: "purify_gibbs/test/{eps}/k{x}", label: "MPS Gibbs, $\\beta=0.9$"}
-      - {study: jem_mnist_nat, where: {beta: 0.9}, key: "purify_sgld/test/{eps}/k{x}", label: "JEM SGLD, $\\beta=0.9$"}
+      - {study: mnist_nat, where: {beta: 0.9}, key: "purify_gibbs_adapt/test/{eps}/k{x}", label: "MPS Gibbs, $\\beta=0.9$"}
+      - {study: jem_mnist_nat, where: {beta: 0.9}, key: "purify_sgld_adapt/test/{eps}/k{x}", label: "JEM SGLD, $\\beta=0.9$"}
+      - {study: mnist_nat, where: {beta: 0.9}, key: "purify_gibbs/test/{eps}/k{x}", label: "MPS Gibbs (transfer)", style: "--", color: C0}
+      - {study: jem_mnist_nat, where: {beta: 0.9}, key: "purify_sgld/test/{eps}/k{x}", label: "JEM SGLD (transfer)", style: "--", color: C1}
 
   mnist_samples:
     kind: samples
     models:
       - {study: mnist_nat, where: {beta: 0}, label: "$\\beta=0$"}
       - {study: mnist_nat, where: {beta: 0.9}, label: "$\\beta=0.9$"}
-      - {study: mnist_nat, where: {beta: 0.99}, label: "$\\beta=0.99$"}
+      - {study: mnist_nat, where: {beta: 0.25}, label: "$\\beta=0.25$"}
       - {study: mnist_nat, where: {beta: 1}, label: "$\\beta=1$"}
       - {study: jem_mnist_nat, where: {beta: 0.9}, label: "JEM $\\beta=0.9$"}
 
@@ -170,7 +179,10 @@ items:
       - {study: spirals_nat, key: acc/test, label: Clean}
       - {study: spirals_nat, key: "rob/test/{eps}", label: Robust}
       - {study: spirals_nat, key: "rob_ceiling/test/{eps}", label: "Robust ceiling", style: ":"}
-      - {study: spirals_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: spirals_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: spirals_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
+      - {study: spirals_nat, key: "rob_ceiling_sel/test/{eps}", label: "Selective ceiling", style: ":"}
+      - {study: spirals_nat, key: "purify/test/{eps}/d0.1", label: "Purified (transfer)", style: "--"}
 
   spirals_beta_nll:
     kind: curve
@@ -189,11 +201,12 @@ items:
       - {study: spirals_nat, where: {beta: 0.5}, label: "$\\beta=0.5$"}
       - {study: spirals_nat, where: {beta: 1}, label: "$\\beta=1$"}
       - {study: spirals_at, where: {beta: 0}, label: AT}
-      - {study: spirals_at, where: {beta: 0.1}, label: "AT $\\beta=0.1$"}
+      - {study: spirals_at, where: {beta: 0.25}, label: "AT $\\beta=0.25$"}
     metrics:
       - {key: acc/test, label: Clean}
       - {key: "rob/test/{eps}", label: Robust}
-      - {key: "purify/test/{eps}/d0.1", label: Purified}
+      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified}
+      - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$)"}
       - {key: "rob_ceiling/test/{eps}", label: Ceiling}
 
   spirals_summary:
@@ -202,7 +215,7 @@ items:
     models: *spirals_models
     metrics: *headline_metrics
 
-  spirals_joint:
+  spirals_joint:           # transfer diagnostics
     kind: table
     eps: 0.2
     models: *spirals_models
@@ -269,7 +282,7 @@ items:
       - {key: acc/test, label: Clean, best: max}
       - {key: loss_x/test, label: "NLL/feature", best: min}
       - {key: "rob/test/{eps}", label: Robust, best: max}
-      - {key: "purify/test/{eps}/d0.1", label: Purified, best: max}
+      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified, best: max}
 
   # ── Appendix: MNIST 12x12 (the rebuttal's setting) ─────────────────────────
   mnist12_beta_acc:
@@ -282,9 +295,10 @@ items:
     series:
       - {study: mnist12_nat, key: acc/test, label: Clean}
       - {study: mnist12_nat, key: "rob/test/{eps}", label: Robust}
-      - {study: mnist12_nat, key: "purify/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: mnist12_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
+      - {study: mnist12_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
       - {study: jem_mnist12_nat, key: acc/test, label: "JEM clean", style: "--"}
-      - {study: jem_mnist12_nat, key: "purify/test/{eps}/d0.1", label: "JEM purified", style: "--"}
+      - {study: jem_mnist12_nat, key: "purify_adapt/test/{eps}/d0.1", label: "JEM purified", style: "--"}
 
   mnist12_capacity:
     kind: curve
