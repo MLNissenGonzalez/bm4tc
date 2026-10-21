@@ -10,3 +10,8 @@ config:
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
 analysis:
   adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell
+  sweep_purify:                # D132: one sweep, no window; transfer only (adaptive too costly)
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: []

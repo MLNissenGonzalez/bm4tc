@@ -2,11 +2,12 @@
 
 One sweep is ``steps`` SGLD transitions on the JEM score, projected onto the L∞
 ball of radius ``step_rel·(hi-lo)`` around the state at the start of the sweep;
-the next sweep is re-centred on its result. Like Gibbs, the radius is a per-sweep
+the next sweep is re-centred on its result. With ``step_rel`` None there is no
+ball, only the input range (D132). Like Gibbs, the radius is a per-sweep
 step, not a budget: the strength is the number of sweeps. Step size and noise are
 fixed for every model, not the model's training-sampler settings.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -15,7 +16,7 @@ from bm4tc.core.jem.sampler import SGLDConfig, SGLDSampler
 
 
 class SGLDPurification:
-    def __init__(self, step_rel: float, steps: int = 20, step_size: float = 0.01,
+    def __init__(self, step_rel: Optional[float], steps: int = 20, step_size: float = 0.01,
                  noise_std: float = 0.005, batch_size: int = 256):
         self.step_rel, self.batch_size = step_rel, batch_size
         # refine() reads only these; the buffer is not used for purification.
@@ -29,7 +30,7 @@ class SGLDPurification:
         if not points or points[0] < 1:
             raise ValueError("sweep_points must contain positive integers")
         lo, hi = model.input_range
-        radius = self.step_rel * (hi - lo)
+        radius = None if self.step_rel is None else self.step_rel * (hi - lo)
         model.to(device)
         snapshots: Dict[int, List[torch.Tensor]] = {k: [] for k in points}
         for i in range(0, len(data), self.batch_size):

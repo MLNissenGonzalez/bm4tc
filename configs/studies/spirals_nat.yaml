@@ -7,3 +7,8 @@ config:
   trainer.max_epoch: 300
   trainer.batch_size: 256
   trainer.patience: 100
+analysis:
+  sweep_purify:                # D132: windowed Gibbs, attacked adaptively (cheap at 2 features)
+    enabled: true
+    sweeps: [1, 6]             # E3: the attack was ahead at 1 sweep, behind at 6
+    adaptive_seeds: [1]

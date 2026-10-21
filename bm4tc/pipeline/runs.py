@@ -106,8 +106,9 @@ class SweepPurifyConfig:
     """Sweep purification: Gibbs for the MPS, SGLD for JEM (D72)."""
     enabled: bool = MISSING
     sweeps: List[int] = MISSING
-    step: float = MISSING
+    step: Optional[float] = MISSING      # per-sweep window; None = the whole input range (D132)
     subsample: Optional[int] = MISSING
+    adaptive_seeds: Optional[List[int]] = MISSING  # runs whose analysis attacks it adaptively (D132)
     gibbs: GibbsConfig = field(default_factory=GibbsConfig)
     sgld: SGLDPurifyConfig = field(default_factory=SGLDPurifyConfig)
 

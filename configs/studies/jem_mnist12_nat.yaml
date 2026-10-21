@@ -20,4 +20,8 @@ hpo:                           # five hparams: 75 trials (D81)
     jem.sampler.noise_std: {log: [1e-3, 3e-2]}
     jem.sampler.num_steps: {choice: [20, 40]}
 analysis:
-  sweep_purify: {enabled: true}   # SGLD purification is cheap for an MLP
+  sweep_purify:                # D132, as mnist12: one SGLD sweep, no ball; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]

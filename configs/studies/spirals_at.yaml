@@ -12,3 +12,8 @@ config:
 hpo:                           # the lr only (D80)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)
+analysis:
+  sweep_purify:                # D132: windowed Gibbs, attacked adaptively (cheap at 2 features)
+    enabled: true
+    sweeps: [1, 6]             # E3: the attack was ahead at 1 sweep, behind at 6
+    adaptive_seeds: [1]

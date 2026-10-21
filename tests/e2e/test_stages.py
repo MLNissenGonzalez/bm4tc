@@ -155,9 +155,14 @@ def test_analyse_caches_each_part(scratch):
     stages.analyse(job)
     after = json.loads(path.read_text())
     assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]
+    assert after["adaptive_sweep"] == before["adaptive_sweep"]     # D132: its own part
     assert after["uq"]["hash"] != before["uq"]["hash"]
     nat.cfg.analysis.adaptive.seeds = [job.seed]                   # D129: it picks runs,
-    assert stages.analysed(job) is not None                        # the hash stays
+    nat.cfg.analysis.sweep_purify.adaptive_seeds = [job.seed]      # D132: so does this,
+    assert stages.analysed(job) is not None                        # the hashes stay
+    nat.cfg.analysis.sweep_purify.adaptive_seeds = []
+    assert "purify_gibbs_adapt/test/0.1/k1" not in stages.analyse(job)
+    assert "purify_adapt/test/0.1/d0.1" in stages.analyse(job)
     nat.cfg.analysis.adaptive.seeds = [job.seed + 1]
     assert not any("_adapt" in k for k in stages.analyse(job))
 

@@ -149,3 +149,16 @@ def test_sgld_purification_moves_within_each_sweep():
     assert (x3 - x).abs().max() <= 0.3 + 1e-6          # re-centred every sweep
     assert (x1 - x).abs().max() > 0.01 and not torch.equal(x1, x3)
     torch.testing.assert_close(s1, log_px(model, x1).detach())
+
+
+def test_sgld_purification_without_a_ball_stays_in_the_input_range():
+    """D132: step_rel None, no ball around the sweep's start, only the range."""
+    from bm4tc.core.jem.purification import SGLDPurification
+    model = small()
+    x = torch.rand(10, 4) * 1.6 - 0.8
+    purifier = SGLDPurification(step_rel=None, steps=10, step_size=0.5, noise_std=0.01,
+                                batch_size=4)
+    x1, _ = purifier.purify_snapshots(model, x, [1], "cpu")[1]
+    lo, hi = model.input_range
+    assert (x1 - x).abs().max() > 0.1                  # past the ball of the test above
+    assert lo <= x1.min() and x1.max() <= hi

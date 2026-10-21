@@ -8,3 +8,9 @@ config:
   trainer.batch_size: 512
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+analysis:
+  sweep_purify:                # D132: one sweep, no window; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
