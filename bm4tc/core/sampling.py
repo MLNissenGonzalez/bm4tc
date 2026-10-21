@@ -53,7 +53,7 @@ For 1.1.6: ``n_sites`` is ``n_features``; nodes have ``rank``, not ``ndim``;
   tensors and repeats the same operations: no new nodes, no edges connected, no
   reset. ``reset``, and ``forward`` through it, removes them; ``develop`` built
   and reset every call.
-- **Float32 precision (open, plan.md "Sampling" step 6).** A double layer is
+- **Float32 precision (docs/evidence.md, "Sampling" step 6).** A double layer is
   positive semi-definite in exact arithmetic, not after float32 rounding: its
   error grows like the square of the contraction's cancellation (one layer:
   linearly), so long chains with improbable candidate windows can give negative

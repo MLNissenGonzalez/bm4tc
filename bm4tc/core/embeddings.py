@@ -169,9 +169,9 @@ class ChebyshevT2Embedding:
     IMPORTANT — domain is restricted to (-0.99, 0.99), NOT the full (-1, 1).
     The weight (1−x²)^{1/4} vanishes at x = ±1, so φ(±1) is the *zero vector*:
     the Born Machine gives those points |ψ|² = 0 for every parameter setting.
-    That is a hard zero in the density, not a small number — see
-    reference/chebyshev_boundary_born_machines.md. T1 has the reciprocal weight
-    and the reciprocal failure (divergence, not extinction).
+    That is a hard zero in the density, not a small number. T1 has the
+    reciprocal weight and the reciprocal failure (divergence, not extinction).
+    The two ranges are explained at ``_EMBEDDING_TO_RANGE``.
     """
     def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
@@ -248,7 +248,7 @@ _EMBEDDING_TO_RANGE = {
     "legendre":   (-1., 1.),
     "hermite":    (-4., 4.),
     # Both Chebyshev families are restricted to ±0.99 rather than ±1, for
-    # opposite reasons — see reference/chebyshev_boundary_born_machines.md.
+    # opposite reasons.
     # T1: the weight (1-x²)^{-1/4} diverges at ±1 (w → ∞), creating a strong
     # implicit boundary prior. ±0.99 caps w ≈ 2.24 vs ~31.6 at the raw boundary.
     # T2: the weight (1-x²)^{+1/4} *vanishes* at ±1, so φ(±1) is the zero vector

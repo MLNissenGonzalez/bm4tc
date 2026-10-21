@@ -1,4 +1,4 @@
-# β pilot E2b (plan.md "Beta"): do the knees E2a found on MNIST 12x12 move on full
+# β pilot E2b (docs/evidence.md "Beta"): do the knees E2a found on MNIST 12x12 move on full
 # MNIST (28x28)? Their shift sets the exponent of N (keep N unless both knees move by
 # more than ~1 in ln r). E2a's grid, arch and norm target; no HPO: each cell takes the
 # lr E2a selected at the same β (hparams_from; configs/hparams/pilot_beta12.yaml,

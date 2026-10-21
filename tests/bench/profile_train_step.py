@@ -1,5 +1,5 @@
 """Profile: where one MPS training step spends its time (the per-step overhead,
-docs/plan.md "Efficiency"). Not collected by pytest; run by hand:
+docs/plan.md, "tensorkrowch"). Not collected by pytest; run by hand:
 
     python -m tests.bench.profile_train_step [--sites 144] [--bond 20] [--batch 512]
         [--beta 0.5] [--steps 10] [--device cuda] [--trace out.json]

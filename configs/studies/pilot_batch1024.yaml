@@ -1,4 +1,4 @@
-# Batch-size pilot (plan.md, Phase 8, "The batch size"; D115's follow-up): E2a's
+# Batch-size pilot (D115's follow-up; decided by D121): E2a's
 # β* cell (MNIST 12x12 d3r40, β = 0.25) at batch 1024, with the Phase 8 HPO (15
 # trials, median pruning, the default lr range). pilot_batch{512,1024,2048} differ
 # only in the batch; compared on objective/valid, accuracy and epochs to the best

@@ -1,4 +1,4 @@
-# β pilot E2a (plan.md "Beta"): where are the accuracy and density knees on MNIST
+# β pilot E2a (docs/evidence.md "Beta"): where are the accuracy and density knees on MNIST
 # 12x12? 12 cells, a factor ≈ 3 in the weight ratio β/(1-β) per step; d3r40 as in
 # the Phase 8 studies; one seed. They set the Phase 8 ladder, β* (best purified
 # accuracy) for the AT grid, and the lr that pilot_beta28 reuses (hparams_from).
@@ -22,7 +22,7 @@ hpo:                           # the lr only, 6 trials per cell, random search (
 budgets: [0.1]                 # read at ε = 0.1 only
 analysis:
   joint_attack: false
-  # E3 follow-up (plan.md, "Beta"): the adaptive part on β ∈ {0, 0.1, 0.25, 0.5}
+  # E3 follow-up (docs/evidence.md, "Beta"): the adaptive part on β ∈ {0, 0.1, 0.25, 0.5}
   # (`run --cell`), no retraining. Trimmed as E3: one threshold; the warm start from
   # PGD (D98) as the only restart, ≈ 4 h per checkpoint (≈ 20 h at the 5 default
   # restarts: every attack step runs the 40-step purifier).
