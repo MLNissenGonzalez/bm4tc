@@ -9,6 +9,7 @@ config:
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
 analysis:
+  batch_size: 512              # D133: 1.3x faster than 256 at an AT unit's memory
   adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell
   sweep_purify:                # D132: one sweep, no window; transfer only (adaptive too costly)
     enabled: true
