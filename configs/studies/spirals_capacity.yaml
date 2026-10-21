@@ -11,4 +11,4 @@ config:
   trainer.patience: 100
 analysis:
   adaptive:
-    restarts: 20               # D135: as in spirals_nat (seconds per budget)
+    restarts: 20               # D135: as in spirals_nat (≈ 1 min per budget)

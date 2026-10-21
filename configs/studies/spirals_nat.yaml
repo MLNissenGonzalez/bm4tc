@@ -14,4 +14,4 @@ analysis:
     adaptive_seeds: [1]
     adaptive_restarts: 5       # D135: 20 would take hours per budget; noted in the paper
   adaptive:
-    restarts: 20               # D135: purification does not saturate at 5 on spirals
+    restarts: 20               # D135: purification does not saturate at 5 on spirals (≈ 1 min per budget)
