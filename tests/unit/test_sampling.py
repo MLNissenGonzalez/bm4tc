@@ -620,6 +620,17 @@ def test_complex_weights_use_the_real_part():
     assert torch.allclose(clean, torch.tensor([[1 / 3, 1.], [0., 0.]]))
 
 
+def test_the_imaginary_part_warning_has_a_tolerance():
+    # D126: rounding gives a double layer an imaginary part that grows with the
+    # chain, so ``sample`` passes 1e-5 · n_features.
+    probs = torch.tensor([[1 + 1e-3j, 1 + 0j]])
+    with pytest.warns(UserWarning, match='imaginary'):
+        SamplingMPS._probabilities_from_amplitudes(probs)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        SamplingMPS._probabilities_from_amplitudes(probs, imag_tol=1e-5 * 784)
+
+
 def test_rows_of_some_samples_without_weight_are_drawn_uniformly():
     # Per-sample domains embedded to zero for the first two samples: their
     # draws have no usable weight and are drawn uniformly (counted in one

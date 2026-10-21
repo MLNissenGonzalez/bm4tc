@@ -57,7 +57,9 @@ For 1.1.6: ``n_sites`` is ``n_features``; nodes have ``rank``, not ``ndim``;
   positive semi-definite in exact arithmetic, not after float32 rounding: its
   error grows like the square of the contraction's cancellation (one layer:
   linearly), so long chains with improbable candidate windows can give negative
-  weights, which raise past tolerance.
+  weights, which raise past tolerance. Its imaginary part, which only rounding
+  gives it, grows with the chain too: the warning about it fires above
+  1e-5 · ``n_features`` of the weights' scale (D126; ``develop``: 1e-5).
 
 Norms are discarded (``renormalize`` divides each environment by one scalar per
 sample): sampling needs only ratios between candidates, and no gradients.
@@ -521,15 +523,17 @@ class SamplingMPS(tk.models.MPS):
         return torch.trapezoid(grid_basis, x=domain, dim=0)
 
     @staticmethod
-    def _probabilities_from_amplitudes(probs: torch.Tensor) -> torch.Tensor:
+    def _probabilities_from_amplitudes(probs: torch.Tensor,
+                                       imag_tol: float = 1e-5) -> torch.Tensor:
         """Cleans finite Born weights: their real part, clamped at zero, each
         row divided by its maximum (which keeps the row's sum finite). A row
-        without weight stays zero."""
+        without weight stays zero. Warns when the imaginary part exceeds
+        ``imag_tol`` of the weights' scale."""
         if torch.is_complex(probs):
             scale = probs.abs().max().detach()
             imag = probs.imag.abs().max().detach()
             if scale > 0:
-                if imag > (1e-5 * scale):
+                if imag > (imag_tol * scale):
                     warnings.warn(
                         'Probabilities have a non-negligible imaginary part. '
                         'Only their real part will be used')
@@ -1438,7 +1442,8 @@ class SamplingMPS(tk.models.MPS):
             unusable = ~torch.isfinite(probs).all(dim=1)
             probs = torch.where(unusable[:, None], torch.zeros_like(probs),
                                 probs)
-            probs = self._probabilities_from_amplitudes(probs)
+            probs = self._probabilities_from_amplitudes(
+                probs, imag_tol=1e-5 * self._n_features)
             unusable = unusable | (probs.amax(dim=1) <= 0)
             probs = torch.where(unusable[:, None], torch.ones_like(probs),
                                 probs)
