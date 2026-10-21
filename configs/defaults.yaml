@@ -51,6 +51,7 @@ analysis:
     subsample: 250             # test points (fixed subset, seed 0); null = all
     adaptive_seeds: null       # seed runs whose analysis attacks it adaptively (the
                                # adaptive_sweep part); null = every one, [] = none (D132)
+    adaptive_restarts: null    # that attack's restarts; null = adaptive.restarts (D135)
     gibbs:
       num_bins: 96             # candidate values per feature
       batch_size: 64           # points swept together; memory ∝ sites·classes·bond (D101)
@@ -62,7 +63,7 @@ analysis:
   adaptive:                    # PGD through purifier and detector (D96, docs/adaptive.md)
     enabled: true              # D114: active defences are reported under it
     steps: 100                 # D121: 200 changes nothing; restarts bind (saturation ablation)
-    restarts: 5
+    restarts: 5                # D135: 5 saturate MNIST 12×12; spirals sets 20
     percentile: 5              # D122: the one threshold attacked (an attack per threshold)
     eot: 16                    # draws per step for Gibbs / SGLD (D121: 8 is weaker, 32 no stronger)
     eval_draws: 32             # fresh draws scoring their examples

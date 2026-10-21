@@ -164,6 +164,17 @@ def test_analyse_caches_each_part(scratch):
     assert "purify_adapt/test/0.1/d0.1" in stages.analyse(job)
     nat.cfg.analysis.adaptive.seeds = [job.seed + 1]
     assert not any("_adapt" in k for k in stages.analyse(job))
+    nat.cfg.analysis.adaptive.seeds = None
+    nat.cfg.analysis.sweep_purify.adaptive_seeds = None
+    stages.analyse(job)
+    before = json.loads(path.read_text())
+    restarts = nat.cfg.analysis.adaptive.restarts                  # D135: the sweep
+    nat.cfg.analysis.sweep_purify.adaptive_restarts = restarts     # purifier keeps its
+    nat.cfg.analysis.adaptive.restarts = restarts + 1              # count, so its part
+    stages.analyse(job)                                            # and gibbs stay cached
+    after = json.loads(path.read_text())
+    assert after["adaptive_sweep"] == before["adaptive_sweep"] and after["gibbs"] == before["gibbs"]
+    assert after["adaptive"]["hash"] != before["adaptive"]["hash"]
 
     stages.collect(nat)                                            # one run analysed
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:

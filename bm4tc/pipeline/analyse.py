@@ -86,11 +86,15 @@ SETTINGS = {
 def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
     """What makes a part's results reusable: its settings, the budgets, the run.
     ``adaptive.seeds`` and ``sweep_purify.adaptive_seeds`` say which runs get a part,
-    not how, so they are left out."""
+    not how, so they are left out. ``sweep_purify.adaptive_restarts`` enters only the
+    sweep purifier's attack, as the restarts it runs (D135)."""
     settings = {k: OmegaConf.to_container(analysis, resolve=True)[k] for k in SETTINGS[name]}
-    for section, picks in (("adaptive", "seeds"), ("sweep_purify", "adaptive_seeds")):
+    for section, picks in (("adaptive", "seeds"), ("sweep_purify", "adaptive_seeds"),
+                           ("sweep_purify", "adaptive_restarts")):
         if section in settings:
             settings[section].pop(picks, None)
+    if name == "adaptive_sweep":
+        settings["adaptive"]["restarts"] = _sweep_restarts(analysis)
     blob = json.dumps({"part": name, "settings": settings, "budgets": list(budgets),
                        "run": run_hash, "seed": SEED}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
@@ -329,11 +333,19 @@ def adaptive_sweep(cbm, datahandler, analysis, budgets, device) -> Dict[str, flo
     the adaptive attack (``purify_{gibbs,sgld}_adapt``, D96) on
     ``analysis.sweep_purify.subsample``. Its own part (D132): it is eager (the
     sampler is Python per site) and costs far more than the others on long chains,
-    so ``sweep_purify.adaptive_seeds`` limits it on its own."""
-    return _attack(cbm, datahandler, analysis, budgets, device, _sweep_defences)
+    so ``sweep_purify.adaptive_seeds`` limits it on its own, and
+    ``sweep_purify.adaptive_restarts`` may give it fewer restarts (D135)."""
+    return _attack(cbm, datahandler, analysis, budgets, device, _sweep_defences,
+                   restarts=_sweep_restarts(analysis))
 
 
-def _attack(cbm, datahandler, analysis, budgets, device, defences_of) -> Dict[str, float]:
+def _sweep_restarts(analysis) -> int:
+    r = analysis.sweep_purify.adaptive_restarts
+    return analysis.adaptive.restarts if r is None else r
+
+
+def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
+            restarts: Optional[int] = None) -> Dict[str, float]:
     """The defences ``defences_of`` builds, attacked at each budget by the adaptive
     attack and, for a selective one, also by the PGD examples. A random purifier's
     attack stays eager."""
@@ -345,7 +357,8 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of) -> Dict[st
     graphs, eager = _graphs(cbm, device), Graphs(enabled=False)
     pgd = ProjectedGradientDescent(norm="inf", num_steps=analysis.attack_steps
                                    ).graphed(cbm, graphs)
-    attack = AdaptivePGD(steps=a.steps, restarts=a.restarts, eot=a.eot)
+    attack = AdaptivePGD(steps=a.steps, restarts=a.restarts if restarts is None else restarts,
+                         eot=a.eot)
     defences = defences_of(cbm, datahandler, analysis, graphs, device)
     # one graphed attack per defence, captured once for every budget
     attacks = [(attack.graphed(d[2], g), g)

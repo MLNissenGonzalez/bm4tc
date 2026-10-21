@@ -108,6 +108,7 @@ class SweepPurifyConfig:
     step: Optional[float] = MISSING      # per-sweep window; None = the whole input range (D132)
     subsample: Optional[int] = MISSING
     adaptive_seeds: Optional[List[int]] = MISSING  # runs whose analysis attacks it adaptively (D132)
+    adaptive_restarts: Optional[int] = MISSING     # its attack's restarts; None = adaptive.restarts (D135)
     gibbs: GibbsConfig = field(default_factory=GibbsConfig)
     sgld: SGLDPurifyConfig = field(default_factory=SGLDPurifyConfig)
 
