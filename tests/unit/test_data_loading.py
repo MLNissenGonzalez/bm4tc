@@ -143,6 +143,27 @@ def test_italy_power_demand_loading():
     assert ds.X.dtype in (np.float32, np.float64)
 
 
+def test_robust_sigmoid_is_one_global_transform_robust_to_outliers():
+    """MPSTime's scaled robust sigmoid (docs/timeseries.md): one transform for every
+    feature, monotone, the train extremes on the range ends, and a spike does not
+    squeeze the other values (a min/max scaler leaves them a sliver of the range)."""
+    import numpy as np
+    from bm4tc.pipeline.data import LinearScaler, RobustSigmoidScaler
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(50, 20))
+    X[0, 3] = 40.0                                             # one spike
+    scaler = RobustSigmoidScaler(feature_range=(-1., 1.), clip=True)
+    Y = scaler.fit_transform(X)
+    assert Y.min() == -1. and Y.max() == 1.
+    order = np.argsort(X, axis=None)
+    assert np.all(np.diff(Y.flatten()[order]) >= 0)            # monotone, one transform
+    spread = lambda Z: np.median(Z[1:].max(1) - Z[1:].min(1))  # the series without the spike
+    linear = LinearScaler(feature_range=(-1., 1.)).fit_transform(X)
+    assert spread(Y) > 0.6 * 2 and spread(linear) < 0.3 * 2
+    assert np.all(scaler.transform(X * 10) <= 1.)              # unseen extremes are clipped
+
+
 def test_spirals_cell_masses_match_the_generator():
     """The law written in _spirals_cell_masses is the law _two_dim_generator samples
     (clipped into the outer cells), cell by cell."""

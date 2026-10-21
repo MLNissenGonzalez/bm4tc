@@ -1,0 +1,15 @@
+# italypowerdemand capacity sweep, legendre d3, NAT, cold (docs/timeseries.md, T3, T5): D44's two
+# criteria pick the rank of italypowerdemand_nat, italypowerdemand_at and the JEM studies. Also the pilot of
+# the series: generous budgets, whose curves set the later studies' epochs and patience.
+dataset: italypowerdemand
+regime: nat
+grid:
+  arch: [d3r5, d3r10, d3r20, d3r40]
+  beta: [0, 1]
+config:
+  trainer.max_epoch: 500
+  trainer.batch_size: 64
+  trainer.patience: 150
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+analysis:
+  adaptive: {enabled: false}   # D129: the arch is chosen by D44's criteria, no adaptive number

@@ -533,9 +533,45 @@ class LinearScaler:
         return self.transform(X)
 
 
+class RobustSigmoidScaler:
+    """
+    Scaled robust sigmoid (MPSTime, Moore et al. 2025, Eqs. A1-A2): one global
+    transform ``s((X - median) / (IQR / 1.35))`` with ``s`` the logistic sigmoid, then
+    a global linear map of the sigmoid's train min/max to ``feature_range``.
+
+    Median and IQR are taken over every value of the training matrix, so all
+    features share one transform, as in LinearScaler; the sigmoid squashes outliers
+    smoothly instead of letting them set the range (ChlorineConcentration's spikes
+    leave a series a quarter of a min/max range; docs/timeseries.md). Unseen values
+    beyond the training extremes are clipped (MPSTime shifts the series instead).
+    """
+
+    def __init__(self, feature_range=(0., 1.), clip=False):
+        self.median = 0.0
+        self.scale = 1.0
+        self.linear = LinearScaler(feature_range, clip)
+
+    def _sigmoid(self, X):
+        return 1.0 / (1.0 + np.exp(-(X - self.median) / self.scale))
+
+    def fit(self, X):
+        q25, self.median, q75 = np.quantile(X, [0.25, 0.5, 0.75])
+        self.scale = (q75 - q25) / 1.35 if q75 > q25 else 1.0
+        self.linear.fit(self._sigmoid(X))
+        return self
+
+    def transform(self, X):
+        return self.linear.transform(self._sigmoid(X))
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+
+
 _SCALER_MAP = {
     "minmax": MinMaxScaler,
     "linear": LinearScaler,
+    "robustsigmoid": RobustSigmoidScaler,
 }
 
 
@@ -591,7 +627,7 @@ class DataHandler:
         return mean, cov
 
     def _get_scaler(self, scaler_name: str):
-        key = scaler_name.lower().replace("-", "").replace(" ", "")
+        key = scaler_name.lower().replace("-", "").replace("_", "").replace(" ", "")
         scaler_cls = _SCALER_MAP.get(key)
         if scaler_cls is None:
             raise ValueError(f"Unknown scaler '{scaler_name}'")

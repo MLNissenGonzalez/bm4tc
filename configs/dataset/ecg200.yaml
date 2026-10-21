@@ -12,4 +12,4 @@ split: [0.5, 0.25, 0.25]
 split_seed: 42
 use_ucr_split: true
 overwrite: false
-scaler: linear               # one transform for every time step: ε is a fraction of the global range (docs/timeseries.md)
+scaler: robust_sigmoid       # MPSTime's: one global transform, outliers squashed (docs/timeseries.md)
