@@ -229,7 +229,7 @@ class ConditionalBornMachine(SamplingMPS):
         if hasattr(self, "norm_net"):
             self._sync_norm_net()
             self._freeze_boundaries()
-        self._invalidate_log_Z_cache()
+        self.invalidate_log_Z_cache()
 
     def _freeze_boundaries(self) -> None:
         """Fix the obc boundary vectors, and give norm_net the model's own.
@@ -540,8 +540,9 @@ class ConditionalBornMachine(SamplingMPS):
         invalidates explicitly.)"""
         return tuple((id(p), p._version) for p in self.parameters())
 
-    def _invalidate_log_Z_cache(self) -> None:
-        """Drop the norm caches after a tensor mutation."""
+    def invalidate_log_Z_cache(self) -> None:
+        """Drop the norm caches after a tensor mutation the version counters miss
+        (``renormalize_``, a captured step's replay: D130)."""
         self._log_Z_cache = None
         self._log_Z = None
 
@@ -659,7 +660,7 @@ class ConditionalBornMachine(SamplingMPS):
             scale = math.exp((log_target - log_Z.item()) / (2 * n))
             for node in self._mats_env:
                 node.tensor.data.mul_(scale)
-        self._invalidate_log_Z_cache()
+        self.invalidate_log_Z_cache()
 
     def prepare(self, device: torch.device | None = None) -> None:
         """Reset the contraction state and move to ``device``. No tk trace: every

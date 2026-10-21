@@ -381,6 +381,7 @@ class _DecompStubCBM:
     def train(self): pass
     def eval(self): pass
     def log_Z(self, recompute=False): return torch.tensor(0.0)
+    def invalidate_log_Z_cache(self): pass
 
     def mixed_nll(self, data, labels, beta, debug=False):
         tag = float(data[0, 0])
