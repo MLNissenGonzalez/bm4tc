@@ -252,6 +252,36 @@ def test_captured_training_is_bit_identical_to_eager(evasion, micro_batch_size):
     assert all(torch.equal(e, g) for e, g in zip(eager_tensors, graph_tensors))
 
 
+@needs_cuda
+def test_log_Z_read_between_captured_steps_is_current():
+    """D130: a replay changes the parameters without bumping their version
+    counters, so an eager log Z read during captured training must not be the
+    one cached before the replays."""
+    torch.manual_seed(0)
+    cbm = ConditionalBornMachine(
+        CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(in_dim=3, bond_dim=4)),
+        data_dim=6, num_classes=3)
+    lo, hi = cbm.input_range
+    data = lo + (hi - lo) * torch.rand(40, 6)
+    loader = DataLoader(TensorDataset(data, torch.randint(0, 3, (40,))), batch_size=8,
+                        drop_last=True)
+    cfg = TrainConfig(beta=0.5, max_epoch=4, eval_every=1, batch_size=8,
+                      optimizer=OptimizerConfig(kwargs={"lr": 1e-2}), cuda_graph=True)
+    trainer = Trainer(cbm, cfg, loader, loader, CUDA)
+    read = []
+
+    def on_epoch_end(epoch, record):
+        cached = trainer.cbm.log_normalizer()
+        with torch.no_grad():
+            fresh = float(trainer.cbm.log_partition_function())
+        read.append((cached, fresh))
+
+    trainer.train(on_epoch_end=on_epoch_end)
+    assert len(trainer._graphed_train_step._captures) == 1
+    assert len({cached for cached, _ in read}) == len(read)        # it moved every epoch
+    assert all(abs(cached - fresh) < 1e-5 for cached, fresh in read)
+
+
 def _run_at_e2as_shape(cuda_graph: bool):
     """MNIST12 d3r40, batch 512, β 0.5, as E2a trains it, for three epochs:
     epoch 1 eager, then the training step and validation (four batches)

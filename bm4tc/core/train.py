@@ -329,6 +329,9 @@ class Trainer:
                 adversarials = self._adversarials(inputs, labels, radius)
                 batch = (inputs, labels) if adversarials is None else (inputs, labels, adversarials)
                 objective, penalty, statistics = self._graphed_train_step(*batch)
+                # A replay changes the parameters without bumping their version
+                # counters, so the model's log Z caches would outlive them (D130).
+                self.cbm._invalidate_log_Z_cache()
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     logger.error(f"CUDA OOM at step {self.step}, re-raising.")
