@@ -1,6 +1,6 @@
 """The stages on tiny studies: hpo -> select -> train, NAT then warm AT (D19, D21, D22).
 
-configs/studies/tests/stages_{nat,at}.yaml; outputs and the hparams file go to a
+configs/studies/tests/stages_{nat,at}.yaml; outputs, hparams files included, go to a
 scratch dir.
 """
 import csv
@@ -18,7 +18,6 @@ from bm4tc.pipeline.runs import RunConflict, Study
 @pytest.fixture
 def scratch(tmp_path, monkeypatch):
     monkeypatch.setenv("BM4TC_DATA_ROOT", str(tmp_path))
-    monkeypatch.setattr(runs, "HPARAMS", tmp_path / "hparams")
     return tmp_path
 
 
@@ -135,7 +134,7 @@ def test_analyse_caches_each_part(scratch):
     job = nat.jobs()[0]
     with pytest.raises(LookupError, match="train tests/stages_nat"):
         stages.analyse(job)
-    nat.hparams_path.parent.mkdir(parents=True)
+    nat.hparams_path.parent.mkdir(parents=True, exist_ok=True)
     nat.hparams_path.write_text(f"{job.cell.name}:\n  trainer.optimizer.kwargs.lr: 0.01\n")
     stages.train(job)
     metrics = stages.analyse(job)
@@ -180,18 +179,12 @@ def test_run_in_parallel_then_status(scratch):
     import subprocess
     import sys
     env = {**os.environ, "BM4TC_DATA_ROOT": str(scratch), "CUDA_VISIBLE_DEVICES": ""}
-    # The units are subprocesses, which the HPARAMS monkeypatch does not reach:
-    # select writes configs/hparams/tests/stages_nat.yaml, removed afterwards.
     nat = Study("tests/stages_nat")
-    path = runs.CONFIGS / "hparams" / "tests" / "stages_nat.yaml"
-    try:
-        proc = subprocess.run([sys.executable, "-m", "bm4tc", "run", "tests/stages_nat",
-                               "--per-gpu", "2"], cwd=runs.REPO, env=env,
-                              capture_output=True, text=True)
-        assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
-        assert yaml.safe_load(path.read_text()).keys() == {c.name for c in nat.cells()}
-    finally:
-        path.unlink(missing_ok=True)
+    proc = subprocess.run([sys.executable, "-m", "bm4tc", "run", "tests/stages_nat",
+                           "--per-gpu", "2"], cwd=runs.REPO, env=env,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-3000:]
+    assert yaml.safe_load(nat.hparams_path.read_text()).keys() == {c.name for c in nat.cells()}
     for cell in nat.cells():
         assert len(_states(nat, cell)) == nat.n_trials              # not n_trials per worker
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:

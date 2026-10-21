@@ -2,7 +2,7 @@
 
     hpo | train | analyse   that stage, through the job pool
     run                     hpo -> select -> train -> analyse, skipping what is done
-    select                  write configs/hparams/<study>.yaml
+    select                  write outputs/<study>/hparams.yaml
     figures <paper>         every figure and table of configs/papers/<paper>.yaml
                             (--item NAME: only that one, repeatable)
     status                  progress per cell; running and failed units with logs

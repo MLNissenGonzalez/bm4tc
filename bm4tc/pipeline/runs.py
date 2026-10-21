@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[2]
 CONFIGS = REPO / "configs"
-HPARAMS = CONFIGS / "hparams"          # written by `select` only (D34)
 REGIMES = ("nat", "at")
 MODELS = ("mps", "jem")
 RAW = "raw"                            # the embedding axis of a JEM study: none
@@ -273,7 +272,9 @@ class Study:
 
     @property
     def hparams_path(self) -> Path:
-        return HPARAMS / f"{self.name}.yaml"
+        """Written by ``select`` only (D34); study data beside ``results.csv``, so it
+        outlives the checkout that selected it (D134)."""
+        return outputs_root() / self.name / "hparams.yaml"
 
     def hparams(self, cell: Cell) -> Dict[str, Any]:
         """The selected hparams of a cell (D21, D34); every key of the HPO space."""

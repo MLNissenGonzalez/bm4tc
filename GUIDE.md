@@ -137,7 +137,6 @@ configs/
   defaults.yaml      study-level defaults: seeds (5), β ladder, AT radius, HPO space,
                      budgets, the analysis settings
   studies/           one file per study; studies/tests/ holds the seam studies
-  hparams/           <study>.yaml, written by `select` only (D34)
   papers/            paper manifests; papers/tests/ for the figures test
   dataset/           spirals, mnist12 (12x12), mnist (28x28), UCR time series, ...
   trainer/           nat.yaml, at.yaml (the PGD-AT preset)
@@ -183,7 +182,7 @@ seed. The result and its hash go into `run.json`.
 
 ```bash
 python -m bm4tc hpo     <study>   # Optuna per cell, trials on the first seed, no checkpoints
-python -m bm4tc select  <study>   # best trial per cell (argmin objective/valid) -> configs/hparams/<study>.yaml
+python -m bm4tc select  <study>   # best trial per cell (argmin objective/valid) -> outputs/<study>/hparams.yaml
 python -m bm4tc train   <study>   # every (cell, seed) with the selected hparams
 python -m bm4tc analyse <study>   # every run on test -> analysis.json; the study's results.csv
 python -m bm4tc run     <study>   # all four in order, skipping what is done
@@ -231,6 +230,7 @@ outputs/<study>/<embedding>/<arch>/b<beta>[/eps<eps>]/
     models/model                   the selected checkpoint (prune deletes these)
     log.json                       per-epoch metrics
     analysis.json                  analysis parts, each with its settings hash
+outputs/<study>/hparams.yaml       the selected hparams per cell, written by `select` only (D34, D134)
 outputs/<study>/results.csv        one row per analysed run
 outputs/<study>/analysis.yaml      the analysis settings behind it
 outputs/<study>/.logs/             one log per unit, status.json

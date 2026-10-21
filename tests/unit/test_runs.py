@@ -81,19 +81,22 @@ def test_at_must_be_warm(tmp_path, monkeypatch):
         Study("bad")
 
 
-# ── hparams (D21, D34) ──────────────────────────────────────────────────────
+# ── hparams (D21, D34, D134) ──────────────────────────────────────────────────────
 
-def test_missing_hparams_fail_loudly():
+def test_missing_hparams_fail_loudly(tmp_path, monkeypatch):
+    monkeypatch.setenv("BM4TC_DATA_ROOT", str(tmp_path))
     study = Study("spirals_at")
     with pytest.raises(LookupError, match="select spirals_at"):
         study.jobs()[0].compose()
 
 
 def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
-    monkeypatch.setattr(runs, "HPARAMS", tmp_path)
+    monkeypatch.setenv("BM4TC_DATA_ROOT", str(tmp_path))
     study = Study("spirals_at")
     cell = study.cells()[1]
-    (tmp_path / "spirals_at.yaml").write_text(  # as `select spirals_at` writes it
+    assert study.hparams_path == tmp_path / "outputs/spirals_at/hparams.yaml"   # D134
+    study.hparams_path.parent.mkdir(parents=True)
+    study.hparams_path.write_text(  # as `select spirals_at` writes it
         f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-3\n"
         "  trainer.clean_weight: 0.4\n  extra: 1\n")
     # only the study's search space is read: the lr (a stale clean_weight from
@@ -104,14 +107,16 @@ def test_hparams_are_read_per_cell(tmp_path, monkeypatch):
 
 
 def test_hparams_from_inherits_the_matching_cell(tmp_path, monkeypatch):
-    monkeypatch.setattr(runs, "HPARAMS", tmp_path)
+    monkeypatch.setenv("BM4TC_DATA_ROOT", str(tmp_path))
     study = Study("jem_mnist12_at")
     cell = next(c for c in study.cells() if c.beta == 0.25 and c.arch == "d3r20")
-    (tmp_path / "jem_mnist12_nat.yaml").write_text(
+    for name in ("jem_mnist12_nat", "jem_mnist12_at"):
+        (tmp_path / "outputs" / name).mkdir(parents=True)
+    (tmp_path / "outputs/jem_mnist12_nat/hparams.yaml").write_text(
         "raw/d3r20/b0.25:\n  trainer.optimizer.kwargs.lr: 1.0e-4\n  jem.energy_l2: 1.0e-5\n"
         "  jem.sampler.step_size: 0.02\n  jem.sampler.noise_std: 0.003\n"
         "  jem.sampler.num_steps: 40\n")
-    (tmp_path / "jem_mnist12_at.yaml").write_text(
+    (tmp_path / "outputs/jem_mnist12_at/hparams.yaml").write_text(
         f"{cell.name}:\n  trainer.optimizer.kwargs.lr: 3.0e-4\n")
     cfg = Job(study, cell, 1).compose()
     assert (cfg.jem.sampler.step_size, cfg.jem.sampler.noise_std, cfg.jem.sampler.num_steps) \

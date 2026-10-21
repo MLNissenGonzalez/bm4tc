@@ -7,7 +7,7 @@
 
 ``hpo`` runs one Optuna study per grid cell (TPE, no pruning) whose trials save
 no checkpoint; ``select`` writes each cell's best trial (argmin
-``objective/valid``, D8) to ``configs/hparams/<study>.yaml``; ``train`` runs the
+``objective/valid``, D8) to ``outputs/<study>/hparams.yaml`` (D134); ``train`` runs the
 seed runs with those hparams; ``analyse`` evaluates each finished run on test
 (:mod:`bm4tc.pipeline.analyse`) into its ``analysis.json`` and collects the study's
 ``results.csv``. Every stage resumes: finished trials and runs are
@@ -337,7 +337,7 @@ def hpo(study: Study, cells: List[Cell], replace: bool = False) -> None:
 # ── select ──────────────────────────────────────────────────────────────────
 
 def select(study: Study, cells: Optional[List[Cell]] = None) -> Path:
-    """Write each cell's best trial to ``configs/hparams/<study>.yaml`` (D21, D34):
+    """Write each cell's best trial to ``outputs/<study>/hparams.yaml`` (D21, D134):
     the given cells (default every cell), keeping the other cells' entries, so a
     cell whose HPO is done trains without waiting for the others (D130). Refuses
     while a given cell's HPO is unfinished or has no finite trial."""
