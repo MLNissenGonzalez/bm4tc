@@ -64,6 +64,18 @@ def _log_to(path: Path) -> Iterator[None]:
         handler.close()
 
 
+def _device() -> torch.device:
+    """The unit's device. A unit given a GPU (``CUDA_VISIBLE_DEVICES`` set, as the
+    executor does) fails without it, rather than run on the CPU (D150)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible:
+        raise RuntimeError(f"CUDA_VISIBLE_DEVICES={visible} but CUDA is unavailable "
+                           f"(with --mps: a broken MPS server, see bm4tc/pipeline/mps.py)")
+    return torch.device("cpu")
+
+
 def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
          names: Dict[str, str], on_valid: Optional[Callable[[int, float], None]] = None):
     """Train one model in ``run_dir`` (log.json; the checkpoint in models/ if
@@ -71,7 +83,7 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     trainer (``best``, ``best_epoch``). ``on_valid(epoch, objective/valid)`` runs
     after each validation; an exception from it ends training (HPO pruning)."""
     run = init_wandb(cfg, run_dir, names)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _device()
 
     datahandler = DataHandler(cfg.dataset)
     datahandler.load()
@@ -465,7 +477,7 @@ def analyse(job: Job) -> Dict[str, float]:
                           f"pruned; `train {job.study.name} --cell {job.cell.name} "
                           f"--seed {job.seed} --replace` first")
     if todo:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = _device()
         with _log_to(job.run_dir / "analyse.log"):
             cbm, datahandler = parts_.load(job.run_dir, analysis.batch_size, device)
             for name, part in todo.items():

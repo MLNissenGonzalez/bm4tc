@@ -92,3 +92,19 @@ def test_mps_needs_gpus(tmp_path):
     import pytest
     with pytest.raises(ValueError, match="--gpus"):
         execute([_unit(tmp_path, "u", "pass")], mps=True)
+
+
+def test_a_unit_given_a_gpu_fails_without_cuda(monkeypatch):
+    """A broken MPS server leaves CUDA unavailable: the unit raises, not run on the
+    CPU (D150); a unit given no GPU, or hidden from them (""), runs on the CPU."""
+    import pytest
+    import torch
+    from bm4tc.pipeline import stages  # imports torch; only here
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
+        stages._device()
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    assert stages._device() == torch.device("cpu")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES")
+    assert stages._device() == torch.device("cpu")
