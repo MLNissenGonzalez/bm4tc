@@ -35,16 +35,19 @@ def make_logger(output_dir: Path, wandb_run=None) -> Callable[[int, dict], None]
 
 def init_wandb(cfg: Config, run_dir: Path, names: Dict[str, str]) -> wandb.Run:
     """Start a W&B run in ``run_dir``; ``names`` (group, name, job_type) come from
-    :meth:`bm4tc.pipeline.runs.Job.wandb` (D47)."""
-    return wandb.init(
-        project=cfg.tracking.project,
-        entity=cfg.tracking.entity,
-        dir=str(run_dir),
-        config=OmegaConf.to_container(cfg, resolve=True),
-        mode=cfg.tracking.mode,
-        reinit="finish_previous",
-        **names,
-    )
+    :meth:`bm4tc.pipeline.runs.Job.wandb` (D47). If W&B cannot be reached, the run
+    logs offline instead of failing (D146: W&B holds live curves only, D39)."""
+    kwargs = dict(project=cfg.tracking.project, entity=cfg.tracking.entity,
+                  dir=str(run_dir), config=OmegaConf.to_container(cfg, resolve=True),
+                  reinit="finish_previous", **names)
+    try:
+        return wandb.init(mode=cfg.tracking.mode, **kwargs)
+    except (wandb.errors.Error, TimeoutError) as e:
+        if cfg.tracking.mode != "online":
+            raise
+        logger.warning(f"W&B unreachable ({type(e).__name__}: {e}); logging offline, "
+                       f"`wandb sync {run_dir}/wandb/offline-run-*` uploads it later")
+        return wandb.init(mode="offline", **kwargs)
 
 
 def log_dataset_viz(datahandler) -> None:
