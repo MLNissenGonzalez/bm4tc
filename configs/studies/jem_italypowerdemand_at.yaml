@@ -1,0 +1,31 @@
+# DRAFT (2026-10-22): the training radius is open (T10), and the epochs and patience
+# wait for jem_italypowerdemand_nat's curves. JEM PGD-AT on italypowerdemand (D71, D139), warm from
+# jem_italypowerdemand_nat's beta=0 runs; the same attack, budgets and beta grid as italypowerdemand_at.
+# beta=0 is MLP-AT; at beta>0 the training SGLD is the one selected for the same
+# jem_italypowerdemand_nat cell (hparams_from).
+dataset: italypowerdemand
+model: jem
+regime: at
+init: warm
+grid:
+  embedding: [raw]
+  arch: [d3r10]
+  beta: [0, 0.25, 0.5]          # D113, as italypowerdemand_at
+  eps: [0.05]                   # T10: placeholder, as italypowerdemand_at
+config:
+  trainer.max_epoch: 500       # as italypowerdemand_at, until jem_italypowerdemand_nat's curves say otherwise
+  trainer.batch_size: 64
+  trainer.patience: 30         # validations (eval_every 5): 150 epochs
+hpo:                           # the lr only (D80)
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}   # the jem_italypowerdemand_nat range (D81)
+hparams_from:
+  study: jem_italypowerdemand_nat
+  params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
+budgets: [0.01, 0.02, 0.05, 0.1]   # D145
+analysis:
+  sweep_purify:                # D132, as mnist12: one SGLD sweep, no ball; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]

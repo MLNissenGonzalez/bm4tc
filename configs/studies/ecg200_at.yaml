@@ -1,0 +1,26 @@
+# DRAFT (2026-10-22): the training radius is open (docs/timeseries.md, T10); set grid.eps
+# from ecg200_nat's curves before launching. ecg200, PGD-AT, warm from ecg200_nat's
+# beta=0 runs (D19), as mnist12_at at the series' rank (D143) and budgets (D145).
+dataset: ecg200
+regime: at
+init: warm
+grid:
+  arch: [d3r10]
+  beta: [0, 0.25, 0.5]          # D113
+  eps: [0.05]                   # T10: placeholder, the radius is not decided
+config:
+  trainer.max_epoch: 500       # the pilots' budget (D143): full radius from epoch 350
+  trainer.batch_size: 64
+  trainer.patience: 30         # validations (eval_every 5): 150 epochs, as the NAT studies
+  trainer.norm_control.soft_strength: 1e-3
+  trainer.norm_control.log_target: null    # the warm start's own log Z
+hpo:                           # the lr only (D80)
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)
+budgets: [0.01, 0.02, 0.05, 0.1]   # D145
+analysis:
+  sweep_purify:                # D132: one sweep, no window; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
