@@ -1,16 +1,21 @@
-# chlorineconcentration capacity sweep, legendre d3, NAT, cold (docs/timeseries.md, T3, T5): D44's two
-# criteria pick the rank of chlorineconcentration_nat, chlorineconcentration_at and the JEM studies. Also the pilot of
-# the series: generous budgets, whose curves set the later studies' epochs and patience.
+# chlorineconcentration capacity sweep, legendre d3, NAT, cold (docs/timeseries.md, T3, T5): D44's
+# beta=0 criterion picks the rank of chlorineconcentration_nat, chlorineconcentration_at and the JEM
+# studies. Selected by 5-fold CV on the UCR train split (D148). Lean (D151): beta=1 is a
+# majority-class classifier at every rank, d3r5 equals d3r10.
 dataset: chlorineconcentration
 regime: nat
 grid:
-  arch: [d3r5, d3r10, d3r20, d3r40, d3r80]   # D144: r80 checks that r40 tops the curve
-  beta: [0, 1]
+  arch: [d3r10, d3r20, d3r40, d3r80]   # D144: r80 checks that r40 tops the curve
+  beta: [0]                    # D151: beta=1 returns in chlorineconcentration_nat
 config:
-  trainer.max_epoch: 1500     # D144: beta=0 still improving at 500
+  trainer.max_epoch: 3000     # D151: the best lr still falling at 1500
   trainer.batch_size: 64
   trainer.patience: 300       # D144: outlasts the ~100 epochs at the majority class
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:                           # D151: CV makes a trial ~5x dearer
+  trials_per_param: 10
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-4, 3e-3]}   # outside it: chance, or not converged by 3000
 budgets: [0.01, 0.02, 0.05, 0.1]   # D145
 analysis:
   adaptive: {enabled: false}   # D129: the arch is chosen by D44's criteria, no adaptive number
