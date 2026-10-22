@@ -4,12 +4,13 @@
 dataset: chlorineconcentration
 regime: nat
 grid:
-  arch: [d3r5, d3r10, d3r20, d3r40]
+  arch: [d3r5, d3r10, d3r20, d3r40, d3r80]   # D144: r80 checks that r40 tops the curve
   beta: [0, 1]
 config:
-  trainer.max_epoch: 500
+  trainer.max_epoch: 1500     # D144: beta=0 still improving at 500
   trainer.batch_size: 64
-  trainer.patience: 150
+  trainer.patience: 300       # D144: outlasts the ~100 epochs at the majority class
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+budgets: [0.01, 0.02, 0.05, 0.1]   # D145
 analysis:
   adaptive: {enabled: false}   # D129: the arch is chosen by D44's criteria, no adaptive number

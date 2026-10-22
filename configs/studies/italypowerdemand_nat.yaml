@@ -1,0 +1,18 @@
+# italypowerdemand, NAT, the default beta ladder, cold; log Z pulled to n·ln d / 2 (D84). Rank and
+# budgets from italypowerdemand_capacity (D143): converged by ~200 epochs, a wide lr plateau.
+dataset: italypowerdemand
+regime: nat
+grid:
+  arch: [d3r10]
+config:
+  trainer.max_epoch: 500
+  trainer.batch_size: 64
+  trainer.patience: 150
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+budgets: [0.01, 0.02, 0.05, 0.1]   # D145
+analysis:
+  sweep_purify:                # D132, as mnist12: one sweep, no window; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
