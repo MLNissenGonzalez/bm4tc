@@ -6,16 +6,26 @@ from dataclasses import dataclass, field
 import os
 import numpy.typing as npt
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Any, Optional, Tuple, List, Dict
 import logging
 from omegaconf import OmegaConf
 
 import torch
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from math import ceil
 
+
+# Folds of a cross-validated split (use_ucr_split: cv): one per seed (D29), so the
+# five seed runs of a cell are its five fold models.
+CV_FOLDS = 5
+
+
+def cv_seeds(cfg) -> Optional[List[int]]:
+    """The seeds whose runs cover every fold of the dataset config ``cfg``'s
+    cross-validated split, or None if it has none."""
+    return list(range(1, CV_FOLDS + 1)) if cfg.use_ucr_split == "cv" else None
 
 
 @dataclass
@@ -37,7 +47,10 @@ class DatasetConfig:
     split: Tuple[float, float, float] = field(default_factory=lambda: (0.7, 0.15, 0.15))
     split_seed: int = 42
     overwrite: bool = False
-    use_ucr_split: bool = False
+    # UCR datasets: "cv" keeps the UCR train/test boundary and validates on one fold of
+    # the train split, picked by the run's seed (cv_seeds); False splits by `split`.
+    # Typed Any, not a new field, so no other dataset's config hash moves.
+    use_ucr_split: Any = False
     scaler: str = "minmax"
 
 logger = logging.getLogger(__name__)
@@ -644,10 +657,11 @@ class DataHandler:
         return _spirals_cell_masses(self.cfg.gen_dow_kwargs, edges,
                                     self.scaler.scale_, self.scaler.min_)
 
-    def split_and_rescale(self, input_range: Tuple[float, float]):
+    def split_and_rescale(self, input_range: Tuple[float, float], seed: int = 1):
         """Split data into train/valid/test and rescale it to ``input_range``, the
         embedding's domain (``cbm.input_range``), with the configured scaler fitted
-        on train."""
+        on train. ``seed`` is the run's: under cross-validation it picks the fold
+        (:func:`cv_seeds`); otherwise the split ignores it."""
         if self.data is None:
             self.load()
         self.input_range = input_range
@@ -655,20 +669,19 @@ class DataHandler:
         data = {}
         labels = {}
 
-        if self.cfg.use_ucr_split and self.ucr_train_size is not None:
-            # Honour original UCR train/test boundary; carve valid from test half
+        if self.cfg.use_ucr_split:
+            # The UCR train/test boundary; valid is fold (seed - 1) mod CV_FOLDS of
+            # the train split, stratified (docs/timeseries.md, D148)
+            if self.cfg.use_ucr_split != "cv" or self.ucr_train_size is None:
+                raise ValueError(f"use_ucr_split: {self.cfg.use_ucr_split!r} on "
+                                 f"{self.cfg.name}: only 'cv' on a UCR dataset (D148)")
             n_train = self.ucr_train_size
-            train_data   = self.data[:n_train]
-            train_labels = self.labels[:n_train]
-            rest_data    = self.data[n_train:]
-            rest_labels  = self.labels[n_train:]
-            n_half = len(rest_data) // 2
-            data["train"]  = train_data
-            data["valid"]  = rest_data[:n_half]
-            data["test"]   = rest_data[n_half:]
-            labels["train"] = train_labels
-            labels["valid"] = rest_labels[:n_half]
-            labels["test"]  = rest_labels[n_half:]
+            folds = StratifiedKFold(CV_FOLDS, shuffle=True, random_state=self.cfg.split_seed)
+            fit, held = list(folds.split(self.data[:n_train], self.labels[:n_train]))[
+                (seed - 1) % CV_FOLDS]
+            data["train"], labels["train"] = self.data[fit], self.labels[fit]
+            data["valid"], labels["valid"] = self.data[held], self.labels[held]
+            data["test"], labels["test"] = self.data[n_train:], self.labels[n_train:]
         else:
             split_ratios = self.cfg.split
             # First split: separate test set

@@ -65,7 +65,7 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
     model.to(device)
     datahandler = DataHandler(manifest.config.dataset)
     datahandler.load()
-    datahandler.split_and_rescale(model.input_range)
+    datahandler.split_and_rescale(model.input_range, seed=manifest.config.tracking.seed)
     datahandler.get_classification_loaders(batch_size=batch_size)
     return model, datahandler
 

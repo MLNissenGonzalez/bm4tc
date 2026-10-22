@@ -188,3 +188,45 @@ def test_class_masses_only_for_a_known_law():
     from bm4tc.pipeline.data import DataHandler, DatasetConfig
 
     assert DataHandler(DatasetConfig(name="moons")).class_masses(np.linspace(-1, 1, 5)) is None
+
+
+def test_cv_split_folds_the_ucr_train_split(monkeypatch):
+    """use_ucr_split: cv (D148): seed s validates on fold (s - 1) mod 5 of the UCR
+    train split, stratified; the folds are disjoint and cover it; the UCR test split
+    is the test split, untouched."""
+    import numpy as np
+    from bm4tc.pipeline import data
+    from bm4tc.pipeline.data import CV_FOLDS, DataHandler, DatasetConfig, cv_seeds
+
+    class Identity:                     # rows keep their ids through the scaler
+        def __init__(self, **_): pass
+        def fit_transform(self, X): return X
+        def transform(self, X): return X
+    monkeypatch.setitem(data._SCALER_MAP, "identity", Identity)
+
+    n_train, n = 60, 100
+    def handler(use_ucr_split="cv"):
+        dh = DataHandler(DatasetConfig(name="toy", use_ucr_split=use_ucr_split, scaler="identity"))
+        dh.data = np.repeat(np.arange(n, dtype=float)[:, None], 3, axis=1)   # row i holds i
+        dh.labels = np.arange(n) % 3
+        dh.ucr_train_size, dh.data_dim, dh.num_cls = n_train, 3, 3
+        return dh
+
+    assert cv_seeds(DatasetConfig(use_ucr_split="cv")) == list(range(1, CV_FOLDS + 1))
+    assert cv_seeds(DatasetConfig()) is None
+    held = []
+    for seed in cv_seeds(DatasetConfig(use_ucr_split="cv")):
+        dh = handler()
+        dh.split_and_rescale((-1., 1.), seed=seed)
+        ids = {k: set(dh.data[k][:, 0].int().tolist()) for k in ("train", "valid", "test")}
+        assert ids["train"] | ids["valid"] == set(range(n_train))
+        assert not ids["train"] & ids["valid"]
+        assert ids["test"] == set(range(n_train, n))
+        assert np.bincount(dh.labels["valid"].numpy()).tolist() == [4, 4, 4]   # stratified
+        held.append(ids["valid"])
+    assert set().union(*held) == set(range(n_train)) and sum(map(len, held)) == n_train
+    dh = handler()
+    dh.split_and_rescale((-1., 1.), seed=1 + CV_FOLDS)          # seeds beyond 5 wrap
+    assert set(dh.data["valid"][:, 0].int().tolist()) == held[0]
+    with pytest.raises(ValueError, match="only 'cv'"):
+        handler(use_ucr_split=True).split_and_rescale((-1., 1.))

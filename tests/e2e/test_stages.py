@@ -299,3 +299,34 @@ def test_cuda_failures_are_retried(scratch, monkeypatch, error):
     stages.hpo(nat, nat.cells()[1:])                   # select of every cell needs each HPO
     selected = yaml.safe_load(stages.select(nat).read_text())
     assert cell.name in selected
+
+
+@pytest.mark.slow
+def test_cv_hpo_averages_the_folds_and_seeds_are_the_folds(scratch, monkeypatch):
+    """use_ucr_split: cv (D148): a trial fits every fold, each as the seed run that
+    validates on it, and returns the mean; seed s's run is then that fold's fit."""
+    from bm4tc.pipeline.data import DataHandler
+    load = DataHandler.load
+    def ucr_load(self):                 # the first 150 spirals points play the UCR train split
+        load(self)
+        self.ucr_train_size = 150
+    monkeypatch.setattr(DataHandler, "load", ucr_load)
+
+    cv = Study("tests/stages_cv")
+    cell, = cv.cells()
+    stages.hpo(cv, [cell])
+    best = lambda d: min(e["objective/valid"] for e in json.loads((d / "log.json").read_text())
+                         if "objective/valid" in e)
+    trials = stages._optuna_study(cv, cell).get_trials()
+    assert len(trials) == cv.n_trials == 2
+    for t in trials:
+        folds = [cv.hpo_dir(cell) / f"t{t.number}" / f"f{s}" for s in range(1, 6)]
+        assert t.value == pytest.approx(sum(map(best, folds)) / 5)
+        assert len(t.user_attrs["best_epoch"]) == 5
+    assert len({best(cv.hpo_dir(cell) / "t0" / f"f{s}") for s in range(1, 6)}) == 5   # five splits
+
+    stages.select(cv)
+    job = next(j for j in cv.jobs() if j.seed == 3)
+    stages.train(job)
+    chosen = min(trials, key=lambda t: t.value).number
+    assert best(job.run_dir) == pytest.approx(best(cv.hpo_dir(cell) / f"t{chosen}" / "f3"), rel=1e-5)

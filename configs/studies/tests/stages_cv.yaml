@@ -1,0 +1,17 @@
+# tests/e2e/test_stages.py: cross-validated HPO (D148) on tiny spirals, whose first
+# 150 points the test declares the UCR train split.
+dataset: spirals
+regime: nat
+grid:
+  arch: [d4r3]
+  beta: [0]
+config:
+  dataset.gen_dow_kwargs.size: 200
+  dataset.use_ucr_split: cv
+  trainer.max_epoch: 3
+  trainer.batch_size: 64
+  tracking.mode: disabled
+hpo:
+  trials_per_param: 2
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-3, 1e-1]}

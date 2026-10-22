@@ -35,7 +35,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from bm4tc.pipeline.runs import Cell, Job, RunConflict, Study, _git_version, archive
 from bm4tc.pipeline.tracking import init_wandb, log_dataset_viz, make_logger
-from bm4tc.pipeline.data import DataHandler
+from bm4tc.pipeline.data import DataHandler, cv_seeds
 from bm4tc.core.jem.model import JEMMLP
 from bm4tc.core.jem.train import JEMTrainer
 from bm4tc.core.model import ConditionalBornMachine
@@ -96,7 +96,7 @@ def _fit(cfg: DictConfig, init: Optional[Dict[str, str]], run_dir: Path,
     else:
         model = ConditionalBornMachine(cfg.born, datahandler.data_dim, datahandler.num_cls, device)
 
-    datahandler.split_and_rescale(model.input_range)
+    datahandler.split_and_rescale(model.input_range, seed=cfg.tracking.seed)
     log_dataset_viz(datahandler)
 
     if cfg.model == "jem" and cfg.trainer.micro_batch_size:
@@ -293,7 +293,7 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
         cfg = job.compose(hparams=hparams)
         cfg.trainer.save = False  # D22: trials keep curves only
         trial_dir = study.hpo_dir(cell) / f"t{trial.number}"
-        trial_dir.mkdir(parents=True, exist_ok=True)
+
         def report(epoch: int, value: float) -> None:
             if not math.isfinite(value):
                 return  # a collapse ends the trial by itself; no value to compare
@@ -303,19 +303,37 @@ def hpo_worker(study: Study, cell: Cell, worker: int = 0) -> None:
                             f"at epoch {epoch} (objective/valid {value:.6g})")
                 raise optuna.TrialPruned()
 
-        with _log_to(trial_dir / "train.log"):
-            logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} {hparams}")
-            try:
-                trainer = _fit(cfg, init, trial_dir, job.wandb(trial=trial.number), report)
-            except Exception as error:
-                if _cuda_failure(error):
-                    trial.set_user_attr(CUDA_FAILURE, True)
-                    cuda_failures.append(trial.number)
-                raise
-        trial.set_user_attr("best_epoch", trainer.best_epoch)
-        logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
-                    f"{trainer.best['objective']:.6g} (epoch {trainer.best_epoch})")
-        return trainer.best["objective"]  # inf if no validation was finite
+        def fit(run_dir: Path, pruned_on: bool):
+            run_dir.mkdir(parents=True, exist_ok=True)
+            with _log_to(run_dir / "train.log"):
+                logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} {hparams} "
+                            f"(seed {cfg.tracking.seed})")
+                try:
+                    trainer = _fit(cfg, init, run_dir, job.wandb(trial=trial.number),
+                                   report if pruned_on else None)
+                except Exception as error:
+                    if _cuda_failure(error):
+                        trial.set_user_attr(CUDA_FAILURE, True)
+                        cuda_failures.append(trial.number)
+                    raise
+            logger.info(f"{job.study.name}/{cell.name}: trial {trial.number} objective/valid "
+                        f"{trainer.best['objective']:.6g} (epoch {trainer.best_epoch})")
+            return trainer
+
+        folds = cv_seeds(cfg.dataset)
+        if folds is None:
+            trainer = fit(trial_dir, pruned_on=True)
+            trial.set_user_attr("best_epoch", trainer.best_epoch)
+            return trainer.best["objective"]  # inf if no validation was finite
+        # Cross-validation (D148): the mean over the folds, each fitted as the seed run
+        # that validates on it, in t<n>/f<seed>/. Only the first fold's curve goes to
+        # the pruner, so trials are compared on the same fold.
+        trainers = []
+        for seed in folds:
+            cfg.tracking.seed = seed
+            trainers.append(fit(trial_dir / f"f{seed}", pruned_on=seed == folds[0]))
+        trial.set_user_attr("best_epoch", [t.best_epoch for t in trainers])
+        return sum(t.best["objective"] for t in trainers) / len(trainers)
 
     while len(_counted(opt.get_trials(deepcopy=False))) < study.n_trials:
         opt.optimize(objective, n_trials=1, catch=(Exception,))
