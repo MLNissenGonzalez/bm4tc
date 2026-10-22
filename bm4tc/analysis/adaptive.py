@@ -12,7 +12,9 @@ on P(x). Its output is ⊥ (reject) or f(P(x)). :class:`AdaptivePGD` attacks it:
 
 It keeps the best iterate per sample over every step and restart. Given a ``start``
 (the pipeline passes the PGD example on the classifier), the first restart begins
-there, so the attack never does worse than that transfer attack (D98). A random
+there, so the attack never does worse than that transfer attack (D98). On a defence
+with no purifier and no detector it is plain PGD on the classifier: :class:`BarePGD`,
+the attack behind ``rob`` and every transfer number (D149). A random
 defence's examples are scored on fresh draws (:meth:`Defense.rates`), not on the
 attack's own.
 
@@ -141,6 +143,19 @@ class AdaptivePGD:
         (grad,) = torch.autograd.grad(loss.sum(), delta)
         delta = delta.detach() - step * normalizing(grad, "inf")
         return self._bounded(defense, x, delta, eps_abs), best_x, best_rate
+
+
+class BarePGD:
+    """PGD on the bare classifier, with restarts (D149): :class:`AdaptivePGD` on a
+    :class:`Defense` with no purifier and no detector (the margin loss, ``restarts``
+    starts, the best iterate per sample). ``graphed(model, graphs)`` gives the
+    attack ``(x, labels, eps_abs, start=None)``, as :class:`GraphedAdaptivePGD`."""
+
+    def __init__(self, steps: int, restarts: int):
+        self.attack = AdaptivePGD(steps=steps, restarts=restarts)
+
+    def graphed(self, model, graphs: Graphs) -> "GraphedAdaptivePGD":
+        return self.attack.graphed(Defense(model), graphs)
 
 
 class GraphedAdaptivePGD:

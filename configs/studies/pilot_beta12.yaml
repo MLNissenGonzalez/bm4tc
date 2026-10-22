@@ -29,4 +29,5 @@ analysis:
   percentiles: [5]
   adaptive:
     enabled: true
+  attack:
     restarts: 1

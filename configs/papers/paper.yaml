@@ -107,16 +107,6 @@ items:
       - {key: "rob_sel/test/{eps}/q5", label: "selective, $q=5$ (transfer)", best: max}
       - {key: "rob_sel_adapt/test/{eps}/q5", label: "selective, $q=5$", best: max}
 
-  mnist_joint:            # transfer diagnostics: the detector-aware attack minus PGD
-    kind: table
-    eps: [0.1, 0.2]
-    models: *mnist_models
-    metrics:
-      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
-      - {key: "rob_joint/test/{eps}", minus: "rob/test/{eps}", label: "$\\Delta$ robust"}
-      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)", best: max}
-      - {key: "purify_joint/test/{eps}/d0.1", minus: "purify/test/{eps}/d0.1", label: "$\\Delta$ purified"}
-
   mnist_purify_vs_eps:
     kind: curve
     x: eps
@@ -230,16 +220,6 @@ items:
     eps: [0.05, 0.1, 0.2]
     models: *spirals_models
     metrics: *headline_metrics
-
-  spirals_joint:           # transfer diagnostics
-    kind: table
-    eps: 0.2
-    models: *spirals_models
-    metrics:
-      - {key: "rob/test/{eps}", label: Robust}
-      - {key: "rob_joint/test/{eps}", label: "Robust (joint)"}
-      - {key: "purify/test/{eps}/d0.1", label: Purified}
-      - {key: "purify_joint/test/{eps}/d0.1", label: "Purified (joint)"}
 
   spirals_capacity:
     kind: curve

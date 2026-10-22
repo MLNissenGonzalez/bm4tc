@@ -108,28 +108,34 @@ class SweepPurifyConfig:
     step: Optional[float] = MISSING      # per-sweep window; None = the whole input range (D132)
     subsample: Optional[int] = MISSING
     adaptive_seeds: Optional[List[int]] = MISSING  # runs whose analysis attacks it adaptively (D132)
-    adaptive_restarts: Optional[int] = MISSING     # its attack's restarts; None = adaptive.restarts (D135)
+    adaptive_restarts: Optional[int] = MISSING     # its attack's restarts; None = attack.restarts (D135)
     gibbs: GibbsConfig = field(default_factory=GibbsConfig)
     sgld: SGLDPurifyConfig = field(default_factory=SGLDPurifyConfig)
+
+
+@dataclass
+class AttackConfig:
+    """PGD on the bare classifier (``rob``, the examples of every transfer number) and
+    the adaptive attacks' steps and restarts: one attack strength (D149)."""
+    steps: int = MISSING
+    restarts: int = MISSING
+    subsample: Optional[int] = MISSING   # test points attacked (fixed, seed 0; D117); None = all
 
 
 @dataclass
 class AdaptiveConfig:
     """Adaptive attacks through purifier and detector (D96)."""
     enabled: bool = MISSING
-    steps: int = MISSING
-    restarts: int = MISSING
     percentile: float = MISSING  # the detector's one threshold attacked (D122)
     eot: int = MISSING          # draws per step for a random purifier (Gibbs, SGLD)
     eval_draws: int = MISSING   # fresh draws scoring a random purifier's examples
-    subsample: Optional[int] = MISSING   # test points (fixed, seed 0; D117); None = all
     seeds: Optional[List[int]] = MISSING # the seed runs it analyses (D129); None = every one
 
 
 @dataclass
 class AnalysisConfig:
     """What `analyse` computes per run; values in configs/defaults.yaml (D20)."""
-    attack_steps: int = MISSING
+    attack: AttackConfig = field(default_factory=AttackConfig)
     joint_attack: bool = MISSING
     rob_ceiling: bool = MISSING
     rob_ceiling_cells: int = MISSING

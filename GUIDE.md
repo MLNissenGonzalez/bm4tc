@@ -242,14 +242,14 @@ outputs/<study>/.logs/             one log per unit, status.json
 | Part | Computes |
 |---|---|
 | `clean` | accuracy, losses, the robust-accuracy ceilings without and with rejection: on the test split (two classes) and, under the pseudo-split `pop`, on the data law where it is known (spirals; D97) |
-| `uq` | PGD-40 at every budget; detection at clean-percentile thresholds q (calibrated on valid, D2); likelihood purification at radius δ |
-| `uq_joint` | the same under the joint attack on class and log p(x) (if `joint_attack`) |
+| `uq` | PGD at every budget (`analysis.attack`: 100 steps, 5 restarts, on a fixed 1000-point subsample; D149); detection at clean-percentile thresholds q (calibrated on valid, D2); likelihood purification at radius δ |
+| `uq_joint` | the same under the joint attack on class and log p(x) (if `joint_attack`; off by default, D149) |
 | `gibbs` / `sgld` | Gibbs (MPS) or SGLD (JEM) purification of the PGD examples, per number of sweeps (if `sweep_purify.enabled`) |
 | `adaptive` | attacks through the whole defence (D96, `docs/adaptive.md`): BPDA (+ EOT) through likelihood, Gibbs or SGLD purification, selective PGD through the detector; selective robust accuracy where a detector may reject (if `adaptive.enabled`; eager) |
 
 **Metric keys** (`quantity/split[/budget][/setting]`) are documented in
 `bm4tc/pipeline/metrics.py`: e.g. `acc/test`, `rob/test/0.1`, `detect/test/0.1/q5`,
-`purify/test/0.1/d0.1`, `purify_gibbs/test/0.1/k6`, `rob_joint/test/0.1`. Budget 0
+`purify/test/0.1/d0.1`, `purify_gibbs/test/0.1/k6`, `purify_adapt/test/0.1/d0.1`. Budget 0
 means clean data (`detect/test/0/q5` is the false-positive rate).
 
 **Prune** (D67) deletes checkpoints only: `--all`, or `--keep-one` (all but the first

@@ -10,5 +10,5 @@ config:
   trainer.batch_size: 256
   trainer.patience: 100
 analysis:
-  adaptive:
+  attack:
     restarts: 20               # D135: as in spirals_nat (≈ 1 min per budget)

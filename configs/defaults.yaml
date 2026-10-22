@@ -35,8 +35,14 @@ budgets: [0.05, 0.1, 0.2]      # D122: three, for the adaptive part's cost
 # Post-hoc analysis of every seed run (the `analyse` stage), on the test split.
 # The settings of the submission's analysis (sweep.py, gibbs.py on MNIST).
 analysis:
-  attack_steps: 40             # PGD Linf with random start, at every budget
-  joint_attack: true           # also attack class and log p(x) jointly (JOINT_PGD)
+  attack:                      # PGD on the bare classifier, at every budget: `rob` and the
+                               # examples of every transfer number; the adaptive attacks'
+                               # steps and restarts too (one attack strength, D149)
+    steps: 100                 # D121: 200 changes nothing; restarts bind (saturation ablation)
+    restarts: 5                # D135: 5 saturate MNIST 12×12; spirals sets 20
+    subsample: 1000            # test points attacked (fixed subset, seed 0; ±0.013), null = all
+                               # (D117); Gibbs / SGLD attack sweep_purify.subsample, a prefix
+  joint_attack: false          # also attack class and log p(x) jointly (JOINT_PGD, one start; D149: off)
   rob_ceiling: true            # data-only bound on robust accuracy (two-class data only)
   rob_ceiling_cells: 200       # grid cells per axis for the population ceiling (2-D data with a known law, D97)
   percentiles: [1, 5, 10, 20]  # detection thresholds: percentiles of clean log p(x) (transfer parts)
@@ -51,7 +57,7 @@ analysis:
     subsample: 250             # test points (fixed subset, seed 0); null = all
     adaptive_seeds: null       # seed runs whose analysis attacks it adaptively (the
                                # adaptive_sweep part); null = every one, [] = none (D132)
-    adaptive_restarts: null    # that attack's restarts; null = adaptive.restarts (D135)
+    adaptive_restarts: null    # that attack's restarts; null = attack.restarts (D135)
     gibbs:
       num_bins: 96             # candidate values per feature
       batch_size: 64           # points swept together; memory ∝ sites·classes·bond (D101)
@@ -62,11 +68,7 @@ analysis:
       batch_size: 256
   adaptive:                    # PGD through purifier and detector (D96, docs/adaptive.md)
     enabled: true              # D114: active defences are reported under it
-    steps: 100                 # D121: 200 changes nothing; restarts bind (saturation ablation)
-    restarts: 5                # D135: 5 saturate MNIST 12×12; spirals sets 20
     percentile: 5              # D122: the one threshold attacked (an attack per threshold)
     eot: 16                    # draws per step for Gibbs / SGLD (D121: 8 is weaker, 32 no stronger)
     eval_draws: 32             # fresh draws scoring their examples
-    subsample: 1000            # test points (fixed subset, seed 0; ±0.013), null = all (D117);
-                               # Gibbs / SGLD use sweep_purify.subsample
     seeds: null                # the seed runs it analyses, null = every one (D129)

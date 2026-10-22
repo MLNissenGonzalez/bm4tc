@@ -139,24 +139,23 @@ def test_analyse_caches_each_part(scratch):
     stages.train(job)
     metrics = stages.analyse(job)
     for k in ("acc/test", "rob/test/0.1", "detect/test/0/q10", "detect/test/0.1/q10",
-              "purify/test/0.1/d0.1", "rob_joint/test/0.1", "purify_gibbs/test/0.1/k1",
+              "purify/test/0.1/d0.1", "purify_gibbs/test/0.1/k1",
               "purify_gibbs/test/0/k1",
               "rob_ceiling/test/0.1", "rob_ceiling_sel/test/0.1", "rob_ceiling/pop/0.1",
               "rob_ceiling_sel/pop/0.1", "purify_adapt/test/0.1/d0.1", "rob_sel/test/0.1/q10",
-              "rob_sel_adapt/test/0.1/q10", "purify_gibbs_adapt/test/0.1/k1",
-              "rob_adapt/test/0.1"):
+              "rob_sel_adapt/test/0.1/q10", "purify_gibbs_adapt/test/0.1/k1"):
         assert k in metrics, k
     assert not any(k.startswith("purify_sel") for k in metrics)    # D122
+    assert not any("_joint" in k or k.startswith("rob_adapt") for k in metrics)  # D149
 
     path = job.run_dir / "analysis.json"
     before = json.loads(path.read_text())
     assert stages.analyse(job) == metrics                          # all cached
-    nat.cfg.analysis.purify_steps = 3                              # uq, uq_joint, adaptive
+    nat.cfg.analysis.purify_steps = 3                              # uq, adaptive
     stages.analyse(job)
     after = json.loads(path.read_text())
     assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]
     assert after["adaptive_sweep"] == before["adaptive_sweep"]     # D132: its own part
-    assert after["adaptive_bare"] == before["adaptive_bare"]       # D147: so is this
     assert after["uq"]["hash"] != before["uq"]["hash"]
     nat.cfg.analysis.adaptive.seeds = [job.seed]                   # D129: it picks runs,
     nat.cfg.analysis.sweep_purify.adaptive_seeds = [job.seed]      # D132: so does this,
@@ -170,13 +169,20 @@ def test_analyse_caches_each_part(scratch):
     nat.cfg.analysis.sweep_purify.adaptive_seeds = None
     stages.analyse(job)
     before = json.loads(path.read_text())
-    restarts = nat.cfg.analysis.adaptive.restarts                  # D135: the sweep
-    nat.cfg.analysis.sweep_purify.adaptive_restarts = restarts     # purifier keeps its
-    nat.cfg.analysis.adaptive.restarts = restarts + 1              # count, so its part
-    stages.analyse(job)                                            # and gibbs stay cached
+    restarts = nat.cfg.analysis.attack.restarts                    # D135: the sweep
+    nat.cfg.analysis.sweep_purify.adaptive_restarts = restarts     # purifier's attack
+    nat.cfg.analysis.attack.restarts = restarts + 1                # keeps its count, so
+    stages.analyse(job)                                            # its part stays cached;
+    after = json.loads(path.read_text())                           # PGD changes (D149)
+    assert after["adaptive_sweep"] == before["adaptive_sweep"]
+    for part in ("uq", "gibbs", "adaptive"):
+        assert after[part]["hash"] != before[part]["hash"], part
+    before = after
+    nat.cfg.analysis.attack.subsample = 50                         # the sweep parts attack
+    stages.analyse(job)                                            # their own subsample
     after = json.loads(path.read_text())
-    assert after["adaptive_sweep"] == before["adaptive_sweep"] and after["gibbs"] == before["gibbs"]
-    assert after["adaptive"]["hash"] != before["adaptive"]["hash"]
+    assert after["gibbs"] == before["gibbs"] and after["adaptive_sweep"] == before["adaptive_sweep"]
+    assert after["uq"]["hash"] != before["uq"]["hash"]
 
     stages.collect(nat)                                            # one run analysed
     with open(scratch / "outputs/tests/stages_nat/results.csv") as f:

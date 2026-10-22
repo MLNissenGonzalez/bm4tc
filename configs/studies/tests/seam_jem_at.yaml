@@ -29,7 +29,8 @@ config:
 hpo: null
 budgets: [0.1, 0.15]
 analysis:
-  attack_steps: 10
+  attack: {steps: 10, restarts: 2, subsample: null}
+  joint_attack: true           # keeps the JOINT_PGD path pinned
   rob_ceiling: false
   percentiles: [5]
   adaptive: {enabled: false}   # the seams pin the transfer parts

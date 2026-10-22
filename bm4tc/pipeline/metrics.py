@@ -37,7 +37,8 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
     rob_ceiling/pop/{eps}, rob_ceiling_sel/pop/{eps}
                                          the same on the data law where it is known
                                          (spirals): the pseudo-split pop
-    rob/test/{eps}                       accuracy on the PGD examples
+    rob/test/{eps}                       accuracy on the PGD examples (the bare classifier
+                                         under the strong PGD, D149)
     log_px/test/{eps}                    mean log p(x) / n of those examples (0: clean)
     detect/test/{eps}/q{p}               fraction flagged (0: the clean false-positive rate)
     err_detected, err_passed             error rate among flagged / passed examples
@@ -47,8 +48,13 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
                                          on a fixed test subsample
     purify_sgld, recovery_sgld           the same for SGLD purification (JEM)
 
-Adaptive attacks (part `adaptive`, D96; docs/adaptive.md), on the test subsample
-`analysis.adaptive.subsample` (D117). `_adapt` on a name means
+PGD is one attack (D149): `analysis.attack`'s steps and restarts on its fixed test
+subsample (`attack.subsample`, D117; Gibbs / SGLD on `sweep_purify.subsample`), so
+every attacked number counts the same points. Clean numbers (budget 0, `acc`) keep
+the whole test split.
+
+Adaptive attacks (part `adaptive`, D96; docs/adaptive.md), at the same steps,
+restarts and subsample. `_adapt` on a name means
 the attack through the whole defence instead of PGD on the classifier. Selective
 robust accuracy counts a point when its clean input is accepted and right and its
 attacked input is rejected or right:
@@ -62,7 +68,7 @@ attacked input is rejected or right:
 JEM has no loss_x on test (no exact log Z), and its log_px is unnormalised.
 
 `_joint` on a name (`rob_joint`, `detect_joint`, ...) means the joint attack on
-class and log p(x) (JOINT_PGD) instead of PGD.
+class and log p(x) (JOINT_PGD, one start) instead of PGD; off by default (D149).
 """
 from typing import Mapping, Optional
 

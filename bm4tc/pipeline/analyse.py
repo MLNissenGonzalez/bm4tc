@@ -10,11 +10,17 @@ parts ran before it (a resumed analysis reproduces them).
     uq_joint   the same under the joint attack (if analysis.joint_attack)
     gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
-    adaptive   PGD and the adaptive attack against likelihood purification and the
+    adaptive   the adaptive attack against likelihood purification and the
                detector (D96; if analysis.adaptive.enabled, on the runs of
-               analysis.adaptive.seeds, D129; on analysis.adaptive.subsample)
+               analysis.adaptive.seeds, D129)
     adaptive_sweep  the adaptive attack against Gibbs / SGLD (D132; if both are
                enabled, on the runs of analysis.sweep_purify.adaptive_seeds)
+
+PGD is one attack everywhere (D149): :class:`BarePGD`, ``analysis.attack.steps`` and
+``.restarts`` on the fixed test subsample ``analysis.attack.subsample`` (the sweep
+purifiers on ``sweep_purify.subsample``, a prefix of it). Its examples give ``rob``
+and every transfer number, and start the adaptive attacks (D98), which run with
+the same steps and restarts.
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -36,10 +42,10 @@ from omegaconf import OmegaConf
 
 from bm4tc.pipeline.metrics import key
 from bm4tc.analysis.ceiling import population_ceiling, robust_accuracy_ceiling
-from bm4tc.analysis.adaptive import AdaptivePGD, Defense
+from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, Defense
 from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
-from bm4tc.analysis.uq import UQConfig, UQEvaluation, UQResults, compute_thresholds
-from bm4tc.core.attacks import ProjectedGradientDescent
+from bm4tc.analysis.uq import (UQConfig, UQEvaluation, UQResults, compute_thresholds,
+                               fixed_subsample)
 from bm4tc.pipeline.data import DataHandler
 from bm4tc.core.jem.model import JEMMLP
 from bm4tc.core.jem.purification import SGLDPurification
@@ -74,13 +80,12 @@ def load(run_dir: Path, batch_size: int, device: torch.device):
 # part is recomputed when one of them, the budgets or the run changes.
 SETTINGS = {
     "clean": ("rob_ceiling", "rob_ceiling_cells"),
-    "uq": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
-    "uq_joint": ("attack_steps", "percentiles", "purify_delta", "purify_steps", "batch_size"),
-    "gibbs": ("attack_steps", "batch_size", "sweep_purify"),
-    "sgld": ("attack_steps", "batch_size", "sweep_purify"),
-    "adaptive": ("attack_steps", "purify_delta", "purify_steps", "batch_size", "adaptive"),
-    "adaptive_bare": ("attack_steps", "batch_size", "adaptive"),
-    "adaptive_sweep": ("attack_steps", "batch_size", "sweep_purify", "adaptive"),
+    "uq": ("attack", "percentiles", "purify_delta", "purify_steps", "batch_size"),
+    "uq_joint": ("attack", "percentiles", "purify_delta", "purify_steps", "batch_size"),
+    "gibbs": ("attack", "batch_size", "sweep_purify"),
+    "sgld": ("attack", "batch_size", "sweep_purify"),
+    "adaptive": ("attack", "purify_delta", "purify_steps", "batch_size", "adaptive"),
+    "adaptive_sweep": ("attack", "batch_size", "sweep_purify", "adaptive"),
 }
 
 
@@ -88,14 +93,17 @@ def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
     """What makes a part's results reusable: its settings, the budgets, the run.
     ``adaptive.seeds`` and ``sweep_purify.adaptive_seeds`` say which runs get a part,
     not how, so they are left out. ``sweep_purify.adaptive_restarts`` enters only the
-    sweep purifier's attack, as the restarts it runs (D135)."""
+    sweep purifier's attack, as the restarts it runs (D135); ``attack.subsample``
+    does not enter the sweep parts, which attack ``sweep_purify.subsample``."""
     settings = {k: OmegaConf.to_container(analysis, resolve=True)[k] for k in SETTINGS[name]}
     for section, picks in (("adaptive", "seeds"), ("sweep_purify", "adaptive_seeds"),
                            ("sweep_purify", "adaptive_restarts")):
         if section in settings:
             settings[section].pop(picks, None)
+    if name in ("gibbs", "sgld", "adaptive_sweep"):
+        settings["attack"].pop("subsample")
     if name == "adaptive_sweep":
-        settings["adaptive"]["restarts"] = _sweep_restarts(analysis)
+        settings["attack"]["restarts"] = _sweep_restarts(analysis)
     blob = json.dumps({"part": name, "settings": settings, "budgets": list(budgets),
                        "run": run_hash, "seed": SEED}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
@@ -116,7 +124,6 @@ def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str,
 
     if analysis.adaptive.enabled and picked(analysis.adaptive.seeds):
         out["adaptive"] = adaptive
-        out["adaptive_bare"] = adaptive_bare
     if (analysis.adaptive.enabled and analysis.sweep_purify.enabled
             and picked(analysis.sweep_purify.adaptive_seeds)):
         out["adaptive_sweep"] = adaptive_sweep
@@ -166,7 +173,8 @@ def _ceilings(cbm, datahandler, budgets, cells: int) -> Dict[str, float]:
 
 def _uq_config(analysis, budgets, **kw) -> UQConfig:
     return UQConfig(
-        norm="inf", eps_rel=list(budgets), attack_num_steps=analysis.attack_steps,
+        norm="inf", eps_rel=list(budgets), attack_num_steps=analysis.attack.steps,
+        attack_restarts=analysis.attack.restarts, attack_subsample=analysis.attack.subsample,
         percentiles=list(analysis.percentiles), delta_rel=list(analysis.purify_delta),
         num_steps=analysis.purify_steps, eval_batch_size=analysis.batch_size, **kw)
 
@@ -238,6 +246,7 @@ def _sweep(name: str, cbm, datahandler, analysis, budgets, device, purifier=None
                      gibbs_num_bins=p.gibbs.num_bins, gibbs_batch_size=p.gibbs.batch_size,
                      gibbs_step_delta_rel=p.step, sweep_subsample=p.subsample)
     cfg.percentiles, cfg.delta_rel = [], []   # only sweeps: no detection, no likelihood purification
+    cfg.attack_subsample = p.subsample        # PGD only on the swept points
     r = _evaluate(cbm, datahandler, cfg, device, sweep_purifier=purifier)
     out = {}
     for (eps, k), m in r.sweep_purification_results.items():
@@ -277,15 +286,6 @@ def _sweep_purified(purifier, model, sweeps, device, x):
     return purifier.purify_snapshots(model, x, [sweeps], device)[sweeps][0]
 
 
-def _subsample(n: int, size: Optional[int]) -> torch.Tensor:
-    """A fixed test subsample (seed 0): the sweep purification's (the same points
-    as UQEvaluation's) or the adaptive part's. The smaller is a prefix of the
-    larger."""
-    if size is None or size >= n:
-        return torch.arange(n)
-    return torch.from_numpy(np.random.default_rng(0).permutation(n)[:size])
-
-
 def _defences(cbm, datahandler, analysis, graphs: Graphs, device):
     """(key name, setting, Defense, selective, test subsample) for likelihood
     purification and the detector at its threshold (the detector on the purified
@@ -296,7 +296,7 @@ def _defences(cbm, datahandler, analysis, graphs: Graphs, device):
     range_size = range_size_of(cbm)
     likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps
                                         ).graphed(cbm, graphs)
-    size = analysis.adaptive.subsample
+    size = analysis.attack.subsample
     out = []
     for delta in analysis.purify_delta:
         purify = partial(_likelihood_purified, likelihood,
@@ -324,23 +324,10 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     ``analysis.adaptive.percentile`` (D122: an attack per threshold, so one). PGD
     on the purifier alone is the ``uq`` part's already.
 
-    On the test subsample ``analysis.adaptive.subsample`` (D117). On CUDA, PGD, the
-    likelihood purifier and the adaptive attack's steps replay from the part's
-    graphs."""
+    On the test subsample ``analysis.attack.subsample`` (D117), at the attack's steps
+    and restarts (D149). On CUDA, PGD, the likelihood purifier and the adaptive
+    attack's steps replay from the part's graphs."""
     return _attack(cbm, datahandler, analysis, budgets, device, _defences)
-
-
-def adaptive_bare(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
-    """The bare classifier under the adaptive attack's settings (``rob_adapt``): with
-    no defence to adapt to, plain PGD with the same steps and restarts, the
-    like-for-like baseline for ``purify_adapt`` and ``rob_sel_adapt`` (``rob`` is PGD
-    at ``attack_steps`` with one restart). Its own part, so adding it recomputes
-    nothing else (D147)."""
-    return _attack(cbm, datahandler, analysis, budgets, device, _bare)
-
-
-def _bare(cbm, datahandler, analysis, graphs: Graphs, device):
-    return [("rob", None, Defense(cbm), False, analysis.adaptive.subsample)]
 
 
 def adaptive_sweep(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
@@ -356,30 +343,30 @@ def adaptive_sweep(cbm, datahandler, analysis, budgets, device) -> Dict[str, flo
 
 def _sweep_restarts(analysis) -> int:
     r = analysis.sweep_purify.adaptive_restarts
-    return analysis.adaptive.restarts if r is None else r
+    return analysis.attack.restarts if r is None else r
 
 
 def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
             restarts: Optional[int] = None) -> Dict[str, float]:
     """The defences ``defences_of`` builds, attacked at each budget by the adaptive
-    attack and, for a selective one, also by the PGD examples. A random purifier's
-    attack stays eager."""
-    a = analysis.adaptive
+    attack and, for a selective one, also by the PGD examples, both at
+    ``analysis.attack``'s steps and ``restarts`` (default ``analysis.attack.restarts``).
+    A random purifier's attack stays eager."""
+    a, steps = analysis.adaptive, analysis.attack.steps
+    restarts = analysis.attack.restarts if restarts is None else restarts
     cbm.to(device)
     cbm.log_normalizer()
     X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
     range_size = range_size_of(cbm)
     graphs, eager = _graphs(cbm, device), Graphs(enabled=False)
-    pgd = ProjectedGradientDescent(norm="inf", num_steps=analysis.attack_steps
-                                   ).graphed(cbm, graphs)
-    attack = AdaptivePGD(steps=a.steps, restarts=a.restarts if restarts is None else restarts,
-                         eot=a.eot)
+    pgd = BarePGD(steps, restarts).graphed(cbm, graphs)
+    attack = AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot)
     defences = defences_of(cbm, datahandler, analysis, graphs, device)
     # one graphed attack per defence, captured once for every budget
     attacks = [(attack.graphed(d[2], g), g)
                for d, g in ((d, eager if d[2].random else graphs) for d in defences)]
     # PGD on the points some defence is scored on (sorted); the other rows stay nan
-    attacked = torch.unique(torch.cat([_subsample(len(X), d[4]) for d in defences]))
+    attacked = torch.unique(torch.cat([fixed_subsample(len(X), d[4]) for d in defences]))
     out = {}
     for eps in budgets:
         eps_abs = rel_to_abs(eps, range_size)
@@ -389,7 +376,7 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
             x_pgd[b] = pgd(X[b].to(device), y[b].to(device),
                            graphs.scalar(eps_abs, device)).cpu()
         for (name, setting, defense, selective, subsample), (adapt, g) in zip(defences, attacks):
-            idx = _subsample(len(X), subsample)
+            idx = fixed_subsample(len(X), subsample)
             radius = g.scalar(eps_abs, device)
             crafts = {"_adapt": lambda xb, yb, b: adapt(xb, yb, radius, start=x_pgd[b])}
             if selective:

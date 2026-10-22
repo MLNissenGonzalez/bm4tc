@@ -50,9 +50,13 @@ class UQConfig:
         step_size: Step size per iteration (None = auto).
         delta_rel: Purification radii to evaluate, as fractions of the input domain.
         percentiles: Percentiles of clean log p(x) for threshold candidates.
-        attack_method: Attack method for generating adversarial inputs.
+        attack_method: "PGD" (:class:`bm4tc.analysis.adaptive.BarePGD`: restarts,
+            the margin loss, the best iterate; D149) or "JOINT_PGD" (one start).
         eps_rel: Attack budgets, as fractions of the input domain.
         attack_num_steps: PGD steps for attack generation.
+        attack_restarts: PGD's starts (the first random too); "PGD" only.
+        attack_subsample: test points attacked (:func:`fixed_subsample`); None = all.
+            Clean metrics keep the whole split.
         random_start: Random start for purification.
     """
     # Purification params
@@ -71,6 +75,8 @@ class UQConfig:
     # On legendre (width 2.0) these are absolute epsilons 0.1 / 0.2 / 0.3.
     eps_rel: List[float] = field(default_factory=lambda: [0.05, 0.1, 0.15])
     attack_num_steps: int = 20
+    attack_restarts: int = 1
+    attack_subsample: Optional[int] = None
 
     # Sweep purification (Gibbs for the MPS by default; JEM passes its SGLD
     # purifier to evaluate()): snapshots after each count in `sweeps`
@@ -83,12 +89,21 @@ class UQConfig:
     # envelope is k*gibbs_step_delta_rel*(hi-lo). Strength is set by sweeps.
     gibbs_step_delta_rel: Optional[float] = 0.1
     # Sweeps are ~99% of UQ cost and reduce to a mean over the test set, so it runs on a
-    # fixed random subsample (cheap metrics keep the full set). None = full set.
+    # fixed random subsample (:func:`fixed_subsample`; cheap metrics keep the full set).
+    # None = full set. Within the attacked points: at most attack_subsample.
     sweep_subsample: Optional[int] = None
-    sweep_subsample_seed: int = 0  # fixed ⇒ same samples across model-seeds/betas (paired)
 
     # Memory control
     eval_batch_size: Optional[int] = None  # chunk size for forwards; None = loader batch
+
+
+def fixed_subsample(n: int, size: Optional[int]) -> torch.Tensor:
+    """Indices of a fixed test subsample of ``size`` out of ``n`` (seed 0, so the same
+    points across runs, seeds and β); ``None`` or ``size ≥ n`` is every point, in
+    order. A smaller subsample is a prefix of a larger one."""
+    if size is None or size >= n:
+        return torch.arange(n)
+    return torch.from_numpy(np.random.default_rng(0).permutation(n)[:size])
 
 
 def _recover_after_failure(model) -> None:
@@ -473,6 +488,7 @@ class UQEvaluation:
             UQResults with all evaluation metrics.
         """
         from bm4tc.core.attacks import EvasionConfig, build_attack
+        from bm4tc.analysis.adaptive import BarePGD
         from bm4tc.analysis.purification import LikelihoodPurification
         from bm4tc.core.embeddings import range_size_of, rel_to_abs
 
@@ -504,12 +520,15 @@ class UQEvaluation:
             )
         # 3. and 4. build the attack and the purifier; their per-batch work, and
         #    log p(x) and the prediction, go through `work`.
-        attack = build_attack(EvasionConfig(
-            method=cfg.attack_method,
-            norm=cfg.norm,
-            num_steps=cfg.attack_num_steps,
-            random_start=True,
-        ))
+        if cfg.attack_method == "PGD":
+            attack = BarePGD(steps=cfg.attack_num_steps, restarts=cfg.attack_restarts)
+        else:
+            attack = build_attack(EvasionConfig(
+                method=cfg.attack_method,
+                norm=cfg.norm,
+                num_steps=cfg.attack_num_steps,
+                random_start=True,
+            ))
         likelihood_purifier = LikelihoodPurification(
             norm=cfg.norm,
             num_steps=cfg.num_steps,
@@ -540,7 +559,13 @@ class UQEvaluation:
         clean_accuracy = clean_correct / clean_total
         logger.info(f"Clean accuracy: {clean_accuracy:.4f}")
 
-        # 3. Generate adversarial examples and evaluate detection
+        # 3. Generate adversarial examples and evaluate detection, on the attacked
+        #    points (fixed_subsample's order, so the sweep's subsample is a prefix)
+        n_test = len(clean_loader.dataset)
+        attacked = fixed_subsample(n_test, cfg.attack_subsample)
+        attack_loader = DataLoader(
+            torch.utils.data.Subset(clean_loader.dataset, attacked.tolist()),
+            batch_size=clean_loader.batch_size, shuffle=False)
 
         adv_log_px: Dict[float, np.ndarray] = {}
         adv_accuracies: Dict[float, float] = {}
@@ -565,7 +590,7 @@ class UQEvaluation:
                 adv_batches = []
 
                 for batch_data, batch_labels in tqdm(
-                    clean_loader, desc=f"attack eps_rel={eps_rel}", unit="batch",
+                    attack_loader, desc=f"attack eps_rel={eps_rel}", unit="batch",
                     leave=False, dynamic_ncols=True,
                 ):
                     batch_data = batch_data.to(device)
@@ -769,18 +794,17 @@ class UQEvaluation:
             )
             sweep_points = sorted(set(cfg.sweeps))
 
-            def _sweep_subsample(*tensors):
-                """Take a fixed random subsample (shared across model-seeds) of inputs.
+            # The sweep's fixed subsample (test indices; within the attacked points,
+            # the smaller subsample being a prefix of the larger), and where those
+            # points sit among the attacked ones. Sweeps are ~99% of the cost.
+            sizes = [k for k in (cfg.attack_subsample, cfg.sweep_subsample) if k is not None]
+            swept = fixed_subsample(n_test, min(sizes) if sizes else None)
+            position = torch.full((n_test,), -1, dtype=torch.long)
+            position[attacked] = torch.arange(len(attacked))
 
-                Sweeps are ~99% of cost and only feed a mean over the test set; estimating
-                that mean on a fixed ~1k subsample keeps the statistic within ~±1.5%.
-                """
-                n = len(tensors[0])
-                if cfg.sweep_subsample is None or cfg.sweep_subsample >= n:
-                    return tensors
-                rng = np.random.default_rng(cfg.sweep_subsample_seed)
-                idx = torch.from_numpy(rng.permutation(n)[: cfg.sweep_subsample])
-                return tuple(t[idx] for t in tensors)
+            def _sweep_subsample(*tensors):
+                """The swept points of tensors over the attacked points."""
+                return tuple(t[position[swept]] for t in tensors)
 
             for eps_rel in tqdm(
                 cfg.eps_rel, desc="sweep purify", unit="eps", dynamic_ncols=True
@@ -845,7 +869,7 @@ class UQEvaluation:
             # Clean sweep purification
             all_clean = torch.cat([b for b, _ in clean_loader])
             all_clean_labels = torch.cat([lb for _, lb in clean_loader])
-            all_clean, all_clean_labels = _sweep_subsample(all_clean, all_clean_labels)
+            all_clean, all_clean_labels = all_clean[swept], all_clean_labels[swept]
             try:
                 clean_mean_log_px_before = float(
                     _batched_forward(

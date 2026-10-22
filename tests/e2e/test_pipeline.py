@@ -86,12 +86,15 @@ RATE_TOL = 0.02
 # - D119: the forward and log Z renormalize every 4 sites. One step agrees to
 #   1.2e-7 (float32 rounding); training grows it to 2-3% in the curves and to
 #   two test points in AT's rob and purified_acc.
+# - D149: PGD is BarePGD (margin loss, best iterate) with 2 restarts at 10 steps:
+#   `rob` 0.50 -> 0.39 (NAT), 0.63 -> 0.59 (AT); detection and purified_acc score
+#   its examples. Training is untouched (the curves and losses hold).
 # `clean_flagged`: the clean test flag rate at the 5th-percentile tau from valid.
 EXPECTED = {
-    "nat": {"objective": 0.091333, "acc": 1.00, "dis_loss": 0.057163, "rob": 0.50,
-            "detection": 0.17, "clean_flagged": 0.08, "purified_acc": 0.61},
-    "at": {"objective": 0.895261, "acc": 0.71, "dis_loss": 0.522472, "rob": 0.63,
-           "detection": 0.09, "clean_flagged": 0.09, "purified_acc": 0.65},
+    "nat": {"objective": 0.091333, "acc": 1.00, "dis_loss": 0.057163, "rob": 0.39,
+            "detection": 0.20, "clean_flagged": 0.08, "purified_acc": 0.59},
+    "at": {"objective": 0.895261, "acc": 0.71, "dis_loss": 0.522472, "rob": 0.59,
+           "detection": 0.11, "clean_flagged": 0.09, "purified_acc": 0.68},
 }
 
 # Training curves, pinned tightly (runs are bit-for-bit deterministic on CPU). They

@@ -13,5 +13,5 @@ analysis:
     sweeps: [1, 6]             # E3: the attack was ahead at 1 sweep, behind at 6
     adaptive_seeds: [1]
     adaptive_restarts: 5       # D135: 20 would take hours per budget; noted in the paper
-  adaptive:
+  attack:
     restarts: 20               # D135: purification does not saturate at 5 on spirals (≈ 1 min per budget)

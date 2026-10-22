@@ -296,7 +296,7 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
         attack_num_steps=2, num_steps=2,
         run_sweeps=True, sweeps=[1, 2], gibbs_num_bins=8,
         gibbs_batch_size=3,          # forces multiple Gibbs batches on the subsample
-        sweep_subsample=8, sweep_subsample_seed=0,
+        sweep_subsample=8,
     )
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert {(0.1, 1), (0.1, 2)} <= set(results.sweep_purification_results.keys())
@@ -308,15 +308,15 @@ def test_uq_gibbs_subsample_runs(cbm, clean_loader):
 
 def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
     # If the attack raises for one eps, the other eps must still produce results.
-    from bm4tc.core import attacks as evasion_mod
-    real_step = evasion_mod._PGD._step     # the analysis attacks step by step (D105)
+    from bm4tc.analysis.adaptive import AdaptivePGD   # PGD is BarePGD (D149), step by step
+    real_step = AdaptivePGD._step
 
-    def selective(self, born, data, labels, delta, eps):
+    def selective(self, defense, x, labels, delta, best_x, best_rate, eps, *purified):
         if eps == 0.2:
             raise RuntimeError("simulated OOM")
-        return real_step(self, born, data, labels, delta, eps)
+        return real_step(self, defense, x, labels, delta, best_x, best_rate, eps, *purified)
 
-    monkeypatch.setattr(evasion_mod._PGD, "_step", selective)
+    monkeypatch.setattr(AdaptivePGD, "_step", selective)
     cfg = UQConfig(
         eps_rel=[0.1, 0.2], delta_rel=[0.1], percentiles=[10],
         attack_num_steps=2, num_steps=2,
@@ -324,6 +324,22 @@ def test_uq_fault_isolation_one_eps_failure(cbm, clean_loader, monkeypatch):
     results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
     assert 0.1 in results.adv_accuracies        # good eps survived
     assert 0.2 not in results.adv_accuracies     # failed eps skipped
+
+
+def test_uq_attacks_a_fixed_subsample(cbm, clean_loader):
+    """D149: the attacked numbers come from attack_subsample's fixed points; the swept
+    points are a prefix of them; clean numbers keep the whole split."""
+    from bm4tc.analysis.uq import fixed_subsample
+    n = len(clean_loader.dataset)
+    assert torch.equal(fixed_subsample(n, 4), fixed_subsample(n, 6)[:4])
+    assert torch.equal(fixed_subsample(n, None), torch.arange(n))
+    cfg = UQConfig(eps_rel=[0.1], delta_rel=[0.1], percentiles=[10],
+                   attack_num_steps=2, attack_restarts=2, num_steps=2, attack_subsample=6,
+                   run_sweeps=True, sweeps=[1], gibbs_num_bins=4, sweep_subsample=4)
+    results = UQEvaluation(cfg).evaluate(cbm, clean_loader, device="cpu", calib_loader=clean_loader)
+    assert len(results.adv_log_px[0.1]) == 6
+    assert len(results.clean_log_px) == n
+    assert (0.1, 1) in results.sweep_purification_results
 
 
 def test_thresholds_come_from_the_calibration_split(cbm, clean_loader):

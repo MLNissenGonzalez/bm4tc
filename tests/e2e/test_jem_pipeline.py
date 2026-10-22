@@ -3,7 +3,9 @@ to d4r3, beta 0 and 0.75, AT warm from NAT) and pin their results.csv rows.
 
 Pinned at Phase 6 (D69-D72), when JEM joined the pipeline; later phases keep them
 or change them on purpose, as the MPS seam (tests/e2e/test_pipeline.py). The AT
-rows were re-pinned at cw = 0 (D91; the seam ran at cw = 0.5 before).
+rows were re-pinned at cw = 0 (D91; the seam ran at cw = 0.5 before), and the
+analysis rows at D149 (PGD is BarePGD with 2 restarts: `rob` holds, detection and
+purification score its examples; JOINT_PGD kept on here to pin its path).
 """
 import csv
 
@@ -15,20 +17,20 @@ RATE_TOL = 0.02
 
 EXPECTED = {
     ("nat", 0.0): {"objective/valid": 0.546472, "acc/test": 0.72, "loss_dis/test": 0.523113,
-                   "rob/test/0.1": 0.62, "rob_joint/test/0.1": 0.62, "detect/test/0.1/q5": 0.02,
-                   "purify/test/0.1/d0.1": 0.61, "purify_sgld/test/0.1/k2": 0.54,
+                   "rob/test/0.1": 0.62, "rob_joint/test/0.1": 0.62, "detect/test/0.1/q5": 0.01,
+                   "purify/test/0.1/d0.1": 0.64, "purify_sgld/test/0.1/k2": 0.60,
                    "purify_sgld/test/0/k1": 0.64},
     ("nat", 0.75): {"objective/valid": 0.305936, "acc/test": 0.72, "loss_dis/test": 0.564802,
-                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.0,
-                   "purify/test/0.1/d0.1": 0.59, "purify_sgld/test/0.1/k2": 0.54,
+                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.05,
+                   "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.56,
                    "purify_sgld/test/0/k1": 0.64},
     ("at", 0.0): {"objective/valid": 0.737107, "acc/test": 0.71, "loss_dis/test": 0.578934,
-                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.01,
-                  "purify/test/0.1/d0.1": 0.57, "purify_sgld/test/0.1/k2": 0.52,
+                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.03,
+                  "purify/test/0.1/d0.1": 0.67, "purify_sgld/test/0.1/k2": 0.54,
                   "purify_sgld/test/0/k1": 0.62},
     ("at", 0.75): {"objective/valid": 0.347327, "acc/test": 0.72, "loss_dis/test": 0.536796,
-                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.01,
-                  "purify/test/0.1/d0.1": 0.57, "purify_sgld/test/0.1/k2": 0.52,
+                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.02,
+                  "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.56,
                   "purify_sgld/test/0/k1": 0.64},
 }
 
