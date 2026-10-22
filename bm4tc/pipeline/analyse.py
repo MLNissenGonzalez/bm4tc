@@ -79,6 +79,7 @@ SETTINGS = {
     "gibbs": ("attack_steps", "batch_size", "sweep_purify"),
     "sgld": ("attack_steps", "batch_size", "sweep_purify"),
     "adaptive": ("attack_steps", "purify_delta", "purify_steps", "batch_size", "adaptive"),
+    "adaptive_bare": ("attack_steps", "batch_size", "adaptive"),
     "adaptive_sweep": ("attack_steps", "batch_size", "sweep_purify", "adaptive"),
 }
 
@@ -115,6 +116,7 @@ def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str,
 
     if analysis.adaptive.enabled and picked(analysis.adaptive.seeds):
         out["adaptive"] = adaptive
+        out["adaptive_bare"] = adaptive_bare
     if (analysis.adaptive.enabled and analysis.sweep_purify.enabled
             and picked(analysis.sweep_purify.adaptive_seeds)):
         out["adaptive_sweep"] = adaptive_sweep
@@ -326,6 +328,19 @@ def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     likelihood purifier and the adaptive attack's steps replay from the part's
     graphs."""
     return _attack(cbm, datahandler, analysis, budgets, device, _defences)
+
+
+def adaptive_bare(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
+    """The bare classifier under the adaptive attack's settings (``rob_adapt``): with
+    no defence to adapt to, plain PGD with the same steps and restarts, the
+    like-for-like baseline for ``purify_adapt`` and ``rob_sel_adapt`` (``rob`` is PGD
+    at ``attack_steps`` with one restart). Its own part, so adding it recomputes
+    nothing else (D147)."""
+    return _attack(cbm, datahandler, analysis, budgets, device, _bare)
+
+
+def _bare(cbm, datahandler, analysis, graphs: Graphs, device):
+    return [("rob", None, Defense(cbm), False, analysis.adaptive.subsample)]
 
 
 def adaptive_sweep(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:

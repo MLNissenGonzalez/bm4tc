@@ -143,7 +143,8 @@ def test_analyse_caches_each_part(scratch):
               "purify_gibbs/test/0/k1",
               "rob_ceiling/test/0.1", "rob_ceiling_sel/test/0.1", "rob_ceiling/pop/0.1",
               "rob_ceiling_sel/pop/0.1", "purify_adapt/test/0.1/d0.1", "rob_sel/test/0.1/q10",
-              "rob_sel_adapt/test/0.1/q10", "purify_gibbs_adapt/test/0.1/k1"):
+              "rob_sel_adapt/test/0.1/q10", "purify_gibbs_adapt/test/0.1/k1",
+              "rob_adapt/test/0.1"):
         assert k in metrics, k
     assert not any(k.startswith("purify_sel") for k in metrics)    # D122
 
@@ -155,6 +156,7 @@ def test_analyse_caches_each_part(scratch):
     after = json.loads(path.read_text())
     assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]
     assert after["adaptive_sweep"] == before["adaptive_sweep"]     # D132: its own part
+    assert after["adaptive_bare"] == before["adaptive_bare"]       # D147: so is this
     assert after["uq"]["hash"] != before["uq"]["hash"]
     nat.cfg.analysis.adaptive.seeds = [job.seed]                   # D129: it picks runs,
     nat.cfg.analysis.sweep_purify.adaptive_seeds = [job.seed]      # D132: so does this,
