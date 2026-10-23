@@ -8,6 +8,8 @@ config:
   trainer.batch_size: 512
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # D157: 15 (D81) left three mnist12_nat cells with a bad lr
 analysis:
   sweep_purify:                # D132: one sweep, no window; adaptive on one seed per beta
     enabled: true

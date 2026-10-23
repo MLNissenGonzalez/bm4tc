@@ -11,6 +11,8 @@ config:
   trainer.batch_size: 512
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # D157: 15 (D81) left three mnist12_nat cells with a bad lr
 analysis:
   batch_size: 512              # D133: 1.3x faster than 256 at an AT unit's memory
   adaptive: {enabled: false}   # D129: the arch is chosen by D44's criteria, no adaptive number

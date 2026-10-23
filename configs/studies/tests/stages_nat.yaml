@@ -11,7 +11,7 @@ config:
   trainer.batch_size: 64
   tracking.mode: disabled
 hpo:
-  trials_per_param: 6          # one hparam: 6 trials, so 2 HPO workers per cell (D125)
+  trials_per_param: 6          # one hparam: 6 trials, 3 HPO workers per cell (D157)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-3, 1e-1]}
 budgets: [0.1]

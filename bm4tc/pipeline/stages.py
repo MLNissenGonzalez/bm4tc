@@ -608,11 +608,15 @@ def logs_dir(study: Study) -> Path:
     return outputs_root() / study.name / ".logs"
 
 
+HPO_WORKERS = 3   # D157
+
+
 def max_hpo_workers(study: Study) -> int:
-    """At most a third of a cell's trials run at once (D125), so TPE sees finished
-    trials and the median pruner acts; with every trial started together neither
-    does, and parallel workers overshoot the count."""
-    return math.ceil(study.n_trials / 3)
+    """At most three trials of a cell run at once (D157), so TPE proposes almost
+    every trial from finished ones and the median pruner acts; with every trial
+    started together neither does (D125's random search on mnist12_nat picked
+    learning rates that broke cells), and parallel workers overshoot the count."""
+    return min(HPO_WORKERS, study.n_trials)
 
 
 def units(study: Study, stages: Sequence[str], cells: List[Cell],

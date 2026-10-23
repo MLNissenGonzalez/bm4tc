@@ -221,11 +221,11 @@ def test_select_runs_after_failed_hpo_workers():
     todo = {u.name: u for u in stages.units(nat, ["hpo", "select", "train"], nat.cells(),
                                             workers=8)}
     hpo_names = [n for n in todo if n.startswith("hpo/")]
-    assert len(hpo_names) == 2 * len(nat.cells())      # 6 trials: at most 2 workers (D125)
+    assert len(hpo_names) == 3 * len(nat.cells())      # at most 3 workers (D157)
     for cell in nat.cells():                           # a select per cell (D130)
         select = todo[f"select/{cell.name}"]
-        assert select.deps == [] and select.after == [f"hpo/{cell.name}/w0",
-                                                      f"hpo/{cell.name}/w1"]
+        assert select.deps == [] and select.after == [f"hpo/{cell.name}/w{i}"
+                                                      for i in range(3)]
     assert all(u.deps == [f"select/{n.removeprefix('train/').rsplit('/', 1)[0]}"]
                for n, u in todo.items() if n.startswith("train/"))
 
