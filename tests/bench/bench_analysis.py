@@ -100,7 +100,7 @@ def _adaptive(cbm, inputs, labels, args, device):
             for i in range(0, args.samples, args.batch):
                 x = inputs[i:i + args.batch].to(device)
                 y = labels[i:i + args.batch].to(device)
-                out.append(graphed(x, y, graphs.scalar(eps_abs, device), start=x))
+                out.append(graphed(x, y, graphs.scalar(eps_abs, device), starts=[x]))
                 right.append(defense.rates(out[-1], y)[0])
             torch.cuda.synchronize()
             seconds = time.perf_counter() - start

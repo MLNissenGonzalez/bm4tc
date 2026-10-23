@@ -10,9 +10,10 @@ on P(x). Its output is ⊥ (reject) or f(P(x)). :class:`AdaptivePGD` attacks it:
 - through the detector with selective PGD: per sample, a step up log p while rejected and
   down the class margin once accepted.
 
-It keeps the best iterate per sample over every step and restart. Given a ``start``
-(the pipeline passes the PGD example on the classifier), the first restart begins
-there, so the attack never does worse than that transfer attack (D98). On a defence
+It keeps the best iterate per sample over every step and restart. Given ``starts``,
+the first restarts begin there: the pipeline passes the PGD example on the classifier,
+so the attack never does worse than that transfer attack (D98), and against a
+detector also a start on the data (:class:`DataStarts`, D156). On a defence
 with no purifier and no detector it is plain PGD on the classifier: :class:`BarePGD`,
 the attack behind ``rob`` and every transfer number (D149). A random
 defence's examples are scored on fresh draws (:meth:`Defense.rates`), not on the
@@ -20,7 +21,7 @@ attack's own.
 
 Budgets are absolute (``eps_abs``), as in :mod:`bm4tc.core.attacks`.
 """
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import torch
 
@@ -110,8 +111,9 @@ class Defense:
 
 class AdaptivePGD:
     """L∞ PGD on :meth:`Defense.attack_step` within the ε ball and the input box, from
-    ``restarts`` starts (the given ``start`` first, if any, then random ones), keeping
-    per sample the iterate with the highest error rate (the first one reaching it)."""
+    ``max(restarts, len(starts))`` starts (the given ``starts`` first, then random
+    ones), keeping per sample the iterate with the highest error rate (the first one
+    reaching it)."""
 
     def __init__(self, steps: int = 100, restarts: int = 5, eot: int = 16,
                  step_size: Optional[float] = None):
@@ -123,8 +125,8 @@ class AdaptivePGD:
         return GraphedAdaptivePGD(self, defense, graphs)
 
     def generate(self, defense: Defense, x: torch.Tensor, labels: torch.Tensor,
-                 eps_abs: float, start: Optional[torch.Tensor] = None) -> torch.Tensor:
-        return self.graphed(defense, Graphs(enabled=False))(x, labels, eps_abs, start)
+                 eps_abs: float, starts: Sequence[torch.Tensor] = ()) -> torch.Tensor:
+        return self.graphed(defense, Graphs(enabled=False))(x, labels, eps_abs, starts)
 
     def _bounded(self, defense: Defense, x: torch.Tensor, delta: torch.Tensor, eps_abs):
         lo, hi = defense.model.input_range
@@ -149,7 +151,7 @@ class BarePGD:
     """PGD on the bare classifier, with restarts (D149): :class:`AdaptivePGD` on a
     :class:`Defense` with no purifier and no detector (the margin loss, ``restarts``
     starts, the best iterate per sample). ``graphed(model, graphs)`` gives the
-    attack ``(x, labels, eps_abs, start=None)``, as :class:`GraphedAdaptivePGD`."""
+    attack ``(x, labels, eps_abs, starts=())``, as :class:`GraphedAdaptivePGD`."""
 
     def __init__(self, steps: int, restarts: int):
         self.attack = AdaptivePGD(steps=steps, restarts=restarts)
@@ -180,17 +182,19 @@ class GraphedAdaptivePGD:
                              *purified))
 
     def __call__(self, x: torch.Tensor, labels: torch.Tensor, eps_abs,
-                 start: Optional[torch.Tensor] = None) -> torch.Tensor:
+                 starts: Sequence[torch.Tensor] = ()) -> torch.Tensor:
         """Adversarial examples for ``x`` (on the model's device); ``eps_abs`` a
-        float, or a device scalar when the graphs are enabled."""
+        float, or a device scalar when the graphs are enabled. The first restarts
+        begin at ``starts`` (each projected into the ball), the others at random."""
         a, defense = self.attack, self.defense
         x = x.detach()
         draws = a.eot if defense.random else 1
         best_x = x.clone()
         best_rate = torch.full((len(x),), -1.0, device=x.device)
-        for restart in range(a.restarts):
-            if restart == 0 and start is not None:
-                delta = a._bounded(defense, x, start.to(x.device).detach() - x, eps_abs)
+        for restart in range(max(a.restarts, len(starts))):
+            if restart < len(starts):
+                delta = a._bounded(defense, x, starts[restart].to(x.device).detach() - x,
+                                   eps_abs)
             else:
                 delta = a._bounded(defense, x, random_in_ball(x.shape, "inf", eps_abs, x.device),
                                    eps_abs)
@@ -202,3 +206,60 @@ class GraphedAdaptivePGD:
                     *(() if purified is None else (purified,)))
         lo, hi = defense.model.input_range
         return best_x.clamp(lo, hi)
+
+
+class DataStarts:
+    """Starts on the data for the attack on a detector (D156): for each point, the
+    nearest (L∞) training point that the detector accepts and the classifier assigns
+    to a class other than the point's label, or the point itself if there is none.
+
+    Inside the ε ball such a start is already an error of the defence; outside it,
+    the attack projects it onto the ball, towards the other class's data. Random
+    starts and the PGD example can instead lie where log p is flat and every point
+    is rejected, so the selective attack never finds an accepted one: on spirals and
+    MNIST 12×12 they left the detector at up to 0.06 (spirals) and 0.92 (MNIST) for
+    an unbounded ε, where the data start reaches 0, and higher by 0.01–0.12 at ε =
+    0.2 (notes:adaptive §12).
+
+    Args:
+        defense: a :class:`Defense` with a detector on its input and no purifier.
+        data: the training inputs; the accepted ones are kept with their predicted
+            class, once.
+        batch_size: the batch for scoring ``data``.
+    """
+
+    CHUNK = 8192   # training points compared at once: a (batch, CHUNK) distance matrix
+
+    def __init__(self, defense: Defense, data: torch.Tensor, batch_size: int):
+        if defense.threshold is None or defense.purify is not None:
+            raise ValueError("DataStarts needs a defence with a detector and no purifier")
+        device = next(defense.model.parameters()).device
+        kept, predicted = [], []
+        with torch.no_grad():
+            for i in range(0, len(data), batch_size):
+                z = data[i:i + batch_size].to(device)
+                z = z[log_px(defense.model, z) >= defense.threshold]
+                if len(z):   # the model takes no empty batch
+                    kept.append(z)
+                    predicted.append(defense.model.log_joint(z).argmax(dim=1))
+        self.points = torch.cat(kept) if kept else data[:0].to(device)
+        self.predicted = (torch.cat(predicted) if kept
+                          else torch.zeros(0, dtype=torch.long, device=device))
+
+    @torch.no_grad()
+    def __call__(self, x: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """The start for each point of ``x`` (same shape and device)."""
+        x_flat, points = x.flatten(1), self.points.flatten(1)
+        dist = torch.full((len(x),), float("inf"), device=x.device)
+        nearest = torch.zeros(len(x), dtype=torch.long, device=x.device)
+        for k in range(0, len(points), self.CHUNK):
+            d = torch.cdist(x_flat, points[k:k + self.CHUNK], p=float("inf"))
+            d = d.masked_fill(self.predicted[None, k:k + self.CHUNK] == labels[:, None],
+                              float("inf"))
+            d_k, j_k = d.min(dim=1)
+            closer = d_k < dist
+            dist, nearest = torch.where(closer, d_k, dist), torch.where(closer, j_k + k, nearest)
+        if not len(points):
+            return x.clone()
+        found = torch.isfinite(dist).view(-1, *[1] * (x.dim() - 1))
+        return torch.where(found, self.points[nearest].reshape(x.shape), x)

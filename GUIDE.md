@@ -111,7 +111,7 @@ bm4tc/analysis/    evaluating a trained model -> numbers; imports only core
                      its per-batch work captured on CUDA (D92)
   purification.py    likelihood (gradient) and Gibbs purification
   ceiling.py         upper bounds on robust accuracy: test split, data law (D97)
-  adaptive.py        attacks through purifier and detector (Defense, AdaptivePGD; D96)
+  adaptive.py        attacks through purifier and detector (Defense, AdaptivePGD, DataStarts; D96, D156)
   privacy.py         membership inference, standalone, not in the pipeline (D1)
 bm4tc/pipeline/    configs, files, runs
   config.py          the run-config schema (D25)
@@ -247,7 +247,9 @@ outputs/<study>/.logs/             one log per unit, status.json
 | `uq` | PGD at every budget (`analysis.attack`: 100 steps, 5 restarts, on a fixed 1000-point subsample; D149); detection at clean-percentile thresholds q (calibrated on valid, D2); likelihood purification at radius δ |
 | `uq_joint` | the same under the joint attack on class and log p(x) (if `joint_attack`; off by default, D149) |
 | `gibbs` / `sgld` | Gibbs (MPS) or SGLD (JEM) purification of the PGD examples, per number of sweeps (if `sweep_purify.enabled`) |
-| `adaptive` | attacks through the whole defence (D96, `notes:adaptive`): BPDA (+ EOT) through likelihood, Gibbs or SGLD purification, selective PGD through the detector; selective robust accuracy where a detector may reject (if `adaptive.enabled`; eager) |
+| `adaptive` | attacks through the whole defence (D96, `notes:adaptive`): BPDA through likelihood purification (if `adaptive.enabled`, on the runs of `adaptive.seeds`) |
+| `adaptive_det` | selective PGD through the detector, from the PGD example and from the nearest training point the detector accepts in another class (D156); selective robust accuracy (same runs as `adaptive`) |
+| `adaptive_sweep` | BPDA + EOT through Gibbs or SGLD purification (D132; on the runs of `sweep_purify.adaptive_seeds`; eager) |
 
 **Metric keys** (`quantity/split[/budget][/setting]`) are documented in
 `bm4tc/pipeline/metrics.py`: e.g. `acc/test`, `rob/test/0.1`, `detect/test/0.1/q5`,

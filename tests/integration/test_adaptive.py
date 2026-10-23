@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from tests.conftest import DATA_DIM, NUM_CLASSES
-from bm4tc.analysis.adaptive import AdaptivePGD, Defense
+from bm4tc.analysis.adaptive import AdaptivePGD, DataStarts, Defense
 from bm4tc.analysis.purification import LikelihoodPurification
 from bm4tc.core.attacks import ProjectedGradientDescent
 from bm4tc.core.interface import log_px
@@ -171,7 +171,7 @@ def test_warm_start_is_never_worse_than_its_start(model, data):
     defense = Defense(model, purify=lambda v: purifier.purify(model, v, 0.1)[0])
     torch.manual_seed(4)
     x_pgd = ProjectedGradientDescent(num_steps=20).generate(model, x, y, EPS)
-    x_adv = AdaptivePGD(steps=3, restarts=1).generate(defense, x, y, EPS, start=x_pgd)
+    x_adv = AdaptivePGD(steps=3, restarts=1).generate(defense, x, y, EPS, starts=[x_pgd])
     _, error_pgd = defense.rates(x_pgd, y)
     _, error_adv = defense.rates(x_adv, y)
     assert (error_adv >= error_pgd).all()
@@ -181,6 +181,38 @@ def test_the_first_restart_begins_at_the_start(model, data):
     x, y = data
     scripted = _Scripted(model, hit=0)
     start = (x + 0.05).clamp(0, 1)
-    AdaptivePGD(steps=2, restarts=2).generate(scripted, x, y, EPS, start=start)
+    AdaptivePGD(steps=2, restarts=2).generate(scripted, x, y, EPS, starts=[start])
     torch.testing.assert_close(scripted.seen[0], start)
     assert not torch.allclose(scripted.seen[3], start)   # the second restart is random
+
+
+def test_every_start_begins_a_restart(model, data):
+    """D156: the PGD example and the data start each begin a restart, even past the
+    restart count (steps + 1 scorings per restart)."""
+    x, y = data
+    scripted = _Scripted(model, hit=0)
+    first, second = (x + 0.05).clamp(0, 1), (x - 0.05).clamp(0, 1)
+    AdaptivePGD(steps=2, restarts=1).generate(scripted, x, y, EPS, starts=[first, second])
+    torch.testing.assert_close(scripted.seen[0], first)
+    torch.testing.assert_close(scripted.seen[3], second)
+    assert len(scripted.seen) == 6
+
+
+def test_data_start_is_the_nearest_accepted_point_of_another_class(model, data):
+    """D156: per point, the closest (L∞) training point that the detector accepts
+    and the classifier puts in another class; the point itself if there is none."""
+    x, y = data
+    torch.manual_seed(5)
+    pool = torch.rand(200, DATA_DIM)
+    with torch.no_grad():
+        lp, predicted = log_px(model, pool), model.log_joint(pool).argmax(dim=1)
+    tau = lp.median()
+    starts = DataStarts(Defense(model, threshold=tau), pool, batch_size=64)(x, y)
+    for i in range(len(x)):
+        ok = (lp >= tau) & (predicted != y[i])
+        d = (pool - x[i]).abs().amax(dim=1).masked_fill(~ok, float("inf"))
+        torch.testing.assert_close(starts[i], pool[d.argmin()])
+    nothing = DataStarts(Defense(model, threshold=lp.max() + 1), pool, batch_size=64)
+    torch.testing.assert_close(nothing(x, y), x)
+    with pytest.raises(ValueError):
+        DataStarts(Defense(model), pool, batch_size=64)

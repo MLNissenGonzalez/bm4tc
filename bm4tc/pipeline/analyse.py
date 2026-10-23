@@ -10,9 +10,10 @@ parts ran before it (a resumed analysis reproduces them).
     uq_joint   the same under the joint attack (if analysis.joint_attack)
     gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
-    adaptive   the adaptive attack against likelihood purification and the
-               detector (D96; if analysis.adaptive.enabled, on the runs of
-               analysis.adaptive.seeds, D129)
+    adaptive   the adaptive attack against likelihood purification (D96; if
+               analysis.adaptive.enabled, on the runs of analysis.adaptive.seeds, D129)
+    adaptive_det  the adaptive attack against the detector, also started on the
+               data (D156; on the same runs as adaptive)
     adaptive_sweep  the adaptive attack against Gibbs / SGLD (D132; if both are
                enabled, on the runs of analysis.sweep_purify.adaptive_seeds)
 
@@ -20,7 +21,8 @@ PGD is one attack everywhere (D149): :class:`BarePGD`, ``analysis.attack.steps``
 ``.restarts`` on the fixed test subsample ``analysis.attack.subsample`` (the sweep
 purifiers on ``sweep_purify.subsample``, a prefix of it). Its examples give ``rob``
 and every transfer number, and start the adaptive attacks (D98), which run with
-the same steps and restarts.
+the same steps and restarts. The attack on the detector also starts one restart on
+the data (:class:`DataStarts`, D156).
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -42,7 +44,7 @@ from omegaconf import OmegaConf
 
 from bm4tc.pipeline.metrics import key
 from bm4tc.analysis.ceiling import population_ceiling, robust_accuracy_ceiling
-from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, Defense
+from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, DataStarts, Defense
 from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
 from bm4tc.analysis.uq import (UQConfig, UQEvaluation, UQResults, compute_thresholds,
                                fixed_subsample)
@@ -84,7 +86,10 @@ SETTINGS = {
     "uq_joint": ("attack", "percentiles", "purify_delta", "purify_steps", "batch_size"),
     "gibbs": ("attack", "batch_size", "sweep_purify"),
     "sgld": ("attack", "batch_size", "sweep_purify"),
+    # D156 moved the detector to adaptive_det; adaptive keeps the whole adaptive section
+    # in its hash (percentile included), so purification results from before stay valid.
     "adaptive": ("attack", "purify_delta", "purify_steps", "batch_size", "adaptive"),
+    "adaptive_det": ("attack", "batch_size", "adaptive"),
     "adaptive_sweep": ("attack", "batch_size", "sweep_purify", "adaptive"),
 }
 
@@ -111,9 +116,13 @@ def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
 
 def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str, Callable]:
     """The parts the settings ask for, in order, for the run of ``seed``: the
-    adaptive attack on likelihood purification and the detector only on
+    adaptive attacks on likelihood purification and the detector only on
     ``analysis.adaptive.seeds`` (D129), on the sweep purifier only on
-    ``analysis.sweep_purify.adaptive_seeds`` (D132); null is every seed."""
+    ``analysis.sweep_purify.adaptive_seeds`` (D132); null is every seed.
+
+    A run's metrics merge the parts' results in this order, later parts winning
+    (``stages.analysed``): ``adaptive`` results stored before D156 still hold the
+    detector's keys, which ``adaptive_det`` replaces."""
     out = {"clean": clean, "uq": uq}
     if analysis.joint_attack:
         out["uq_joint"] = uq_joint
@@ -124,6 +133,7 @@ def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str,
 
     if analysis.adaptive.enabled and picked(analysis.adaptive.seeds):
         out["adaptive"] = adaptive
+        out["adaptive_det"] = adaptive_det
     if (analysis.adaptive.enabled and analysis.sweep_purify.enabled
             and picked(analysis.sweep_purify.adaptive_seeds)):
         out["adaptive_sweep"] = adaptive_sweep
@@ -286,13 +296,9 @@ def _sweep_purified(purifier, model, sweeps, device, x):
     return purifier.purify_snapshots(model, x, [sweeps], device)[sweeps][0]
 
 
-def _defences(cbm, datahandler, analysis, graphs: Graphs, device):
+def _likelihood_defences(cbm, datahandler, analysis, graphs: Graphs, device):
     """(key name, setting, Defense, selective, test subsample) for likelihood
-    purification and the detector at its threshold (the detector on the purified
-    input is not attacked, D122: it matched purification alone). The likelihood
-    purifier replays from ``graphs``."""
-    thresholds, _ = compute_thresholds(cbm, datahandler.classification["valid"],
-                                       [analysis.adaptive.percentile], device)
+    purification at each radius; the purifier replays from ``graphs``."""
     range_size = range_size_of(cbm)
     likelihood = LikelihoodPurification(norm="inf", num_steps=analysis.purify_steps
                                         ).graphed(cbm, graphs)
@@ -302,9 +308,17 @@ def _defences(cbm, datahandler, analysis, graphs: Graphs, device):
         purify = partial(_likelihood_purified, likelihood,
                          graphs.scalar(rel_to_abs(delta, range_size), device))
         out.append(("purify", f"d{delta:g}", Defense(cbm, purify), False, size))
-    for q, tau in thresholds.items():
-        out.append(("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True, size))
     return out
+
+
+def _detector_defences(cbm, datahandler, analysis, graphs: Graphs, device):
+    """The detector at its threshold, as :func:`_likelihood_defences` (D122: one
+    threshold; the detector on the purified input is not attacked, it matched
+    purification alone)."""
+    thresholds, _ = compute_thresholds(cbm, datahandler.classification["valid"],
+                                       [analysis.adaptive.percentile], device)
+    return [("rob_sel", f"q{q:g}", Defense(cbm, threshold=tau), True,
+             analysis.attack.subsample) for q, tau in thresholds.items()]
 
 
 def _sweep_defences(cbm, datahandler, analysis, graphs: Graphs, device):
@@ -317,17 +331,26 @@ def _sweep_defences(cbm, datahandler, analysis, graphs: Graphs, device):
 
 
 def adaptive(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
-    """Likelihood purification and the detector at each budget, attacked by PGD on
-    the classifier (no suffix) and by the adaptive attack (``_adapt``, D96), which
-    starts its first restart from the PGD example (D98). Robust accuracy for the
-    purifier, selective robust accuracy (``rob_sel``) for the detector at
-    ``analysis.adaptive.percentile`` (D122: an attack per threshold, so one). PGD
-    on the purifier alone is the ``uq`` part's already.
+    """Likelihood purification at each budget, attacked by the adaptive attack
+    (``purify_adapt``, D96), which starts its first restart from the PGD example
+    (D98); PGD on the purifier alone is the ``uq`` part's already.
 
     On the test subsample ``analysis.attack.subsample`` (D117), at the attack's steps
     and restarts (D149). On CUDA, PGD, the likelihood purifier and the adaptive
     attack's steps replay from the part's graphs."""
-    return _attack(cbm, datahandler, analysis, budgets, device, _defences)
+    return _attack(cbm, datahandler, analysis, budgets, device, _likelihood_defences)
+
+
+def adaptive_det(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
+    """The detector at ``analysis.adaptive.percentile`` (D122: an attack per
+    threshold, so one) at each budget: selective robust accuracy under the PGD
+    examples (``rob_sel``) and under the adaptive attack (``rob_sel_adapt``), whose
+    first restarts begin at the PGD example and at a start on the data
+    (:class:`DataStarts`, D156). Its own part, so adding the data start re-ran only
+    the detector (cheap) and not the purifier (≈ 20× the cost on MNIST).
+
+    Subsample, steps, restarts and graphs as :func:`adaptive`."""
+    return _attack(cbm, datahandler, analysis, budgets, device, _detector_defences)
 
 
 def adaptive_sweep(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
@@ -351,7 +374,8 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     """The defences ``defences_of`` builds, attacked at each budget by the adaptive
     attack and, for a selective one, also by the PGD examples, both at
     ``analysis.attack``'s steps and ``restarts`` (default ``analysis.attack.restarts``).
-    A random purifier's attack stays eager."""
+    The adaptive attack starts at the PGD example and, on a selective defence, also
+    on the data (D156). A random purifier's attack stays eager."""
     a, steps = analysis.adaptive, analysis.attack.steps
     restarts = analysis.attack.restarts if restarts is None else restarts
     cbm.to(device)
@@ -362,6 +386,8 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     pgd = BarePGD(steps, restarts).graphed(cbm, graphs)
     attack = AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot)
     defences = defences_of(cbm, datahandler, analysis, graphs, device)
+    data_starts = [DataStarts(d[2], datahandler.data["train"], analysis.batch_size)
+                   if d[3] else None for d in defences]
     # one graphed attack per defence, captured once for every budget
     attacks = [(attack.graphed(d[2], g), g)
                for d, g in ((d, eager if d[2].random else graphs) for d in defences)]
@@ -375,10 +401,15 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
             b = attacked[i:i + analysis.batch_size]
             x_pgd[b] = pgd(X[b].to(device), y[b].to(device),
                            graphs.scalar(eps_abs, device)).cpu()
-        for (name, setting, defense, selective, subsample), (adapt, g) in zip(defences, attacks):
+        for (name, setting, defense, selective, subsample), (adapt, g), on_data in zip(
+                defences, attacks, data_starts):
             idx = fixed_subsample(len(X), subsample)
             radius = g.scalar(eps_abs, device)
-            crafts = {"_adapt": lambda xb, yb, b: adapt(xb, yb, radius, start=x_pgd[b])}
+
+            def starts(xb, yb, b):
+                return [x_pgd[b]] + ([] if on_data is None else [on_data(xb, yb)])
+
+            crafts = {"_adapt": lambda xb, yb, b: adapt(xb, yb, radius, starts(xb, yb, b))}
             if selective:
                 crafts[""] = None   # the PGD examples
             for suffix, craft in crafts.items():

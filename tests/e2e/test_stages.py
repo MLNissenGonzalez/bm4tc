@@ -156,6 +156,7 @@ def test_analyse_caches_each_part(scratch):
     after = json.loads(path.read_text())
     assert after["clean"] == before["clean"] and after["gibbs"] == before["gibbs"]
     assert after["adaptive_sweep"] == before["adaptive_sweep"]     # D132: its own part
+    assert after["adaptive_det"] == before["adaptive_det"]         # D156: likewise
     assert after["uq"]["hash"] != before["uq"]["hash"]
     nat.cfg.analysis.adaptive.seeds = [job.seed]                   # D129: it picks runs,
     nat.cfg.analysis.sweep_purify.adaptive_seeds = [job.seed]      # D132: so does this,
@@ -175,7 +176,7 @@ def test_analyse_caches_each_part(scratch):
     stages.analyse(job)                                            # its part stays cached;
     after = json.loads(path.read_text())                           # PGD changes (D149)
     assert after["adaptive_sweep"] == before["adaptive_sweep"]
-    for part in ("uq", "gibbs", "adaptive"):
+    for part in ("uq", "gibbs", "adaptive", "adaptive_det"):
         assert after[part]["hash"] != before[part]["hash"], part
     before = after
     nat.cfg.analysis.attack.subsample = 50                         # the sweep parts attack

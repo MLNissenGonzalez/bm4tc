@@ -472,8 +472,8 @@ def test_captured_adaptive_attack_is_bit_identical_to_eager():
             gibbs.purify_snapshots(cbm, data, [1], CUDA)
         start = (data + 0.1).clamp(*cbm.input_range)
         for c, e in zip(captured, eager):
-            assert torch.equal(c(data, labels, eps, start=start),
-                               e(data, labels, 0.2, start=start))
+            assert torch.equal(c(data, labels, eps, starts=[start]),
+                               e(data, labels, 0.2, starts=[start]))
     for c in captured:
         assert len(c.step._captures) == 1
 
