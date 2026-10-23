@@ -1,5 +1,5 @@
-# DRAFT (2026-10-22): the training radius is open (T10), and the epochs and patience
-# wait for jem_italypowerdemand_nat's curves. JEM PGD-AT on italypowerdemand (D71, D139), warm from
+# DRAFT (2026-10-22): the epochs and patience wait for jem_italypowerdemand_nat's curves.
+# JEM PGD-AT on italypowerdemand (D71, D139) at the radius of italypowerdemand_at (D153), warm from
 # jem_italypowerdemand_nat's beta=0 runs; the same attack, budgets and beta grid as italypowerdemand_at.
 # beta=0 is MLP-AT; at beta>0 the training SGLD is the one selected for the same
 # jem_italypowerdemand_nat cell (hparams_from).
@@ -11,7 +11,7 @@ grid:
   embedding: [raw]
   arch: [d3r10]
   beta: [0, 0.25, 0.5]          # D113, as italypowerdemand_at
-  eps: [0.05]                   # T10: placeholder, as italypowerdemand_at
+  eps: [0.05]                   # D153, as italypowerdemand_at
 config:
   trainer.max_epoch: 500       # as italypowerdemand_at, until jem_italypowerdemand_nat's curves say otherwise
   trainer.batch_size: 64

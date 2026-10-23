@@ -1,5 +1,4 @@
-# DRAFT (2026-10-22): the training radius is open (notes:timeseries, T10); set grid.eps
-# from ecg200_nat's curves before launching. ecg200, PGD-AT, warm from ecg200_nat's
+# ecg200, PGD-AT at the series' radius (D153), warm from ecg200_nat's
 # beta=0 runs (D19), as mnist12_at at the series' rank (D143) and budgets (D145).
 dataset: ecg200
 regime: at
@@ -7,7 +6,7 @@ init: warm
 grid:
   arch: [d3r10]
   beta: [0, 0.25, 0.5]          # D113
-  eps: [0.05]                   # T10: placeholder, the radius is not decided
+  eps: [0.05]                   # D153: the middle of the NAT curve
 config:
   trainer.max_epoch: 500       # the pilots' budget (D143): full radius from epoch 350
   trainer.batch_size: 64
