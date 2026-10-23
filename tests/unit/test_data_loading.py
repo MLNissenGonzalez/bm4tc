@@ -144,7 +144,7 @@ def test_italy_power_demand_loading():
 
 
 def test_robust_sigmoid_is_one_global_transform_robust_to_outliers():
-    """MPSTime's scaled robust sigmoid (docs/timeseries.md): one transform for every
+    """MPSTime's scaled robust sigmoid (notes:timeseries): one transform for every
     feature, monotone, the train extremes on the range ends, and a spike does not
     squeeze the other values (a min/max scaler leaves them a sliver of the range)."""
     import numpy as np

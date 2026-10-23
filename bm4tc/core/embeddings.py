@@ -294,7 +294,7 @@ def embedding_range_size(embedding: str | None) -> float:
 # ---------------------------------------------------------------------------
 # Adversarial and purification budgets are authored as *relative* fractions of the
 # embedding's input-domain width and converted to absolute model-domain values here.
-# See the "Budget vocabulary" section of CLAUDE.md for the full convention; in short:
+# See "Vocabulary" in GUIDE.md for the full convention; in short:
 #   eps_rel / delta_rel  fraction of (hi - lo); also the budget in the data's own units
 #   eps_abs / delta_abs  value in model-domain units, = _rel * (hi - lo)
 

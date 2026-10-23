@@ -1,4 +1,4 @@
-"""Pins the rel/abs budget convention (see "Budget vocabulary" in CLAUDE.md).
+"""Pins the rel/abs budget convention (see "Vocabulary" in GUIDE.md).
 
 Every authored budget is a *fraction* of the input domain width; absolute
 model-domain values are derived at one boundary per entry point. These tests exist

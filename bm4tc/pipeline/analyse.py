@@ -152,7 +152,7 @@ def _ceilings(cbm, datahandler, budgets, cells: int) -> Dict[str, float]:
     """Bounds on robust accuracy without (``rob_ceiling``) and with rejection
     (``rob_ceiling_sel``): on the test split (two classes), and on the data law
     under the pseudo-split ``pop`` where the law is known (spirals), the upper end
-    of the bracket (D97, docs/adaptive.md §2)."""
+    of the bracket (D97, notes:adaptive §2)."""
     X = datahandler.data[SPLIT].detach().cpu().numpy()
     y = datahandler.labels[SPLIT].detach().cpu().numpy()
     edges = np.linspace(*cbm.input_range, cells + 1)
@@ -398,7 +398,7 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
 def _score(defense: Defense, x, x_adv, labels, selective: bool, draws: int) -> torch.Tensor:
     """Per sample: the probability of a right answer on ``x_adv``, or with
     ``selective`` of a right answer on ``x`` and no wrong one on ``x_adv``
-    (docs/adaptive.md §1)."""
+    (notes:adaptive §1)."""
     right_adv, error_adv = defense.rates(x_adv, labels, draws)
     if not selective:
         return right_adv

@@ -13,11 +13,11 @@ exactly in polynomial time and the bound is the tightest one obtainable this way
 The bound is a property of the *data*, not of any model: a measured ``rob`` above it means
 the attack failed to find adversarial examples that provably exist, never that the model is
 that robust. It is tight on the sample, so it is optimistic about what a model can reach
-on the data law (docs/adaptive.md §2.1).
+on the data law (notes:adaptive §2.1).
 
 ``selective`` bounds a classifier that may reject (the matching bound at ``eps_abs / 2``),
 and :func:`population_ceiling` brackets the bound for a known 2-D data law instead of a
-sample (docs/adaptive.md §2.2, §2.3).
+sample (notes:adaptive §2.2, §2.3).
 
 Budget convention (GUIDE.md, glossary): ``eps_abs`` is an ABSOLUTE
 model-domain budget, matching ``eval_rob(eps_abs=)``. Callers convert with
@@ -93,7 +93,7 @@ def robust_accuracy_ceiling(
     With ``selective``, the bound on selective robust accuracy (a classifier that may
     reject: the clean point accepted and correct, the attacked one rejected or correct).
     Two opposite-class points within ``eps_abs`` of each other cannot both be robust in
-    that sense, which is the matching bound at ``eps_abs / 2`` (docs/adaptive.md §2.2).
+    that sense, which is the matching bound at ``eps_abs / 2`` (notes:adaptive §2.2).
 
     Args:
         X: ``(n, d)`` inputs, in the same coordinates as ``eps_abs``.
@@ -163,7 +163,7 @@ def population_ceiling(
     With equal class priors the robust Bayes accuracy is ``1 - F/2``, where ``F`` is the
     largest mass that can be coupled between the two class laws with every pair at most
     ``2 * eps_abs`` apart in L∞ (``eps_abs`` with ``selective``, the bound for a
-    classifier that may reject; docs/adaptive.md §2). On a grid of square cells ``F`` is
+    classifier that may reject; notes:adaptive §2). On a grid of square cells ``F`` is
     a maximum flow from class-0 cells to class-1 cells within reach. A cell blurs a
     distance by up to ``cell`` per axis, so connecting the cells whose farthest points
     are within reach gives a lower bound on ``F`` and connecting those whose nearest

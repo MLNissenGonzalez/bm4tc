@@ -66,7 +66,7 @@ analysis:
       step_size: 0.01          # fixed for every model (not the training sampler's)
       noise_std: 0.005
       batch_size: 256
-  adaptive:                    # PGD through purifier and detector (D96, docs/adaptive.md)
+  adaptive:                    # PGD through purifier and detector (D96, notes:adaptive)
     enabled: true              # D114: active defences are reported under it
     percentile: 5              # D122: the one threshold attacked (an attack per threshold)
     eot: 16                    # draws per step for Gibbs / SGLD (D121: 8 is weaker, 32 no stronger)

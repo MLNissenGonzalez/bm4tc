@@ -1,6 +1,6 @@
 """Evasion (adversarial) attacks against any GenerativeClassifier (bm4tc.core.interface).
 
-Budget convention (see "Budget vocabulary" in CLAUDE.md):
+Budget convention (see "Vocabulary" in GUIDE.md):
     ``eps_rel``  authored fraction of the embedding domain width ``hi - lo``. This is
                  what configs carry, and it equals the budget in the data's own units.
     ``eps_abs``  model-domain value, ``eps_rel * (hi - lo)``. Every attack method in

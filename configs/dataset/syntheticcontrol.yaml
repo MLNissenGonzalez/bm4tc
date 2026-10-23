@@ -12,4 +12,4 @@ split: [0.5, 0.25, 0.25]
 split_seed: 42
 use_ucr_split: cv           # cross-validated on the UCR train split (D148)
 overwrite: false
-scaler: robust_sigmoid       # MPSTime's: one global transform, outliers squashed (docs/timeseries.md)
+scaler: robust_sigmoid       # MPSTime's: one global transform, outliers squashed (notes:timeseries)

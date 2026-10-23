@@ -1,4 +1,4 @@
-# E3 (docs/evidence.md "Pilots"; docs/adaptive.md §4): the adaptive attacks (D96) on E2c's
+# E3 (notes:evidence "Pilots"; notes:adaptive §4): the adaptive attacks (D96) on E2c's
 # models, against the ceilings (D97). Half of E2c's β ladder, E2c's selected lr
 # (hparams_from: outputs/pilot_beta_spirals/hparams.yaml, from the cluster), one seed.
 # About 40 min per run on the eGPU (Gibbs is most of it); 6 runs, 3 at a time: ~1.5-2 h.

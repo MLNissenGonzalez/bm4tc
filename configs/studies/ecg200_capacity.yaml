@@ -1,4 +1,4 @@
-# ecg200 capacity sweep, legendre d3, NAT, cold (docs/timeseries.md, T3, T5): D44's two
+# ecg200 capacity sweep, legendre d3, NAT, cold (notes:timeseries, T3, T5): D44's two
 # criteria pick the rank of ecg200_nat, ecg200_at and the JEM studies. Also the pilot of
 # the series: generous budgets, whose curves set the later studies' epochs and patience.
 dataset: ecg200

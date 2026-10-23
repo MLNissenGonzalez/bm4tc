@@ -1,9 +1,11 @@
 # Guide
 
 How bm4tc works: the model and the objective, the vocabulary, the pipeline from a
-study file to a paper figure, and where in the code each piece lives. The reasons
-behind the design are numbered decisions (D1, D2, ...) in
-[docs/decisions.md](docs/decisions.md); they are cited here where they matter.
+study file to a paper figure, where in the code each piece lives, and the rules for
+changing it. The reasons behind the design are numbered decisions (D1, D2, ...), cited
+here and in the code where they matter; the decision log and the design notes (cited
+as `notes:<name>`, e.g. `notes:adaptive`) are kept with the project's notes, outside
+this repository.
 
 ## 1. The model
 
@@ -19,7 +21,7 @@ so p(c | x), log p(x) and their gradients are all exact. Long chains (MNIST: 145
 sites) overflow float32, so contractions run in the log domain with norm
 accumulation (the only amplitude path, D89; renormalized every 8 sites for Legendre, every 4 otherwise, D119, D120), and `log Z` is computed by a zip-up contraction.
 These caches belong to the model, keyed on the parameters' versions (D31, D55). This
-numerical core is not touched outside a dedicated track (D30, docs/plan.md, "tensorkrowch").
+numerical core is not touched outside a dedicated track (D30; see "Rules for changes").
 
 | Embedding | Input range | Note |
 |---|---|---|
@@ -245,7 +247,7 @@ outputs/<study>/.logs/             one log per unit, status.json
 | `uq` | PGD at every budget (`analysis.attack`: 100 steps, 5 restarts, on a fixed 1000-point subsample; D149); detection at clean-percentile thresholds q (calibrated on valid, D2); likelihood purification at radius δ |
 | `uq_joint` | the same under the joint attack on class and log p(x) (if `joint_attack`; off by default, D149) |
 | `gibbs` / `sgld` | Gibbs (MPS) or SGLD (JEM) purification of the PGD examples, per number of sweeps (if `sweep_purify.enabled`) |
-| `adaptive` | attacks through the whole defence (D96, `docs/adaptive.md`): BPDA (+ EOT) through likelihood, Gibbs or SGLD purification, selective PGD through the detector; selective robust accuracy where a detector may reject (if `adaptive.enabled`; eager) |
+| `adaptive` | attacks through the whole defence (D96, `notes:adaptive`): BPDA (+ EOT) through likelihood, Gibbs or SGLD purification, selective PGD through the detector; selective robust accuracy where a detector may reject (if `adaptive.enabled`; eager) |
 
 **Metric keys** (`quantity/split[/budget][/setting]`) are documented in
 `bm4tc/pipeline/metrics.py`: e.g. `acc/test`, `rob/test/0.1`, `detect/test/0.1/q5`,
@@ -303,7 +305,30 @@ training curves to 1e-6. A refactor must keep them, or change a number on purpos
 its own commit, saying why (D26, D51). The seam studies run once per session and are
 shared by the MPS seam, the JEM seam and the figures test.
 
-## 9. Gotchas
+## 9. Rules for changes
+
+The code follows Ousterhout's *A Philosophy of Software Design*: deep modules,
+information hidden in one place, no pass-through layers.
+
+- **Pin before you change behaviour** (D26, D51). A refactor reproduces the seam
+  numbers exactly; a deliberate change re-pins in its own commit, with the reason. Take
+  "before" numbers from a `git worktree` of HEAD, not from a background run of code
+  you are editing.
+- **tensorkrowch first** (D30): tensor-network maths stays in `ConditionalBornMachine`
+  on tensorkrowch nodes and contractions, not in plain torch elsewhere. The numerical
+  core (contractions, `log_partition_function`, accumulate, sampling) changes only on
+  its own track: a new contraction matches log|ψ|², log Z and their gradients on random
+  models (overflowing ones included) to float tolerance, the seams re-pin in their own
+  commit, and the gain is measured with `tests/bench/bench_train_step.py` and
+  `profile_train_step.py` from a `git worktree` of HEAD.
+- **The import rule** (D32, section 4) is enforced by a test.
+- **One owner per convention:** metric keys are built only in
+  `bm4tc/pipeline/metrics.py`, run paths only in `bm4tc/pipeline/runs.py`; nothing
+  parses a path (runs are found by `run.json`).
+- **Clean break** (D12): no compatibility shims for old run dirs, configs or CSVs; the
+  tag `pre-ousterhout` has the old code.
+
+## 10. Gotchas
 
 - `tqdm` around a DataLoader (even disabled) and every extra pass over a loader
   consume a torch RNG draw; adding one moves every RNG-dependent number after it.
@@ -315,3 +340,7 @@ shared by the MPS seam, the JEM seam and the figures test.
   1/φ₀(0), otherwise the initial amplitude underflows on long chains; use
   `init_method: canonical` for Hermite (set in `defaults.yaml`).
 - Complex parameters need torch ≥ 2.1 (an Adam `foreach` bug produced NaNs before).
+- A failed CUDA graph capture poisons the process in torch 2.1, so tests that may fail
+  a capture run in a child process (`tests/unit/test_graphs.py`).
+- tensorkrowch's `reset` reorders `parameters()`: compare parameters by name across a
+  reset.

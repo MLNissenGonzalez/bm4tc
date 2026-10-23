@@ -57,9 +57,9 @@ python -m bm4tc figures paper                            # every figure and tabl
 
 `configs/papers/paper.yaml` maps each figure and table of the paper to the studies it
 reads; `python -m bm4tc figures paper` draws them all from the studies' results (and,
-for sample and density plots, from one kept checkpoint per model). The studies, the
-order to run them in and the pilots that come first are listed in
-[docs/plan.md](docs/plan.md).
+for sample and density plots, from one kept checkpoint per model). Warm studies (AT,
+JEM-AT) need their `warm_from` study trained first ([GUIDE.md](GUIDE.md), "The
+pipeline").
 
 ## Repository
 
@@ -73,11 +73,11 @@ bm4tc/
                bm4tc/__main__.py
 configs/       defaults.yaml, studies/, papers/, datasets, trainer presets, hparams/
 tests/         unit, integration and end-to-end (seam) tests; a training benchmark
-docs/          design decisions, the remaining plan, design notes
 figures/       generated paper figures and tables
 ```
 
-[GUIDE.md](GUIDE.md) explains the concepts, the pipeline and the code in depth.
+[GUIDE.md](GUIDE.md) explains the concepts, the pipeline and the code in depth, and the
+rules for changing it.
 
 ```bash
 pytest -q                    # the full suite, ~3 min

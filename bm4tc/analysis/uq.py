@@ -15,7 +15,7 @@ This module provides tools to evaluate both defenses by:
   calibration split (validation), never on the evaluated split (D2)
 - Purifying adversarial examples and measuring accuracy recovery
 
-Budget convention (see "Budget vocabulary" in CLAUDE.md): ``UQConfig`` is authored
+Budget convention (see "Vocabulary" in GUIDE.md): ``UQConfig`` is authored
 entirely in *relative* fractions of the input domain (``eps_rel`` for the attacker,
 ``delta_rel`` for purification). :func:`evaluate_uq` converts them once, up front, and
 everything below that point is absolute (``eps_abs`` / ``delta_abs``). Result dicts and

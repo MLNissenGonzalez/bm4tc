@@ -172,7 +172,7 @@ def _two_dim_generator(cfg: DataGenDowConfig) -> tuple[np.ndarray, np.ndarray]:
 def _spirals_cell_masses(cfg: DataGenDowConfig, edges: np.ndarray, scale: np.ndarray,
                          shift: np.ndarray, n_theta: int = 6000) -> np.ndarray:
     """The law of ``_two_dim_generator``'s spirals, as each class's probability per grid
-    cell (docs/adaptive.md §2.3), in the coordinates ``x * scale + shift``.
+    cell (notes:adaptive §2.3), in the coordinates ``x * scale + shift``.
 
     θ = 2π√U has density θ / (2π²) on [0, 2π]; class 0 is centred on
     (2θ + π)(cos θ, sin θ), class 1 on its negative; the noise is N(0, noise²) per raw
@@ -555,7 +555,7 @@ class RobustSigmoidScaler:
     Median and IQR are taken over every value of the training matrix, so all
     features share one transform, as in LinearScaler; the sigmoid squashes outliers
     smoothly instead of letting them set the range (ChlorineConcentration's spikes
-    leave a series a quarter of a min/max range; docs/timeseries.md). Unseen values
+    leave a series a quarter of a min/max range; notes:timeseries). Unseen values
     beyond the training extremes are clipped (MPSTime shifts the series instead).
     """
 
@@ -671,7 +671,7 @@ class DataHandler:
 
         if self.cfg.use_ucr_split:
             # The UCR train/test boundary; valid is fold (seed - 1) mod CV_FOLDS of
-            # the train split, stratified (docs/timeseries.md, D148)
+            # the train split, stratified (notes:timeseries, D148)
             if self.cfg.use_ucr_split != "cv" or self.ucr_train_size is None:
                 raise ValueError(f"use_ucr_split: {self.cfg.use_ucr_split!r} on "
                                  f"{self.cfg.name}: only 'cv' on a UCR dataset (D148)")

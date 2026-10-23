@@ -1,6 +1,6 @@
 """Likelihood-based purification for Born Machines.
 
-Budget convention (see "Budget vocabulary" in CLAUDE.md):
+Budget convention (see "Vocabulary" in GUIDE.md):
     ``delta_rel``  authored fraction of the embedding domain width ``hi - lo``.
     ``delta_abs``  model-domain radius, ``delta_rel * (hi - lo)``. The purify methods
                    take ``delta_abs`` — conversion happens in the caller via

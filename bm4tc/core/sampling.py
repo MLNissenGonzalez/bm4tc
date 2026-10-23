@@ -53,7 +53,7 @@ For 1.1.6: ``n_sites`` is ``n_features``; nodes have ``rank``, not ``ndim``;
   tensors and repeats the same operations: no new nodes, no edges connected, no
   reset. ``reset``, and ``forward`` through it, removes them; ``develop`` built
   and reset every call.
-- **Float32 precision (docs/evidence.md, "Sampling" step 6).** A double layer is
+- **Float32 precision (notes:evidence, "Sampling" step 6).** A double layer is
   positive semi-definite in exact arithmetic, not after float32 rounding: its
   error grows like the square of the contraction's cancellation (one layer:
   linearly), so long chains with improbable candidate windows can give negative
@@ -75,7 +75,7 @@ where ``marginalize_output`` works with it too; here it raises, as nothing in
 bm4tc needs it. Both inline chains (``_contract_envs_zipup`` and
 ``_inline_contraction``) renormalize through ``_renormalize_inline``, which a
 subclass that keeps the norm overrides. It has no tensorkrowch counterpart: it
-goes when tensorkrowch's ``renormalize`` keeps the norm (plan.md).
+goes when tensorkrowch's ``renormalize`` keeps the norm (notes:plan).
 """
 import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Text, Tuple, Union

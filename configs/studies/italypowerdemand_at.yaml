@@ -1,4 +1,4 @@
-# DRAFT (2026-10-22): the training radius is open (docs/timeseries.md, T10); set grid.eps
+# DRAFT (2026-10-22): the training radius is open (notes:timeseries, T10); set grid.eps
 # from italypowerdemand_nat's curves before launching. italypowerdemand, PGD-AT, warm from italypowerdemand_nat's
 # beta=0 runs (D19), as mnist12_at at the series' rank (D143) and budgets (D145).
 dataset: italypowerdemand

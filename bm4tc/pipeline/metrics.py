@@ -53,7 +53,7 @@ subsample (`attack.subsample`, D117; Gibbs / SGLD on `sweep_purify.subsample`), 
 every attacked number counts the same points. Clean numbers (budget 0, `acc`) keep
 the whole test split.
 
-Adaptive attacks (part `adaptive`, D96; docs/adaptive.md), at the same steps,
+Adaptive attacks (part `adaptive`, D96; notes:adaptive), at the same steps,
 restarts and subsample. `_adapt` on a name means
 the attack through the whole defence instead of PGD on the classifier. Selective
 robust accuracy counts a point when its clean input is accepted and right and its

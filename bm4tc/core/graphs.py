@@ -2,7 +2,7 @@
 
 One MPS training step is thousands of tiny kernels, each dispatched from Python:
 a unit keeps a CPU core busy and the GPU mostly idle. Captured as a CUDA graph,
-the same kernels replay with one launch (≈ 9-10x per unit on <node>, bit-identical
+the same kernels replay with one launch (≈ 9-10x per unit on a cluster GPU, bit-identical
 to the eager step), and with NVIDIA MPS several units share a GPU.
 
 :class:`Graphed` hides what capture needs: eager warm-up calls on a side stream,

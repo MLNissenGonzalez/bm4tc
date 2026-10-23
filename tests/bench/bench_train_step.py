@@ -21,7 +21,7 @@ the whole run, validation and capture included: allocated, reserved (the
 allocator's cache and the graphs' pools), and the process as nvidia-smi sees it at
 the end, CUDA context included: that is what one unit takes from the GPU, so
 `--per-gpu` is about (GPU memory - other processes) / this (D95; E2a's units held
-3.9 GiB each on <node> where reserved said 2.9).
+3.9 GiB each on a cluster GPU where reserved said 2.9).
 
 `--snapshot FILE` pickles the allocator's state after training (the viewer is
 `python -m torch.cuda._memory_viz`) and prints what each memory pool holds then:

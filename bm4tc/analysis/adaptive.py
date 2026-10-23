@@ -1,6 +1,6 @@
 """Adaptive attacks: PGD against the whole defence, purifier and detector included (D96).
 
-The theory is in docs/adaptive.md §1 and §3. A :class:`Defense` is a purifier P, the
+The theory is in notes:adaptive §1 and §3. A :class:`Defense` is a purifier P, the
 model's classifier f and a detector that accepts iff log p(·) ≥ τ, read on the input or
 on P(x). Its output is ⊥ (reject) or f(P(x)). :class:`AdaptivePGD` attacks it:
 
