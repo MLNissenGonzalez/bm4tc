@@ -490,7 +490,7 @@ class ConditionalBornMachine(SamplingMPS):
         # (D,d,D) of `result @ node`, so peak memory is O(D²·d) instead of
         # O(L·D⁴) — the difference between fitting and OOM at large bond dim.
         # Mathematically identical to the old inline-transfer-matrix order; only
-        # the contraction order differs. Mirrors tn4dd TTTN.norm zip-up.
+        # the contraction order differs. Mirrors tpm-tn-benchmark's TTTN.norm zip-up.
         # Renormalized every _renormalize_every sites and at the last (D119).
         log_Z = 0
         result_node = None
