@@ -17,6 +17,6 @@ analysis:
     enabled: true
     sweeps: [1, 6]             # E3: the attack was ahead at 1 sweep, behind at 6
     adaptive_seeds: [1]
-    adaptive_restarts: 5       # D135: 20 would take hours per budget; noted in the paper
   attack:
-    restarts: 20               # D135: purification does not saturate at 5 on spirals (≈ 1 min per budget)
+    restarts: 20               # D135: purification does not saturate at 5 on spirals (≈ 1 min per budget);
+                               # Gibbs too (D152: ≈ 8 min per restart and budget on a 1080 Ti)
