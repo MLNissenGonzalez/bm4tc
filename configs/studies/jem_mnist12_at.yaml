@@ -20,8 +20,8 @@ hparams_from:
   study: jem_mnist12_nat
   params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
 analysis:
-  sweep_purify:                # D132, as mnist12: one SGLD sweep, no ball; adaptive on one seed per beta
+  sweep_purify:                # D132, as mnist12: one SGLD sweep, adaptive on one seed per beta; D158: ball 0.3
     enabled: true
-    step: null
+    step: 0.3                  # > the largest budget (0.2), so one sweep can undo it
     sweeps: [1]
     adaptive_seeds: [1]

@@ -13,8 +13,8 @@ hpo:
 analysis:
   batch_size: 512              # D133: 1.3x faster than 256 at an AT unit's memory
   adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell
-  sweep_purify:                # D132: one sweep, no window; transfer only (adaptive too costly)
+  sweep_purify:                # D132: one sweep, transfer only (adaptive too costly); D158: window 0.3
     enabled: true
-    step: null
+    step: 0.3                  # > the largest budget (0.2), so one sweep can undo it
     sweeps: [1]
     adaptive_seeds: []

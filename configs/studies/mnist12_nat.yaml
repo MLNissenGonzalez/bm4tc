@@ -11,8 +11,8 @@ config:
 hpo:
   trials_per_param: 30         # D157: 15 (D81) left three mnist12_nat cells with a bad lr
 analysis:
-  sweep_purify:                # D132: one sweep, no window; adaptive on one seed per beta
+  sweep_purify:                # D132: one sweep, adaptive on one seed per beta; D158: window 0.3
     enabled: true
-    step: null
+    step: 0.3                  # > the largest budget (0.2), so one sweep can undo it
     sweeps: [1]
     adaptive_seeds: [1]
