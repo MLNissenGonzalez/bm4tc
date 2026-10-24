@@ -9,7 +9,9 @@ ended, in any state; when a unit fails, everything that depends on it is skipped
 and the rest goes on. Units start on one GPU at least ``stagger`` seconds apart
 (D130), so their warm-up peaks do not coincide and its MPS daemon is not asked to
 take several clients at once. The state of every unit is written to a JSON file as it
-changes, for ``status``.
+changes, for ``status``. Neither that file nor a unit's log can end a launch: a write
+the filesystem refuses is logged and the pool goes on (D159), since the units' own
+outputs, not these, hold the results.
 
 The pool knows nothing about studies: :mod:`bm4tc.pipeline.stages` builds the units.
 """
@@ -49,6 +51,16 @@ def _now() -> str:
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def _close(handle) -> None:
+    """Close a unit's log. On the lab's full ceph export a close has failed with
+    EACCES (2026-10-24), which ended the launch and killed every running unit; the
+    log may lose its tail, the unit's state still comes from its exit code (D159)."""
+    try:
+        handle.close()
+    except OSError as e:
+        logger.warning(f"closing the log {handle.name} failed ({e}); it may be cut short")
+
+
 def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: int = 1,
             state_file: Optional[Path] = None, poll: float = 0.5,
             mps: bool = False, stagger: float = STAGGER) -> Dict[str, str]:
@@ -72,11 +84,15 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
     last_start: Dict[str, float] = {}  # gpu -> time of its last start
 
     def save():
-        if state_file is not None:
-            tmp = state_file.with_suffix(".tmp")
+        if state_file is None:
+            return
+        tmp = state_file.with_suffix(".tmp")
+        try:
             tmp.write_text(json.dumps({"pid": os.getpid(), "mps": mps, "units": state},
                                       indent=2))
             tmp.replace(state_file)
+        except OSError as e:        # the next change writes it again (D159)
+            logger.warning(f"writing {state_file} failed ({e}); `status` may lag")
 
     def set_state(name, value, **extra):
         state[name].update(state=value, **extra)
@@ -124,7 +140,7 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
                 code = proc.poll()
                 if code is None:
                     continue
-                handle.close()
+                _close(handle)
                 del running[name]
                 free.append(gpu)
                 if code == 0:
@@ -137,6 +153,6 @@ def execute(units: List[Unit], gpus: Optional[Sequence[str]] = None, per_gpu: in
         for name, (proc, _, handle) in running.items():
             proc.terminate()
             proc.wait()
-            handle.close()
+            _close(handle)
             set_state(name, FAILED, finished=_now(), exit="interrupted")
     return {name: s["state"] for name, s in state.items()}

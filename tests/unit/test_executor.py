@@ -51,6 +51,41 @@ def test_after_waits_for_the_end_in_any_state(tmp_path):
     assert order.read_text() == "sz"
 
 
+def test_refused_log_and_state_writes_do_not_end_the_launch(tmp_path, monkeypatch):
+    """D159: on the full ceph export closing a unit's log raised EACCES and ended the
+    launch, killing its running units. Every close and every state write now fails;
+    each unit still ends in the state its exit code gives."""
+    import pathlib
+
+    from bm4tc.pipeline import executor
+
+    class RefusedClose:
+        def __init__(self, path, mode):
+            self._f = open(path, mode)
+            self.name = str(path)
+
+        def fileno(self):
+            return self._f.fileno()
+
+        def close(self):
+            self._f.close()
+            raise PermissionError(13, "Permission denied")
+
+    def refused_write(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(executor, "open", RefusedClose, raising=False)
+    monkeypatch.setattr(pathlib.Path, "write_text", refused_write)
+    units = [
+        _unit(tmp_path, "a", "print('a')"),
+        _unit(tmp_path, "bad", "import sys; sys.exit(3)"),
+        _unit(tmp_path, "slow", "import time; time.sleep(0.5)", deps=["a"]),
+    ]
+    states = execute(units, per_gpu=2, state_file=tmp_path / "status.json", poll=0.05)
+    assert states == {"a": "done", "bad": "failed", "slow": "done"}
+    assert (tmp_path / "a.log").read_text().strip() == "a"
+
+
 def test_each_slot_pins_its_gpu(tmp_path):
     code = "import os; print(os.environ.get('CUDA_VISIBLE_DEVICES'))"
     units = [_unit(tmp_path, f"u{i}", code) for i in range(4)]
