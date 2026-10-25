@@ -5,7 +5,9 @@ Pinned at Phase 6 (D69-D72), when JEM joined the pipeline; later phases keep the
 or change them on purpose, as the MPS seam (tests/e2e/test_pipeline.py). The AT
 rows were re-pinned at cw = 0 (D91; the seam ran at cw = 0.5 before), and the
 analysis rows at D149 (PGD is BarePGD with 2 restarts: `rob` holds, detection and
-purification score its examples; JOINT_PGD kept on here to pin its path).
+purification score its examples; JOINT_PGD kept on here to pin its path). The AT
+row at beta 0.75 was re-pinned at D161: selection starts at epoch 4 of its 4
+(SELECT_FROM), where it picked epoch 2 before.
 """
 import csv
 
@@ -28,10 +30,10 @@ EXPECTED = {
                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.03,
                   "purify/test/0.1/d0.1": 0.67, "purify_sgld/test/0.1/k2": 0.54,
                   "purify_sgld/test/0/k1": 0.62},
-    ("at", 0.75): {"objective/valid": 0.347327, "acc/test": 0.72, "loss_dis/test": 0.536796,
-                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.02,
-                  "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.56,
-                  "purify_sgld/test/0/k1": 0.64},
+    ("at", 0.75): {"objective/valid": 0.350695, "acc/test": 0.70, "loss_dis/test": 0.552633,
+                  "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.06,
+                  "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.60,
+                  "purify_sgld/test/0/k1": 0.66},
 }
 
 

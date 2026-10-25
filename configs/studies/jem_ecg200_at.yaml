@@ -12,7 +12,8 @@ grid:
   beta: [0, 0.25, 0.5]          # D113, as ecg200_at
   eps: [0.05]                   # D153, as ecg200_at
 config:
-  trainer.max_epoch: 500       # as ecg200_at; jem_ecg200_nat's curves agree (D160)
+  trainer.max_epoch: 1000      # D161: at D160's 500 every run ended at the cap
+  trainer.curriculum_end: 0.35 # full radius at epoch 350, as ecg200_at
   trainer.batch_size: 64
   trainer.patience: 30         # validations (eval_every 5): 150 epochs
 hpo:                           # the lr only (D80)

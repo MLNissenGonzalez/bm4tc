@@ -13,7 +13,7 @@ from bm4tc.core.interface import class_probabilities, log_px, nll
 from bm4tc.core.jem.model import (JEMMLP, JEMModelConfig, matched_width,
                                   mlp_parameter_count, mps_parameter_count)
 from bm4tc.core.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
-from bm4tc.core.jem.train import JEMConfig, JEMTrainer, ValidSamplerConfig
+from bm4tc.core.jem.train import SELECT_FROM, JEMConfig, JEMTrainer, ValidSamplerConfig
 from bm4tc.core.objective import OptimizerConfig
 from bm4tc.core.train import TrainConfig
 
@@ -120,6 +120,25 @@ def test_beta_zero_has_no_generative_term():
     assert v["loss_x"] != v["loss_x"]          # nan: no SGLD at beta 0
     assert v["objective"] == v["loss_dis"]
     assert log[-1]["train"]["penalty"] == 0.0
+
+
+def test_selection_skips_the_cold_validation_chain():
+    """D161: a validation before SELECT_FROM, however low (here made the lowest, as
+    the cold validation chain makes it), is neither the best state nor counted."""
+    trainer = _trainer(0.5, max_epoch=SELECT_FROM + 2)
+    validate = trainer._validate
+
+    def cold_start(epoch):
+        valid = validate(epoch)
+        if epoch < SELECT_FROM:
+            valid["objective"] -= 10.0
+        return valid
+
+    trainer._validate = cold_start
+    log = []
+    trainer.train(on_epoch_end=lambda e, r: log.append((e, r["valid"]["objective"])))
+    selectable = [(objective, e) for e, objective in log if e >= SELECT_FROM]
+    assert trainer.best_epoch == min(selectable)[1]
 
 
 def test_at_selects_on_objective_and_saves(tmp_path):

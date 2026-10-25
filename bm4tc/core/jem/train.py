@@ -13,8 +13,10 @@ N = ``n_vars(x)``, the features and the class, as for the MPS (D86).
 Validation and selection are the MPS's (:func:`bm4tc.core.objective.evaluate`,
 argmin ``objective``, D8), with log Z estimated by a standardized, seeded SGLD
 chain independent of the training sampler, so that weak training chains cannot
-buy a low validation loss. The replay buffer is part of the best state and of the
-checkpoint.
+buy a low validation loss. That chain starts from noise, so its first estimates
+are too low and so is ``objective`` (``jem_mnist12_nat`` at β ≥ 0.9: −2 to −4 in
+epochs 1–2, above 0 after): selection starts at epoch :data:`SELECT_FROM` (D161).
+The replay buffer is part of the best state and of the checkpoint.
 """
 import logging
 import math
@@ -35,6 +37,11 @@ from bm4tc.core.objective import evaluate, mix, n_vars, optimizer
 from bm4tc.core.train import TrainConfig, curriculum_eps, evasion_config
 
 logger = logging.getLogger(__name__)
+
+# The first epoch whose validation may become the best state and counts towards
+# patience, at β > 0 (D161; earlier validations are logged and reported to the HPO
+# pruner, whose warm-up is later). The validation chain's cold start lasts 1–2 epochs.
+SELECT_FROM = 5
 
 
 @dataclass
@@ -201,6 +208,9 @@ class JEMTrainer:
         cfg = self.cfg
         self.optimizer = optimizer(self.model.parameters(), cfg.optimizer)
         patience = 0
+        # a run shorter than SELECT_FROM still selects from its last validation
+        last_validation = max(cfg.eval_every, cfg.max_epoch // cfg.eval_every * cfg.eval_every)
+        select_from = 1 if cfg.beta <= 0 else min(SELECT_FROM, last_validation)
         regime = "JEM-AT" if self.attack is not None else "JEM"
         logger.info(f"{regime} training begins (beta={cfg.beta:.3g}, "
                     f"{self.model.count_parameters()} parameters).")
@@ -225,7 +235,7 @@ class JEMTrainer:
             record["diagnostics"] = self._diagnostics
             if on_epoch_end is not None:
                 on_epoch_end(epoch, record)
-            if validated:
+            if validated and epoch >= select_from:
                 if math.isfinite(valid["objective"]) and valid["objective"] < self.best["objective"]:
                     self.best, self.best_epoch = dict(valid), epoch
                     self._best_state = self._snapshot()
