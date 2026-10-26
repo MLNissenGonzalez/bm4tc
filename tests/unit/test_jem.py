@@ -13,7 +13,8 @@ from bm4tc.core.interface import class_probabilities, log_px, nll
 from bm4tc.core.jem.model import (JEMMLP, JEMModelConfig, matched_width,
                                   mlp_parameter_count, mps_parameter_count)
 from bm4tc.core.jem.sampler import ReplayBuffer, SGLDConfig, SGLDSampler
-from bm4tc.core.jem.train import SELECT_FROM, JEMConfig, JEMTrainer, ValidSamplerConfig
+from bm4tc.core.jem.train import (SELECT_FROM, VALID_ROUNDS, VALID_TOL, JEMConfig, JEMTrainer,
+                                  ValidSamplerConfig)
 from bm4tc.core.objective import OptimizerConfig
 from bm4tc.core.train import TrainConfig
 
@@ -93,11 +94,13 @@ def _trainer(beta, evasion=None, max_epoch=3, save=False):
 # dis_loss/valid, mixed_loss/valid, acc/valid). Later epochs differ from it on
 # purpose: validation is now the shared evaluate(), whose disabled tqdm around the
 # loader costs one torch RNG draw that the old JEM validation did not, so the
-# training stream shifts from epoch 2 on.
+# training stream shifts from epoch 2 on. objective/valid was re-pinned at D163 (the
+# validation chain refines until its log Z estimate stops rising: 0.6061, 0.5617,
+# 0.5206 before); the training stream and the other columns did not move.
 EPOCHS = [
-    (0.6512282689412435, 0.9979217052459717, 0.6060814023017883, 0.6875),
-    (0.6038286754240592, 0.9266936779022217, 0.5616896271705627, 0.625),
-    (0.5626597174753745, 0.8615583181381226, 0.5206401705741882, 0.625),
+    (0.6512282689412435, 0.9979217052459717, 0.611006498336792, 0.6875),
+    (0.6038286754240592, 0.9266936779022217, 0.5694947719573975, 0.625),
+    (0.5626597174753745, 0.8615583181381226, 0.530038583278656, 0.625),
 ]
 
 
@@ -139,6 +142,30 @@ def test_selection_skips_the_cold_validation_chain():
     trainer.train(on_epoch_end=lambda e, r: log.append((e, r["valid"]["objective"])))
     selectable = [(objective, e) for e, objective in log if e >= SELECT_FROM]
     assert trainer.best_epoch == min(selectable)[1]
+
+
+@pytest.mark.parametrize("rises, rounds", [
+    ([2.0, 0.5], 3),               # stops at the first round that adds less than VALID_TOL
+    ([2.0, -0.5], 3),              # or lowers the estimate
+    ([2.0] * 50, VALID_ROUNDS),    # a chain still climbing stops at the cap
+])
+def test_validation_log_Z_refines_until_it_stops_rising(rises, rounds):
+    """D163: rounds of the validation chain until one raises the estimate by less
+    than VALID_TOL per modelled variable. ``rises`` are in units of that tolerance."""
+    trainer = _trainer(0.5)
+    n = trainer.model.data_dim + 1
+    estimates = [0.0]
+    for rise in rises:
+        estimates.append(estimates[-1] + rise * n * VALID_TOL)
+    calls = []
+
+    def one_round(epoch):
+        calls.append(epoch)
+        return estimates[len(calls) - 1]
+
+    trainer._log_Z_round = one_round
+    assert trainer._log_Z(3) == estimates[rounds - 1]
+    assert calls == [3] * rounds
 
 
 def test_at_selects_on_objective_and_saves(tmp_path):

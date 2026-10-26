@@ -7,7 +7,10 @@ rows were re-pinned at cw = 0 (D91; the seam ran at cw = 0.5 before), and the
 analysis rows at D149 (PGD is BarePGD with 2 restarts: `rob` holds, detection and
 purification score its examples; JOINT_PGD kept on here to pin its path). The AT
 row at beta 0.75 was re-pinned at D161: selection starts at epoch 4 of its 4
-(SELECT_FROM), where it picked epoch 2 before.
+(SELECT_FROM), where it picked epoch 2 before. Both beta 0.75 rows were re-pinned at
+D163 (the validation chain refines until its log Z estimate stops rising): NAT now
+selects epoch 5, so its model and analysis rows move; AT keeps its epoch-4 model and
+only `objective/valid` moves (0.350695 before).
 """
 import csv
 
@@ -22,15 +25,15 @@ EXPECTED = {
                    "rob/test/0.1": 0.62, "rob_joint/test/0.1": 0.62, "detect/test/0.1/q5": 0.01,
                    "purify/test/0.1/d0.1": 0.64, "purify_sgld/test/0.1/k2": 0.60,
                    "purify_sgld/test/0/k1": 0.64},
-    ("nat", 0.75): {"objective/valid": 0.305936, "acc/test": 0.72, "loss_dis/test": 0.564802,
-                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.05,
-                   "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.56,
-                   "purify_sgld/test/0/k1": 0.64},
+    ("nat", 0.75): {"objective/valid": 0.368460, "acc/test": 0.72, "loss_dis/test": 0.609913,
+                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.66, "detect/test/0.1/q5": 0.07,
+                   "purify/test/0.1/d0.1": 0.65, "purify_sgld/test/0.1/k2": 0.62,
+                   "purify_sgld/test/0/k1": 0.66},
     ("at", 0.0): {"objective/valid": 0.737107, "acc/test": 0.71, "loss_dis/test": 0.578934,
                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.03,
                   "purify/test/0.1/d0.1": 0.67, "purify_sgld/test/0.1/k2": 0.54,
                   "purify_sgld/test/0/k1": 0.62},
-    ("at", 0.75): {"objective/valid": 0.350695, "acc/test": 0.70, "loss_dis/test": 0.552633,
+    ("at", 0.75): {"objective/valid": 0.483165, "acc/test": 0.70, "loss_dis/test": 0.552633,
                   "rob/test/0.1": 0.6, "rob_joint/test/0.1": 0.6, "detect/test/0.1/q5": 0.06,
                   "purify/test/0.1/d0.1": 0.66, "purify_sgld/test/0.1/k2": 0.60,
                   "purify_sgld/test/0/k1": 0.66},

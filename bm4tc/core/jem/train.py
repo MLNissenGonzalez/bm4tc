@@ -13,9 +13,12 @@ N = ``n_vars(x)``, the features and the class, as for the MPS (D86).
 Validation and selection are the MPS's (:func:`bm4tc.core.objective.evaluate`,
 argmin ``objective``, D8), with log Z estimated by a standardized, seeded SGLD
 chain independent of the training sampler, so that weak training chains cannot
-buy a low validation loss. That chain starts from noise, so its first estimates
-are too low and so is ``objective`` (``jem_mnist12_nat`` at β ≥ 0.9: −2 to −4 in
-epochs 1–2, above 0 after): selection starts at epoch :data:`SELECT_FROM` (D161).
+buy a low validation loss. A chain that lags the model estimates log Z too low, and
+so ``objective``: each validation refines the chain in rounds until the estimate stops
+rising (D163; on ECG200, whose epoch is 1–2 optimizer steps, one round per epoch left
+``loss_x/valid`` below 0 for epochs 3–6). On MNIST 12×12 the first epochs' estimates
+stay low however long the chain runs (−2 to −4 in epochs 1–2, ``jem_mnist12_nat`` at
+β ≥ 0.9): selection starts at epoch :data:`SELECT_FROM` (D161).
 The replay buffer is part of the best state and of the checkpoint.
 """
 import logging
@@ -42,6 +45,12 @@ logger = logging.getLogger(__name__)
 # patience, at β > 0 (D161; earlier validations are logged and reported to the HPO
 # pruner, whose warm-up is later). The validation chain's cold start lasts 1–2 epochs.
 SELECT_FROM = 5
+
+# The validation estimate of log Z is refined in rounds until a round raises it by
+# less than VALID_TOL nats per modelled variable (loss_x's unit, D86), at most
+# VALID_ROUNDS rounds (D163). ECG200 settles in 2–3 rounds after its first 10 epochs.
+VALID_TOL = 1e-4
+VALID_ROUNDS = 20
 
 
 @dataclass
@@ -145,9 +154,20 @@ class JEMTrainer:
 
     def _log_Z(self, epoch: int) -> float:
         """The validation estimate of log Z: the mean score of a standardized SGLD
-        chain, seeded per epoch apart from the training randomness. nan at β=0."""
+        chain, seeded per epoch apart from the training randomness, refined until it
+        stops rising (D163). nan at β=0."""
         if self.cfg.beta <= 0:
             return float("nan")
+        n = self.model.data_dim + 1                      # n_vars (D86)
+        estimate = self._log_Z_round(epoch)
+        for _ in range(VALID_ROUNDS - 1):
+            previous, estimate = estimate, self._log_Z_round(epoch)
+            if (estimate - previous) / n < VALID_TOL:
+                break
+        return estimate
+
+    def _log_Z_round(self, epoch: int) -> float:
+        """One round: the epoch's seeded draw of buffer slots, refined and scored."""
         v = self.jem.valid_sampler
         devices = []
         if torch.device(self.device).type == "cuda":
