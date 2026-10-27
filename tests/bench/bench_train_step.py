@@ -10,7 +10,7 @@ put the numbers in the commit message:
         --micro-batch 256 --beta 0.5          # full MNIST d3r40, as mnist_capacity trains it
 
 Random inputs in the embedding's input range, 10 classes; the defaults are MNIST12
-(144 features), d3r20, batch 256, β = 0. The Trainer runs through its public
+(144 features), d3r20 (`--in-dim`, `--bond-dim`), batch 256, β = 0. The Trainer runs through its public
 `train()` with its defaults (on CUDA the step and the validation are captured, D90,
 D92; `--eager` turns that off); only `_train_epoch` is timed (the validation pass is
 not), and the first two epochs are discarded: epoch 1 runs eagerly, epoch 2
@@ -135,7 +135,7 @@ def bench(regime: str, args, device: torch.device) -> tuple[list[float], int, in
     (0, 0, None on CPU), and with ``--snapshot`` the pools after training
     (:func:`pool_report`)."""
     torch.manual_seed(0)
-    born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=3, bond_dim=args.bond_dim))  # defaults: legendre c64
+    born = CBMConfig(init_kwargs=MPSInitConfig(in_dim=args.in_dim, bond_dim=args.bond_dim))  # defaults: legendre c64
     cbm = ConditionalBornMachine(born, args.features, N_CLASSES, device)
     dh = _datahandler(cbm, args.features, args.batch, args.micro_batch, args.steps)
     common = dict(beta=args.beta, max_epoch=args.epochs, batch_size=args.batch,
@@ -183,6 +183,7 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--regime", choices=["nat", "at", "both"], default="both")
     parser.add_argument("--features", type=int, default=144, help="sites (MNIST12 144, MNIST 784)")
+    parser.add_argument("--in-dim", type=int, default=3, help="physical dimension d")
     parser.add_argument("--bond-dim", type=int, default=20)
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--micro-batch", type=int, default=None)
@@ -196,7 +197,7 @@ def main():
 
     name = torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu"
     mode = "eager" if args.eager or device.type != "cuda" else "captured"
-    print(f"legendre d3r{args.bond_dim} c64, {args.features} features, {N_CLASSES} classes, "
+    print(f"legendre d{args.in_dim}r{args.bond_dim} c64, {args.features} features, {N_CLASSES} classes, "
           f"batch {args.batch}, micro-batch {args.micro_batch}, β {args.beta}, {mode}, "
           f"{args.steps} steps x {args.epochs - WARM_EPOCHS} timed epochs, {name}")
     for regime in (["nat", "at"] if args.regime == "both" else [args.regime]):

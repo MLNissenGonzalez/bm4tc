@@ -1,0 +1,17 @@
+# MNIST 12x12, the physical dimension at r40, NAT, cold (D164): a capacity knob beside
+# the rank. d3r40 is mnist12_nat's cell, so every other setting is mnist12_nat's and the
+# two studies read side by side (a figure joins them; no run depends on the other).
+dataset: mnist12
+regime: nat
+grid:
+  arch: [d2r40, d5r40, d10r40]
+  beta: [0, 1]
+config:
+  trainer.max_epoch: 200       # as mnist12_nat (D121)
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # as mnist12_nat (D157)
+analysis:
+  adaptive: {enabled: false}   # D164: like the capacity studies (D129), no adaptive number
