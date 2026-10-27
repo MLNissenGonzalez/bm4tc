@@ -40,6 +40,36 @@ class FourierEmbedding:
         return torch.stack(components, dim=axis).to(self.dtype)
 
 
+class CosineEmbedding:
+    """
+    Cosine basis of L²[0,1]: φ_0(x) = 1, φ_k(x) = √2 · cos(πkx) for k = 1 … dim−1.
+
+    Orthonormal on [0,1]: with 2 cos a cos b = cos(a−b) + cos(a+b),
+
+        ∫_0^1 2 cos(πjx) cos(πkx) dx = ∫_0^1 cos(π(j−k)x) + cos(π(j+k)x) dx,
+
+    and ∫_0^1 cos(πmx) dx = sin(πm)/(πm) = 0 for every integer m ≠ 0, so the integral
+    is δ_jk for j, k ≥ 1 (j = k leaves ∫_0^1 1 dx = 1); for φ_0 against φ_k it is
+    √2 · sin(πk)/(πk) = 0, and ∫_0^1 φ_0² = 1. It is complete: the even extension of
+    f ∈ L²[0,1] to [−1,1] has a Fourier series of cosines alone, cos(πkx).
+
+    Unlike ``FourierEmbedding`` (period 1 = the range, so φ(0) = φ(1) at every dim),
+    its period is 2, so the two ends differ: φ_k(0) = √2, φ_k(1) = √2 · (−1)^k. Every
+    φ_k has zero slope at both ends (``LegendreEmbedding``'s slope there grows as k²).
+    """
+
+    def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
+        self.dim = dim
+        self.dtype = dtype
+
+    def __call__(self, data: torch.Tensor, axis: int = -1) -> torch.Tensor:
+        if not isinstance(data, torch.Tensor):
+            raise TypeError('`data` should be torch.Tensor type')
+        components = [torch.ones_like(data)] + [
+            sqrt(2) * (pi * k * data).cos() for k in range(1, self.dim)]
+        return torch.stack(components, dim=axis).to(self.dtype)
+
+
 class PolyEmbedding:
     """Polynomial (monomial) embedding, matching tk.embeddings.poly."""
 
@@ -196,6 +226,7 @@ class ChebyshevT2Embedding:
 
 _EMBEDDING_MAP = {
     "fourier":     FourierEmbedding,
+    "cosine":      CosineEmbedding,
     "poly":        PolyEmbedding,
     "polynomial":  PolyEmbedding,
     "legendre":    LegendreEmbedding,
@@ -216,9 +247,11 @@ def embedding(name: str, dim: int, dtype: torch.dtype = torch.float32) -> Callab
     name : str
         Embedding identifier (case-insensitive). Valid options:
         - "fourier"
+        - "cosine"
         - "poly" or "polynomial"
         - "legendre"
         - "hermite"
+        - "chebychev1" / "chebyshev1", "chebychev2" / "chebyshev2"
     dim : int
         Physical dimension (number of embedding components).
     dtype : torch.dtype
@@ -245,6 +278,7 @@ def embedding(name: str, dim: int, dtype: torch.dtype = torch.float32) -> Callab
 
 _EMBEDDING_TO_RANGE = {
     "fourier":    (0., 1.),
+    "cosine":     (0., 1.),
     "legendre":   (-1., 1.),
     "hermite":    (-4., 4.),
     # Both Chebyshev families are restricted to ±0.99 rather than ±1, for

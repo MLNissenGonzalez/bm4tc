@@ -11,10 +11,10 @@ from tests.conftest import raw_amplitudes
 
 
 def _tiny_cbm(embedding="fourier", dtype="float32", data_dim=2, num_classes=2,
-              bond_dim=2, std=1e-3):
+              bond_dim=2, std=1e-3, in_dim=2):
     cfg = CBMConfig(
         embedding=embedding,
-        init_kwargs=MPSInitConfig(in_dim=2, bond_dim=bond_dim, dtype=dtype, std=std),
+        init_kwargs=MPSInitConfig(in_dim=in_dim, bond_dim=bond_dim, dtype=dtype, std=std),
     )
     return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
 
@@ -633,6 +633,15 @@ def _numeric_log_Z(cbm, grid=401):
     w[0] = w[-1] = 0.5
     weights = torch.outer(w, w).reshape(-1) * ((hi - lo) / (grid - 1)) ** 2
     return torch.logsumexp(lse + weights.log(), 0).item()
+
+
+@pytest.mark.parametrize("embedding", ["fourier", "cosine", "legendre"])
+def test_log_Z_is_the_integral_over_the_input_range(embedding):
+    """The contracted log Z is ∫ Σ_c |ψ|² over the input range, for the embeddings
+    orthonormal on it (tests/unit/test_embeddings.py), at a d with several frequencies."""
+    torch.manual_seed(3)
+    cbm = _tiny_cbm(embedding=embedding, dtype="complex64", bond_dim=3, std=0.3, in_dim=4)
+    assert abs(float(cbm.log_partition_function()) - _numeric_log_Z(cbm, grid=801)) < 1e-3
 
 
 def test_boundaries_are_fixed_and_shared_with_norm_net():

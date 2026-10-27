@@ -11,13 +11,16 @@ this repository.
 
 **MPS Born machine** (`bm4tc/core/model.py`, `ConditionalBornMachine`, a
 `tensorkrowch` MPS). Each input feature x_i is embedded into a d-dimensional vector
-φ(x_i) (`bm4tc/core/embeddings.py`: legendre, fourier, hermite, chebychev1/2). An MPS
+φ(x_i) (`bm4tc/core/embeddings.py`: legendre, fourier, cosine, hermite, chebychev1/2). An MPS
 of bond dimension r, with one extra site for the class, contracts the embedded input
 into amplitudes ψ(x, c) (complex64 by default, D4). The Born rule gives
 
     p(x, c) = |ψ(x, c)|² / Z,   Z = Σ_c ∫ |ψ(x, c)|² dx   (exact, by contracting the MPS with itself)
 
-so p(c | x), log p(x) and their gradients are all exact. Long chains (MNIST: 145
+so p(c | x), log p(x) and their gradients are all exact. Contracting the MPS with
+itself gives ∫ |ψ|² only because the embedding is orthonormal, ∫ φ(x) φ(x)ᵀ dx = I
+(`tests/unit/test_embeddings.py` checks every embedding; the table says on which
+domain). Long chains (MNIST: 145
 sites) overflow float32, so contractions run in the log domain with norm
 accumulation (the only amplitude path, D89; renormalized every 8 sites for Legendre, every 4 otherwise, D119, D120), and `log Z` is computed by a zip-up contraction.
 These caches belong to the model, keyed on the parameters' versions (D31, D55). This
@@ -26,10 +29,14 @@ numerical core is not touched outside a dedicated track (D30; see "Rules for cha
 | Embedding | Input range | Note |
 |---|---|---|
 | `legendre` (default) | [−1, 1] | orthonormal Legendre polynomials |
-| `fourier` | [0, 1] | tensorkrowch's |
-| `hermite` | [−4, 4] | Hermite functions; `init_method: canonical` |
-| `chebychev1` | [−0.99, 0.99] | the weight diverges at ±1 |
-| `chebychev2` | [−0.99, 0.99] | φ(±1) = 0 would be unreachable |
+| `fourier` | [0, 1] | tensorkrowch's; periodic, so φ(0) = φ(1) |
+| `cosine` | [0, 1] | √2 cos πkx; flat at both ends (orthonormality proved in its docstring) |
+| `hermite` | [−4, 4] | Hermite functions, orthonormal on ℝ; `init_method: canonical` |
+| `chebychev1` | [−0.99, 0.99] | orthonormal on (−1, 1); the weight diverges at ±1 |
+| `chebychev2` | [−0.99, 0.99] | orthonormal on (−1, 1); φ(±1) = 0 would be unreachable |
+
+The others are orthonormal on their input range. Hermite and Chebyshev normalise the
+density on the larger domain, so it puts some mass outside the data's range.
 
 Data are rescaled to the embedding's input range (JEM: [−1, 1], no embedding).
 

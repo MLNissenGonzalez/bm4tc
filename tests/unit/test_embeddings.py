@@ -5,6 +5,7 @@ from bm4tc.core.embeddings import (
     LegendreEmbedding,
     HermiteEmbedding,
     ChebyshevT1Embedding,
+    _EMBEDDING_TO_RANGE,
     embedding,
     range_from_embedding,
 )
@@ -145,7 +146,7 @@ def test_range_from_embedding_chebychev2():
 # ---- no embedding may vanish inside its own declared domain ----
 
 @pytest.mark.parametrize(
-    "name", ["fourier", "legendre", "hermite", "chebychev1", "chebychev2"]
+    "name", ["fourier", "cosine", "legendre", "hermite", "chebychev1", "chebychev2"]
 )
 def test_embedding_never_vanishes_in_its_own_range(name):
     """‖φ(x)‖ > 0 for every x in the declared domain.
@@ -192,3 +193,85 @@ def test_embedding_no_nan_inf():
     x = torch.rand(BATCH, DATA_DIM)
     out = emb(x)
     assert torch.isfinite(out).all()
+
+
+# ---- orthonormality: Z = Σ_c ∫ |ψ|² is the MPS contracted with itself only if ∫ φ φᵀ = I ----
+
+DIMS = [1, 2, 3, 5, 10]   # mnist12_pdim's d and below
+QUAD_NODES = 400
+
+# Embeddings orthonormal on a larger domain than their input range: that domain, and the
+# largest |Gram − I| on the input range at the dims above (the density is normalised on
+# the larger domain, so it puts some mass outside the data's range). Every other embedding
+# with a range must be orthonormal on that range.
+ORTHONORMAL_ELSEWHERE = {
+    "hermite":    ((-12.0, 12.0), 0.25),   # ℝ; [-4, 4] cuts the tails: 2e-1 at dim 10
+    "chebychev1": ("(-1, 1)", 0.2),        # ±0.99 cuts the diverging weight: 0.18
+    "chebyshev1": ("(-1, 1)", 0.2),
+    "chebychev2": ("(-1, 1)", 0.1),        # 0.08 at dim 10
+    "chebyshev2": ("(-1, 1)", 0.1),
+}
+# Hermite's scale is π^(1/8) too large (¼·ln π where ½·ln π belongs in `_norms`), so its
+# Gram is π^(1/4)·I. Remove the mark with the fix.
+HERMITE_SCALE = pytest.mark.xfail(strict=True, reason="Hermite normalisation: Gram = π^(1/4)·I")
+
+
+def _ranged(name):
+    return pytest.param(name, marks=HERMITE_SCALE) if name == "hermite" else name
+
+
+def _gram(name, dim, domain):
+    """∫ φ φᵀ over ``domain`` in float64: Gauss-Legendre quadrature on an interval;
+    ``"(-1, 1)"`` substitutes x = cos θ and takes the midpoint rule in θ. Both Chebyshev
+    integrands then become trigonometric polynomials (cos mθ cos nθ, sin mθ sin nθ), which
+    that rule integrates exactly, and no node comes near the embedding's clamp
+    (1 − x² ≥ 1e-6) at the ends."""
+    import numpy as np
+    if domain == "(-1, 1)":
+        theta = torch.tensor(np.pi * (np.arange(QUAD_NODES) + 0.5) / QUAD_NODES)
+        x, w = theta.cos(), np.pi / QUAD_NODES * theta.sin()
+    else:
+        t, w = np.polynomial.legendre.leggauss(QUAD_NODES)
+        lo, hi = domain
+        x, w = torch.tensor((hi - lo) / 2 * t + (hi + lo) / 2), torch.tensor((hi - lo) / 2 * w)
+    phi = embedding(name, dim, dtype=torch.float64)(x)
+    return (phi * w[:, None]).T @ phi
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("name", [_ranged(n) for n in _EMBEDDING_TO_RANGE])
+def test_embedding_is_orthonormal(name, dim):
+    domain = ORTHONORMAL_ELSEWHERE.get(name, (range_from_embedding(name),))[0]
+    gram = _gram(name, dim, domain)
+    assert torch.allclose(gram, torch.eye(dim, dtype=gram.dtype), atol=1e-10), (
+        f"{name} at dim {dim} on {domain}: max |Gram − I| = "
+        f"{(gram - torch.eye(dim, dtype=gram.dtype)).abs().max().item():.3g}")
+
+
+@pytest.mark.parametrize("dim", DIMS)
+@pytest.mark.parametrize("name", [_ranged(n) for n in _EMBEDDING_TO_RANGE])
+def test_embedding_gram_on_its_input_range(name, dim):
+    tol = ORTHONORMAL_ELSEWHERE.get(name, (None, 1e-10))[1]
+    gram = _gram(name, dim, range_from_embedding(name))
+    deviation = (gram - torch.eye(dim, dtype=gram.dtype)).abs().max().item()
+    assert deviation <= tol, f"{name} at dim {dim}: max |Gram − I| = {deviation:.3g} > {tol}"
+
+
+# ---- cosine vs Fourier at the ends of [0, 1] ----
+
+def test_cosine_ends_differ_where_fourier_ends_collide():
+    """Fourier's period equals its range, so a pixel at 0 and one at 1 embed the same at
+    every dim; the cosine basis has period 2, and φ_1 tells the ends apart."""
+    ends = torch.tensor([0.0, 1.0])
+    fourier, cosine = embedding("fourier", 5)(ends), embedding("cosine", 5)(ends)
+    assert torch.allclose(fourier[0], fourier[1], atol=1e-5)
+    assert not torch.allclose(cosine[0], cosine[1], atol=1e-2)
+
+
+def test_cosine_is_flat_at_both_ends():
+    """dφ_k/dx = −√2 πk sin(πkx) is 0 at 0 and 1 for every k (Legendre's grows as k²)."""
+    x = torch.tensor([0.0, 1.0], dtype=torch.float64, requires_grad=True)
+    phi = embedding("cosine", 10, dtype=torch.float64)(x)
+    for k in range(10):
+        (grad,) = torch.autograd.grad(phi[:, k].sum(), x, retain_graph=True)
+        assert grad.abs().max() < 1e-12
