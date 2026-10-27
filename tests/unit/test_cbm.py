@@ -646,6 +646,25 @@ def test_log_Z_is_the_integral_over_the_input_range(embedding):
     assert abs(float(cbm.log_partition_function()) - _numeric_log_Z(cbm, grid=801)) < 1e-3
 
 
+@pytest.mark.parametrize("embedding", ["cosine", "legendre", "hermite"])
+def test_the_unit_interval_density_integrates_to_one(embedding):
+    """D170: the analysis reports log p per feature on the unit interval, the model's
+    log p plus ln(hi − lo) per feature (``analyse.log_width``). Integrated over [0, 1]²
+    it is a density, whatever the embedding's range (widths 1, 2, 8)."""
+    from bm4tc.pipeline.analyse import log_width
+    torch.manual_seed(3)
+    cbm = _tiny_cbm(embedding=embedding, dtype="complex64", bond_dim=3, std=0.3, in_dim=4)
+    lo, hi = cbm.input_range
+    u = torch.linspace(0, 1, 801)
+    with torch.no_grad():
+        log_p = (torch.logsumexp(cbm.log_joint(lo + (hi - lo) * torch.cartesian_prod(u, u)), 1)
+                 - cbm.log_normalizer() + 2 * log_width(cbm)).double()
+    w = torch.ones(801, dtype=torch.float64)
+    w[0] = w[-1] = 0.5
+    weights = torch.outer(w, w).reshape(-1) / 800 ** 2
+    assert abs(float(torch.logsumexp(log_p + weights.log(), 0))) < 1e-3
+
+
 def test_boundaries_are_fixed_and_shared_with_norm_net():
     cbm = _tiny_cbm(embedding="legendre", dtype="complex64", bond_dim=3)
     for name in ("_left_node", "_right_node"):

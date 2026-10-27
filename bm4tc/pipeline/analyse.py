@@ -34,6 +34,7 @@ does the sweep purification (Gibbs, SGLD) with its adaptive attack.
 import hashlib
 import json
 import logging
+import math
 import time
 from pathlib import Path
 from functools import partial
@@ -97,6 +98,22 @@ SETTINGS = {
 }
 
 
+# The parts that report log-densities (loss_x, log_px), and the units they report them in
+# (D170). The units enter these parts' hashes, so results stored in the model's units
+# (before D170) are recomputed unless converted in place first.
+LOG_DENSITY_PARTS = ("clean", "uq", "uq_joint")
+LOG_DENSITY_UNITS = "nats per feature on the unit interval"
+
+
+def log_width(model) -> float:
+    """ln(hi − lo) of the model's input range: a log-density per feature on that range
+    minus this is the same density on the unit interval, the data's own range before
+    rescaling (D170). So log-densities compare across embeddings (ranges of width 1, 2,
+    1.98 and 8) and with JEM ([−1, 1]); the training logs (``loss_x`` on train and valid,
+    the objective) stay on the model's range, where they are optimised."""
+    return math.log(range_size_of(model))
+
+
 def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
     """What makes a part's results reusable: its settings, the budgets, the run.
     ``adaptive.seeds`` and ``sweep_purify.adaptive_seeds`` say which runs get a part,
@@ -112,8 +129,11 @@ def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
         settings["attack"].pop("subsample")
     if name == "adaptive_sweep":
         settings["attack"]["restarts"] = _sweep_restarts(analysis)
-    blob = json.dumps({"part": name, "settings": settings, "budgets": list(budgets),
-                       "run": run_hash, "seed": SEED}, sort_keys=True)
+    fields = {"part": name, "settings": settings, "budgets": list(budgets),
+              "run": run_hash, "seed": SEED}
+    if name in LOG_DENSITY_PARTS:
+        fields["units"] = LOG_DENSITY_UNITS
+    blob = json.dumps(fields, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -157,6 +177,8 @@ def clean(cbm, datahandler, analysis, budgets: List[float], device) -> Dict[str,
         datahandler.classification[SPLIT], device, log_Z=float("nan") if jem else None)
     names = ("acc", "loss_dis") if jem else ("acc", "loss_dis", "loss_x")
     out = {key(name, SPLIT): m[name] for name in names}
+    if not jem:
+        out[key("loss_x", SPLIT)] -= log_width(cbm)
     if analysis.rob_ceiling:
         out.update(_ceilings(cbm, datahandler, budgets, analysis.rob_ceiling_cells))
     return out
@@ -216,12 +238,15 @@ def _n_features(datahandler) -> int:
     return datahandler.data[SPLIT][0].numel()
 
 
-def _attack_keys(r: UQResults, n_features: int, suffix: str = "") -> Dict[str, float]:
-    """``log_px`` is per feature (D86), like ``loss_x``."""
+def _attack_keys(r: UQResults, n_features: int, log_w: float,
+                 suffix: str = "") -> Dict[str, float]:
+    """``log_px`` is per feature (D86) on the unit interval (D170), like ``loss_x``;
+    ``log_w`` is :func:`log_width` of the model."""
     out = {}
     for eps, acc in r.adv_accuracies.items():
         out[key(f"rob{suffix}", SPLIT, eps)] = acc
-        out[key(f"log_px{suffix}", SPLIT, eps)] = float(r.adv_log_px[eps].mean()) / n_features
+        out[key(f"log_px{suffix}", SPLIT, eps)] = (float(r.adv_log_px[eps].mean()) / n_features
+                                                   + log_w)
     for (pct, eps), rate in r.detection_rates.items():
         q = f"q{pct:g}"
         out[key(f"detect{suffix}", SPLIT, eps, q)] = rate
@@ -237,8 +262,8 @@ def _attack_keys(r: UQResults, n_features: int, suffix: str = "") -> Dict[str, f
 def uq(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     r = _evaluate(cbm, datahandler, _uq_config(analysis, budgets), device)
     n = _n_features(datahandler)
-    out = _attack_keys(r, n)
-    out[key("log_px", SPLIT, 0)] = float(r.clean_log_px.mean()) / n
+    out = _attack_keys(r, n, log_width(cbm))
+    out[key("log_px", SPLIT, 0)] = float(r.clean_log_px.mean()) / n + log_width(cbm)
     for pct, rate in r.clean_flagged.items():
         out[key("detect", SPLIT, 0, f"q{pct:g}")] = rate
     for delta, m in r.clean_purification_results.items():
@@ -270,7 +295,7 @@ def gradients(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
 def uq_joint(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
     cfg = _uq_config(analysis, budgets, attack_method="JOINT_PGD")
     return _attack_keys(_evaluate(cbm, datahandler, cfg, device), _n_features(datahandler),
-                        "_joint")
+                        log_width(cbm), "_joint")
 
 
 def _sweep(name: str, cbm, datahandler, analysis, budgets, device, purifier=None):

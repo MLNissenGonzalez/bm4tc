@@ -16,7 +16,9 @@ modelled variables (n features and the class).
     penalty     the norm-control penalty (train only; JEM: the energy penalty)
     loss_dis    -log p(c|x) on clean data, nats per label
     loss_x      -log p(x) / n on clean data, nats per feature (JEM: its estimate, with
-                log Z estimated by a standardized SGLD chain; nan at beta=0)
+                log Z estimated by a standardized SGLD chain; nan at beta=0). In
+                training (train, valid) p is the density on the model's input range;
+                the analysis (test) reports it on the unit interval (below, D170)
     loss_adv    -log p(c|x_adv) on the PGD examples (AT only)
     acc         clean accuracy
     rob         robust accuracy, keyed by relative budget
@@ -30,6 +32,14 @@ Analysis (`analyse`, on test) uses the same rule. Budget 0 is clean data, so a
 curve over budgets starts at the clean value; the last part names the defence
 setting: q{percentile} (detection threshold, calibrated on valid, D2),
 d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
+
+Log-densities in the analysis (`loss_x/test`, `log_px/test/{eps}`) are per feature on
+the unit interval, the data's own range before it is rescaled to the model's input
+range [lo, hi] (D170): the model's density there, plus ln(hi − lo) for log p. The
+embeddings' ranges have widths 1 (fourier, cosine), 2 (legendre), 1.98 (chebychev) and 8
+(hermite), and JEM's is 2, so only these units compare across models. They do not
+compare across datasets with different scalers (the series' robust sigmoid is not
+linear in the raw values).
 
     acc, loss_dis, loss_x                clean, on the full test split
     rob_ceiling/test/{eps}               data-only bound on robust accuracy (two classes)

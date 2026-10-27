@@ -65,7 +65,10 @@ One objective for both regimes and both models (`bm4tc/core/objective.py`,
 
 N = n + 1 counts the modelled variables (the n features and the class), so L_gen / N
 is the generative loss per variable and L is a weighted mean of per-variable NLLs:
-every loss is in **nats per variable** (D86).
+every loss is in **nats per variable** (D86). In training, p(x) is the density on the
+model's input range; the analysis reports log-densities on the unit interval, ln(hi − lo)
+per feature apart, so they compare across embeddings and models (D170,
+`bm4tc/pipeline/metrics.py`).
 
 - **NAT** (natural training): no attack, so L = (1 − β) · L_dis(x) + (β / N) · L_gen(x)
   = (1 − s) · L_dis + s · L_x with s = β·n/N and L_x = −log p(x) / n (nats per feature).
