@@ -1,0 +1,25 @@
+# chlorineconcentration, NAT, the default beta ladder, cold; log Z pulled to n·ln d / 2 (D84).
+# Rank d3r10 (D154) and the training budget of its CV capacity study (D151). Its bare
+# classifier breaks ten times sooner than the other series', so its budgets and purification
+# radii are its own (D165).
+dataset: chlorineconcentration
+regime: nat
+grid:
+  arch: [d3r10]
+config:
+  trainer.max_epoch: 3000     # D151: the best lr still falling at 1500
+  trainer.batch_size: 64
+  trainer.patience: 300       # D144: outlasts the ~100 epochs at the majority class
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:                           # D151: CV makes a trial ~5x dearer
+  trials_per_param: 10
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-4, 3e-3]}   # outside it: chance, or not converged by 3000
+budgets: [0.001, 0.002, 0.005, 0.01]   # D165: rob 0.75 -> 0.03 at beta = 0
+analysis:
+  purify_delta: [0.002, 0.005, 0.01]   # D165: below, at and above the budgets
+  sweep_purify:                # D132, as the other series: one sweep, no window; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
