@@ -135,10 +135,12 @@ class HermiteEmbedding:
     def __init__(self, dim: int, dtype: torch.dtype = torch.float32):
         self.dim = dim
         self.dtype = dtype
-        log_sqrt_pi_quarter = 0.25 * math.log(math.pi)
+        # log of sqrt(π) · 2^n · n!; the norm is its square root (D167: it took ¼ ln π, so
+        # every component was π^(1/8) too large)
+        log_sqrt_pi = 0.5 * math.log(math.pi)
         log2 = math.log(2.0)
         self._norms: List[float] = [
-            math.exp(-0.5 * (log_sqrt_pi_quarter + n * log2 + math.lgamma(n + 1)))
+            math.exp(-0.5 * (log_sqrt_pi + n * log2 + math.lgamma(n + 1)))
             for n in range(dim)
         ]
 

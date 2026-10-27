@@ -635,10 +635,12 @@ def _numeric_log_Z(cbm, grid=401):
     return torch.logsumexp(lse + weights.log(), 0).item()
 
 
-@pytest.mark.parametrize("embedding", ["fourier", "cosine", "legendre"])
+@pytest.mark.parametrize("embedding", ["fourier", "cosine", "legendre", "hermite"])
 def test_log_Z_is_the_integral_over_the_input_range(embedding):
     """The contracted log Z is ∫ Σ_c |ψ|² over the input range, for the embeddings
-    orthonormal on it (tests/unit/test_embeddings.py), at a d with several frequencies."""
+    orthonormal on it (tests/unit/test_embeddings.py), at a d with several frequencies.
+    Hermite is orthonormal on ℝ; at d = 4 its tails beyond ±4 are within the tolerance (it was
+    0.572 off on 2 features before D167)."""
     torch.manual_seed(3)
     cbm = _tiny_cbm(embedding=embedding, dtype="complex64", bond_dim=3, std=0.3, in_dim=4)
     assert abs(float(cbm.log_partition_function()) - _numeric_log_Z(cbm, grid=801)) < 1e-3

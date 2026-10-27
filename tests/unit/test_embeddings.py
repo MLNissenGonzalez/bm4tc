@@ -211,13 +211,6 @@ ORTHONORMAL_ELSEWHERE = {
     "chebychev2": ("(-1, 1)", 0.1),        # 0.08 at dim 10
     "chebyshev2": ("(-1, 1)", 0.1),
 }
-# Hermite's scale is π^(1/8) too large (¼·ln π where ½·ln π belongs in `_norms`), so its
-# Gram is π^(1/4)·I. Remove the mark with the fix.
-HERMITE_SCALE = pytest.mark.xfail(strict=True, reason="Hermite normalisation: Gram = π^(1/4)·I")
-
-
-def _ranged(name):
-    return pytest.param(name, marks=HERMITE_SCALE) if name == "hermite" else name
 
 
 def _gram(name, dim, domain):
@@ -239,7 +232,7 @@ def _gram(name, dim, domain):
 
 
 @pytest.mark.parametrize("dim", DIMS)
-@pytest.mark.parametrize("name", [_ranged(n) for n in _EMBEDDING_TO_RANGE])
+@pytest.mark.parametrize("name", list(_EMBEDDING_TO_RANGE))
 def test_embedding_is_orthonormal(name, dim):
     domain = ORTHONORMAL_ELSEWHERE.get(name, (range_from_embedding(name),))[0]
     gram = _gram(name, dim, domain)
@@ -249,7 +242,7 @@ def test_embedding_is_orthonormal(name, dim):
 
 
 @pytest.mark.parametrize("dim", DIMS)
-@pytest.mark.parametrize("name", [_ranged(n) for n in _EMBEDDING_TO_RANGE])
+@pytest.mark.parametrize("name", list(_EMBEDDING_TO_RANGE))
 def test_embedding_gram_on_its_input_range(name, dim):
     tol = ORTHONORMAL_ELSEWHERE.get(name, (None, 1e-10))[1]
     gram = _gram(name, dim, range_from_embedding(name))
