@@ -1,0 +1,20 @@
+# MNIST 12x12, the physical dimension at r40 with the cosine embedding (D168): beside
+# mnist12_pdim (Legendre, D164), every other setting the same. Legendre's slope at the
+# range's ends grows as k^2 and 77 % of the pixels sit at one end; cosine is flat there,
+# at the same d, r and parameter count. The budgets are relative, so the attack is the
+# same in pixel units on cosine's [0, 1] as on Legendre's [-1, 1].
+dataset: mnist12
+regime: nat
+grid:
+  embedding: [cosine]
+  arch: [d2r40, d3r40, d5r40, d10r40]   # d3 too: mnist12_nat's d3r40 is Legendre
+  beta: [0, 1]
+config:
+  trainer.max_epoch: 200       # as mnist12_pdim
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # as mnist12_pdim (D157)
+analysis:
+  adaptive: {enabled: false}   # as mnist12_pdim (D164)
