@@ -8,7 +8,8 @@ parts ran before it (a resumed analysis reproduces them).
     clean      acc, losses, the robust-accuracy ceilings (test; data law if known)
     uq         PGD at every budget: rob, detection, likelihood purification
     uq_joint   the same under the joint attack (if analysis.joint_attack)
-    gibbs      MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
+    gradients  the classifier's first-order steepness at the attacked points (D169)
+    gibbs     MPS: Gibbs purification of PGD examples   } if analysis.sweep_purify
     sgld       JEM: SGLD purification of PGD examples    } .enabled (D72)
     adaptive   the adaptive attack against likelihood purification (D96; if
                analysis.adaptive.enabled, on the runs of analysis.adaptive.seeds, D129)
@@ -45,6 +46,7 @@ from omegaconf import OmegaConf
 from bm4tc.pipeline.metrics import key
 from bm4tc.analysis.ceiling import population_ceiling, robust_accuracy_ceiling
 from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, DataStarts, Defense
+from bm4tc.analysis.gradients import margin_sensitivity
 from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
 from bm4tc.analysis.uq import (UQConfig, UQEvaluation, UQResults, compute_thresholds,
                                fixed_subsample)
@@ -84,6 +86,7 @@ SETTINGS = {
     "clean": ("rob_ceiling", "rob_ceiling_cells"),
     "uq": ("attack", "percentiles", "purify_delta", "purify_steps", "batch_size"),
     "uq_joint": ("attack", "percentiles", "purify_delta", "purify_steps", "batch_size"),
+    "gradients": ("attack", "batch_size"),
     "gibbs": ("attack", "batch_size", "sweep_purify"),
     "sgld": ("attack", "batch_size", "sweep_purify"),
     # D156 moved the detector to adaptive_det; adaptive keeps the whole adaptive section
@@ -126,6 +129,7 @@ def parts(analysis, model: str = "mps", seed: Optional[int] = None) -> Dict[str,
     out = {"clean": clean, "uq": uq}
     if analysis.joint_attack:
         out["uq_joint"] = uq_joint
+    out["gradients"] = gradients
     if analysis.sweep_purify.enabled:
         out.update({"sgld": sgld} if model == "jem" else {"gibbs": gibbs})
     def picked(seeds):
@@ -239,6 +243,27 @@ def uq(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
         out[key("detect", SPLIT, 0, f"q{pct:g}")] = rate
     for delta, m in r.clean_purification_results.items():
         out[key("purify", SPLIT, 0, f"d{delta:g}")] = m.accuracy_after_purify
+    return out
+
+
+def gradients(cbm, datahandler, analysis, budgets, device) -> Dict[str, float]:
+    """The classifier's first-order steepness (D169, :mod:`bm4tc.analysis.gradients`) on
+    the attack's fixed points, as medians over them, budgets relative to the range:
+    the margin, the gain G per unit of budget, the share of G from features at the
+    range's ends, the flip budget ε* (0 for a point already wrong), and per budget the
+    fraction of points with ε* below it (a first-order estimate of 1 − rob)."""
+    cbm.to(device)
+    X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
+    idx = fixed_subsample(len(X), analysis.attack.subsample)
+    s = margin_sensitivity(cbm, X[idx], y[idx], analysis.batch_size, device)
+    gain = s.gain * range_size_of(cbm)
+    eps_star = s.margin.clamp(min=0) / gain
+    out = {key("margin", SPLIT): float(s.margin.median()),
+           key("gain", SPLIT): float(gain.median()),
+           key("gain_ends", SPLIT): float((s.gain_ends / s.gain).nan_to_num().median()),
+           key("eps_star", SPLIT): float(eps_star.median())}
+    for eps in budgets:
+        out[key("eps_star_below", SPLIT, eps)] = float((eps_star < eps).float().mean())
     return out
 
 

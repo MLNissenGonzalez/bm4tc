@@ -48,6 +48,19 @@ d{radius} (likelihood purification), k{sweeps} (Gibbs or SGLD purification):
                                          on a fixed test subsample
     purify_sgld, recovery_sgld           the same for SGLD purification (JEM)
 
+First-order steepness (part `gradients`, D169; `bm4tc/analysis/gradients.py`), on the
+attack's fixed points, medians over them, budgets relative to the input range:
+
+    margin/test                          log p(y|x) − max_{c≠y} log p(c|x)
+    gain/test                            first-order fall of the margin per unit of
+                                         L∞ budget, features at the range's ends
+                                         moving inwards only
+    gain_ends/test                       the share of that gain from features at the ends
+    eps_star/test                        margin / gain: the budget that flips a point to
+                                         first order (0 when it is already wrong)
+    eps_star_below/test/{eps}            fraction of points with eps_star < eps (a
+                                         first-order estimate of 1 − rob)
+
 PGD is one attack (D149): `analysis.attack`'s steps and restarts on its fixed test
 subsample (`attack.subsample`, D117; Gibbs / SGLD on `sweep_purify.subsample`), so
 every attacked number counts the same points. Clean numbers (budget 0, `acc`) keep
