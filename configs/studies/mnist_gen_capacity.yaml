@@ -1,4 +1,4 @@
-# DRAFT (D172): not launched. Full MNIST at beta = 1 only, the rank swept to r160: can an MPS
+# Full MNIST at beta = 1 only, the rank swept to r160: can an MPS
 # Born machine be a good generative model of MNIST? A side track (Martin, 2026-10-28).
 # mnist_capacity's beta = 1 cells were still improving at its 100-epoch cap, with the same
 # test NLL at every rank (r10-r80), so that study could not say. Here 400 epochs and

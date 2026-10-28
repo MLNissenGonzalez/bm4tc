@@ -1,0 +1,22 @@
+# MNIST 12x12, NAT, the default beta ladder with the cosine embedding at d3r40 (D173): the
+# same study as mnist12_nat's d3r40 cells, the embedding the only change. Cosine is flat at
+# the ends of its range, where most pixels sit; at d3 it was the weaker density and the more
+# robust classifier (mnist12_pdim_cosine, D168). Does the beta ladder tell the same story?
+dataset: mnist12
+regime: nat
+grid:
+  embedding: [cosine]
+  arch: [d3r40]
+config:
+  trainer.max_epoch: 200       # as mnist12_nat (D121)
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # as mnist12_nat (D157)
+analysis:
+  sweep_purify:                # as mnist12_nat (D132, D158)
+    enabled: true
+    step: 0.3
+    sweeps: [1]
+    adaptive_seeds: [1]
