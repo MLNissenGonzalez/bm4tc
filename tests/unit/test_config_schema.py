@@ -9,8 +9,7 @@ from bm4tc.core.train import evasion_config
 STUDIES = sorted(p.relative_to(CONFIGS / "studies").with_suffix("").as_posix()
                  for p in (CONFIGS / "studies").rglob("*.yaml"))
 # Studies waiting for a decision; they must fail loudly until it is made.
-PENDING = {"mnist_nat": "mnist_capacity picks the rank (D44)",
-           "mnist_at": "mnist_capacity picks the rank (D44)"}
+PENDING = {}   # mnist_nat and mnist_at had their rank pending until D171
 
 
 @pytest.mark.parametrize("name", STUDIES)
