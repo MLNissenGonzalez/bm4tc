@@ -1,0 +1,22 @@
+# DRAFT (D172): not launched. Full MNIST at beta = 1 only, the rank swept to r160: can an MPS
+# Born machine be a good generative model of MNIST? A side track (Martin, 2026-10-28).
+# mnist_capacity's beta = 1 cells were still improving at its 100-epoch cap, with the same
+# test NLL at every rank (r10-r80), so that study could not say. Here 400 epochs and
+# patience 40 (NAT validates every epoch), adaptive off.
+# Cost (bench, 1080 Ti, batch 512, one unit): d3r80 217 ms/step, 2.3 GiB per process;
+# d3r160 398 ms/step, 6.4 GiB, so one r160 unit per 1080 Ti (11 GB) or three per RTX 6000.
+dataset: mnist
+regime: nat
+grid:
+  arch: [d3r10, d3r20, d3r40, d3r80, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 400
+  trainer.batch_size: 512
+  trainer.patience: 40
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # D157
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
