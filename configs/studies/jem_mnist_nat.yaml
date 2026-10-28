@@ -1,0 +1,31 @@
+# DRAFT (D174): not launched; its cost is not measured yet. JEM baseline on full MNIST, NAT,
+# the default beta ladder, cold (D35): jem_mnist12_nat on mnist, at mnist_nat's rank (D171).
+# arch is the MPS each JEM is sized to (D70): d3r40 on 784 sites is ~5x the 12x12 MLP.
+# Under D163 a jem_mnist12_nat trial took 1.1-1.6 h, so 75 trials x 7 cells here may be
+# thousands of GPU-h: measure a trial before launching and trim the HPO if needed. Its
+# beta = 1 cell may select at D161's floor, as jem_mnist12_nat's did under D163 (open).
+dataset: mnist
+model: jem
+regime: nat
+grid:
+  embedding: [raw]
+  arch: [d3r40]
+config:
+  trainer.max_epoch: 100       # as jem_mnist12_nat
+  trainer.batch_size: 512
+  trainer.patience: 30
+hpo:                           # five hparams: 75 trials (D81), as jem_mnist12_nat
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
+    jem.energy_l2: {log: [1e-6, 1e-3]}
+    jem.sampler.step_size: {log: [1e-3, 3e-1]}
+    jem.sampler.noise_std: {log: [1e-3, 3e-2]}
+    jem.sampler.num_steps: {choice: [20, 40]}
+analysis:
+  batch_size: 512              # D133, as mnist_nat
+  adaptive: {seeds: [1]}       # D129, as mnist_nat
+  sweep_purify:                # as mnist_nat: one SGLD sweep, transfer only; D158: ball 0.3
+    enabled: true
+    step: 0.3
+    sweeps: [1]
+    adaptive_seeds: []

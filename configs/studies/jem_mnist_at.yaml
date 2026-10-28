@@ -1,0 +1,29 @@
+# DRAFT (D174): not launched. JEM PGD-AT on full MNIST (D71), warm from jem_mnist_nat's
+# beta=0 runs; the same attack, budgets and beta grid as mnist_at. At beta>0 the training
+# SGLD is the one selected for the same jem_mnist_nat cell (hparams_from).
+dataset: mnist
+model: jem
+regime: at
+init: warm
+grid:
+  embedding: [raw]
+  arch: [d3r40]
+  beta: [0, 0.25, 0.5]          # D113, as mnist_at
+config:
+  trainer.max_epoch: 150       # D88: full radius from epoch 105
+  trainer.batch_size: 512
+  trainer.patience: 8          # validations (eval_every 5): 40 epochs (D88)
+hpo:                           # the lr only (D80)
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}   # the jem_mnist_nat range (D81)
+hparams_from:
+  study: jem_mnist_nat
+  params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
+analysis:
+  batch_size: 512              # D133, as mnist_at
+  adaptive: {seeds: [1]}       # D129, as mnist_at
+  sweep_purify:                # as mnist_at: one SGLD sweep, transfer only; D158: ball 0.3
+    enabled: true
+    step: 0.3
+    sweeps: [1]
+    adaptive_seeds: []
