@@ -2,9 +2,9 @@
 dataset: mnist
 regime: nat
 grid:
-  arch: ???                    # the rank mnist_capacity selects (D44)
+  arch: [d3r40]                # D171: mnist_capacity (D44 read r20 at its edge; r40 0.11 behind the best at beta = 0, the 12x12 rank)
 config:
-  trainer.max_epoch: 100
+  trainer.max_epoch: 200       # D171: mnist_capacity's beta = 1 was still improving at 100 (as mnist12_nat, D121)
   trainer.batch_size: 512
   trainer.patience: 50
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
