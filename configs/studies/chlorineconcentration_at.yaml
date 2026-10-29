@@ -1,0 +1,27 @@
+# chlorineconcentration, PGD-AT at the series' radius (D175), warm from chlorineconcentration_nat's
+# beta=0 runs (D19), as ecg200_at at Chlorine's rank (D154), budgets and radii (D165).
+dataset: chlorineconcentration
+regime: at
+init: warm
+grid:
+  arch: [d3r10]
+  beta: [0, 0.25, 0.5]          # D113
+  eps: [0.002]                  # D175: the middle of the NAT curve, as D153
+config:
+  trainer.max_epoch: 3000      # D151, as chlorineconcentration_nat: full radius from epoch 2100
+  trainer.batch_size: 64
+  trainer.patience: 60         # validations (eval_every 5): 300 epochs, as the NAT study
+  trainer.norm_control.soft_strength: 1e-3
+  trainer.norm_control.log_target: null    # the warm start's own log Z
+hpo:                           # the lr only (D80); D151: CV makes a trial ~5x dearer
+  trials_per_param: 10
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 3e-3]}   # warm start: below the cold range (D81); above 3e-3 NAT reached chance (D151)
+budgets: [0.001, 0.002, 0.005, 0.01]   # D165
+analysis:
+  purify_delta: [0.002, 0.005, 0.01]   # D165
+  sweep_purify:                # D132, as the other series: one sweep, no window; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]

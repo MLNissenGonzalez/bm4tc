@@ -1,0 +1,29 @@
+# JEM baseline on chlorineconcentration, NAT, the default beta ladder, cold (D35, D139, D175): a
+# copy of jem_ecg200_nat sized to chlorineconcentration_nat's rank (D70, D154), on its budgets
+# and radii (D165). Its curves are read before jem_chlorineconcentration_at is written.
+dataset: chlorineconcentration
+model: jem
+regime: nat
+grid:
+  embedding: [raw]
+  arch: [d3r10]
+config:
+  trainer.max_epoch: 3000      # D151, as chlorineconcentration_nat
+  trainer.batch_size: 64
+  trainer.patience: 300
+hpo:                           # five hparams: 30 trials, each on 5 folds (D148)
+  trials_per_param: 6          # D155
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
+    jem.energy_l2: {log: [1e-6, 1e-3]}
+    jem.sampler.step_size: {log: [1e-3, 3e-1]}
+    jem.sampler.noise_std: {log: [1e-3, 3e-2]}
+    jem.sampler.num_steps: {choice: [20, 40]}
+budgets: [0.001, 0.002, 0.005, 0.01]   # D165
+analysis:
+  purify_delta: [0.002, 0.005, 0.01]   # D165
+  sweep_purify:                # D132, as the other series: one SGLD sweep, no ball; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
