@@ -30,7 +30,7 @@ numerical core is not touched outside a dedicated track (D30; see "Rules for cha
 |---|---|---|
 | `legendre` (default) | [−1, 1] | orthonormal Legendre polynomials |
 | `fourier` | [0, 1] | tensorkrowch's; periodic, so φ(0) = φ(1) |
-| `cosine` | [0, 1] | √2 cos πkx; flat at both ends (orthonormality proved in its docstring) |
+| `cosine` | [0, 1] | √2 cos πkx; flat at both ends (orthonormality proved in its docstring), so attacks stay 10⁻³ of the range inside them (D178) |
 | `hermite` | [−4, 4] | Hermite functions, orthonormal on ℝ; `init_method: canonical` |
 | `chebychev1` | [−0.99, 0.99] | orthonormal on (−1, 1); the weight diverges at ±1 |
 | `chebychev2` | [−0.99, 0.99] | orthonormal on (−1, 1); φ(±1) = 0 would be unreachable |

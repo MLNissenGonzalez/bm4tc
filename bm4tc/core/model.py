@@ -4,7 +4,7 @@ import tensorkrowch as tk
 from dataclasses import dataclass, field
 from typing import List, Optional, Text
 from omegaconf import OmegaConf
-from bm4tc.core.embeddings import embedding, range_from_embedding
+from bm4tc.core.embeddings import attack_range_from_embedding, embedding, range_from_embedding
 from bm4tc.core.sampling import SamplingMPS
 import logging
 
@@ -109,6 +109,7 @@ class ConditionalBornMachine(SamplingMPS):
         self.embedding_name = cfg.embedding
         self.embedding = embedding(self.embedding_name, _in_dim, dtype=_dtype)
         self.input_range = range_from_embedding(self.embedding_name)
+        self.attack_range = attack_range_from_embedding(self.embedding_name)
         self.dtype = _dtype
 
         # ── cls_pos + phys_dim ────────────────────────────────────────────

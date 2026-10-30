@@ -96,10 +96,10 @@ class _PGD:
             perturbation: torch.Tensor,
             naturals: torch.Tensor,
             eps_abs: float,
-            input_range: Tuple[float, float],
+            attack_range: Tuple[float, float],
     ) -> torch.Tensor:
-        """Project onto both the valid input domain and the epsilon ball."""
-        lo, hi = input_range
+        """Project onto both the model's attack range and the epsilon ball."""
+        lo, hi = attack_range
         in_domain = (naturals + perturbation).clamp(lo, hi) - naturals
         return project(in_domain, self.norm, eps_abs)
 
@@ -108,7 +108,7 @@ class _PGD:
         if not self.random_start:
             return torch.zeros_like(naturals)
         delta = random_in_ball(naturals.shape, self.norm, eps_abs, naturals.device)
-        return self._bounded_delta(delta, naturals, eps_abs, model.input_range)
+        return self._bounded_delta(delta, naturals, eps_abs, model.attack_range)
 
     def _step(self, model, naturals: torch.Tensor, labels: torch.LongTensor,
               delta: torch.Tensor, eps_abs) -> torch.Tensor:
@@ -121,7 +121,7 @@ class _PGD:
         # micro-batched step accumulates (D79).
         (grad,) = torch.autograd.grad(loss, delta)
         delta = delta.detach() + step_size * normalizing(grad, norm=self.norm)
-        return self._bounded_delta(delta, naturals, eps_abs, model.input_range)
+        return self._bounded_delta(delta, naturals, eps_abs, model.attack_range)
 
     def graphed(self, model, graphs: Graphs) -> "GraphedPGD":
         """The attack on ``model`` with each step replayed from a CUDA graph of

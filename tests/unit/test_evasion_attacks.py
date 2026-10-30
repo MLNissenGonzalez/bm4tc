@@ -8,6 +8,7 @@ from bm4tc.core.attacks import (
     EvasionConfig,
     build_attack,
 )
+from bm4tc.analysis.adaptive import AdaptivePGD, Defense
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 
 BATCH = 16
@@ -140,3 +141,37 @@ def test_build_attack_joint_pgd_runs(cbm_attack, attack_loader):
 
     assert adv.shape == naturals.shape
     assert (adv - naturals).abs().max().item() <= eps_abs + 1e-6
+
+
+@pytest.fixture(scope="module")
+def cbm_cosine():
+    from bm4tc.core.model import ConditionalBornMachine, CBMConfig, MPSInitConfig
+    torch.manual_seed(42)
+    cfg = CBMConfig(
+        embedding="cosine",
+        init_kwargs=MPSInitConfig(in_dim=DATA_DIM, bond_dim=2, std=1.0),
+    )
+    model = ConditionalBornMachine(cfg=cfg, data_dim=DATA_DIM, num_classes=NUM_CLASSES, device="cpu")
+    model.prepare(device="cpu")
+    return model
+
+
+def _pgd_examples(model, x, y, eps):
+    return ProjectedGradientDescent(num_steps=5).generate(model, x, y, eps_abs=eps)
+
+
+def _adaptive_examples(model, x, y, eps):
+    return AdaptivePGD(steps=5, restarts=1).generate(Defense(model), x, y, eps)
+
+
+@pytest.mark.parametrize("attack", [_pgd_examples, _adaptive_examples])
+def test_no_pixel_stays_frozen_on_a_flat_end_of_the_range(cbm_cosine, labels, attack):
+    """Every cosine feature has a zero slope at 0 and 1: a pixel exactly there gets a zero
+    gradient and a sign step leaves it, which masked PGD on cosine by up to .3 of `rob`
+    (D178). The attack must move every such pixel, within the ball and the domain."""
+    torch.manual_seed(0)
+    x = torch.randint(0, 2, (BATCH, DATA_DIM)).float()   # every pixel on an end
+    x_adv = attack(cbm_cosine, x, labels, 0.1)
+    assert (x_adv != x).all()
+    assert (x_adv - x).abs().max() <= 0.1 + 1e-6
+    assert x_adv.min() >= 0 and x_adv.max() <= 1

@@ -20,6 +20,7 @@ import torch
 
 class GenerativeClassifier(Protocol):
     input_range: Tuple[float, float]
+    attack_range: Tuple[float, float]    # the box an attack's iterates stay in (D178)
     out_dim: int
 
     def log_joint(self, data: torch.Tensor) -> torch.Tensor: ...

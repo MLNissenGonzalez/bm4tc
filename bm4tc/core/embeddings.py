@@ -313,6 +313,21 @@ def range_from_embedding(embedding: str):
     return rang
 
 
+# How far inside the input range an attack's iterates stay, as a fraction of the range.
+# Only for an embedding whose every feature is flat at the ends: the input gradient is
+# exactly 0 there, so a sign step would leave a pixel on an end for good (D178).
+_EMBEDDING_ATTACK_INSET = {"cosine": 1e-3}
+
+
+def attack_range_from_embedding(embedding: str):
+    """The box an attack's iterates stay in: the embedding's input range, inset where
+    the embedding is flat at the ends of it (D178)."""
+    lo, hi = range_from_embedding(embedding)
+    key = embedding.replace(" ", "").lower()
+    inset = _EMBEDDING_ATTACK_INSET.get(key, 0.0) * (hi - lo)
+    return lo + inset, hi - inset
+
+
 # Total input-range size per embedding, derived from _EMBEDDING_TO_RANGE.
 # The conversion factor between relative and absolute budgets (see below).
 _EMBEDDING_RANGE_SIZE: dict[str, float] = {

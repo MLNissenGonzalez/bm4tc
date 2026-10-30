@@ -129,7 +129,7 @@ class AdaptivePGD:
         return self.graphed(defense, Graphs(enabled=False))(x, labels, eps_abs, starts)
 
     def _bounded(self, defense: Defense, x: torch.Tensor, delta: torch.Tensor, eps_abs):
-        lo, hi = defense.model.input_range
+        lo, hi = defense.model.attack_range
         return project((x + delta).clamp(lo, hi) - x, "inf", eps_abs)
 
     def _step(self, defense: Defense, x, labels, delta, best_x, best_rate, eps_abs,

@@ -78,6 +78,7 @@ class JEMMLP(nn.Module):
                 layers.append(_ACTIVATIONS[cfg.activation]())
         self.network = nn.Sequential(*layers)
         self.input_range: Tuple[float, float] = tuple(float(v) for v in cfg.input_range)
+        self.attack_range = self.input_range
         self.data_dim = data_dim
         self.out_dim = num_classes
         self.hidden_dims = dims[1:-1]

@@ -6,6 +6,7 @@ from bm4tc.core.embeddings import (
     HermiteEmbedding,
     ChebyshevT1Embedding,
     _EMBEDDING_TO_RANGE,
+    attack_range_from_embedding,
     embedding,
     range_from_embedding,
 )
@@ -268,3 +269,13 @@ def test_cosine_is_flat_at_both_ends():
     for k in range(10):
         (grad,) = torch.autograd.grad(phi[:, k].sum(), x, retain_graph=True)
         assert grad.abs().max() < 1e-12
+
+
+@pytest.mark.parametrize("name", list(_EMBEDDING_TO_RANGE))
+def test_attack_range_is_the_input_range_unless_the_embedding_is_flat_at_its_ends(name):
+    """Attacks on every other embedding stay bit-identical (D178)."""
+    lo, hi = range_from_embedding(name)
+    if name == "cosine":
+        assert attack_range_from_embedding(name) == pytest.approx((lo + 1e-3, hi - 1e-3))
+    else:
+        assert attack_range_from_embedding(name) == (lo, hi)
