@@ -1,10 +1,8 @@
-# DRAFT (D174): not launched; its cost is not measured yet. JEM baseline on full MNIST, NAT,
-# the default beta ladder, cold (D35): jem_mnist12_nat on mnist, at mnist_nat's rank (D171).
-# arch is the MPS each JEM is sized to (D70): d3r40 on 784 sites is ~5x the 12x12 MLP.
-# Under D163 a jem_mnist12_nat trial took 1.1-1.6 h, so 75 trials x 7 cells here may be
-# thousands of GPU-h: measure a trial before launching and trim the HPO if needed. Its
-# beta = 1 cell stays but is reported as unselectable (D176): on MNIST the validation
-# loss_x is flat, so it selects at D161's floor, as jem_mnist12_nat's did under D163.
+# JEM baseline on full MNIST, NAT, the default beta ladder, cold (D35, D174): jem_mnist12_nat
+# on mnist, at mnist_nat's rank (D171). arch is the MPS each JEM is sized to (D70): d3r40 on
+# 784 sites is ~5x the 12x12 MLP. One trial took 0.37 h alone on a 1080 Ti, so the HPO keeps
+# D81's 75 trials (D177). Its beta = 1 cell stays but is reported as unselectable (D176): on
+# MNIST the validation loss_x is flat, so it selects at D161's floor, as jem_mnist12_nat's did.
 dataset: mnist
 model: jem
 regime: nat
