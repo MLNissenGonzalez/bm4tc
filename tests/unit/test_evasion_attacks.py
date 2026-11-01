@@ -175,3 +175,63 @@ def test_no_pixel_stays_frozen_on_a_flat_end_of_the_range(cbm_cosine, labels, at
     assert (x_adv != x).all()
     assert (x_adv - x).abs().max() <= 0.1 + 1e-6
     assert x_adv.min() >= 0 and x_adv.max() <= 1
+
+
+def test_an_attack_given_the_input_range_stays_sparse_on_a_flat_end(cbm_cosine, labels):
+    """The box is the attack's: in ``input_range`` the pixels a random start clamps onto
+    a flat end stay there, the sparse attack D179 needs against a detector."""
+    torch.manual_seed(0)
+    x = torch.randint(0, 2, (BATCH, DATA_DIM)).float()
+    attack = AdaptivePGD(steps=5, restarts=1, box=cbm_cosine.input_range)
+    x_adv = attack.generate(Defense(cbm_cosine), x, labels, 0.1)
+    unmoved = (x_adv == x).float().mean().item()
+    assert 0.2 < unmoved < 0.8
+
+
+def _detector_attack_boxes(model, labels, monkeypatch, scores):
+    """Run `_attack` on a detector with `_score` scripted to ``scores``, one per craft
+    of the adaptive attack: (the boxes attacked, rob_sel_adapt)."""
+    from types import SimpleNamespace
+    from bm4tc.pipeline import analyse as A
+
+    boxes, scripted = [], iter(scores)
+
+    class Recording(AdaptivePGD):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            boxes.append(kwargs["box"])
+
+    def score(defense, x, x_adv, y, selective, draws):
+        return next(scripted, torch.ones(len(x)))    # the PGD examples: ones
+
+    monkeypatch.setattr(A, "AdaptivePGD", Recording)
+    monkeypatch.setattr(A, "_score", score)
+    x = torch.rand(BATCH, DATA_DIM)
+    analysis = SimpleNamespace(
+        adaptive=SimpleNamespace(eot=1, eval_draws=1), batch_size=BATCH,
+        attack=SimpleNamespace(steps=1, restarts=1, subsample=None))
+    data = SimpleNamespace(data={A.SPLIT: x, "train": x}, labels={A.SPLIT: labels})
+    defences = [("rob_sel", "q5", Defense(model, threshold=-1e9), True, None)]
+    out = A._attack(model, data, analysis, [0.1], torch.device("cpu"),
+                    lambda *_: defences)
+    return boxes, out[A.key("rob_sel_adapt", A.SPLIT, 0.1, "q5")]
+
+
+def test_a_detector_on_a_flat_embedding_counts_the_lower_score_of_both_boxes(
+        cbm_cosine, labels, monkeypatch):
+    """Neither box dominates against a detector (D179): a point is lost if either loses it."""
+    first = (torch.arange(BATCH) % 2 == 0).float()
+    boxes, rob_sel = _detector_attack_boxes(cbm_cosine, labels, monkeypatch,
+                                            [first, torch.ones(BATCH)])
+    assert boxes == [tuple(cbm_cosine.attack_range), tuple(cbm_cosine.input_range)]
+    assert rob_sel == pytest.approx(first.mean().item())
+    boxes, rob_sel = _detector_attack_boxes(cbm_cosine, labels, monkeypatch,
+                                            [first, 1 - first])
+    assert rob_sel == 0.0
+
+
+def test_a_detector_on_any_other_embedding_faces_one_attack(cbm_attack, labels, monkeypatch):
+    first = (torch.arange(BATCH) % 2 == 0).float()
+    boxes, rob_sel = _detector_attack_boxes(cbm_attack, labels, monkeypatch, [first])
+    assert boxes == [tuple(cbm_attack.attack_range)]
+    assert rob_sel == pytest.approx(first.mean().item())

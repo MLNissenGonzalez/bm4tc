@@ -23,7 +23,8 @@ PGD is one attack everywhere (D149): :class:`BarePGD`, ``analysis.attack.steps``
 purifiers on ``sweep_purify.subsample``, a prefix of it). Its examples give ``rob``
 and every transfer number, and start the adaptive attacks (D98), which run with
 the same steps and restarts. The attack on the detector also starts one restart on
-the data (:class:`DataStarts`, D156).
+the data (:class:`DataStarts`, D156), and on an embedding flat at its ends it runs
+in both boxes (D179, :func:`_attack`).
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -425,7 +426,14 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     attack and, for a selective one, also by the PGD examples, both at
     ``analysis.attack``'s steps and ``restarts`` (default ``analysis.attack.restarts``).
     The adaptive attack starts at the PGD example and, on a selective defence, also
-    on the data (D156). A random purifier's attack stays eager."""
+    on the data (D156). A random purifier's attack stays eager.
+
+    Against a detector, an embedding whose ``attack_range`` is not its ``input_range``
+    is attacked in both boxes, PGD included, and a point counts under the lower of its
+    two scores (D179): a sign step gives a nearly flat end pixel a full step, so the
+    attack in ``attack_range`` moves every end pixel and pays in log p, while the one
+    in ``input_range`` leaves many on their end, sparse, and evades the detector better
+    at high beta. Neither dominates. Every other embedding has one box."""
     a, steps = analysis.adaptive, analysis.attack.steps
     restarts = analysis.attack.restarts if restarts is None else restarts
     cbm.to(device)
@@ -433,43 +441,52 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     X, y = datahandler.data[SPLIT], datahandler.labels[SPLIT]
     range_size = range_size_of(cbm)
     graphs, eager = _graphs(cbm, device), Graphs(enabled=False)
-    pgd = BarePGD(steps, restarts).graphed(cbm, graphs)
-    attack = AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot)
     defences = defences_of(cbm, datahandler, analysis, graphs, device)
+    boxes = [tuple(cbm.attack_range)]
+    if any(d[3] for d in defences) and tuple(cbm.input_range) != boxes[0]:
+        boxes.append(tuple(cbm.input_range))
+    pgds = [BarePGD(steps, restarts, box).graphed(cbm, graphs) for box in boxes]
     data_starts = [DataStarts(d[2], datahandler.data["train"], analysis.batch_size)
                    if d[3] else None for d in defences]
-    # one graphed attack per defence, captured once for every budget
-    attacks = [(attack.graphed(d[2], g), g)
+    # graphed attacks per defence, one per box it faces, captured once for every budget
+    attacks = [([AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot, box=box).graphed(d[2], g)
+                 for box in (boxes if d[3] else boxes[:1])], g)
                for d, g in ((d, eager if d[2].random else graphs) for d in defences)]
     # PGD on the points some defence is scored on (sorted); the other rows stay nan
     attacked = torch.unique(torch.cat([fixed_subsample(len(X), d[4]) for d in defences]))
     out = {}
     for eps in budgets:
         eps_abs = rel_to_abs(eps, range_size)
-        x_pgd = torch.full_like(X, float("nan"))
-        for i in range(0, len(attacked), analysis.batch_size):
-            b = attacked[i:i + analysis.batch_size]
-            x_pgd[b] = pgd(X[b].to(device), y[b].to(device),
-                           graphs.scalar(eps_abs, device)).cpu()
-        for (name, setting, defense, selective, subsample), (adapt, g), on_data in zip(
+        x_pgds = [torch.full_like(X, float("nan")) for _ in pgds]
+        for pgd, x_pgd in zip(pgds, x_pgds):
+            for i in range(0, len(attacked), analysis.batch_size):
+                b = attacked[i:i + analysis.batch_size]
+                x_pgd[b] = pgd(X[b].to(device), y[b].to(device),
+                               graphs.scalar(eps_abs, device)).cpu()
+        for (name, setting, defense, selective, subsample), (adapts, g), on_data in zip(
                 defences, attacks, data_starts):
             idx = fixed_subsample(len(X), subsample)
             radius = g.scalar(eps_abs, device)
 
-            def starts(xb, yb, b):
-                return [x_pgd[b]] + ([] if on_data is None else [on_data(xb, yb)])
+            def adaptive_craft(adapt, x_pgd):
+                def craft(xb, yb, b):
+                    starts = [x_pgd[b]] + ([] if on_data is None else [on_data(xb, yb)])
+                    return adapt(xb, yb, radius, starts)
+                return craft
 
-            crafts = {"_adapt": lambda xb, yb, b: adapt(xb, yb, radius, starts(xb, yb, b))}
-            if selective:
-                crafts[""] = None   # the PGD examples
-            for suffix, craft in crafts.items():
+            # each suffix's crafts; a point counts under the lowest of their scores
+            crafts = {"_adapt": [adaptive_craft(*pair) for pair in zip(adapts, x_pgds)]}
+            if selective:   # the PGD examples
+                crafts[""] = [lambda xb, yb, b: x_pgds[0][b].to(device)]
+            for suffix, crafted in crafts.items():
                 start = time.time()
                 scores = []
                 for i in range(0, len(idx), analysis.batch_size):
                     b = idx[i:i + analysis.batch_size]
                     xb, yb = X[b].to(device), y[b].to(device)
-                    x_adv = x_pgd[b].to(device) if craft is None else craft(xb, yb, b)
-                    scores.append(_score(defense, xb, x_adv, yb, selective, a.eval_draws).cpu())
+                    scores.append(torch.stack(
+                        [_score(defense, xb, craft(xb, yb, b), yb, selective, a.eval_draws)
+                         for craft in crafted]).min(dim=0).values.cpu())
                 k = key(name + suffix, SPLIT, eps, setting)
                 out[k] = float(torch.cat(scores).mean())
                 logger.info(f"  {k} = {out[k]:.4f} ({time.time() - start:.0f} s)")

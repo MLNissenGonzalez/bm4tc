@@ -85,7 +85,9 @@ attacked input is rejected or right:
     purify_adapt/test/{eps}/d{r}         likelihood purification, adaptive attack
     rob_sel[_adapt]/test/{eps}/q{p}      detector at q{p} (analysis.adaptive.percentile):
                                          selective robust accuracy; the adaptive attack
-                                         also starts on the data (D156)
+                                         also starts on the data (D156) and, on an
+                                         embedding flat at its ends, runs in both
+                                         boxes, the lower score per point (D179)
     purify_gibbs_adapt/test/{eps}/k{n}   Gibbs (MPS) / SGLD (JEM, purify_sgld_adapt),
                                          adaptive attack, on the sweep subsample
 

@@ -113,11 +113,17 @@ class AdaptivePGD:
     """L∞ PGD on :meth:`Defense.attack_step` within the ε ball and the input box, from
     ``max(restarts, len(starts))`` starts (the given ``starts`` first, then random
     ones), keeping per sample the iterate with the highest error rate (the first one
-    reaching it)."""
+    reaching it).
+
+    Args:
+        box: the (lo, hi) the iterates stay in; None is the model's ``attack_range``.
+    """
 
     def __init__(self, steps: int = 100, restarts: int = 5, eot: int = 16,
-                 step_size: Optional[float] = None):
+                 step_size: Optional[float] = None,
+                 box: Optional[Tuple[float, float]] = None):
         self.steps, self.restarts, self.eot, self.step_size = steps, restarts, eot, step_size
+        self.box = box
 
     def graphed(self, defense: Defense, graphs: Graphs) -> "GraphedAdaptivePGD":
         """The attack on ``defense`` with each step replayed from a CUDA graph of
@@ -129,7 +135,7 @@ class AdaptivePGD:
         return self.graphed(defense, Graphs(enabled=False))(x, labels, eps_abs, starts)
 
     def _bounded(self, defense: Defense, x: torch.Tensor, delta: torch.Tensor, eps_abs):
-        lo, hi = defense.model.attack_range
+        lo, hi = defense.model.attack_range if self.box is None else self.box
         return project((x + delta).clamp(lo, hi) - x, "inf", eps_abs)
 
     def _step(self, defense: Defense, x, labels, delta, best_x, best_rate, eps_abs,
@@ -153,8 +159,9 @@ class BarePGD:
     starts, the best iterate per sample). ``graphed(model, graphs)`` gives the
     attack ``(x, labels, eps_abs, starts=())``, as :class:`GraphedAdaptivePGD`."""
 
-    def __init__(self, steps: int, restarts: int):
-        self.attack = AdaptivePGD(steps=steps, restarts=restarts)
+    def __init__(self, steps: int, restarts: int,
+                 box: Optional[Tuple[float, float]] = None):
+        self.attack = AdaptivePGD(steps=steps, restarts=restarts, box=box)
 
     def graphed(self, model, graphs: Graphs) -> "GraphedAdaptivePGD":
         return self.attack.graphed(Defense(model), graphs)

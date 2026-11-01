@@ -1,0 +1,25 @@
+# MNIST 28x28, NAT, the default beta ladder with the cosine embedding at d3r40 (D179): the
+# same study as mnist_nat, the embedding the only change, as mnist12_nat_cosine is of
+# mnist12_nat's d3r40 cells. On Legendre at 28x28 purification collapses at eps 0.2 and the
+# detector is the strongest adaptive defence at beta = 0; on cosine at 12x12 neither holds.
+# Is that Legendre's steep background?
+dataset: mnist
+regime: nat
+grid:
+  embedding: [cosine]
+  arch: [d3r40]                # as mnist_nat (D171)
+config:
+  trainer.max_epoch: 200       # as mnist_nat (D171)
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # as mnist_nat (D157)
+analysis:
+  batch_size: 512              # as mnist_nat (D133)
+  adaptive: {seeds: [1]}       # as mnist_nat (D129)
+  sweep_purify:                # as mnist_nat (D132, D158): transfer only
+    enabled: true
+    step: 0.3
+    sweeps: [1]
+    adaptive_seeds: []
