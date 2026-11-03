@@ -1,4 +1,4 @@
-# DRAFT (D174): not launched. JEM PGD-AT on full MNIST (D71), warm from jem_mnist_nat's
+# JEM PGD-AT on full MNIST (D71, D174, D180), warm from jem_mnist_nat's
 # beta=0 runs; the same attack, budgets and beta grid as mnist_at. At beta>0 the training
 # SGLD is the one selected for the same jem_mnist_nat cell (hparams_from).
 dataset: mnist

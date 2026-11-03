@@ -1,0 +1,18 @@
+# MNIST 12x12, the physical dimension at rank 1, beta = 1 (D180): beside mnist12_pdim, to split
+# its NLL gain along d into the per-pixel marginal and the correlations. At rank 1 the MPS is a
+# product of per-pixel Born densities (and p(y|x) = p(y), so only loss_x is read); the gap to
+# mnist12_pdim's r40 at the same d is what the correlations add. Otherwise mnist12_pdim's settings.
+dataset: mnist12
+regime: nat
+grid:
+  arch: [d2r1, d3r1, d5r1, d10r1]
+  beta: [1]
+config:
+  trainer.max_epoch: 200       # as mnist12_pdim
+  trainer.batch_size: 512
+  trainer.patience: 50
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo:
+  trials_per_param: 30         # as mnist12_pdim (D157)
+analysis:
+  adaptive: {enabled: false}   # D164, as mnist12_pdim

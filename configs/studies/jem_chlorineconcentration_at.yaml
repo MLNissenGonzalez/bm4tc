@@ -1,0 +1,33 @@
+# JEM PGD-AT on chlorineconcentration (D71, D139, D180) at the radius of chlorineconcentration_at
+# (D175), warm from jem_chlorineconcentration_nat's beta=0 runs; the same attack, budgets, radii
+# and beta grid as chlorineconcentration_at. beta=0 is MLP-AT; at beta>0 the training SGLD is the
+# one selected for the same jem_chlorineconcentration_nat cell (hparams_from), so this study
+# trains after that study's D180 re-run.
+dataset: chlorineconcentration
+model: jem
+regime: at
+init: warm
+grid:
+  embedding: [raw]
+  arch: [d3r10]
+  beta: [0, 0.25, 0.5]          # D113, as chlorineconcentration_at
+  eps: [0.002]                  # D175, as chlorineconcentration_at
+config:
+  trainer.max_epoch: 3000      # D151, as chlorineconcentration_at: full radius from epoch 2100
+  trainer.batch_size: 64
+  trainer.patience: 60         # validations (eval_every 5): 300 epochs, as chlorineconcentration_at
+hpo:                           # the lr only (D80); D151: CV makes a trial ~5x dearer
+  trials_per_param: 10         # as chlorineconcentration_at
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # as the other JEM AT studies: the NAT picks sat at 2e-3 (D160)
+hparams_from:                # not jem.energy_l2: the JEM AT studies train at its default 1e-4 (D160)
+  study: jem_chlorineconcentration_nat
+  params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
+budgets: [0.001, 0.002, 0.005, 0.01]   # D165
+analysis:
+  purify_delta: [0.002, 0.005, 0.01]   # D165
+  sweep_purify:                # D132, as the other series: one SGLD sweep, no ball; adaptive on one seed per beta
+    enabled: true
+    step: null
+    sweeps: [1]
+    adaptive_seeds: [1]
