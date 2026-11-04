@@ -11,12 +11,12 @@ config:
   trainer.max_epoch: 3000      # D151, as chlorineconcentration_nat
   trainer.batch_size: 64
   trainer.patience: 300
-hpo:                           # five hparams: 30 trials, each on 5 folds (D148)
+  jem.energy_l2: 1.0e-3        # D182: fixed, as jem_italypowerdemand_nat (the HPO picked the
+                               # floor of [1e-4, 1e-2] at beta >= 0.25, the runaway's signature)
+hpo:                           # four hparams: 24 trials, each on 5 folds (D148)
   trials_per_param: 6          # D155
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
-    jem.energy_l2: {log: [1e-4, 1e-2]}   # D180: below 1e-4 the energy ran away at beta >= 0.1;
-                                         # cells picked in [1e-4, 1e-3] before D180 kept their HPO
     jem.sampler.step_size: {log: [1e-3, 3e-1]}
     jem.sampler.noise_std: {log: [1e-3, 3e-2]}
     jem.sampler.num_steps: {choice: [20, 40]}

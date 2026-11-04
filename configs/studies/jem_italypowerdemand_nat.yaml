@@ -11,12 +11,13 @@ config:
   trainer.max_epoch: 500
   trainer.batch_size: 64
   trainer.patience: 150
-hpo:                           # five hparams: 30 trials, each on 5 folds (D148)
+  jem.energy_l2: 1.0e-3        # D182: fixed, not tuned. The objective rewards a falling loss_x, so
+                               # at beta >= 0.25 the HPO picked the floor of every range and the
+                               # energy ran away (D163, D180); 1e-3 is among the healthy picks
+hpo:                           # four hparams: 24 trials, each on 5 folds (D148)
   trials_per_param: 6          # D155: 15 (D81) costs ~10 h per study under CV
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
-    jem.energy_l2: {log: [1e-4, 1e-2]}   # D180: below 1e-4 the energy ran away at beta >= 0.1;
-                                         # cells picked in [1e-4, 1e-3] before D180 kept their HPO
     jem.sampler.step_size: {log: [1e-3, 3e-1]}
     jem.sampler.noise_std: {log: [1e-3, 3e-2]}
     jem.sampler.num_steps: {choice: [20, 40]}
