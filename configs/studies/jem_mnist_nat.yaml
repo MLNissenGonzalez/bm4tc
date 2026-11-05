@@ -1,7 +1,7 @@
 # JEM baseline on full MNIST, NAT, the default beta ladder, cold (D35, D174): jem_mnist12_nat
 # on mnist, at mnist_nat's rank (D171). arch is the MPS each JEM is sized to (D70): d3r40 on
 # 784 sites is ~5x the 12x12 MLP. One trial took 0.37 h alone on a 1080 Ti, so the HPO keeps
-# D81's 75 trials (D177). Its beta = 1 cell stays but is reported as unselectable (D176): on
+# D81's 15 trials per hparam (D177). Its beta = 1 cell stays but is reported as unselectable (D176): on
 # MNIST the validation loss_x is flat, so it selects at D161's floor, as jem_mnist12_nat's did.
 dataset: mnist
 model: jem
@@ -13,10 +13,13 @@ config:
   trainer.max_epoch: 100       # as jem_mnist12_nat
   trainer.batch_size: 512
   trainer.patience: 30
-hpo:                           # five hparams: 75 trials (D81), as jem_mnist12_nat
+  jem.energy_l2: 1.0e-3        # D183: fixed, as the series JEMs (D182). In [1e-6, 1e-3] beta 0.9 / 1
+                               # picked the floor (3e-6, 1e-6) and beta 0.9 selected in the
+                               # cold-chain dip; beta <= 0.5 picked 7e-4 - 1e-3 and keep their D177
+                               # runs, so run this study only with --cell (they hold the old hash)
+hpo:                           # four hparams: 60 trials (D81)
   space:
     trainer.optimizer.kwargs.lr: {log: [1e-5, 2e-3]}
-    jem.energy_l2: {log: [1e-6, 1e-3]}
     jem.sampler.step_size: {log: [1e-3, 3e-1]}
     jem.sampler.noise_std: {log: [1e-3, 3e-2]}
     jem.sampler.num_steps: {choice: [20, 40]}
