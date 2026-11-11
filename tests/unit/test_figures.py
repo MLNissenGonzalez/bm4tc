@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from bm4tc.pipeline import figures
-from bm4tc.pipeline.figures import results, tables
+from bm4tc.pipeline.figures import plots, results, tables
 from bm4tc.pipeline.figures.results import Metric, Model
 
 SEEDS = (1, 2, 3)
@@ -92,6 +92,26 @@ def test_table(toy, tmp_path):
     assert tex[2] == r"Model & Clean & Gain \\"
     assert tex[4] == r"a0 & $\mathbf{0.970 \pm 0.010}$ & $+0.050$ \\"
     assert tex[5] == r"a1 & $0.470 \pm 0.010$ & $+0.050$ \\"
+
+
+def test_curve_panels(toy, tmp_path):
+    """The series in every panel, {data} filled per panel, one line per radius; the
+    item's eps does not combine with panels."""
+    spec = {"x": "beta", "eps_labels": ["small", "large"],
+            "panels": [{"title": f"r{r}", "data": "toy", "where": {"arch": f"d3r{r}"},
+                        "eps": [0.1, 0.2], "shade": {"from": 0.01, "to": 1}}
+                       for r in (20, 40)],
+            "series": [{"study": "{data}", "key": "rob/test/{eps}", "label": "robust"},
+                       {"study": "{data}", "key": "acc/test", "label": "clean", "thin": True}]}
+    (path,) = plots.curve(spec, tmp_path / "p")
+    assert path.exists()
+    legend = [h.get_label() for h in plots._panel_legend(spec, spec["panels"])]
+    assert legend == ["robust", "clean", "small", "large"]
+    with pytest.raises(ValueError, match="`eps` and `panels`"):
+        plots.curve({**spec, "eps": 0.1}, tmp_path / "q")
+    with pytest.raises(ValueError, match="needs the panel's `eps`"):
+        plots.curve({**spec, "panels": [{"title": "t", "data": "toy",
+                                         "where": {"arch": "d3r20"}}]}, tmp_path / "r")
 
 
 def test_manifest_draws_every_item_and_reports_failures(toy, tmp_path, monkeypatch):

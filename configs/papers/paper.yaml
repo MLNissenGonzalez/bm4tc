@@ -13,6 +13,29 @@
 out: figures/journal
 
 items:
+  # ── Main: the boundary across datasets ───────────────────────────────────
+  boundary:               # where the generative term helps the boundary and where AT does;
+                          # radii: AT's training radius and twice it (Chlorine: 2.5x, the
+                          # nearest budget)
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    eps_labels: ["robust, at the AT radius", "robust, at twice the AT radius"]
+    panels:
+      - {title: Spirals, data: spirals, eps: [0.1, 0.2]}
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.1, 0.2]}
+      - {title: "MNIST $28\\times28$", data: mnist, eps: [0.1, 0.2]}
+      - {title: ECG200, data: ecg200, eps: [0.05, 0.1]}
+      - {title: ItalyPowerDemand, data: italypowerdemand, eps: [0.05, 0.1]}
+      - {title: Chlorine, data: chlorineconcentration, eps: [0.002, 0.005],
+         shade: {from: 0.9, to: 1, label: "majority class"}}
+    series:
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: NAT, color: C0}
+      - {study: "{data}_at", key: "rob/test/{eps}", label: AT, color: C3, style: "--"}
+      - {study: "{data}_nat", key: acc/test, label: "clean, NAT", color: C0, thin: true}
+      - {study: "{data}_at", key: acc/test, label: "clean, AT", color: C3, style: "--", thin: true}
+
   # ── Main: MNIST ───────────────────────────────────────────────────────────
   mnist_beta_acc:
     kind: curve

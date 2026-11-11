@@ -2,8 +2,9 @@
 error bar. Each kind takes the item's spec and the output path without suffix,
 and returns the files it wrote.
 
-    curve      metric vs one axis: beta, bond_dim, or {x} in the key (eps, sweeps)
-    bars       metrics (groups) x models (bars), at one budget
+    curve      metric vs one axis: beta, bond_dim, or {x} in the key (eps, sweeps);
+               with ``panels``, the same series in one panel per dataset
+    bars      metrics (groups) x models (bars), at one budget
     coverage   accuracy on passed examples vs fraction passed, over the detection
                percentiles q (one curve per model)
 """
@@ -15,6 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 from bm4tc.pipeline.figures.results import (Metric, Model, cell_stats, curve as curve_of,  # noqa: E402
                                             fill, model_list, one_cell, rows, stats, values)
@@ -52,7 +54,20 @@ def _beta_axis(ax, positions: Dict[float, float], betas):
 
 def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
     """``x``, ``series: [{study, where, key, label, minus, axis: left|right}]``,
-    optional ``eps``, ``where``, ``ylabel``, ``ylabel_right``, ``ylim``, ``title``."""
+    optional ``eps``, ``where``, ``ylabel``, ``ylabel_right``, ``ylim``, ``title``.
+
+    Small multiples: ``panels: [{title, data, where, eps: [e1, e2], shade}]`` draws the
+    series in every panel, ``{data}`` in a series' study standing for the panel's
+    ``data`` (``"{data}_nat"``). A series whose key holds ``{eps}`` is drawn once per
+    radius of the panel, marker o for the first and * for the second; ``eps_labels``
+    names the two in the legend, the panel title gives their values. A series with
+    ``thin: true`` is a thin pale line without markers (e.g. clean accuracy). Every
+    line has its std band over seeds.
+    ``shade: {from, to, label}`` greys the x range between those two values. One
+    legend below the panels; ``ncols`` (default 3). The item's ``eps`` and ``axis:
+    right`` do not combine with panels."""
+    if "panels" in spec:
+        return _panels(spec, out)
     x = spec["x"]
     subs = {"eps": float(spec["eps"])} if "eps" in spec else {}
     with plt.rc_context(STYLE):
@@ -91,6 +106,106 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
         if "title" in spec:
             ax.set_title(fill(spec["title"], **subs))
         return save(fig, out)
+
+
+MARKERS = (("o", 3.5, "●"), ("*", 7, "★"))   # a panel's radii: marker, size, glyph
+
+
+def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
+    """``curve`` with ``panels`` (see its docstring)."""
+    if "eps" in spec:
+        raise ValueError("curve: `eps` and `panels` do not combine; each panel names "
+                         "its own radii")
+    if any(s.get("axis") == "right" for s in spec["series"]):
+        raise ValueError("curve: `axis: right` and `panels` do not combine")
+    x, panels = spec["x"], spec["panels"]
+
+    def lines(panel):   # (series index, series, radius index or None, curve)
+        radii = list(panel.get("eps", []))
+        if len(radii) > len(MARKERS):
+            raise ValueError(f"curve panel {panel['title']!r}: at most {len(MARKERS)} radii")
+        where = {**spec.get("where", {}), **panel.get("where", {})}
+        for k, s in enumerate(spec["series"]):
+            s = {**s, "study": fill(s["study"], data=panel["data"])}
+            model, metric = Model.parse(s, where), Metric.parse(s)
+            if "{eps}" not in metric.key:
+                yield k, s, None, curve_of(model, metric, x)
+                continue
+            if not radii:
+                raise ValueError(f"curve panel {panel['title']!r}: series {metric.key!r} "
+                                 f"needs the panel's `eps`")
+            for i, e in enumerate(radii):
+                yield k, s, i, curve_of(model, metric, x, eps=float(e))
+
+    drawn = [list(lines(p)) for p in panels]
+    xs = [v for d in drawn for *_, c in d for v in c.x]
+    positions = _beta_positions(xs) if x == "beta" else {v: v for v in xs}
+    ticks = sorted(set(positions.values()))
+    ncols = min(spec.get("ncols", 3), len(panels))
+    nrows = -(-len(panels) // ncols)
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(nrows, ncols, sharey=True, squeeze=False,
+                                 figsize=spec.get("size", (3.0 * ncols, 2.4 * nrows)))
+        for ax, panel, d in zip(axes.flat, panels, drawn):
+            for k, s, i, c in d:
+                at = [positions[v] for v in c.x]
+                style = dict(color=s.get("color", f"C{k}"), ls=s.get("style", "-"))
+                if s.get("thin"):
+                    ax.plot(at, c["mean"], lw=0.8, alpha=0.5, **style)
+                else:
+                    marker, size, _ = MARKERS[i or 0]
+                    ax.plot(at, c["mean"], lw=1.3, marker=marker, ms=size, **style)
+                ax.fill_between(at, c["mean"] - c["std"], c["mean"] + c["std"],
+                                color=style["color"], alpha=0.07 if s.get("thin") else 0.12,
+                                lw=0)
+            if "shade" in panel:
+                _shade(ax, panel["shade"], positions, ticks)
+            radii = "   ".join(f"{MARKERS[i][2]} $\\varepsilon={float(e):g}$"
+                               for i, e in enumerate(panel.get("eps", [])))
+            ax.set_title(f"{panel['title']}   {radii}".strip(), fontsize=8.5)
+            if x == "beta":
+                _beta_axis(ax, positions, xs)
+            ax.tick_params(labelsize=7)
+            if "ylim" in spec:
+                ax.set_ylim(*spec["ylim"])
+        for ax in axes.flat[len(panels):]:
+            ax.set_visible(False)
+        for ax in axes[:, 0]:
+            ax.set_ylabel(spec.get("ylabel", ""))
+        for ax in axes[-1]:
+            ax.set_xlabel(spec.get("xlabel", XLABELS.get(x, x)))
+        fig.tight_layout()
+        fig.legend(handles=_panel_legend(spec, panels), loc="upper center",
+                   bbox_to_anchor=(0.5, 0.0), ncol=spec.get("legend_cols", 6), frameon=False)
+        return save(fig, out)
+
+
+def _shade(ax, shade: Mapping[str, Any], positions: Dict[float, float], ticks: List[float]):
+    """Grey the x range from ``shade['from']`` to ``shade['to']``, out to halfway to the
+    neighbouring ticks."""
+    lo, hi = positions[float(shade["from"])], positions[float(shade["to"])]
+    j, k = ticks.index(lo), ticks.index(hi)
+    gap = (ticks[-1] - ticks[0]) / max(len(ticks) - 1, 1) / 2
+    lo = (ticks[j - 1] + lo) / 2 if j > 0 else lo - gap
+    hi = (ticks[k + 1] + hi) / 2 if k + 1 < len(ticks) else hi + gap
+    ax.axvspan(lo, hi, color="0.92", zorder=0, lw=0)
+    if shade.get("label"):
+        ax.text((lo + hi) / 2, 0.97, shade["label"], transform=ax.get_xaxis_transform(),
+                ha="center", va="top", fontsize=7)
+
+
+def _panel_legend(spec: Mapping[str, Any], panels) -> List[Line2D]:
+    """One entry per labelled series (its colour and line), then one per radius
+    (its marker)."""
+    handles = [Line2D([], [], color=s.get("color", f"C{k}"), ls=s.get("style", "-"),
+                      lw=0.8 if s.get("thin") else 1.3, alpha=0.5 if s.get("thin") else 1,
+                      label=s["label"])
+               for k, s in enumerate(spec["series"]) if "label" in s]
+    n = max(len(p.get("eps", [])) for p in panels)
+    names = spec.get("eps_labels", [f"radius {i + 1}" for i in range(n)])
+    handles += [Line2D([], [], color="k", ls="", marker=MARKERS[i][0], ms=MARKERS[i][1],
+                       label=names[i]) for i in range(n)]
+    return handles
 
 
 def grid(spec: Mapping[str, Any]):

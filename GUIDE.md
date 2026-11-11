@@ -290,7 +290,7 @@ mnist_headline:
 
 | Kind | Draws | From |
 |---|---|---|
-| `curve` | a metric against `x`: `beta` (at ln(β/(1−β)), D86), `bond_dim`, or `{x}` inside the key (ε, sweeps) | results.csv |
+| `curve` | a metric against `x`: `beta` (at ln(β/(1−β)), D86), `bond_dim`, or `{x}` inside the key (ε, sweeps); with `panels`, the same series once per dataset (`{data}` in the study), two radii per panel as markers ● ★, one legend | results.csv |
 | `bars` | models × metrics at one budget | results.csv |
 | `coverage` | accuracy on passed examples vs fraction passed, over q | results.csv |
 | `table` | models × metrics, mean ± std, booktabs `.tex` | results.csv |
