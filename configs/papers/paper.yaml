@@ -58,6 +58,90 @@ items:
       - {study: "{data}_nat", key: "rob_sel_adapt/test/{eps}/q5", label: "detector (selective)", color: C4}
       - {study: "{data}_nat", key: acc/test, label: clean, color: "0.35", thin: true}
 
+  # ── Main: the JEM baseline (MPS solid, JEM dashed) ───────────────────────
+  # 2x2 without Chlorine (its high beta is a majority-class classifier); each panel
+  # on its own y scale; JEM beta = 1 left out (D176). Radii as boundary; the defences
+  # at the radius where each regime's defences separate (NAT: AT's radius, AT: twice it).
+  jem_nat:
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    sharey: false
+    ncols: 2
+    eps_labels: ["at the AT radius", "at twice the AT radius"]
+    panels: &jem_panels
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.1, 0.2]}
+      - {title: "MNIST $28\\times28$", data: mnist, eps: [0.1, 0.2]}
+      - {title: ECG200, data: ecg200, eps: [0.05, 0.1]}
+      - {title: ItalyPowerDemand, data: italypowerdemand, eps: [0.05, 0.1]}
+    series:
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: MPS NAT, color: C0}
+      - {study: "jem_{data}_nat", where: &jem_no_b1 {beta: [0, 0.01, 0.1, 0.25, 0.5, 0.9]},
+         key: "rob/test/{eps}", label: JEM NAT, color: C1, style: "--"}
+      - {study: "{data}_nat", key: acc/test, label: "clean, MPS", color: C0, thin: true}
+      - {study: "jem_{data}_nat", where: *jem_no_b1, key: acc/test, label: "clean, JEM", color: C1,
+         style: "--", thin: true}
+
+  jem_at:
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    sharey: false
+    ncols: 2
+    eps_labels: ["at the AT radius", "at twice the AT radius"]
+    panels: *jem_panels
+    series:
+      - {study: "{data}_at", key: "rob/test/{eps}", label: MPS AT, color: C3}
+      - {study: "jem_{data}_at", key: "rob/test/{eps}", label: JEM AT, color: C5, style: "--"}
+      - {study: "{data}_at", key: acc/test, label: "clean, MPS", color: C3, thin: true}
+      - {study: "jem_{data}_at", key: acc/test, label: "clean, JEM", color: C5, style: "--", thin: true}
+
+  jem_nat_defenses:       # adaptive attack, at AT's radius
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    sharey: false
+    ncols: 2
+    legend_cols: 4
+    panels:
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.1]}
+      - {title: "MNIST $28\\times28$", data: mnist, eps: [0.1]}
+      - {title: ECG200, data: ecg200, eps: [0.05]}
+      - {title: ItalyPowerDemand, data: italypowerdemand, eps: [0.05]}
+    series:
+      - {study: "{data}_nat", key: "purify_adapt/test/{eps}/d0.1", label: "MPS purified", color: C2}
+      - {study: "{data}_nat", key: "rob_sel_adapt/test/{eps}/q5", label: "MPS detector", color: C4}
+      - {study: "jem_{data}_nat", where: *jem_no_b1, key: "purify_adapt/test/{eps}/d0.1",
+         label: "JEM purified", color: C2, style: "--"}
+      - {study: "jem_{data}_nat", where: *jem_no_b1, key: "rob_sel_adapt/test/{eps}/q5",
+         label: "JEM detector", color: C4, style: "--"}
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: "MPS no defence", color: "0.35", thin: true}
+      - {study: "jem_{data}_nat", where: *jem_no_b1, key: "rob/test/{eps}", label: "JEM no defence",
+         color: "0.35", style: "--", thin: true}
+
+  jem_at_defenses:        # adaptive attack, at twice AT's radius
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    sharey: false
+    ncols: 2
+    legend_cols: 4
+    panels:
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.2]}
+      - {title: "MNIST $28\\times28$", data: mnist, eps: [0.2]}
+      - {title: ECG200, data: ecg200, eps: [0.1]}
+      - {title: ItalyPowerDemand, data: italypowerdemand, eps: [0.1]}
+    series:
+      - {study: "{data}_at", key: "purify_adapt/test/{eps}/d0.1", label: "MPS purified", color: C2}
+      - {study: "{data}_at", key: "rob_sel_adapt/test/{eps}/q5", label: "MPS detector", color: C4}
+      - {study: "jem_{data}_at", key: "purify_adapt/test/{eps}/d0.1", label: "JEM purified",
+         color: C2, style: "--"}
+      - {study: "jem_{data}_at", key: "rob_sel_adapt/test/{eps}/q5", label: "JEM detector",
+         color: C4, style: "--"}
+      - {study: "{data}_at", key: "rob/test/{eps}", label: "MPS no defence", color: "0.35", thin: true}
+      - {study: "jem_{data}_at", key: "rob/test/{eps}", label: "JEM no defence", color: "0.35",
+         style: "--", thin: true}
+
   # ── Main: capacity (single panels, combined in the paper) ────────────────
   # MNIST 12x12 over beta, one colour per bond dimension r (mnist12_nat); then the
   # physical dimension d at r = 40 (mnist12_pdim, d = 3 from mnist12_nat).

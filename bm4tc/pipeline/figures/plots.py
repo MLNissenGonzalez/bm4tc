@@ -63,13 +63,14 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
     series in every panel; one panel gives a single figure in the same style. Any
     other panel field fills its placeholder in a series' study and key: ``data: ecg200``
     makes ``"{data}_nat"`` ``ecg200_nat``, ``delta: 0.01`` makes ``d{delta}`` ``d0.01``.
-    A series whose key holds ``{eps}`` is drawn once per radius of the panel, marker o for the first and * for the second; ``eps_labels``
-    names the two in the legend, the panel title gives their values. A series with
-    ``thin: true`` is a thin pale line without markers (e.g. clean accuracy). Every
-    line has its std band over seeds.
-    ``shade: {from, to, label}`` greys the x range between those two values. One
-    legend below the panels; ``ncols`` (default 3). The item's ``eps`` and ``axis:
-    right`` do not combine with panels."""
+    A series whose key holds ``{eps}`` is drawn once per radius of the panel, marker
+    o for the first and * for the second; ``eps_labels`` names the two in the legend,
+    the panel title gives their values. A series with ``thin: true`` is a thin pale
+    line without markers (e.g. clean accuracy). Every line has its std band over
+    seeds. ``shade: {from, to, label}`` greys the x range between those two values.
+    One legend below the panels; ``ncols`` (default 3). The panels share their y
+    axis unless ``sharey: false`` (each scaled to its own data; then no ``ylim``).
+    The item's ``eps`` and ``axis: right`` do not combine with panels."""
     if "panels" in spec:
         return _panels(spec, out)
     x = spec["x"]
@@ -137,6 +138,10 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
                          "its own radii")
     if any(s.get("axis") == "right" for s in spec["series"]):
         raise ValueError("curve: `axis: right` and `panels` do not combine")
+    sharey = spec.get("sharey", True)
+    if not sharey and "ylim" in spec:
+        raise ValueError("curve: `sharey: false` and `ylim` do not combine; each panel "
+                         "is scaled to its own data")
     x, panels = spec["x"], spec["panels"]
 
     def lines(panel):   # (series index, series, radius index or None, curve)
@@ -164,7 +169,7 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
     ncols = min(spec.get("ncols", 3), len(panels))
     nrows = -(-len(panels) // ncols)
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(nrows, ncols, sharey=True, squeeze=False,
+        fig, axes = plt.subplots(nrows, ncols, sharey=sharey, squeeze=False,
                                  figsize=spec.get("size", (3.0 * ncols + 0.6, 2.4 * nrows)))
         for ax, panel, d in zip(axes.flat, panels, drawn):
             for k, s, i, c in d:
@@ -180,8 +185,9 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
                                 lw=0)
             if "shade" in panel:
                 _shade(ax, panel["shade"], positions, ticks)
-            radii = "   ".join(f"{MARKERS[i][2]} $\\varepsilon={float(e):g}$"
-                               for i, e in enumerate(panel.get("eps", [])))
+            eps = panel.get("eps", [])   # one radius needs no marker key
+            radii = "   ".join((f"{MARKERS[i][2]} " if len(eps) > 1 else "")
+                               + f"$\\varepsilon={float(e):g}$" for i, e in enumerate(eps))
             ax.set_title(f"{panel['title']}   {radii}".strip(), fontsize=8.5)
             if x == "beta":
                 _beta_axis(ax, positions, xs)
@@ -209,7 +215,9 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
 
 def _shade(ax, shade: Mapping[str, Any], positions: Dict[float, float], ticks: List[float]):
     """Grey the x range from ``shade['from']`` to ``shade['to']``, out to halfway to the
-    neighbouring ticks."""
+    neighbouring ticks; nothing if the range is not on the axis (e.g. an AT grid)."""
+    if float(shade["from"]) not in positions or float(shade["to"]) not in positions:
+        return
     lo, hi = positions[float(shade["from"])], positions[float(shade["to"])]
     j, k = ticks.index(lo), ticks.index(hi)
     gap = (ticks[-1] - ticks[0]) / max(len(ticks) - 1, 1) / 2

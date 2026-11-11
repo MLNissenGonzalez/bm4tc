@@ -113,6 +113,9 @@ def test_curve_panels(toy, tmp_path):
     keyed = {**spec, "panels": [{**p, "delta": 0.1} for p in spec["panels"]],
              "series": [{"study": "{data}", "key": "purify/test/{eps}/d{delta}"}]}
     assert plots.curve(keyed, tmp_path / "d")[0].exists()
+    assert plots.curve({**spec, "sharey": False}, tmp_path / "s")[0].exists()
+    with pytest.raises(ValueError, match="`sharey: false` and `ylim`"):
+        plots.curve({**spec, "sharey": False, "ylim": [0, 1]}, tmp_path / "t")
     with pytest.raises(ValueError, match="`eps` and `panels`"):
         plots.curve({**spec, "eps": 0.1}, tmp_path / "q")
     with pytest.raises(ValueError, match="needs the panel's `eps`"):
