@@ -36,6 +36,76 @@ items:
       - {study: "{data}_nat", key: acc/test, label: "clean, NAT", color: C0, thin: true}
       - {study: "{data}_at", key: acc/test, label: "clean, AT", color: C3, style: "--", thin: true}
 
+  # ── Main: capacity (single panels, combined in the paper) ────────────────
+  # MNIST 12x12 over beta, one colour per bond dimension r (mnist12_nat); then the
+  # physical dimension d at r = 40 (mnist12_pdim, d = 3 from mnist12_nat).
+  mnist12_rank_acc:
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    legend_cols: 3
+    panels: [{title: "MNIST $12\\times12$", eps: [0.1]}]
+    series:
+      - {study: mnist12_nat, where: {arch: d3r10}, key: "rob/test/{eps}", label: "robust, $r=10$", color: C0}
+      - {study: mnist12_nat, where: {arch: d3r20}, key: "rob/test/{eps}", label: "robust, $r=20$", color: C1}
+      - {study: mnist12_nat, where: {arch: d3r40}, key: "rob/test/{eps}", label: "robust, $r=40$", color: C2}
+      - {study: mnist12_nat, where: {arch: d3r10}, key: acc/test, label: "clean, $r=10$", color: C0, thin: true}
+      - {study: mnist12_nat, where: {arch: d3r20}, key: acc/test, label: "clean, $r=20$", color: C1, thin: true}
+      - {study: mnist12_nat, where: {arch: d3r40}, key: acc/test, label: "clean, $r=40$", color: C2, thin: true}
+
+  mnist12_rank_nll:
+    kind: curve
+    x: beta
+    ylabel: "$-\\log p(x)$ per feature"
+    legend_cols: 3
+    panels: [{title: "MNIST $12\\times12$"}]
+    series:
+      - {study: mnist12_nat, where: {arch: d3r10}, key: loss_x/test, label: "$r=10$", color: C0}
+      - {study: mnist12_nat, where: {arch: d3r20}, key: loss_x/test, label: "$r=20$", color: C1}
+      - {study: mnist12_nat, where: {arch: d3r40}, key: loss_x/test, label: "$r=40$", color: C2}
+
+  mnist12_rank_defenses:  # adaptive attack (D114)
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    legend_cols: 3
+    panels: [{title: "MNIST $12\\times12$", eps: [0.1]}]
+    series:
+      - {study: mnist12_nat, where: {arch: d3r10}, key: "purify_adapt/test/{eps}/d0.1", label: "purified, $r=10$", color: C0}
+      - {study: mnist12_nat, where: {arch: d3r20}, key: "purify_adapt/test/{eps}/d0.1", label: "purified, $r=20$", color: C1}
+      - {study: mnist12_nat, where: {arch: d3r40}, key: "purify_adapt/test/{eps}/d0.1", label: "purified, $r=40$", color: C2}
+      - {study: mnist12_nat, where: {arch: d3r10}, key: "rob_sel_adapt/test/{eps}/q5", label: "detector, $r=10$", color: C0, style: "--"}
+      - {study: mnist12_nat, where: {arch: d3r20}, key: "rob_sel_adapt/test/{eps}/q5", label: "detector, $r=20$", color: C1, style: "--"}
+      - {study: mnist12_nat, where: {arch: d3r40}, key: "rob_sel_adapt/test/{eps}/q5", label: "detector, $r=40$", color: C2, style: "--"}
+
+  mnist12_pdim_acc:
+    kind: curve
+    x: phys_dim
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    legend_cols: 3
+    where: &pdim_r40 {arch: [d2r40, d3r40, d5r40, d10r40]}
+    eps_labels: ["robust, $\\varepsilon=0.05$", "robust, $\\varepsilon=0.1$"]
+    panels: [{title: "MNIST $12\\times12$, $r=40$", eps: [0.05, 0.1]}]
+    series:
+      - {study: [mnist12_pdim, mnist12_nat], where: {beta: 0}, key: "rob/test/{eps}", label: "$\\beta=0$", color: C0}
+      - {study: [mnist12_pdim, mnist12_nat], where: {beta: 1}, key: "rob/test/{eps}", label: "$\\beta=1$", color: C3}
+      - {study: [mnist12_pdim, mnist12_nat], where: {beta: 0}, key: acc/test, label: "clean, $\\beta=0$", color: C0, thin: true}
+      - {study: [mnist12_pdim, mnist12_nat], where: {beta: 1}, key: acc/test, label: "clean, $\\beta=1$", color: C3, thin: true}
+
+  mnist12_pdim_nll:       # rank 1 = the pixel marginals (mnist12_pdim_rank1)
+    kind: curve
+    x: phys_dim
+    ylabel: "$-\\log p(x)$ per feature"
+    legend_cols: 3
+    panels: [{title: "MNIST $12\\times12$"}]
+    series:
+      - {study: [mnist12_pdim, mnist12_nat], where: {<<: *pdim_r40, beta: 0}, key: loss_x/test, label: "$r=40$, $\\beta=0$", color: C0}
+      - {study: [mnist12_pdim, mnist12_nat], where: {<<: *pdim_r40, beta: 1}, key: loss_x/test, label: "$r=40$, $\\beta=1$", color: C3}
+      - {study: mnist12_pdim_rank1, key: loss_x/test, label: "$r=1$ (marginals), $\\beta=1$", color: "0.4", style: ":"}
+
   # ── Main: MNIST ───────────────────────────────────────────────────────────
   mnist_beta_acc:
     kind: curve

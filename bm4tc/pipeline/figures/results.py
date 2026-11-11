@@ -6,7 +6,8 @@ A *model* in a paper item is a study plus a filter on its identity columns::
     {study: mnist_nat, where: {beta: 0.5, arch: d3r40}, label: "MPS $\\beta=0.5$"}
 
 and must select exactly one grid cell; the seeds of that cell are what the mean
-and std are over. A *metric* is a key of :mod:`bm4tc.pipeline.metrics` in which
+and std are over. ``study`` may be a list (their rows pooled, e.g. a curve whose
+points sit in two studies) and a ``where`` value a list (any of them). A *metric* is a key of :mod:`bm4tc.pipeline.metrics` in which
 ``{eps}`` stands for the item's budget (``rob/test/{eps}``), optionally minus
 another key (``purify/test/{eps}/d0.1`` minus ``rob/test/{eps}``: the gain).
 """
@@ -74,6 +75,8 @@ def load(study: str) -> pd.DataFrame:
 
 
 def _matches(column: pd.Series, value) -> pd.Series:
+    if isinstance(value, (list, tuple)):
+        return np.logical_or.reduce([_matches(column, v) for v in value])
     if value is None:
         return column.isna()
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -82,8 +85,9 @@ def _matches(column: pd.Series, value) -> pd.Series:
 
 
 def rows(model: Model) -> pd.DataFrame:
-    """The study's rows that pass the model's filter."""
-    df = load(model.study)
+    """The study's (or studies') rows that pass the model's filter."""
+    studies = model.study if isinstance(model.study, (list, tuple)) else [model.study]
+    df = pd.concat([load(s) for s in studies], ignore_index=True)
     for name, value in model.where.items():
         if name not in df.columns:
             raise KeyError(f"{model.study}: no identity column {name!r} to filter on")
@@ -129,16 +133,19 @@ def cell_stats(model: Model, metric: Metric, **subs) -> Tuple[float, float, int]
 
 # ── Curves ──────────────────────────────────────────────────────────────────
 
-AXES = {"beta": "beta", "bond_dim": "arch", "arch": "arch"}   # x from an identity column
+AXES = {"beta": "beta", "bond_dim": "arch", "phys_dim": "arch",   # x from an identity column
+        "arch": "arch"}
 
 
 def _x_value(axis: str, raw) -> float:
-    return float(parse_arch(raw)[1]) if axis == "bond_dim" else raw
+    if axis in ("phys_dim", "bond_dim"):
+        return float(parse_arch(raw)[axis == "bond_dim"])
+    return raw
 
 
 def curve(model: Model, metric: Metric, x: str, **subs) -> pd.DataFrame:
     """Columns x, mean, std, n: the metric over ``x``. x is an identity column
-    (beta, bond_dim) grouped over cells, or a placeholder ``{x}`` in the metric key
+    (beta, bond_dim, phys_dim) grouped over cells, or a placeholder ``{x}`` in the metric key
     (``purify_gibbs/test/{eps}/k{x}``, ``rob/test/{x}``) read off one cell's columns."""
     df = rows(model)
     out = []

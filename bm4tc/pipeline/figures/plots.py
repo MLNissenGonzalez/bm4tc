@@ -23,7 +23,8 @@ from bm4tc.pipeline.figures.results import (Metric, Model, cell_stats, curve as 
 
 STYLE = {"font.size": 10, "axes.grid": True, "grid.alpha": 0.3, "legend.fontsize": 8,
          "figure.dpi": 150, "savefig.bbox": "tight", "pdf.fonttype": 42}
-XLABELS = {"beta": r"$\beta$", "bond_dim": "bond dimension $r$", "eps": r"$\varepsilon$",
+XLABELS = {"beta": r"$\beta$", "bond_dim": "bond dimension $r$",
+           "phys_dim": "physical dimension $d$", "eps": r"$\varepsilon$",
            "sweeps": "sweeps $k$", "q": "detection percentile $q$"}
 
 
@@ -58,7 +59,7 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
 
     Small multiples: ``panels: [{title, data, where, eps: [e1, e2], shade}]`` draws the
     series in every panel, ``{data}`` in a series' study standing for the panel's
-    ``data`` (``"{data}_nat"``). A series whose key holds ``{eps}`` is drawn once per
+    ``data`` (``"{data}_nat"``); one panel gives a single figure in the same style. A series whose key holds ``{eps}`` is drawn once per
     radius of the panel, marker o for the first and * for the second; ``eps_labels``
     names the two in the legend, the panel title gives their values. A series with
     ``thin: true`` is a thin pale line without markers (e.g. clean accuracy). Every
@@ -126,7 +127,9 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
             raise ValueError(f"curve panel {panel['title']!r}: at most {len(MARKERS)} radii")
         where = {**spec.get("where", {}), **panel.get("where", {})}
         for k, s in enumerate(spec["series"]):
-            s = {**s, "study": fill(s["study"], data=panel["data"])}
+            study = s["study"]
+            s = {**s, "study": [fill(t, data=panel.get("data")) for t in study]
+                 if isinstance(study, list) else fill(study, data=panel.get("data"))}
             model, metric = Model.parse(s, where), Metric.parse(s)
             if "{eps}" not in metric.key:
                 yield k, s, None, curve_of(model, metric, x)
@@ -145,7 +148,7 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
     nrows = -(-len(panels) // ncols)
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(nrows, ncols, sharey=True, squeeze=False,
-                                 figsize=spec.get("size", (3.0 * ncols, 2.4 * nrows)))
+                                 figsize=spec.get("size", (3.0 * ncols + 0.6, 2.4 * nrows)))
         for ax, panel, d in zip(axes.flat, panels, drawn):
             for k, s, i, c in d:
                 at = [positions[v] for v in c.x]
@@ -165,6 +168,9 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
             ax.set_title(f"{panel['title']}   {radii}".strip(), fontsize=8.5)
             if x == "beta":
                 _beta_axis(ax, positions, xs)
+            elif x in ("bond_dim", "phys_dim"):
+                ax.set_xticks(ticks)
+                ax.set_xticklabels([f"{t:g}" for t in ticks])
             ax.tick_params(labelsize=7)
             if "ylim" in spec:
                 ax.set_ylim(*spec["ylim"])
@@ -175,8 +181,12 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
         for ax in axes[-1]:
             ax.set_xlabel(spec.get("xlabel", XLABELS.get(x, x)))
         fig.tight_layout()
-        fig.legend(handles=_panel_legend(spec, panels), loc="upper center",
-                   bbox_to_anchor=(0.5, 0.0), ncol=spec.get("legend_cols", 6), frameon=False)
+        handles, cols = _panel_legend(spec, panels), spec.get("legend_cols", 6)
+        rows = -(-len(handles) // cols)   # matplotlib fills columns first: read across rows
+        handles = [handles[r * cols + c] for c in range(cols) for r in range(rows)
+                   if r * cols + c < len(handles)]
+        fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
+                   ncol=cols, frameon=False)
         return save(fig, out)
 
 
@@ -202,9 +212,10 @@ def _panel_legend(spec: Mapping[str, Any], panels) -> List[Line2D]:
                       label=s["label"])
                for k, s in enumerate(spec["series"]) if "label" in s]
     n = max(len(p.get("eps", [])) for p in panels)
-    names = spec.get("eps_labels", [f"radius {i + 1}" for i in range(n)])
+    default = [f"radius {i + 1}" for i in range(n)] if n > 1 else []   # one radius: no key
+    names = spec.get("eps_labels", default)[:n]
     handles += [Line2D([], [], color="k", ls="", marker=MARKERS[i][0], ms=MARKERS[i][1],
-                       label=names[i]) for i in range(n)]
+                       label=name) for i, name in enumerate(names)]
     return handles
 
 
