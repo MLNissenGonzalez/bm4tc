@@ -107,6 +107,12 @@ def test_curve_panels(toy, tmp_path):
     assert path.exists()
     legend = [h.get_label() for h in plots._panel_legend(spec, spec["panels"])]
     assert legend == ["robust", "clean", "small", "large"]
+    # a panel field fills its placeholder in the key, {eps} stays for the radii
+    assert plots._partial("purify/test/{eps}/d{delta}", {"delta": 0.1}) == \
+        "purify/test/{eps}/d0.1"
+    keyed = {**spec, "panels": [{**p, "delta": 0.1} for p in spec["panels"]],
+             "series": [{"study": "{data}", "key": "purify/test/{eps}/d{delta}"}]}
+    assert plots.curve(keyed, tmp_path / "d")[0].exists()
     with pytest.raises(ValueError, match="`eps` and `panels`"):
         plots.curve({**spec, "eps": 0.1}, tmp_path / "q")
     with pytest.raises(ValueError, match="needs the panel's `eps`"):

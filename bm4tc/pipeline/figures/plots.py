@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
+from bm4tc.core.embeddings import fmt_budget  # noqa: E402
+
 from bm4tc.pipeline.figures.results import (Metric, Model, cell_stats, curve as curve_of,  # noqa: E402
                                             fill, model_list, one_cell, rows, stats, values)
 
@@ -57,10 +59,11 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
     """``x``, ``series: [{study, where, key, label, minus, axis: left|right}]``,
     optional ``eps``, ``where``, ``ylabel``, ``ylabel_right``, ``ylim``, ``title``.
 
-    Small multiples: ``panels: [{title, data, where, eps: [e1, e2], shade}]`` draws the
-    series in every panel, ``{data}`` in a series' study standing for the panel's
-    ``data`` (``"{data}_nat"``); one panel gives a single figure in the same style. A series whose key holds ``{eps}`` is drawn once per
-    radius of the panel, marker o for the first and * for the second; ``eps_labels``
+    Small multiples: ``panels: [{title, where, eps: [e1, e2], shade, ...}]`` draws the
+    series in every panel; one panel gives a single figure in the same style. Any
+    other panel field fills its placeholder in a series' study and key: ``data: ecg200``
+    makes ``"{data}_nat"`` ``ecg200_nat``, ``delta: 0.01`` makes ``d{delta}`` ``d0.01``.
+    A series whose key holds ``{eps}`` is drawn once per radius of the panel, marker o for the first and * for the second; ``eps_labels``
     names the two in the legend, the panel title gives their values. A series with
     ``thin: true`` is a thin pale line without markers (e.g. clean accuracy). Every
     line has its std band over seeds.
@@ -110,6 +113,21 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
 
 
 MARKERS = (("o", 3.5, "●"), ("*", 7, "★"))   # a panel's radii: marker, size, glyph
+PANEL_FIELDS = {"title", "where", "eps", "shade"}       # the others fill placeholders
+
+
+class _Keep(dict):
+    def __missing__(self, name):
+        return "{" + name + "}"
+
+
+def _partial(template, subs: Mapping[str, Any]):
+    """Fill the placeholders named in ``subs`` (budgets as in the keys), keep the
+    others (``{eps}``, ``{x}``) for later; a list is filled item by item."""
+    if isinstance(template, list):
+        return [_partial(t, subs) for t in template]
+    return template.format_map(_Keep({k: fmt_budget(v) if isinstance(v, float) else v
+                                      for k, v in subs.items()}))
 
 
 def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
@@ -126,10 +144,9 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
         if len(radii) > len(MARKERS):
             raise ValueError(f"curve panel {panel['title']!r}: at most {len(MARKERS)} radii")
         where = {**spec.get("where", {}), **panel.get("where", {})}
+        subs = {k: v for k, v in panel.items() if k not in PANEL_FIELDS}
         for k, s in enumerate(spec["series"]):
-            study = s["study"]
-            s = {**s, "study": [fill(t, data=panel.get("data")) for t in study]
-                 if isinstance(study, list) else fill(study, data=panel.get("data"))}
+            s = {**s, **{f: _partial(s[f], subs) for f in ("study", "key", "minus") if f in s}}
             model, metric = Model.parse(s, where), Metric.parse(s)
             if "{eps}" not in metric.key:
                 yield k, s, None, curve_of(model, metric, x)

@@ -36,6 +36,28 @@ items:
       - {study: "{data}_nat", key: acc/test, label: "clean, NAT", color: C0, thin: true}
       - {study: "{data}_at", key: acc/test, label: "clean, AT", color: C3, style: "--", thin: true}
 
+  # ── Main: the active defences across datasets ────────────────────────────
+  defenses:               # boundary's frame and radii; adaptive attack (D114), NAT studies;
+                          # full MNIST's adaptive numbers are seed 1 only (D129): no band
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    eps_labels: ["at the AT radius", "at twice the AT radius"]
+    panels:
+      - {title: Spirals, data: spirals, delta: 0.1, eps: [0.1, 0.2]}
+      - {title: "MNIST $12\\times12$", data: mnist12, delta: 0.1, where: {arch: d3r40}, eps: [0.1, 0.2]}
+      - {title: "MNIST $28\\times28$, seed 1", data: mnist, delta: 0.1, eps: [0.1, 0.2]}
+      - {title: ECG200, data: ecg200, delta: 0.1, eps: [0.05, 0.1]}
+      - {title: ItalyPowerDemand, data: italypowerdemand, delta: 0.1, eps: [0.05, 0.1]}
+      - {title: "Chlorine, $\\delta=0.01$", data: chlorineconcentration, delta: 0.01,
+         eps: [0.002, 0.005], shade: {from: 0.9, to: 1, label: "majority class"}}
+    series:
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: "no defence", color: "0.35"}
+      - {study: "{data}_nat", key: "purify_adapt/test/{eps}/d{delta}", label: "purified", color: C2}
+      - {study: "{data}_nat", key: "rob_sel_adapt/test/{eps}/q5", label: "detector (selective)", color: C4}
+      - {study: "{data}_nat", key: acc/test, label: clean, color: "0.35", thin: true}
+
   # ── Main: capacity (single panels, combined in the paper) ────────────────
   # MNIST 12x12 over beta, one colour per bond dimension r (mnist12_nat); then the
   # physical dimension d at r = 40 (mnist12_pdim, d = 3 from mnist12_nat).
