@@ -66,7 +66,7 @@ def curve(spec: Mapping[str, Any], out: Path) -> List[Path]:
     A series whose key holds ``{eps}`` is drawn once per radius of the panel, marker
     o for the first and * for the second; ``eps_labels`` names the two in the legend,
     the panel title gives their values. A series with ``thin: true`` is a thin pale
-    line without markers (e.g. clean accuracy). Every line has its std band over
+    line (e.g. clean accuracy), with small radius markers if its key holds ``{eps}``. Every line has its std band over
     seeds. ``shade: {from, to, label}`` greys the x range between those two values.
     One legend below the panels; ``ncols`` (default 3). The panels share their y
     axis unless ``sharey: false`` (each scaled to its own data; then no ``ylim``).
@@ -175,8 +175,10 @@ def _panels(spec: Mapping[str, Any], out: Path) -> List[Path]:
             for k, s, i, c in d:
                 at = [positions[v] for v in c.x]
                 style = dict(color=s.get("color", f"C{k}"), ls=s.get("style", "-"))
-                if s.get("thin"):
-                    ax.plot(at, c["mean"], lw=0.8, alpha=0.5, **style)
+                if s.get("thin"):   # small radius markers only when it depends on one
+                    marker, size, _ = MARKERS[i] if i is not None else (None, 0, "")
+                    ax.plot(at, c["mean"], lw=0.8, alpha=0.5, marker=marker, ms=size * 0.6,
+                            **style)
                 else:
                     marker, size, _ = MARKERS[i or 0]
                     ax.plot(at, c["mean"], lw=1.3, marker=marker, ms=size, **style)

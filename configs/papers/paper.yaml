@@ -212,32 +212,73 @@ items:
       - {study: [mnist12_pdim, mnist12_nat], where: {<<: *pdim_r40, beta: 1}, key: loss_x/test, label: "$r=40$, $\\beta=1$", color: C3}
       - {study: mnist12_pdim_rank1, key: loss_x/test, label: "$r=1$ (marginals), $\\beta=1$", color: "0.4", style: ":"}
 
-  # ── Main: MNIST ───────────────────────────────────────────────────────────
-  mnist_beta_acc:
+  # ── Appendix: the density over beta ───────────────────────────────────────
+  density_beta:           # MPS NAT only (the JEM has no exact density); own y scale per panel
     kind: curve
     x: beta
-    eps: 0.1
+    ylabel: "$-\\log p(x)$ per feature"
+    sharey: false
+    panels:
+      - {title: Spirals, data: spirals}
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}}
+      - {title: "MNIST $28\\times28$", data: mnist}
+      - {title: ECG200, data: ecg200}
+      - {title: ItalyPowerDemand, data: italypowerdemand}
+      - {title: Chlorine, data: chlorineconcentration, shade: {from: 0.9, to: 1, label: "majority class"}}
+    series:
+      - {study: "{data}_nat", key: loss_x/test, label: "MPS NAT", color: C0}
+
+  # ── Appendix: the embedding, cosine against Legendre (MNIST, NAT, r = 40) ─
+  embedding_acc:
+    kind: curve
+    x: beta
     ylabel: Accuracy
     ylim: [0, 1.02]
+    ncols: 2
+    eps_labels: ["robust, $\\varepsilon=0.1$", "robust, $\\varepsilon=0.2$"]
+    panels: &embedding_panels
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.1, 0.2]}
+      - {title: "MNIST $28\\times28$", data: mnist, eps: [0.1, 0.2]}
     series:
-      - {study: mnist_nat, key: acc/test, label: Clean}
-      - {study: mnist_nat, key: "rob/test/{eps}", label: Robust}
-      - {study: mnist_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
-      - {study: mnist_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
-      - {study: mnist_nat, key: "purify/test/{eps}/d0.1", label: "Purified (transfer)", style: "--"}
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: Legendre, color: C0}
+      - {study: "{data}_nat_cosine", key: "rob/test/{eps}", label: cosine, color: C1, style: "--"}
+      - {study: "{data}_nat", key: acc/test, label: "clean, Legendre", color: C0, thin: true}
+      - {study: "{data}_nat_cosine", key: acc/test, label: "clean, cosine", color: C1, style: "--", thin: true}
 
-  mnist_beta_nll:
+  embedding_nll:
     kind: curve
     x: beta
-    ylabel: "$-\\log p(c|x)$"
-    ylabel_right: "$-\\log p(x, c)$"
+    ylabel: "$-\\log p(x)$ per feature"
+    ncols: 2
+    panels:
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}}
+      - {title: "MNIST $28\\times28$", data: mnist}
     series:
-      - {study: mnist_nat, key: loss_dis/test, label: Discriminative NLL}
-      - {study: mnist_nat, key: loss_x/test, label: NLL per feature, axis: right}
+      - {study: "{data}_nat", key: loss_x/test, label: Legendre, color: C0}
+      - {study: "{data}_nat_cosine", key: loss_x/test, label: cosine, color: C1, style: "--"}
 
+  embedding_defenses:     # adaptive attack (D114); full MNIST seed 1 only
+    kind: curve
+    x: beta
+    ylabel: Accuracy
+    ylim: [0, 1.02]
+    ncols: 2
+    legend_cols: 3
+    panels:
+      - {title: "MNIST $12\\times12$", data: mnist12, where: {arch: d3r40}, eps: [0.1]}
+      - {title: "MNIST $28\\times28$, seed 1", data: mnist, eps: [0.1]}
+    series:
+      - {study: "{data}_nat", key: "purify_adapt/test/{eps}/d0.1", label: "Legendre purified", color: C2}
+      - {study: "{data}_nat", key: "rob_sel_adapt/test/{eps}/q5", label: "Legendre detector", color: C4}
+      - {study: "{data}_nat", key: "rob/test/{eps}", label: "Legendre no defence", color: "0.35", thin: true}
+      - {study: "{data}_nat_cosine", key: "purify_adapt/test/{eps}/d0.1", label: "cosine purified", color: C2, style: "--"}
+      - {study: "{data}_nat_cosine", key: "rob_sel_adapt/test/{eps}/q5", label: "cosine detector", color: C4, style: "--"}
+      - {study: "{data}_nat_cosine", key: "rob/test/{eps}", label: "cosine no defence", color: "0.35", style: "--", thin: true}
+
+  # ── Appendix: MNIST tables; checkpoint figures (drawn on the cluster) ────
   mnist_headline:
     kind: table
-    eps: 0.1
+    eps: [0.1, 0.2]
     models: &mnist_models
       - {study: mnist_nat, where: {beta: 0}, label: "MPS $\\beta=0$"}
       - {study: mnist_nat, where: {beta: 0.25}, label: "MPS $\\beta=0.25$"}
@@ -255,69 +296,6 @@ items:
       - {key: "purify_adapt/test/{eps}/d0.1", label: Purified, best: max}
       - {key: "purify_adapt/test/{eps}/d0.1", minus: "rob/test/{eps}", label: Gain, best: max}
       - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector", best: max}
-
-  mnist_defenses:
-    kind: bars
-    eps: [0.1, 0.2]
-    models:
-      - {study: mnist_nat, where: {beta: 0}, label: "MPS $\\beta=0$"}
-      - {study: mnist_nat, where: {beta: 0.9}, label: "MPS $\\beta=0.9$"}
-      - {study: mnist_at, where: {beta: 0.5}, label: "MPS AT $\\beta=0.5$"}
-      - {study: jem_mnist_nat, where: {beta: 0.9}, label: "JEM $\\beta=0.9$"}
-      - {study: jem_mnist_at, where: {beta: 0}, label: "JEM AT"}
-    metrics:
-      - {key: acc/test, label: Clean}
-      - {key: "rob/test/{eps}", label: Robust}
-      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified}
-      - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$)"}
-      - {key: "purify/test/{eps}/d0.1", label: "Purified (transfer)"}
-
-  mnist_capacity:
-    kind: curve
-    x: bond_dim
-    ylabel: Clean accuracy
-    ylabel_right: "$-\\log p(x, c)$"
-    series:
-      - {study: mnist_capacity, where: {beta: 0}, key: acc/test, label: "acc, $\\beta=0$"}
-      - {study: mnist_capacity, where: {beta: 1}, key: acc/test, label: "acc, $\\beta=1$"}
-      - {study: mnist_capacity, where: {beta: 1}, key: loss_x/test, label: "NLL per feature, $\\beta=1$",
-         axis: right, style: ":"}
-
-  mnist_coverage:
-    kind: coverage
-    eps: 0.1
-    models:
-      - {study: mnist_nat, where: {beta: 0}, label: "MPS $\\beta=0$"}
-      - {study: mnist_nat, where: {beta: 0.9}, label: "MPS $\\beta=0.9$"}
-      - {study: mnist_at, where: {beta: 0.5}, label: "MPS AT $\\beta=0.5$"}
-      - {study: jem_mnist_nat, where: {beta: 0.9}, label: "JEM $\\beta=0.9$"}
-
-  mnist_detection:        # transfer: fraction of PGD examples flagged at the clean q-th percentile (D2);
-                          # then selective robust accuracy at q5, transfer and adaptive (D114)
-    kind: table
-    eps: 0.1
-    models: *mnist_models
-    metrics:
-      - {key: "detect/test/0/q5", label: "FPR ($q=5$)"}
-      - {key: "detect/test/{eps}/q1", label: "$q=1$", best: max}
-      - {key: "detect/test/{eps}/q5", label: "$q=5$", best: max}
-      - {key: "detect/test/{eps}/q10", label: "$q=10$", best: max}
-      - {key: "detect/test/{eps}/q20", label: "$q=20$", best: max}
-      - {key: "rob_sel/test/{eps}/q5", label: "selective, $q=5$ (transfer)", best: max}
-      - {key: "rob_sel_adapt/test/{eps}/q5", label: "selective, $q=5$", best: max}
-
-  mnist_purify_vs_eps:
-    kind: curve
-    x: eps
-    ylabel: Accuracy
-    ylim: [0, 1.02]
-    series:
-      - {study: mnist_nat, where: {beta: 0}, key: "purify_adapt/test/{x}/d0.1", label: "purified, $\\beta=0$"}
-      - {study: mnist_nat, where: {beta: 0.9}, key: "purify_adapt/test/{x}/d0.1", label: "purified, $\\beta=0.9$"}
-      - {study: mnist_at, where: {beta: 0.5}, key: "purify_adapt/test/{x}/d0.1", label: "purified, AT"}
-      - {study: mnist_nat, where: {beta: 0}, key: "rob/test/{x}", label: "robust, $\\beta=0$", style: "--", color: C0}
-      - {study: mnist_nat, where: {beta: 0.9}, key: "rob/test/{x}", label: "robust, $\\beta=0.9$", style: "--", color: C1}
-      - {study: mnist_at, where: {beta: 0.5}, key: "rob/test/{x}", label: "robust, AT", style: "--", color: C2}
 
   mnist_gibbs:            # Gibbs: one sweep, no window; transfer only on full MNIST (D132)
     kind: table
@@ -374,62 +352,46 @@ items:
       - {study: spirals_nat, where: {beta: 0.5}, label: "$\\beta=0.5$"}
       - {study: spirals_nat, where: {beta: 1}, label: "$\\beta=1$"}
 
-  spirals_beta_acc:
+  spirals_beta_acc:       # the exact ceilings (data only, so flat in beta); adaptive defences
     kind: curve
     x: beta
-    eps: 0.2
     ylabel: Accuracy
     ylim: [0, 1.02]
+    legend_cols: 3
+    eps_labels: ["at the AT radius", "at twice the AT radius"]
+    panels: [{title: Spirals, eps: [0.1, 0.2]}]
     series:
-      - {study: spirals_nat, key: acc/test, label: Clean}
-      - {study: spirals_nat, key: "rob/test/{eps}", label: Robust}
-      - {study: spirals_nat, key: "rob_ceiling/test/{eps}", label: "Robust ceiling", style: ":"}
-      - {study: spirals_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
-      - {study: spirals_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
-      - {study: spirals_nat, key: "rob_ceiling_sel/test/{eps}", label: "Selective ceiling", style: ":"}
-      - {study: spirals_nat, key: "purify/test/{eps}/d0.1", label: "Purified (transfer)", style: "--"}
+      - {study: spirals_nat, key: "rob/test/{eps}", label: "no defence", color: "0.35"}
+      - {study: spirals_nat, key: "purify_adapt/test/{eps}/d0.1", label: purified, color: C2}
+      - {study: spirals_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "detector (selective)", color: C4}
+      - {study: spirals_nat, key: "rob_ceiling/test/{eps}", label: "robust ceiling", color: "0.35", style: ":", thin: true}
+      - {study: spirals_nat, key: "rob_ceiling_sel/test/{eps}", label: "selective ceiling", color: C4, style: ":", thin: true}
+      - {study: spirals_nat, key: acc/test, label: clean, color: "0.35", thin: true}
 
-  spirals_beta_nll:
-    kind: curve
-    x: beta
-    ylabel: "$-\\log p(c|x)$"
-    ylabel_right: "$-\\log p(x, c)$"
-    series:
-      - {study: spirals_nat, key: loss_dis/test, label: Discriminative NLL}
-      - {study: spirals_nat, key: loss_x/test, label: NLL per feature, axis: right}
-
-  spirals_defenses:
-    kind: bars
-    eps: [0.05, 0.1, 0.2]       # D122's budgets
+  spirals_summary:
+    kind: table
+    eps: [0.05, 0.1, 0.2]
     models: &spirals_models
       - {study: spirals_nat, where: {beta: 0}, label: "$\\beta=0$"}
       - {study: spirals_nat, where: {beta: 0.5}, label: "$\\beta=0.5$"}
       - {study: spirals_nat, where: {beta: 1}, label: "$\\beta=1$"}
       - {study: spirals_at, where: {beta: 0}, label: AT}
       - {study: spirals_at, where: {beta: 0.25}, label: "AT $\\beta=0.25$"}
-    metrics:
-      - {key: acc/test, label: Clean}
-      - {key: "rob/test/{eps}", label: Robust}
-      - {key: "purify_adapt/test/{eps}/d0.1", label: Purified}
-      - {key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$)"}
-      - {key: "rob_ceiling/test/{eps}", label: Ceiling}
-
-  spirals_summary:
-    kind: table
-    eps: [0.05, 0.1, 0.2]
-    models: *spirals_models
     metrics: *headline_metrics
 
-  spirals_capacity:
+  spirals_capacity:       # the larger models lose robustness at beta = 1
     kind: curve
     x: bond_dim
-    eps: 0.2
     ylabel: Accuracy
+    ylim: [0, 1.02]
+    legend_cols: 3
+    eps_labels: ["robust, $\\varepsilon=0.05$", "robust, $\\varepsilon=0.1$"]
+    panels: [{title: "Spirals ($d=4, 6, 10, 30$)", eps: [0.05, 0.1]}]
     series:
-      - {study: spirals_capacity, where: {beta: 0}, key: acc/test, label: "clean, $\\beta=0$"}
-      - {study: spirals_capacity, where: {beta: 1}, key: acc/test, label: "clean, $\\beta=1$"}
-      - {study: spirals_capacity, where: {beta: 0}, key: "rob/test/{eps}", label: "robust, $\\beta=0$", style: "--"}
-      - {study: spirals_capacity, where: {beta: 1}, key: "rob/test/{eps}", label: "robust, $\\beta=1$", style: "--"}
+      - {study: spirals_capacity, where: {beta: 0}, key: "rob/test/{eps}", label: "$\\beta=0$", color: C0}
+      - {study: spirals_capacity, where: {beta: 1}, key: "rob/test/{eps}", label: "$\\beta=1$", color: C3}
+      - {study: spirals_capacity, where: {beta: 0}, key: acc/test, label: "clean, $\\beta=0$", color: C0, thin: true}
+      - {study: spirals_capacity, where: {beta: 1}, key: acc/test, label: "clean, $\\beta=1$", color: C3, thin: true}
 
   spirals_capacity_density:
     kind: density
@@ -439,20 +401,6 @@ items:
       - {study: spirals_capacity, where: {arch: d6r4}, label: "$d=6, r=4$"}
       - {study: spirals_capacity, where: {arch: d10r6}, label: "$d=10, r=6$"}
       - {study: spirals_capacity, where: {arch: d30r18}, label: "$d=30, r=18$"}
-
-  spirals_capacity_check:   # D42: the d10r6 cells, tuned twice, should agree
-    kind: table
-    eps: 0.2
-    models:
-      - {study: spirals_nat, where: {beta: 0}, label: "spirals\\_nat $\\beta=0$"}
-      - {study: spirals_capacity, where: {arch: d10r6, beta: 0}, label: "spirals\\_capacity $\\beta=0$"}
-      - {study: spirals_nat, where: {beta: 1}, label: "spirals\\_nat $\\beta=1$"}
-      - {study: spirals_capacity, where: {arch: d10r6, beta: 1}, label: "spirals\\_capacity $\\beta=1$"}
-    metrics:
-      - {key: acc/test, label: Clean}
-      - {key: loss_x/test, label: "NLL/feature"}
-      - {key: "rob/test/{eps}", label: Robust}
-      - {key: objective/valid, label: "Objective (valid)"}
 
   spirals_embedding_density:
     kind: density
@@ -480,33 +428,9 @@ items:
       - {key: "purify_adapt/test/{eps}/d0.1", label: Purified, best: max}
 
   # ── Appendix: MNIST 12x12 (the rebuttal's setting) ─────────────────────────
-  mnist12_beta_acc:
-    kind: curve
-    x: beta
-    eps: 0.1
-    where: {arch: d3r40}
-    ylabel: Accuracy
-    ylim: [0, 1.02]
-    series:
-      - {study: mnist12_nat, key: acc/test, label: Clean}
-      - {study: mnist12_nat, key: "rob/test/{eps}", label: Robust}
-      - {study: mnist12_nat, key: "purify_adapt/test/{eps}/d0.1", label: "Purified ($\\delta=0.1$)"}
-      - {study: mnist12_nat, key: "rob_sel_adapt/test/{eps}/q5", label: "Detector ($q=5$, selective)"}
-      - {study: jem_mnist12_nat, key: acc/test, label: "JEM clean", style: "--"}
-      - {study: jem_mnist12_nat, key: "purify_adapt/test/{eps}/d0.1", label: "JEM purified", style: "--"}
-
-  mnist12_capacity:
-    kind: curve
-    x: bond_dim
-    ylabel: Clean accuracy
-    series:
-      - {study: mnist12_nat, where: {beta: 0}, key: acc/test, label: "$\\beta=0$"}
-      - {study: mnist12_nat, where: {beta: 0.5}, key: acc/test, label: "$\\beta=0.5$"}
-      - {study: mnist12_nat, where: {beta: 1}, key: acc/test, label: "$\\beta=1$"}
-
   mnist12_headline:
     kind: table
-    eps: 0.1
+    eps: [0.1, 0.2]
     where: {arch: d3r40}
     models:
       - {study: mnist12_nat, where: {beta: 0}, label: "MPS $\\beta=0$"}
