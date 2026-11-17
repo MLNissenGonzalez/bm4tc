@@ -6,7 +6,8 @@ JEM go through the same code.
     density    2-D data: decision boundary and p(x) over the input square, one
                column per model
     samples    class-conditional samples (MPS: exact sampling; JEM: SGLD from
-               noise): per-class means for images, the points for 2-D data
+               noise): per-class means for images (exact for the MPS), the points
+               for 2-D data
     transfer   PGD examples crafted on one model and passed to all: original,
                adversarial, and each model's likelihood-purified version, on
                examples that fool the attacked model; plus a statistics file
@@ -164,17 +165,68 @@ def class_samples(net, config: Mapping, n_per_class: int, num_bins: int,
     return torch.stack(xs).cpu()
 
 
+def class_means(net, num_bins: int) -> torch.Tensor:
+    """(classes, features): the exact mean of every feature under the MPS's p(x | c),
+    in the model's input range, without sampling. Every integral is the trapezoidal
+    rule on ``num_bins`` points of the input range, for any embedding (the Gram matrix
+    of the embedding on that grid replaces the identity of an orthonormal one).
+
+    One sweep per class: the right environments first, then left to right, where a
+    feature's density matrix (left environment, core, right environment) gives its
+    normalised first moment. Contracted in complex128 (or float64 for a real model):
+    in float32 the double layer's cancellations reach 6e-2 of the weights on full
+    MNIST at β = 0 (notes:evidence, 2026-11-17)."""
+    wide = torch.complex128 if net.dtype.is_complex else torch.float64
+    grid = torch.linspace(*net.input_range, num_bins, device=device(), dtype=torch.float64)
+    weights = torch.trapezoid(torch.eye(num_bins, device=device(), dtype=torch.float64),
+                              x=grid, dim=0).to(wide)
+    phi = net.embedding(grid.to(torch.get_default_dtype())).reshape(num_bins, -1).to(wide)
+    gram = torch.einsum("k,ks,kt->st", weights, phi, phi.conj())
+    first = torch.einsum("k,ks,kt->st", weights * grid.to(wide), phi, phi.conj())
+
+    means = []
+    for c in range(net.out_dim):
+        label = torch.nn.functional.one_hot(torch.tensor(c), net.out_dim)
+        cores = [t.detach().to(wide) for t in
+                 net.condition(label.to(net.dtype).to(device())).tensors]
+        cores[0] = cores[0] if cores[0].ndim == 3 else cores[0].unsqueeze(0)
+        cores[-1] = cores[-1] if cores[-1].ndim == 3 else cores[-1].unsqueeze(-1)
+        one = torch.ones(1, 1, dtype=wide, device=device())
+        rights, env = [], one
+        for core in reversed(cores):   # environments are rescaled: only ratios are used
+            rights.append(env)
+            env = torch.einsum("asc,st,cd,btd->ab", core, gram, env, core.conj())
+            env = env / env.abs().max()
+        rights.reverse()
+        left, mean = one, []
+        for core, right in zip(cores, rights):
+            rho = torch.einsum("ab,asc,cd,btd->st", left, core, right, core.conj())
+            mean.append((torch.einsum("st,st->", rho, first)
+                         / torch.einsum("st,st->", rho, gram)).real)
+            left = torch.einsum("ab,asc,st,btd->cd", left, core, gram, core.conj())
+            left = left / left.abs().max()
+        means.append(torch.stack(mean))
+    return torch.stack(means).float().cpu()
+
+
 def samples(spec: Mapping[str, Any], out: Path) -> List[Path]:
     """``models``, optional ``n_per_class`` (64), ``num_bins`` (100, MPS),
-    ``sgld_steps`` (1000, JEM), ``seed``. Images: one row per model, the mean
-    sample of each class; 2-D data: one panel per model, the samples themselves."""
+    ``sgld_steps`` (1000, JEM), ``seed``. Images: one row per model, the mean image
+    of each class, exact for an MPS (``class_means``) and the mean of
+    ``n_per_class`` SGLD samples for a JEM (it has no exact marginals); 2-D data: one
+    panel per model, the samples themselves."""
     models = model_list(spec["models"], spec.get("where"))
+    num_bins = spec.get("num_bins", 100)
     drawn = []
     for model in models:
-        net, _, config = load(model, spec.get("seed"))
+        net, data, config = load(model, spec.get("seed"))
         set_seed(SEED)
-        x = class_samples(net, config, spec.get("n_per_class", 64),
-                          spec.get("num_bins", 100), spec.get("sgld_steps", 1000))
+        if data.data["test"].shape[1] != 2 and not isinstance(net, JEMMLP):
+            x = class_means(net, num_bins)
+        else:
+            x = class_samples(net, config, spec.get("n_per_class", 64), num_bins,
+                              spec.get("sgld_steps", 1000))
+            x = x if data.data["test"].shape[1] == 2 else x.mean(dim=1)
         drawn.append((model, _to_unit(x, net).clamp(0, 1)))
     with plt.rc_context({**STYLE, "axes.grid": False}):
         if drawn[0][1].shape[-1] == 2:
@@ -190,7 +242,7 @@ def samples(spec: Mapping[str, Any], out: Path) -> List[Path]:
         fig, axes = plt.subplots(len(drawn), n_classes, squeeze=False,
                                  figsize=(0.9 * n_classes, 1.0 * len(drawn)))
         for row, (model, x) in enumerate(drawn):
-            for c, mean in enumerate(x.mean(dim=1)):
+            for c, mean in enumerate(x):
                 ax = axes[row, c]
                 ax.imshow(_image(mean), cmap="gray_r", vmin=0, vmax=1)
                 ax.set_xticks([])

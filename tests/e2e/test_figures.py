@@ -47,3 +47,29 @@ def test_transfer_examples(root, monkeypatch):
     assert np.array_equal(keep, np.flatnonzero(fooled))
     for k in range(3):
         assert r["purified"][k].shape == (len(keep), 2)
+
+
+@pytest.mark.slow
+def test_class_means_match_the_joint_on_a_grid(root, monkeypatch):
+    """The sweep's per-class feature means equal brute-force integration of
+    p(x, c) over the 2-D grid, with the same trapezoidal weights."""
+    import torch
+
+    from bm4tc.pipeline.figures.checkpoints import class_means, load
+    from bm4tc.pipeline.figures.results import model_list
+
+    monkeypatch.setenv("BM4TC_DATA_ROOT", str(root))
+    net, _, _ = load(model_list([{"study": "tests/seam_nat"}], None)[0])
+    bins = 60
+    means = class_means(net, bins).double()
+
+    axis = torch.linspace(*net.input_range, bins, dtype=torch.float64)
+    w = torch.trapezoid(torch.eye(bins, dtype=torch.float64), x=axis, dim=0)
+    g1, g2 = torch.meshgrid(axis, axis, indexing="ij")
+    grid = torch.stack([g1.ravel(), g2.ravel()], dim=1)
+    with torch.no_grad():
+        log_joint = net.log_joint(grid.float().to(next(net.parameters()).device)).double().cpu()
+    p = (log_joint - log_joint.max()).exp() * torch.outer(w, w).ravel()[:, None]   # (N, classes)
+    brute = (grid.T @ p / p.sum(dim=0)).T                                              # (classes, 2)
+    assert means.shape == brute.shape == (net.out_dim, 2)
+    assert torch.allclose(means, brute, atol=1e-4)
