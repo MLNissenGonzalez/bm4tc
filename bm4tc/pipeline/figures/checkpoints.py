@@ -9,7 +9,7 @@ JEM go through the same code.
                noise): per-class means for images, the points for 2-D data
     transfer   PGD examples crafted on one model and passed to all: original,
                adversarial, and each model's likelihood-purified version, on
-               examples that fool every model; plus a statistics file
+               examples that fool the attacked model; plus a statistics file
 """
 import json
 import math
@@ -204,12 +204,12 @@ def samples(spec: Mapping[str, Any], out: Path) -> List[Path]:
 
 # ── transfer ────────────────────────────────────────────────────────────────
 
-def transfer_mask(clean: List[np.ndarray], adv: List[np.ndarray], labels: np.ndarray) -> np.ndarray:
-    """Examples every model classifies correctly when clean and wrongly when attacked."""
-    mask = np.ones(len(labels), dtype=bool)
-    for c, a in zip(clean, adv):
-        mask &= (c == labels) & (a != labels)
-    return mask
+def transfer_mask(clean: np.ndarray, adv: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Examples the attacked model classifies correctly when clean and wrongly when
+    attacked. The other models are not filtered on: how often the attack transfers to
+    them is part of what the figure shows (requiring every model to be fooled kept 2 of
+    2000 MNIST examples, 2026-11-17)."""
+    return (clean == labels) & (adv != labels)
 
 
 def first_of_each(labels: np.ndarray, classes) -> Dict[int, Optional[int]]:
@@ -220,7 +220,7 @@ def first_of_each(labels: np.ndarray, classes) -> Dict[int, Optional[int]]:
 
 def transfer_examples(spec: Mapping[str, Any]) -> Dict[str, Any]:
     """The computation behind ``transfer``, all images in [0, 1]: ``clean``,
-    ``adv`` (N, features), ``labels`` (N,); ``keep`` (indices fooling every model);
+    ``adv`` (N, features), ``labels`` (N,); ``keep`` (indices fooling the attacked model);
     per model ``clean_pred``, ``adv_pred`` (N,), ``purified`` (len(keep), features),
     ``purified_pred``; ``models``; ``source`` (index)."""
     specs = list(spec["models"])
@@ -253,9 +253,11 @@ def transfer_examples(spec: Mapping[str, Any]) -> Dict[str, Any]:
          "clean": _to_unit(x_all, src), "adv": _to_unit(torch.cat(advs), src)}
     r["clean_pred"] = [predict(net, r["clean"]) for net in nets]
     r["adv_pred"] = [predict(net, r["adv"]) for net in nets]
-    r["keep"] = np.flatnonzero(transfer_mask(r["clean_pred"], r["adv_pred"], r["labels"]))
+    s = sources[0]
+    r["keep"] = np.flatnonzero(transfer_mask(r["clean_pred"][s], r["adv_pred"][s], r["labels"]))
     if not len(r["keep"]):
-        raise RuntimeError("transfer: no attack fools every model; raise eps or max_attack")
+        raise RuntimeError("transfer: the attack fools the attacked model on no example; "
+                           "raise eps or max_attack")
     r["purified"], r["purified_pred"] = [], []
     for net in nets:
         x = _from_unit(r["adv"][r["keep"]], net)
@@ -302,7 +304,7 @@ def transfer(spec: Mapping[str, Any], out: Path) -> List[Path]:
 
     lines = [f"PGD-{spec.get('attack_steps', 40)} eps_rel={float(spec['eps']):g} on "
              f"{models[src].label}; likelihood purification delta_rel={float(spec['delta']):g}; "
-             f"{len(labels)} test examples attacked, {len(keep)} fool every model",
+             f"{len(labels)} test examples attacked, {len(keep)} fool {models[src].label}",
              f"{'model':<40} {'clean':>7} {'attacked':>9} {'purified':>9}"]
     for k, m in enumerate(models):
         lines.append(f"{m.label:<40} {np.mean(r['clean_pred'][k] == labels):7.3f} "

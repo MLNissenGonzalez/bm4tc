@@ -328,8 +328,8 @@ items:
     kind: samples
     models:
       - {study: mnist_nat, where: {beta: 0}, label: "$\\beta=0$"}
-      - {study: mnist_nat, where: {beta: 0.9}, label: "$\\beta=0.9$"}
       - {study: mnist_nat, where: {beta: 0.25}, label: "$\\beta=0.25$"}
+      - {study: mnist_nat, where: {beta: 0.9}, label: "$\\beta=0.9$"}
       - {study: mnist_nat, where: {beta: 1}, label: "$\\beta=1$"}
       - {study: jem_mnist_nat, where: {beta: 0.9}, label: "JEM $\\beta=0.9$"}
 

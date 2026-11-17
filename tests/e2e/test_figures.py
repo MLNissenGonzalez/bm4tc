@@ -40,7 +40,10 @@ def test_transfer_examples(root, monkeypatch):
     assert r["source"] == 1 and len(keep) > 0
     assert float(r["clean"].min()) >= 0 and float(r["clean"].max()) <= 1
     assert np.abs(r["adv"] - r["clean"]).max() <= 0.15 + 1e-6   # relative budget, in [0, 1]
-    for k in range(3):   # every kept example fools every model
-        assert (r["clean_pred"][k][keep] == labels[keep]).all()
-        assert (r["adv_pred"][k][keep] != labels[keep]).all()
+    s = r["source"]   # every kept example fools the attacked model, and only it is filtered on
+    assert (r["clean_pred"][s][keep] == labels[keep]).all()
+    assert (r["adv_pred"][s][keep] != labels[keep]).all()
+    fooled = (r["clean_pred"][s] == labels) & (r["adv_pred"][s] != labels)
+    assert np.array_equal(keep, np.flatnonzero(fooled))
+    for k in range(3):
         assert r["purified"][k].shape == (len(keep), 2)
