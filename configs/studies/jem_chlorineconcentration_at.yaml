@@ -26,8 +26,8 @@ hparams_from:                # not jem.energy_l2: the JEM AT studies train at it
 budgets: [0.001, 0.002, 0.005, 0.01]   # D165
 analysis:
   purify_delta: [0.002, 0.005, 0.01]   # D165
-  sweep_purify:                # D132, as the other series: one SGLD sweep, no ball; adaptive on one seed per beta
+  sweep_purify:                # D132: one sweep, adaptive on one seed per beta; D189: a window, as D158
     enabled: true
-    step: null
+    step: 0.015                # D189: 1.5x the largest budget (0.01), so one sweep can undo it
     sweeps: [1]
     adaptive_seeds: [1]

@@ -18,8 +18,9 @@ hpo:                           # the lr only (D80)
     trainer.optimizer.kwargs.lr: {log: [1e-5, 1e-2]}   # warm start: below the cold default range (D81)
 budgets: [0.01, 0.02, 0.05, 0.1]   # D145
 analysis:
-  sweep_purify:                # D132: one sweep, no window; adaptive on one seed per beta
+  purify_delta: [0.02, 0.05, 0.1]   # D189: below, at and above the AT radius 0.05 (D153)
+  sweep_purify:                # D132: one sweep, adaptive on one seed per beta; D189: a window, as D158
     enabled: true
-    step: null
+    step: 0.15                 # D189: 1.5x the largest budget (0.1), so one sweep can undo it
     sweeps: [1]
     adaptive_seeds: [1]
