@@ -29,6 +29,7 @@ from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
 from bm4tc.core.gauge import GaugeConfig, check as check_gauge, gauge_diagnostics, gauge_step_
 from bm4tc.core.graphs import Graphs
+from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
@@ -71,6 +72,10 @@ class TrainConfig:
     # A gauge step after the optimiser's (D190, bm4tc/core/gauge.py): ψ unchanged, so it
     # acts only through the optimiser. kind none (the default) leaves the gauge alone.
     gauge: GaugeConfig = field(default_factory=GaugeConfig)
+    # Train on the isometric form (D192, bm4tc/core/pogo.py): the cores kept isometries
+    # towards the class core by POGO, so Z = 1 by the constraint. Needs the model built
+    # with trim_bonds, no gauge step and no norm penalty.
+    riemannian: bool = False
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical
     # to the eager step except for the AT random start, whose draws come from
@@ -108,6 +113,15 @@ class Trainer:
         if cfg.eval_every < 1:
             raise ValueError(f"eval_every must be >= 1, got {cfg.eval_every}")
         check_gauge(cfg.gauge)  # a composed config skips GaugeConfig's own check
+        if cfg.riemannian:
+            if cfg.gauge.kind != "none":
+                raise ValueError(f"trainer.riemannian keeps the cores isometries towards the class "
+                                 f"core, which a gauge step breaks: trainer.gauge.kind must be "
+                                 f"'none', got {cfg.gauge.kind!r}")
+            if cfg.norm_control.soft_strength > 0.0:
+                raise ValueError(f"trainer.riemannian holds Z = 1 by the constraint: "
+                                 f"trainer.norm_control.soft_strength must be 0, got "
+                                 f"{cfg.norm_control.soft_strength}")
         self.cbm = cbm
         self.cfg = cfg
         self.train_loader = train_loader
@@ -432,6 +446,10 @@ class Trainer:
         on_cuda = torch.device(self.device).type == "cuda"
         self.optimizer = optimizer(self.cbm.parameters(), cfg.optimizer,
                                    **({"capturable": True} if on_cuda else {}))
+        if cfg.riemannian:
+            isometric_start_(self.cbm)
+            self.cbm.invalidate_log_Z_cache()
+            self.optimizer = POGO(self.cbm, self.optimizer)
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
@@ -473,6 +491,8 @@ class Trainer:
                 # Where the gauge is (D190), also under kind none (the optimiser's own
                 # drift); no RNG draws, about a second per call at full MNIST d3r160.
                 record["diagnostics"] = {**record["diagnostics"], **gauge_diagnostics(self.cbm)}
+                if cfg.riemannian:
+                    record["diagnostics"]["isometry/defect_max"] = max(isometry_defects(self.cbm))
                 postfix["acc"] = f"{valid['acc']:.4f}"
                 logged = dict(valid)
                 if "rob" in valid:

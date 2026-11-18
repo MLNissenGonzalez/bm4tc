@@ -91,6 +91,13 @@ per feature apart, so they compare across embeddings and models (D170,
   `every`-th step. The training log carries `gauge/*` diagnostics at every validation
   (also under `none`). Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
   moves by lr along its normalised gradient).
+- **Isometric form** (MPS, D192, `bm4tc/core/pogo.py`): `trainer.riemannian: true` starts
+  from the canonical form centred at the class core (QR sweeps, then the class core
+  normalised: Z = 1) and keeps every core an isometry towards it with POGO's step after the
+  base optimiser's. The gauge then never changes, and the norm is held by the constraint.
+  It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
+  can carry), `trainer.norm_control.soft_strength: 0` and `trainer.gauge.kind: none`; the
+  Trainer raises otherwise. The training log carries `isometry/defect_max`.
 - **Selection** (D8): every `eval_every` epochs the same objective is evaluated on the
   validation split (AT: on a fixed attacked subset). The epoch with the lowest
   `objective/valid` is kept. `patience` counts validations. HPO and the choice
@@ -121,6 +128,7 @@ bm4tc/core/        the maths; no files, no configs
   interface.py       the model interface for analysis (D69)
   objective.py       losses, mixed objective, norm control, optimizers, Evaluation / evaluate()
   gauge.py           gauge steps after the optimizer's (scalar, balanced) and their diagnostics (D190)
+  pogo.py            the isometric form: its start, POGO's step around the base optimizer (D192)
   train.py           Trainer (MPS, NAT and AT); step and validation captured as CUDA graphs (D90, D92)
   graphs.py          Graphs / Graphed: functions replayed from CUDA graphs (one pool each)
   attacks.py         PGD and the joint (class + density) PGD

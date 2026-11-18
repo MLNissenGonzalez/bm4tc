@@ -32,6 +32,12 @@ RENORMALIZE_EVERY_BY_EMBEDDING: dict[str, int] = {"legendre": 8}
 class MPSInitConfig:
     in_dim: int = 4
     bond_dim: int = 3
+    # Every bond capped at the rank the cores on its shorter side can reach (the product
+    # of their physical dimensions: bond 0 of d3r10 is 3, bond 1 is 9; D192). It changes
+    # no ψ the model can represent, only drops components that carry nothing; the
+    # isometric form of trainer.riemannian needs it (an edge core of d rows is no
+    # isometry onto r > d bond components).
+    trim_bonds: bool = False
     out_position: Optional[int] = None
     boundary: Text = "obc"
     init_method: Text = "randn_eye"
@@ -46,6 +52,23 @@ class CBMConfig:
     init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
     embedding: str = "legendre"
     model_path: Optional[str] = None
+
+
+def trimmed_bond_dims(phys_dim: List[int], bond_dim: int) -> List[int]:
+    """Bond k (between sites k and k + 1) capped at min(bond_dim, ∏_{j≤k} phys_dim[j],
+    ∏_{j>k} phys_dim[j]): the largest rank a bond of an open chain can carry."""
+    dims = []
+    for k in range(len(phys_dim) - 1):
+        cap = bond_dim
+        for side in (phys_dim[:k + 1], phys_dim[k + 1:]):
+            reach = 1
+            for d in side:
+                reach *= d
+                if reach >= cap:
+                    break
+            cap = min(cap, reach)
+        dims.append(cap)
+    return dims
 
 
 class ConditionalBornMachine(SamplingMPS):
@@ -123,6 +146,9 @@ class ConditionalBornMachine(SamplingMPS):
         _init_method = cfg.init_kwargs.init_method
         _std = cfg.init_kwargs.std
         _boundary = cfg.init_kwargs.boundary
+
+        if cfg.init_kwargs.trim_bonds:
+            _bond_dim = trimmed_bond_dims(_phys_dim, _bond_dim)
 
         super().__init__(
             n_features=n_features,

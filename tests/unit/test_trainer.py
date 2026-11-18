@@ -715,3 +715,31 @@ def test_gauge_config_is_checked_by_the_trainer():
     cfg.gauge.rate = 0.1
     with pytest.raises(ValueError, match="rate"):
         _trainer(cfg)
+
+
+# ── Training on the isometric form (D192) ──────────────────────────────────
+
+@pytest.mark.parametrize("name", ["sgd", "adam"])
+def test_riemannian_training_keeps_Z_at_one(name):
+    """trainer.riemannian: the trainer starts from the isometric form, POGO keeps it (the
+    tiny model's bonds are within their support, so it needs no trimming)."""
+    nc = NormControlConfig(soft_strength=0.0)
+    cfg = TrainConfig(max_epoch=3, beta=0.5, riemannian=True, norm_control=nc,
+                      optimizer=OptimizerConfig(name=name, kwargs={"lr": 1e-2, "weight_decay": 0.0}))
+    records = []
+    trainer = _trainer(cfg)
+    trainer.train(on_epoch_end=lambda epoch, record: records.append(record))
+    assert len(records) == 3 and math.isfinite(records[-1]["train"]["objective"])
+    assert records[-1]["diagnostics"]["isometry/defect_max"] < 1e-3
+    assert records[-1]["diagnostics"]["norm/log_Z_mean"] == pytest.approx(0.0, abs=1e-3)
+
+
+@pytest.mark.parametrize("change, match", [
+    (lambda cfg: setattr(cfg.gauge, "kind", "scalar"), "gauge"),
+    (lambda cfg: setattr(cfg.norm_control, "soft_strength", 0.1), "soft_strength"),
+])
+def test_riemannian_refuses_a_gauge_step_and_a_norm_penalty(change, match):
+    cfg = TrainConfig(riemannian=True, norm_control=NormControlConfig(soft_strength=0.0))
+    change(cfg)
+    with pytest.raises(ValueError, match=match):
+        _trainer(cfg)
