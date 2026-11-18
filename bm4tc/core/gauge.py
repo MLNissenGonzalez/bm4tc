@@ -102,10 +102,10 @@ def gauge_step_(cbm, optimizer, cfg) -> int:
     caches (the cores are written through ``.data``)."""
     if cfg.kind == "none":
         return 0
-    net = _Cores(cbm, optimizer)
     if cfg.kind == "scalar":
-        net.scalar_()
+        _scalar_(cbm, optimizer)
         return 1
+    net = _Cores(cbm, optimizer)
     if cfg.rate is not None:
         net.soft_(cfg.rate)
         return 1
@@ -139,25 +139,20 @@ class _Cores:
 
     def __init__(self, cbm, optimizer):
         self.params = [node.tensor for node in cbm._mats_env]
-        self.work = [p.detach().to(torch.complex128) for p in self.params]
+        # On the CPU: the bond matrices are small (r × r, (r d) × r), so float64 there beats
+        # the GPU's launch-bound complex128 kernels (measured on G21G01: minutes per sweep).
+        self.work = [p.detach().to('cpu', torch.complex128) for p in self.params]
         self.n = len(self.params)
         obc = cbm._boundary == "obc"
-        self.left = cbm._left_node.tensor.detach().to(torch.complex128) if obc else None
-        self.right = cbm._right_node.tensor.detach().to(torch.complex128) if obc else None
+        self.left = cbm._left_node.tensor.detach().to('cpu', torch.complex128) if obc else None
+        self.right = cbm._right_node.tensor.detach().to('cpu', torch.complex128) if obc else None
         eye = lambda b: torch.eye(self.work[b].shape[-1], dtype=torch.complex128,
                                   device=self.work[b].device)
         # per bond, the composed matrices of its two sides: A ← A M_A, B ← B M_B (a gauge
         # S gives M_A = S, M_B = S⁻ᵀ; a projection onto the other side's range, M = Π̄)
         self.m_a = [eye(b) for b in range(self.n - 1)]
         self.m_b = [eye(b) for b in range(self.n - 1)]
-        self.state = [optimizer.state.get(p, {}) if optimizer is not None else {}
-                      for p in self.params]
-        for st in self.state:
-            unknown = [k for k, v in st.items() if torch.is_tensor(v) and v.dim() > 0
-                       and k not in _FIRST_MOMENTS + _SECOND_MOMENTS]
-            if unknown:
-                raise ValueError(f"gauge_step_ does not know how the optimiser state "
-                                 f"{unknown} moves under a gauge change")
+        self.state = _states(optimizer, self.params)
 
     def _entries(self, v: int, keys) -> list:
         """Core v's optimiser state tensors under ``keys`` (an entry may be None: SGD
@@ -225,31 +220,19 @@ class _Cores:
         ∇ ← ∇ ·ₗ conj(M_A of bond v − 1), through its right bond ∇ ← ∇ ·ᵣ conj(M_B of
         bond v) (a gauge: conj(S), S⁻ᴴ); second moments kept."""
         for v, p in enumerate(self.params):
-            p.data.copy_(self.work[v].to(p.dtype))
+            p.data.copy_(self.work[v].to(p.device, p.dtype))
             moments = [m for m in self._entries(v, _FIRST_MOMENTS)]
             if not moments:
                 continue
             left = self.m_a[v - 1].conj() if v > 0 else None
             right = self.m_b[v].conj() if v < self.n - 1 else None
             for m in moments:
-                t = m.to(torch.complex128)
+                t = m.to('cpu', torch.complex128)
                 if left is not None:
                     t = torch.einsum("lpr,ls->spr", t, left)
                 if right is not None:
                     t = torch.einsum("lpr,rs->lps", t, right)
-                m.copy_(t.to(m.dtype))
-
-    def scalar_(self) -> None:
-        """Every core times c_v = exp(mean log‖W‖ − log‖W_v‖) (∏ c_v = 1: a product of
-        per-bond scalars); first moments / c_v, second / c_v², both exact."""
-        half = self.log_norms2().real / 2
-        factors = torch.exp(half.mean() - half)
-        for v, c in enumerate(factors.tolist()):
-            self.params[v].data.mul_(c)
-            for m in self._entries(v, _FIRST_MOMENTS):
-                m.div_(c)
-            for m in self._entries(v, _SECOND_MOMENTS):
-                m.div_(c * c)
+                m.copy_(t.to(m.device, m.dtype))
 
     def _equalise_(self) -> None:
         """The scalar minimum on the copies, as per-bond scalars: bond b times
@@ -331,6 +314,45 @@ class _Cores:
         for b, (s, s_inv) in enumerate(steps):
             self._gauge_(b, s, s_inv)
         self.commit_()
+
+
+def _scalar_(cbm, optimizer) -> None:
+    """Every core times c_v = exp(mean log‖W‖ − log‖W_v‖) (∏ c_v = 1: a product of
+    per-bond scalars), on the cores' device (no copies: it runs after every step); first
+    moments / c_v, second / c_v², both exact."""
+    params = [node.tensor for node in cbm._mats_env]
+    states = _states(optimizer, params)
+    obc = cbm._boundary == "obc"
+    norms = []
+    for v, w in enumerate(params):
+        w = w.detach()
+        if obc and v == 0:
+            w = torch.einsum("l,lpr->pr", cbm._left_node.tensor.detach().to(w.dtype), w)
+        if obc and v == len(params) - 1:
+            w = torch.einsum("lpr,r->lp", w, cbm._right_node.tensor.detach().to(w.dtype))
+        norms.append(w.abs().square().sum())
+    half = torch.stack(norms).double().log() / 2
+    factors = torch.exp(half.mean() - half)
+    for v, (p, c) in enumerate(zip(params, factors.tolist())):
+        p.data.mul_(c)
+        state = states[v]
+        for keys, power in ((_FIRST_MOMENTS, 1), (_SECOND_MOMENTS, 2)):
+            for k in keys:
+                if torch.is_tensor(state.get(k)):
+                    state[k].div_(c ** power)
+
+
+def _states(optimizer, params) -> list:
+    """The optimiser's state of each core ({} without an optimiser); ValueError naming any
+    state tensor whose motion under a gauge change is unknown here."""
+    states = [optimizer.state.get(p, {}) if optimizer is not None else {} for p in params]
+    for st in states:
+        unknown = [k for k, v in st.items() if torch.is_tensor(v) and v.dim() > 0
+                   and k not in _FIRST_MOMENTS + _SECOND_MOMENTS]
+        if unknown:
+            raise ValueError(f"gauge_step_ does not know how the optimiser state "
+                             f"{unknown} moves under a gauge change")
+    return states
 
 
 def _roots(m: torch.Tensor):
