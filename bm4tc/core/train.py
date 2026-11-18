@@ -27,6 +27,7 @@ from tqdm import tqdm
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
+from bm4tc.core.gauge import GaugeConfig, check as check_gauge, gauge_diagnostics, gauge_step_
 from bm4tc.core.graphs import Graphs
 from bm4tc.core.objective import (
     NormControlConfig,
@@ -67,6 +68,9 @@ class TrainConfig:
     curriculum_eps_start_rel: float = 0.0
     curriculum_end: float = 1.0
     norm_control: NormControlConfig = field(default_factory=NormControlConfig)
+    # A gauge step after the optimiser's (D190, bm4tc/core/gauge.py): ψ unchanged, so it
+    # acts only through the optimiser. kind none (the default) leaves the gauge alone.
+    gauge: GaugeConfig = field(default_factory=GaugeConfig)
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical
     # to the eager step except for the AT random start, whose draws come from
@@ -103,6 +107,7 @@ class Trainer:
     ):
         if cfg.eval_every < 1:
             raise ValueError(f"eval_every must be >= 1, got {cfg.eval_every}")
+        check_gauge(cfg.gauge)  # a composed config skips GaugeConfig's own check
         self.cbm = cbm
         self.cfg = cfg
         self.train_loader = train_loader
@@ -329,8 +334,13 @@ class Trainer:
                 adversarials = self._adversarials(inputs, labels, radius)
                 batch = (inputs, labels) if adversarials is None else (inputs, labels, adversarials)
                 objective, penalty, statistics = self._graphed_train_step(*batch)
-                # A replay changes the parameters without bumping their version
-                # counters, so the model's log Z caches would outlive them (D130).
+                # Eager, after the (possibly replayed) step: it writes the cores and
+                # the optimiser's state in place, where the graph reads them (D190).
+                if self.step % self.cfg.gauge.every == 0:
+                    gauge_step_(self.cbm, self.optimizer, self.cfg.gauge)
+                # A replay (and a gauge step) changes the parameters without bumping
+                # their version counters, so the model's log Z caches would outlive
+                # them (D130).
                 self.cbm.invalidate_log_Z_cache()
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -460,6 +470,9 @@ class Trainer:
             validated = self.epoch % cfg.eval_every == 0
             if validated:
                 valid = self._validate()
+                # Where the gauge is (D190), also under kind none (the optimiser's own
+                # drift); no RNG draws, about a second per call at full MNIST d3r160.
+                record["diagnostics"] = {**record["diagnostics"], **gauge_diagnostics(self.cbm)}
                 postfix["acc"] = f"{valid['acc']:.4f}"
                 logged = dict(valid)
                 if "rob" in valid:

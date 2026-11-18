@@ -83,6 +83,14 @@ per feature apart, so they compare across embeddings and models (D170,
 - **Norm control** (MPS): a soft penalty strength · (log Z − target)² / N keeps log Z
   near a target, so the amplitudes stay in float range (`trainer.norm_control`;
   optional hard rescaling every k steps).
+- **Gauge** (MPS, D190, `bm4tc/core/gauge.py`): a gauge change (A ← A S, B ← B S⁻ᵀ on a
+  bond) leaves ψ unchanged, so it acts only through the optimiser, which (Adam) is not
+  gauge-equivariant. `trainer.gauge.kind`: `none` (default), `scalar` (every core at the
+  geometric-mean norm; Adam's moments move exactly) or `balanced` (towards A†A = (B†B)ᵀ,
+  the minimal node norm: exact sweeps, or with `rate` one soft step), after every
+  `every`-th step. The training log carries `gauge/*` diagnostics at every validation
+  (also under `none`). Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
+  moves by lr along its normalised gradient).
 - **Selection** (D8): every `eval_every` epochs the same objective is evaluated on the
   validation split (AT: on a fixed attacked subset). The epoch with the lowest
   `objective/valid` is kept. `patience` counts validations. HPO and the choice
@@ -111,7 +119,8 @@ bm4tc/core/        the maths; no files, no configs
   sampling.py        SamplingMPS: tk develop's condition and sample on 1.1.6 (D100, D101)
   embeddings.py      feature maps; budget conversion (rel_to_abs, fmt_budget)
   interface.py       the model interface for analysis (D69)
-  objective.py       losses, mixed objective, norm control, Evaluation / evaluate()
+  objective.py       losses, mixed objective, norm control, optimizers, Evaluation / evaluate()
+  gauge.py           gauge steps after the optimizer's (scalar, balanced) and their diagnostics (D190)
   train.py           Trainer (MPS, NAT and AT); step and validation captured as CUDA graphs (D90, D92)
   graphs.py          Graphs / Graphed: functions replayed from CUDA graphs (one pool each)
   attacks.py         PGD and the joint (class + density) PGD

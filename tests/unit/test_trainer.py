@@ -13,7 +13,7 @@ from bm4tc.core.graphs import Graphs
 from bm4tc.core.train import Trainer, TrainConfig
 from bm4tc.core.objective import (
     NORM_STATISTICS, NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate,
-    mix, norm_statistics,
+    OptimizerConfig, mix, norm_statistics, optimizer,
 )
 
 CPU = torch.device("cpu")
@@ -671,3 +671,47 @@ def test_pgd_leaves_parameter_gradients_alone():
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
     ProjectedGradientDescent(norm="inf", num_steps=2).generate(cbm, x, y, 0.05, CPU)
     assert all(torch.equal(p.grad, torch.ones_like(p)) for p in cbm.parameters())
+
+
+# ── Optimiser arms and the gauge step (D190) ───────────────────────────────
+
+@pytest.mark.parametrize("name", ["sgd", "normalized_gd"])
+def test_gradient_descent_arms_train(name):
+    """Plain SGD (no momentum) and the per-core normalised step go through the
+    optimizer factory and the training loop."""
+    cfg = TrainConfig(max_epoch=2, beta=0.5,
+                      optimizer=OptimizerConfig(name=name, kwargs={"lr": 1e-2, "weight_decay": 0.0}))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    assert len(records) == 2 and math.isfinite(records[-1]["train"]["objective"])
+
+
+def test_normalized_gd_moves_every_core_by_lr():
+    cbm = _tiny_cbm()
+    before = [p.detach().clone() for p in cbm.parameters() if p.requires_grad]
+    opt = optimizer(cbm.parameters(), OptimizerConfig(name="normalized_gd", kwargs={"lr": 0.3}))
+    x, y = torch.rand(8, 2), torch.randint(0, 2, (8,))
+    loss, _ = cbm.mixed_nll(x, y, beta=0.5)
+    loss.backward()
+    opt.step()
+    after = [p.detach() for p in cbm.parameters() if p.requires_grad]
+    for a, b in zip(before, after):
+        assert torch.linalg.vector_norm(b - a).item() == pytest.approx(0.3, rel=1e-5)
+
+
+def test_gauge_step_runs_in_training_and_is_logged():
+    from bm4tc.core.gauge import GAUGE_DIAGNOSTICS, GaugeConfig
+    cfg = TrainConfig(max_epoch=2, beta=0.5, gauge=GaugeConfig("scalar"))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    diagnostics = records[-1]["diagnostics"]
+    assert set(GAUGE_DIAGNOSTICS) <= diagnostics.keys()
+    assert diagnostics["gauge/log_norm_over_scalar"] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_gauge_config_is_checked_by_the_trainer():
+    cfg = TrainConfig()
+    cfg.gauge.kind = "scalar"
+    cfg.gauge.rate = 0.1
+    with pytest.raises(ValueError, match="rate"):
+        _trainer(cfg)

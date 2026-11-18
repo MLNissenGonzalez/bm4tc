@@ -1,3 +1,4 @@
+import inspect
 import math
 import logging
 import random
@@ -76,8 +77,32 @@ class OptimizerConfig:
     kwargs: Optional[Dict[str, Any]] = field(default_factory=lambda: {"weight_decay": 0.0})
 
 
+class NormalizedGD(optim.Optimizer):
+    """Normalised gradient descent per parameter tensor, without momentum (D190):
+    W ← W − lr · ∇W / ‖∇W‖ for each core with a non-zero gradient. It is the step of
+    MPSTime's TSGO, per core instead of per merged bond tensor, and without TSGO's
+    renormalisation of the core afterwards (here the norm control keeps log Z). Every
+    core moves by lr in Frobenius norm, whatever its scale or its gradient's. No state and
+    no host sync, so a CUDA graph can capture it (D90)."""
+
+    def __init__(self, params, lr: float, weight_decay: float = 0.0, capturable: bool = False):
+        if weight_decay:
+            raise ValueError(f"normalized_gd takes no weight decay, got {weight_decay}")
+        super().__init__(params, {"lr": lr})
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                norm = torch.linalg.vector_norm(p.grad)
+                p.sub_(p.grad * (group["lr"] / norm.clamp(min=torch.finfo(norm.dtype).tiny)))
+
+
 _OPTIMIZER_MAP = {
     "sgd": optim.SGD,
+    "normalizedgd": NormalizedGD,   # trainer.optimizer.name: normalized_gd
     "adam": optim.Adam,
     "adamw": optim.AdamW,
     "rmsprop": optim.RMSprop,
@@ -115,6 +140,10 @@ def optimizer(params, config: OptimizerConfig, **extra) -> optim.Optimizer:
         raise ValueError(f"Optimizer {config.name} not recognised. "
                          f"Available: {list(_OPTIMIZER_MAP.keys())}")
 
+    # ``capturable`` keeps step counters on the device (Adam's); an optimizer without
+    # host-side state between steps (SGD) has no such argument and needs none.
+    if "capturable" in extra and "capturable" not in inspect.signature(optimizer_cls).parameters:
+        extra = {k: v for k, v in extra.items() if k != "capturable"}
     return optimizer_cls(params, **config.kwargs, **extra)
 
 
