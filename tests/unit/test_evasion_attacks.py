@@ -208,7 +208,7 @@ def _detector_attack_boxes(model, labels, monkeypatch, scores):
     monkeypatch.setattr(A, "_score", score)
     x = torch.rand(BATCH, DATA_DIM)
     analysis = SimpleNamespace(
-        adaptive=SimpleNamespace(eot=1, eval_draws=1), batch_size=BATCH,
+        adaptive=SimpleNamespace(eot=1, eval_draws=1), batch_size=BATCH, detector_masks=[],
         attack=SimpleNamespace(steps=1, restarts=1, subsample=None))
     data = SimpleNamespace(data={A.SPLIT: x, "train": x}, labels={A.SPLIT: labels})
     defences = [("rob_sel", "q5", Defense(model, threshold=-1e9), True, None)]
@@ -235,3 +235,126 @@ def test_a_detector_on_any_other_embedding_faces_one_attack(cbm_attack, labels, 
     boxes, rob_sel = _detector_attack_boxes(cbm_attack, labels, monkeypatch, [first])
     assert boxes == [tuple(cbm_attack.attack_range)]
     assert rob_sel == pytest.approx(first.mean().item())
+
+
+# ---- the detector's attack confined to an image mask (D193) ----
+
+@pytest.mark.parametrize("model", ["cbm_attack", "cbm_cosine"])
+def test_a_masked_attack_moves_only_the_masked_in_features(model, labels, request):
+    """Frozen features stay exactly at x, also in cosine's inset box (D178), which would
+    otherwise move a frozen end pixel by the inset; the free ones move, in the ball."""
+    model = request.getfixturevalue(model)
+    torch.manual_seed(0)
+    x = torch.randint(0, 2, (BATCH, DATA_DIM)).float()   # every pixel on an end
+    free = torch.tensor([1.0, 1.0, 0.0, 0.0])
+    attack = AdaptivePGD(steps=5, restarts=2, mask=lambda x: free)
+    x_adv = attack.generate(Defense(model), x, labels, 0.1)
+    assert torch.equal(x_adv[:, 2:], x[:, 2:])
+    assert (x_adv[:, :2] != x[:, :2]).any()
+    assert (x_adv - x).abs().max() <= 0.1 + 1e-6
+
+
+def test_image_masks_window_data_and_digit():
+    from bm4tc.analysis.adaptive import image_masks
+    side = 6
+    train = torch.zeros(4, side * side)
+    train[:, 0] = 1.0                      # on in every image
+    train[:1, 1] = 0.5                     # on in a quarter of them
+    x = torch.zeros(2, side * side)
+    x[0, 2 * side + 2] = 1.0               # one pixel at (2, 2)
+    window, data_quarter, data_half, digit0, digit1 = image_masks(
+        [{"window": 0.5}, {"data": 0.25}, {"data": 0.5}, {"digit": 0}, {"digit": 1}],
+        train, (0.0, 1.0))
+    expected = torch.zeros(side, side)
+    expected[1:4, 1:4] = 1                 # the centred 3×3
+    assert torch.equal(window(x), expected.flatten())
+    assert data_quarter(x).nonzero().flatten().tolist() == [0, 1]
+    assert data_half(x).nonzero().flatten().tolist() == [0]
+    assert digit0(x)[0].nonzero().flatten().tolist() == [2 * side + 2]
+    assert digit0(x)[1].sum() == 0         # a blank image frees nothing
+    grown = torch.zeros(side, side)
+    grown[1:4, 1:4] = 1
+    assert torch.equal(digit1(x)[0], grown.flatten())
+
+
+@pytest.mark.parametrize("spec", [{"window": 0.5, "data": 0.1}, {"frame": 1}, {}])
+def test_a_mask_spec_is_one_known_key(spec):
+    from bm4tc.analysis.adaptive import image_masks
+    with pytest.raises(ValueError, match="mask spec"):
+        image_masks([spec], torch.zeros(2, 16), (0.0, 1.0))
+
+
+def test_image_masks_need_square_images():
+    from bm4tc.analysis.adaptive import image_masks
+    with pytest.raises(ValueError, match="square"):
+        image_masks([{"digit": 0}], torch.zeros(2, 5), (0.0, 1.0))
+
+
+def _detector_attack(model, labels, monkeypatch, masks, score=None, budgets=(0.1,),
+                     restarts=1):
+    """`_attack` on a detector with ``analysis.detector_masks = masks``: (the variants
+    built, as (box, masked), and rob_sel_adapt per budget). ``score`` replaces `_score`."""
+    from types import SimpleNamespace
+    from bm4tc.pipeline import analyse as A
+
+    variants = []
+
+    class Recording(AdaptivePGD):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            variants.append((kwargs["box"], kwargs["mask"] is not None))
+
+    monkeypatch.setattr(A, "AdaptivePGD", Recording)
+    if score is not None:
+        monkeypatch.setattr(A, "_score", score)
+    torch.manual_seed(3)
+    x = torch.rand(BATCH, DATA_DIM)
+    analysis = SimpleNamespace(
+        adaptive=SimpleNamespace(eot=1, eval_draws=1), batch_size=BATCH, detector_masks=masks,
+        attack=SimpleNamespace(steps=2, restarts=restarts, subsample=None))
+    data = SimpleNamespace(data={A.SPLIT: x, "train": x}, labels={A.SPLIT: labels})
+    defences = [("rob_sel", "q5", Defense(model, threshold=-1e9), True, None)]
+    torch.manual_seed(0)
+    out = A._attack(model, data, analysis, list(budgets), torch.device("cpu"),
+                    lambda *_: defences)
+    return variants, [out[A.key("rob_sel_adapt", A.SPLIT, eps, "q5")] for eps in budgets]
+
+
+def test_a_detector_faces_every_mask_after_the_unmasked_attack_and_counts_the_lowest(
+        cbm_attack, labels, monkeypatch):
+    first = (torch.arange(BATCH) % 2 == 0).float()
+    scripted = iter([torch.ones(BATCH), first])
+
+    def score(defense, x, x_adv, y, selective, draws):
+        return next(scripted, torch.ones(len(x)))   # unmasked: ones; masked: first
+
+    variants, (rob_sel,) = _detector_attack(cbm_attack, labels, monkeypatch,
+                                            [{"window": 0.5}], score)
+    box = tuple(cbm_attack.attack_range)
+    assert variants == [(box, False), (box, True)]
+    assert rob_sel == pytest.approx(first.mean().item())
+
+
+def test_masks_leave_the_unmasked_attack_unchanged(cbm_attack, labels, monkeypatch):
+    """The masked attacks draw from streams of their own, so adding masks changes no draw
+    of the unmasked attack, at any budget (its random starts included): its examples, and
+    the stored scores, are those of a run without masks (D193)."""
+    from bm4tc.pipeline import analyse as A
+    true_score = A._score
+
+    def run(masks):
+        seen = []
+
+        def score(defense, x, x_adv, y, selective, draws):
+            seen.append(x_adv.detach().clone())
+            return true_score(defense, x, x_adv, y, selective, draws)
+        _detector_attack(cbm_attack, labels, monkeypatch, masks, score,
+                         budgets=(0.1, 0.2), restarts=4)
+        monkeypatch.undo()
+        return seen
+
+    plain, masked = run([]), run([{"digit": 0}])
+    # per budget: plain = [unmasked, PGD examples], masked = [unmasked, masked, PGD examples]
+    assert len(plain) == 4 and len(masked) == 6
+    for p, m in zip(plain, [masked[0], masked[2], masked[3], masked[5]]):
+        assert torch.equal(p, m)

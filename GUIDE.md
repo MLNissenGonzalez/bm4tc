@@ -259,7 +259,7 @@ outputs/<study>/.logs/             one log per unit, status.json
 | `gibbs` / `sgld` | Gibbs (MPS) or SGLD (JEM) purification of the PGD examples, per number of sweeps (if `sweep_purify.enabled`) |
 | `gradients` | the classifier's first-order steepness on the attack's points: margin, its fall per unit of L∞ budget, the share of that from features at the range's ends, the first-order flip budget (D169; seconds per run) |
 | `adaptive` | attacks through the whole defence (D96, `notes:adaptive`): BPDA through likelihood purification (if `adaptive.enabled`, on the runs of `adaptive.seeds`) |
-| `adaptive_det` | selective PGD through the detector, from the PGD example and from the nearest training point the detector accepts in another class (D156); selective robust accuracy (same runs as `adaptive`) |
+| `adaptive_det` | selective PGD through the detector, from the PGD example and from the nearest training point the detector accepts in another class (D156), and also confined to each image mask of `analysis.detector_masks` (D193); selective robust accuracy, a point under its lowest score (same runs as `adaptive`) |
 | `adaptive_sweep` | BPDA + EOT through Gibbs or SGLD purification (D132; on the runs of `sweep_purify.adaptive_seeds`; eager) |
 
 **Metric keys** (`quantity/split[/budget][/setting]`) are documented in

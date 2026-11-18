@@ -21,9 +21,12 @@ attack's own.
 
 Budgets are absolute (``eps_abs``), as in :mod:`bm4tc.core.attacks`.
 """
-from typing import Callable, Optional, Sequence, Tuple
+import math
+from functools import partial
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import torch
+import torch.nn.functional as F
 
 from bm4tc.core.attacks import normalizing, project, random_in_ball
 from bm4tc.core.graphs import Graphs
@@ -117,13 +120,18 @@ class AdaptivePGD:
 
     Args:
         box: the (lo, hi) the iterates stay in; None is the model's ``attack_range``.
+        mask: a function of the clean batch x giving 1 where a feature may move and 0
+            where it stays exactly at x (broadcastable to x; :func:`image_masks`), so
+            every start and step changes only the masked-in features (D193). None
+            moves every feature.
     """
 
     def __init__(self, steps: int = 100, restarts: int = 5, eot: int = 16,
                  step_size: Optional[float] = None,
-                 box: Optional[Tuple[float, float]] = None):
+                 box: Optional[Tuple[float, float]] = None,
+                 mask: Optional[Callable[[torch.Tensor], torch.Tensor]] = None):
         self.steps, self.restarts, self.eot, self.step_size = steps, restarts, eot, step_size
-        self.box = box
+        self.box, self.mask = box, mask
 
     def graphed(self, defense: Defense, graphs: Graphs) -> "GraphedAdaptivePGD":
         """The attack on ``defense`` with each step replayed from a CUDA graph of
@@ -136,7 +144,10 @@ class AdaptivePGD:
 
     def _bounded(self, defense: Defense, x: torch.Tensor, delta: torch.Tensor, eps_abs):
         lo, hi = defense.model.attack_range if self.box is None else self.box
-        return project((x + delta).clamp(lo, hi) - x, "inf", eps_abs)
+        delta = project((x + delta).clamp(lo, hi) - x, "inf", eps_abs)
+        # masked last: the clamp and the L∞ projection act per feature, and an inset box
+        # (D178) would otherwise move a frozen end pixel by the inset
+        return delta if self.mask is None else delta * self.mask(x)
 
     def _step(self, defense: Defense, x, labels, delta, best_x, best_rate, eps_abs,
               purified=None):
@@ -151,6 +162,69 @@ class AdaptivePGD:
         (grad,) = torch.autograd.grad(loss.sum(), delta)
         delta = delta.detach() - step * normalizing(grad, "inf")
         return self._bounded(defense, x, delta, eps_abs), best_x, best_rate
+
+
+def image_masks(specs: Sequence[dict], train: torch.Tensor,
+                input_range: Tuple[float, float]) -> List[Callable[[torch.Tensor], torch.Tensor]]:
+    """The masks of ``specs`` for square images flattened in raster order (D193): each
+    spec is a one-key mapping,
+
+    - ``{window: s}``: the centred square whose side is the fraction s of the image's;
+    - ``{data: f}``: the pixels off the background in at least the fraction f of
+      ``train``;
+    - ``{digit: k}``: the pixels of the attacked image itself that are off the
+      background, grown by k pixels (k 3×3 max-pools).
+
+    A pixel is background when it lies within 10⁻³ of the range above its lower end
+    (MNIST's 0 after rescaling). An attack confined to such a mask leaves the
+    background, where a steep density makes every sign step cost log p, untouched:
+    against Legendre's detector it found far more than the attack on every pixel
+    (notes:evidence, "The detector under an attack confined to the digit").
+
+    Raises ValueError for a spec that is not one known key, or for non-square inputs."""
+    n = train.shape[1]
+    side = math.isqrt(n)
+    if side * side != n:
+        raise ValueError(f"image masks need square images; got {n} features")
+    lo, hi = input_range
+    floor = lo + 1e-3 * (hi - lo)
+    masks = []
+    for spec in specs:
+        items = list(dict(spec).items())
+        kind, value = items[0] if len(items) == 1 else (None, None)
+        if kind == "window":
+            s = min(side, max(1, round(float(value) * side)))
+            m = torch.zeros(side, side)
+            a = (side - s) // 2
+            m[a:a + s, a:a + s] = 1
+            masks.append(_FixedMask(m.flatten()))
+        elif kind == "data":
+            masks.append(_FixedMask(((train > floor).float().mean(0) >= float(value)).float()))
+        elif kind == "digit":
+            masks.append(partial(_digit_mask, floor=floor, side=side, grow=int(value)))
+        else:
+            raise ValueError(f"a mask spec is one of {{window: s}}, {{data: f}}, "
+                             f"{{digit: k}}; got {dict(spec)!r}")
+    return masks
+
+
+class _FixedMask:
+    """The same mask for every image, moved to the batch's device once."""
+
+    def __init__(self, mask: torch.Tensor):
+        self.mask = mask
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        if self.mask.device != x.device or self.mask.dtype != x.dtype:
+            self.mask = self.mask.to(x.device, x.dtype)
+        return self.mask
+
+
+def _digit_mask(x: torch.Tensor, floor: float, side: int, grow: int) -> torch.Tensor:
+    m = (x > floor).to(x.dtype).view(-1, 1, side, side)
+    for _ in range(grow):
+        m = F.max_pool2d(m, 3, stride=1, padding=1)
+    return m.view(x.shape)
 
 
 class BarePGD:
