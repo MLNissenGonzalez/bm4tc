@@ -28,6 +28,27 @@ def test_cbmconfig_defaults():
     assert cfg.init_kwargs.std == 1e-9
 
 
+@pytest.mark.parametrize("data_dim", [2, 20])
+def test_randn_eye_legendre_starts_at_unit_amplitude(data_dim):
+    """D131, D190: every data core, the two edge cores included, is rescaled by
+    1/phi_0, and the class core is not, so |psi(x, 0)|^2 = 1 at init for Legendre
+    (phi_0 is constant) and the other classes start near 0 (the noise, std 1e-9)."""
+    cbm = _tiny_cbm(embedding="legendre", dtype="complex64", data_dim=data_dim,
+                    num_classes=3, bond_dim=4, std=1e-9, in_dim=3)
+    x = torch.rand(8, data_dim) * 2 - 1
+    with torch.no_grad():
+        las = cbm.log_amp_sq(x)
+    assert torch.allclose(las[:, 0], torch.zeros(8), atol=1e-5)
+    assert (las[:, 1:] < -30).all()
+    norms = [float(node.tensor.abs().square().sum()) for node in cbm._mats_env]
+    # the identity slice has bond_dim ones (an edge core one: tk's randn_eye), times
+    # 1/phi_0^2 = 2 on the data cores
+    last = len(norms) - 1
+    for i, n in enumerate(norms):
+        want = 4 if i == cbm.out_position else (2 if i in (0, last) else 8)
+        assert n == pytest.approx(want, rel=1e-5)
+
+
 def test_abs_square_real():
     cbm = _tiny_cbm(dtype="float32")
     t = torch.tensor([2.0, -3.0])

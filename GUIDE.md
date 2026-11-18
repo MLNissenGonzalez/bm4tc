@@ -349,8 +349,9 @@ information hidden in one place, no pass-through layers.
   attribute in OmegaConf.
 - Generated datasets are cached in `$BM4TC_DATA_ROOT/.datasets/` under a name with
   every generation setting (D76); delete the file to regenerate it.
-- `randn_eye` initialisation with a non-Fourier embedding rescales the tensors by
-  1/φ₀(0), otherwise the initial amplitude underflows on long chains; use
+- `randn_eye` initialisation with a non-Fourier embedding rescales every data core
+  (not the class core) by 1/φ₀(0), otherwise the initial amplitude underflows on long
+  chains (D131, D190); use
   `init_method: canonical` for Hermite (set in `defaults.yaml`).
 - Complex parameters need torch ≥ 2.1 (an Adam `foreach` bug produced NaNs before).
 - A failed CUDA graph capture poisons the process in torch 2.1, so tests that may fail

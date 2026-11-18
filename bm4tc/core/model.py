@@ -165,24 +165,30 @@ class ConditionalBornMachine(SamplingMPS):
         self._freeze_boundaries()
 
         # ── randn_eye phi_0 rescaling ─────────────────────────────────────
-        # randn_eye sets T[:,0,:] ≈ I; initial amplitude ≈ phi_0^n_sites.
-        # For non-Fourier embeddings phi_0 ≠ 1 → float32 underflow on MNIST.
-        # Rescale by 1/phi_0 so (phi_0 * 1/phi_0)^n = 1. Exact for Legendre
-        # (constant phi_0); partial for Hermite/Chebyshev (use 'canonical').
+        # randn_eye sets T[:,0,:] ≈ I, so the initial amplitude ≈ phi_0^n_data:
+        # for non-Fourier embeddings phi_0 ≠ 1, a float32 underflow on MNIST.
+        # Every data core is rescaled by 1/phi_0, the two edge cores included
+        # (D131, D190: ``self.tensors`` returns the edge cores contracted with the
+        # boundary vectors, as new tensors, so scaling through it missed them), and
+        # the class core, which embeds nothing, is not: the amplitude starts at 1.
+        # Exact for Legendre (constant phi_0); partial for Hermite/Chebyshev (use
+        # 'canonical').
         if tensors is None and _init_method == "randn_eye":
             _x0 = torch.zeros(1)
             _phi_0 = float(self.embedding(_x0).view(-1)[0])
             if abs(_phi_0 - 1.0) > 1e-6:
                 _scale = 1.0 / _phi_0
-                _expected = _phi_0 ** n_features
+                _expected = _phi_0 ** _data_dim
                 logger.warning(
                     f"[CBM] randn_eye + '{self.embedding_name}': phi_0={_phi_0:.4f} "
-                    f"(expected 1.0). Amplitude ≈ {_expected:.2e} for n_sites={n_features} "
-                    f"— float32 underflow risk. Rescaling tensors by 1/phi_0={_scale:.4f}."
+                    f"(expected 1.0). Amplitude ≈ {_expected:.2e} for {_data_dim} data "
+                    f"sites — float32 underflow risk. Rescaling the data cores by "
+                    f"1/phi_0={_scale:.4f}."
                 )
                 with torch.no_grad():
-                    for t in self.tensors:
-                        t.data.mul_(_scale)
+                    for i, node in enumerate(self._mats_env):
+                        if i != _cls_pos:
+                            node.tensor.data.mul_(_scale)
 
         # ── Saved attributes ──────────────────────────────────────────────
         cfg.init_kwargs.out_position = _cls_pos
