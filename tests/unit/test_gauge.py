@@ -150,3 +150,15 @@ def test_unknown_optimizer_state_raises():
     opt.state[cbm._mats_env[0].tensor]["mystery"] = torch.zeros_like(cbm._mats_env[0].tensor)
     with pytest.raises(ValueError, match="mystery"):
         gauge_step_(cbm, opt, GaugeConfig("scalar"))
+
+
+@pytest.mark.parametrize("cfg", KINDS, ids=lambda c: f"{c.kind}-{c.rate}")
+def test_plain_sgd_state_without_momentum(cfg):
+    """torch's SGD without momentum keeps momentum_buffer = None: nothing to carry."""
+    cbm = _unbalanced_cbm()
+    opt = torch.optim.SGD(cbm.parameters(), lr=1e-3)
+    x, y = torch.rand(8, 8) * 2 - 1, torch.randint(0, 2, (8,))
+    _gradients(cbm, x, y)
+    opt.step()
+    assert any(st.get("momentum_buffer", 0) is None for st in opt.state.values())
+    gauge_step_(cbm, opt, cfg)

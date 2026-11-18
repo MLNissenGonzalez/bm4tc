@@ -159,6 +159,11 @@ class _Cores:
                 raise ValueError(f"gauge_step_ does not know how the optimiser state "
                                  f"{unknown} moves under a gauge change")
 
+    def _entries(self, v: int, keys) -> list:
+        """Core v's optimiser state tensors under ``keys`` (an entry may be None: SGD
+        without momentum keeps ``momentum_buffer = None``)."""
+        return [self.state[v][k] for k in keys if torch.is_tensor(self.state[v].get(k))]
+
     # -- the effective cores ------------------------------------------------
     def _live(self, v: int) -> torch.Tensor:
         """Core v with the boundary vectors contracted in (a leg of size 1 kept)."""
@@ -221,7 +226,7 @@ class _Cores:
         bond v) (a gauge: conj(S), S⁻ᴴ); second moments kept."""
         for v, p in enumerate(self.params):
             p.data.copy_(self.work[v].to(p.dtype))
-            moments = [self.state[v][k] for k in _FIRST_MOMENTS if k in self.state[v]]
+            moments = [m for m in self._entries(v, _FIRST_MOMENTS)]
             if not moments:
                 continue
             left = self.m_a[v - 1].conj() if v > 0 else None
@@ -241,12 +246,10 @@ class _Cores:
         factors = torch.exp(half.mean() - half)
         for v, c in enumerate(factors.tolist()):
             self.params[v].data.mul_(c)
-            for key in _FIRST_MOMENTS:
-                if key in self.state[v]:
-                    self.state[v][key].div_(c)
-            for key in _SECOND_MOMENTS:
-                if key in self.state[v]:
-                    self.state[v][key].div_(c * c)
+            for m in self._entries(v, _FIRST_MOMENTS):
+                m.div_(c)
+            for m in self._entries(v, _SECOND_MOMENTS):
+                m.div_(c * c)
 
     def _equalise_(self) -> None:
         """The scalar minimum on the copies, as per-bond scalars: bond b times
