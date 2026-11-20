@@ -22,6 +22,8 @@ hparams_from:
   study: jem_mnist_nat
   params: [jem.sampler.step_size, jem.sampler.noise_std, jem.sampler.num_steps]
 analysis:
+  detector_masks:              # D194: the detector's attack also confined to the digit (D193)
+    [{window: 0.67}, {data: 0.1}, {digit: 0}, {digit: 1}]
   batch_size: 512              # D133, as mnist_at
   adaptive: {seeds: [1]}       # D129, as mnist_at
   sweep_purify:                # as mnist_at: one SGLD sweep, transfer only; D158: ball 0.3

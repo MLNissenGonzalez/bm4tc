@@ -147,7 +147,7 @@ class AnalysisConfig:
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
     # the detector's attack also confined to each image mask, a one-key mapping
     # ({window: s}, {data: f}, {digit: k}; bm4tc.analysis.adaptive.image_masks, D193)
-    detector_masks: List[Dict[str, float]] = MISSING
+    detector_masks: List[Dict[str, Any]] = MISSING
 
 
 @dataclass
