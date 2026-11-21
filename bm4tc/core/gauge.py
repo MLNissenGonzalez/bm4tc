@@ -70,6 +70,10 @@ class GaugeConfig:
     kind: str = "none"
     every: int = 1
     rate: Optional[float] = None    # balanced only: None = exact sweeps, > 0 = one soft step
+    # Validations between two computations of the bond defects, the costly diagnostics
+    # (O(n r³ d) on the CPU: ≈ 1 s at full MNIST r40, 10-30 s at r160 per call); the
+    # norms are logged at every validation.
+    defects_every: int = 1
 
     def __post_init__(self):
         check(self)
@@ -82,6 +86,8 @@ def check(cfg) -> None:
         raise ValueError(f"trainer.gauge.kind must be one of {KINDS}, got {cfg.kind!r}")
     if cfg.every < 1:
         raise ValueError(f"trainer.gauge.every must be >= 1, got {cfg.every}")
+    if cfg.defects_every < 1:
+        raise ValueError(f"trainer.gauge.defects_every must be >= 1, got {cfg.defects_every}")
     if cfg.rate is not None:
         if cfg.kind != "balanced":
             raise ValueError(f"trainer.gauge.rate is the soft step of kind 'balanced'; "
@@ -113,18 +119,21 @@ def gauge_step_(cbm, optimizer, cfg) -> int:
 
 
 @torch.no_grad()
-def gauge_diagnostics(cbm) -> dict:
+def gauge_diagnostics(cbm, defects: bool = True) -> dict:
     """How far the cores are from the minimal-norm gauge, without changing them:
-    log Σ_v ‖W_v‖², its excess over the scalar minimum (log N − log N_scalar, ≥ 0), and
-    the median and largest bond defect ‖P − Q‖_F / ‖P‖_F."""
+    log Σ_v ‖W_v‖² and its excess over the scalar minimum (log N − log N_scalar, ≥ 0),
+    and with ``defects`` the median and largest bond defect ‖P − Q‖_F / ‖P‖_F (the
+    costly part: see ``GaugeConfig.defects_every``)."""
     net = _Cores(cbm, None)
     logs = net.log_norms2().real
     log_n = torch.logsumexp(logs, 0).item()
     log_scalar = math.log(len(logs)) + logs.mean().item()
-    defects = torch.tensor([net.defect(b) for b in range(net.n - 1)])
-    return {"gauge/log_norm": log_n, "gauge/log_norm_over_scalar": log_n - log_scalar,
-            "gauge/defect_median": defects.median().item(),
-            "gauge/defect_max": defects.max().item()}
+    out = {"gauge/log_norm": log_n, "gauge/log_norm_over_scalar": log_n - log_scalar}
+    if defects:
+        values = torch.tensor([net.defect(b) for b in range(net.n - 1)])
+        out.update({"gauge/defect_median": values.median().item(),
+                    "gauge/defect_max": values.max().item()})
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -187,13 +196,15 @@ class _Cores:
         within them), and P_k, Q_k the Gram matrices there."""
         a, bb = self._matrices(b)
         r = a.shape[1]
-        _, sa, vh = torch.linalg.svd(a, full_matrices=True)
+        # The right singular vectors from the r × r Gram matrices (eigh), not from SVDs of
+        # the tall (r d) × r matrices: at r160 on full MNIST that took 35-60 s per call.
+        # In complex128 the squared spectrum still resolves _LIVE (1e-12 relative).
+        u, sa = _right_singular(a)
         ka = int((sa > _LIVE * sa[0]).sum()) if sa.numel() else 0
-        u = vh.mH
-        _, sb, wh = torch.linalg.svd((bb @ u.conj())[:, :ka], full_matrices=True)
+        w, sb = _right_singular((bb @ u.conj())[:, :ka])
         k = int((sb > _LIVE * sb[0]).sum()) if sb.numel() else 0
         rot = torch.eye(r, dtype=u.dtype, device=u.device)
-        rot[:ka, :ka] = wh.mH.conj()       # B's block ← B's block · W, A's · W̄
+        rot[:ka, :ka] = w.conj()           # B's block ← B's block · W, A's · W̄
         u = u @ rot
         a_k, b_k = (a @ u)[:, :k], (bb @ u.conj())[:, :k]
         return u, k, a_k.mH @ a_k, (b_k.mH @ b_k).T
@@ -353,6 +364,14 @@ def _states(optimizer, params) -> list:
             raise ValueError(f"gauge_step_ does not know how the optimiser state "
                              f"{unknown} moves under a gauge change")
     return states
+
+
+def _right_singular(x: torch.Tensor):
+    """V (n × n, unitary) and the singular values of X (m × n), descending, from the
+    eigendecomposition of XᴴX; the columns of V past min(m, n) span X's null space."""
+    values, vectors = torch.linalg.eigh(x.mH @ x)
+    order = torch.argsort(values, descending=True)
+    return vectors[:, order], values[order].clamp(min=0).sqrt()
 
 
 def _roots(m: torch.Tensor):

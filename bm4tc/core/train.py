@@ -432,6 +432,7 @@ class Trainer:
         self.epoch = 0
         self.best_epoch = 0
         self.patience_counter = 0
+        self._validations = 0
         self.epoch_times = []
         self._collapsed = False
 
@@ -489,8 +490,12 @@ class Trainer:
             if validated:
                 valid = self._validate()
                 # Where the gauge is (D190), also under kind none (the optimiser's own
-                # drift); no RNG draws, about a second per call at full MNIST d3r160.
-                record["diagnostics"] = {**record["diagnostics"], **gauge_diagnostics(self.cbm)}
+                # drift); no RNG draws. The bond defects only every defects_every-th
+                # validation: they cost 10-30 s per call at full MNIST d3r160.
+                defects = self._validations % cfg.gauge.defects_every == 0   # the 1st, then every k-th
+                self._validations += 1
+                record["diagnostics"] = {**record["diagnostics"],
+                                         **gauge_diagnostics(self.cbm, defects=defects)}
                 if cfg.riemannian:
                     record["diagnostics"]["isometry/defect_max"] = max(isometry_defects(self.cbm))
                 postfix["acc"] = f"{valid['acc']:.4f}"

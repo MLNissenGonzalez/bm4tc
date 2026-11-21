@@ -89,7 +89,8 @@ per feature apart, so they compare across embeddings and models (D170,
   geometric-mean norm; Adam's moments move exactly) or `balanced` (towards A†A = (B†B)ᵀ,
   the minimal node norm: exact sweeps, or with `rate` one soft step), after every
   `every`-th step. The training log carries `gauge/*` diagnostics at every validation
-  (also under `none`). Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
+  (also under `none`); the bond defects, which are costly at large r, only at the first and
+  every `defects_every`-th one. Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
   moves by lr along its normalised gradient).
 - **Isometric form** (MPS, D192, `bm4tc/core/pogo.py`): `trainer.riemannian: true` starts
   from the canonical form centred at the class core (QR sweeps, then the class core

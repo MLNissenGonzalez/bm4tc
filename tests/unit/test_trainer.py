@@ -743,3 +743,13 @@ def test_riemannian_refuses_a_gauge_step_and_a_norm_penalty(change, match):
     change(cfg)
     with pytest.raises(ValueError, match=match):
         _trainer(cfg)
+
+
+def test_gauge_defects_every_k_th_validation_norms_always():
+    from bm4tc.core.gauge import GaugeConfig
+    cfg = TrainConfig(max_epoch=4, beta=0.5, gauge=GaugeConfig("none", defects_every=3))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    has = ["gauge/defect_median" in r["diagnostics"] for r in records]
+    assert has == [True, False, False, True]
+    assert all("gauge/log_norm" in r["diagnostics"] for r in records)

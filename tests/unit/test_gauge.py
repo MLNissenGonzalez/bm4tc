@@ -135,6 +135,7 @@ def test_none_changes_nothing():
 @pytest.mark.parametrize("kwargs, match", [
     ({"kind": "isometric"}, "kind"),
     ({"kind": "scalar", "every": 0}, "every"),
+    ({"kind": "none", "defects_every": 0}, "defects_every"),
     ({"kind": "scalar", "rate": 0.1}, "rate"),
     ({"kind": "none", "rate": 0.1}, "rate"),
     ({"kind": "balanced", "rate": 0.0}, "rate"),

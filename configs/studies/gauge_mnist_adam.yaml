@@ -15,6 +15,7 @@ config:
   trainer.max_epoch: 400
   trainer.batch_size: 512
   trainer.patience: 40
+  trainer.gauge.defects_every: 10                 # 10-30 s per call at r160 (CPU): epochs 1, 11, 21, ...
   trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
 hpo: null
 hparams_from:

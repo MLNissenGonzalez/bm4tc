@@ -15,6 +15,7 @@ config:
   trainer.max_epoch: 400
   trainer.batch_size: 512
   trainer.patience: 40
+  trainer.gauge.defects_every: 10                 # 10-30 s per call at r160 (CPU): epochs 1, 11, 21, ...
   trainer.riemannian: true
   trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
   born.init_kwargs.trim_bonds: true
