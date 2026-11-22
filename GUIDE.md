@@ -102,6 +102,10 @@ per feature apart, so they compare across embeddings and models (D170,
   It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
   can carry), `trainer.norm_control.soft_strength: 0` and `trainer.gauge.kind: none`; the
   Trainer raises otherwise. The training log carries `isometry/defect_max`.
+- **Uniform classes at the start** (MPS, D196): `born.init_kwargs.uniform_classes: true`
+  starts `randn_eye` at p(c|x) = 1/C instead of at class 0 with the others at 1e-9 (whose
+  first gradient freezes the class core under `vadam`). Default off; it raises with another
+  `init_method`.
 - **Selection** (D8): every `eval_every` epochs the same objective is evaluated on the
   validation split (AT: on a fixed attacked subset). The epoch with the lowest
   `objective/valid` is kept. `patience` counts validations. HPO and the choice

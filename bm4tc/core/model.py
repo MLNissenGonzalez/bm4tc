@@ -38,6 +38,11 @@ class MPSInitConfig:
     # isometric form of trainer.riemannian needs it (an edge core of d rows is no
     # isometry onto r > d bond components).
     trim_bonds: bool = False
+    # randn_eye only: every class starts at the class-0 slice / sqrt(C), so p(c|x) = 1/C
+    # (D196). randn_eye alone starts psi(x, c > 0) at its 1e-9 noise: a first gradient of
+    # 1e7-1e8 on the class core, which VAdam's one second moment per core keeps for about
+    # 1000 steps (the core then stands still).
+    uniform_classes: bool = False
     out_position: Optional[int] = None
     boundary: Text = "obc"
     init_method: Text = "randn_eye"
@@ -144,6 +149,10 @@ class ConditionalBornMachine(SamplingMPS):
 
         # ── MPS super().__init__ ──────────────────────────────────────────
         _init_method = cfg.init_kwargs.init_method
+        _uniform_classes = cfg.init_kwargs.uniform_classes
+        if _uniform_classes and _init_method != "randn_eye":
+            raise ValueError(f"born.init_kwargs.uniform_classes is a start of init_method "
+                             f"'randn_eye', got init_method {_init_method!r}")
         _std = cfg.init_kwargs.std
         _boundary = cfg.init_kwargs.boundary
 
@@ -215,6 +224,15 @@ class ConditionalBornMachine(SamplingMPS):
                     for i, node in enumerate(self._mats_env):
                         if i != _cls_pos:
                             node.tensor.data.mul_(_scale)
+
+        # ── uniform classes (D196) ────────────────────────────────────────
+        # Each slice keeps its own 1e-9 noise (no further draws), and the norm stays
+        # (an eye spread over C classes / sqrt(C)).
+        if tensors is None and _uniform_classes:
+            with torch.no_grad():
+                core = self._mats_env[_cls_pos].tensor.data
+                core[:, 1:] += core[:, :1]
+                core /= math.sqrt(_num_classes)
 
         # ── Saved attributes ──────────────────────────────────────────────
         cfg.init_kwargs.out_position = _cls_pos

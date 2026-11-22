@@ -772,3 +772,66 @@ def test_the_forward_renormalizes_every_k_steps_of_its_embedding(monkeypatch,
                         staticmethod(lambda node, axes: calls.append(1) or norm(node, axes)))
     cbm.log_amp_sq(torch.rand(2, 17))
     assert len(calls) == n_calls
+
+
+# ── randn_eye with uniform classes (D196) ───────────────────────────────
+
+def _eye_start(uniform, trim=False, num_classes=3, data_dim=20):
+    torch.manual_seed(0)
+    cfg = CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(
+        in_dim=3, bond_dim=6, uniform_classes=uniform, trim_bonds=trim))
+    return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
+
+
+@pytest.mark.parametrize("num_classes", [2, 3, 10])
+def test_uniform_classes_start_at_one_over_C(num_classes):
+    cbm = _eye_start(True, num_classes=num_classes)
+    x = torch.rand(8, 20) * 2 - 1
+    with torch.no_grad():
+        p = cbm.class_probabilities(x)
+    assert torch.allclose(p, torch.full_like(p, 1 / num_classes), atol=1e-4)
+
+
+def test_uniform_classes_every_arm_has_the_same_start():
+    """The free gauge, trimmed bonds and the isometric form start from one model."""
+    from bm4tc.core.pogo import isometric_start_
+    x = torch.rand(8, 20) * 2 - 1
+    y = torch.arange(8) % 3
+    models = [_eye_start(True), _eye_start(True, trim=True), _eye_start(True, trim=True)]
+    isometric_start_(models[2])
+    losses = []
+    for m in models:
+        m.invalidate_log_Z_cache()
+        with torch.no_grad():
+            losses.append(m.mixed_nll(x, y, beta=1.0)[0].item())
+    assert max(losses) - min(losses) < 1e-4
+
+
+def test_uniform_classes_have_no_huge_first_gradient():
+    x = torch.rand(8, 20) * 2 - 1
+    y = torch.arange(8) % 3
+    largest = []
+    for uniform in (False, True):
+        m = _eye_start(uniform)
+        m.mixed_nll(x, y, beta=1.0)[0].backward()
+        largest.append(m._mats_env[m.out_position].tensor.grad.abs().max().item())
+    assert largest[0] > 1e4 and largest[1] < 10
+
+
+def test_uniform_classes_refuse_another_init():
+    cfg = CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(
+        in_dim=3, bond_dim=4, uniform_classes=True, init_method="randn"))
+    with pytest.raises(ValueError, match="uniform_classes"):
+        ConditionalBornMachine(cfg=cfg, data_dim=6, num_classes=2)
+
+
+def test_uniform_classes_are_not_reapplied_on_load(tmp_path):
+    m = _eye_start(True)
+    with torch.no_grad():
+        m._mats_env[m.out_position].tensor[:, 1].mul_(2.0)      # a trained class core
+    m.invalidate_log_Z_cache()
+    m.save(str(tmp_path / "m.pt"))
+    back = ConditionalBornMachine.load(str(tmp_path / "m.pt"))
+    x = torch.rand(8, 20) * 2 - 1
+    with torch.no_grad():
+        assert torch.allclose(back.log_amp_sq(x), m.log_amp_sq(x), atol=1e-5)
