@@ -1,0 +1,26 @@
+# Option 2, step card notes:gauge §16.1 (a) (D195, D196): gauge_ecg200_vadam_pogo with the lr range
+# widened, because there the search ended at .94 of its top (1) with the trial objective still
+# falling. Same arm otherwise: ECG200 beta = 1, d3r10, on D148's folds (seeds 1-5), ecg200_nat's
+# training settings, uniform classes; POGO + VAdam, log Z from the centre.
+# Above lr 1 the step cap (||Delta|| <= 1 per core) binds whenever VAdam's step would be longer.
+dataset: ecg200
+regime: nat
+grid:
+  arch: [d3r10]
+  beta: [1]
+config:
+  trainer.max_epoch: 500
+  trainer.batch_size: 64
+  trainer.patience: 150
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: true
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.name: vadam
+hpo:
+  space:
+    trainer.optimizer.kwargs.lr: {log: [0.1, 10]}
+budgets: [0.05]
+analysis:
+  purify_delta: [0.05]
+  adaptive: {enabled: false}

@@ -1,0 +1,26 @@
+# Option 2, step card notes:gauge §16.1 (b) (D195, D196): MNIST r40 pilot, POGO + VAdam (the POGO
+# method: cores isometries towards the class core, log Z from the centre, no norm penalty,
+# step cap 1) at lr 0.3, one of three fixed lrs (.3, 1, 3; VAdam's step per core ~ lr).
+# Against gauge_mnist_adam_r40: full MNIST beta = 1, seed 1, uniform classes, 600 epochs,
+# patience 100 (not D172's 400 / 40, see there). Gauge diagnostics every 10th validation.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 100
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: true
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.name: vadam
+  trainer.optimizer.kwargs.lr: 0.3
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
