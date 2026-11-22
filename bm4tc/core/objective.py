@@ -100,7 +100,54 @@ class NormalizedGD(optim.Optimizer):
                 p.sub_(p.grad * (group["lr"] / norm.clamp(min=torch.finfo(norm.dtype).tiny)))
 
 
+class VectorAdam(optim.Optimizer):
+    """Adam with one second moment per parameter tensor (VAdam, Ling et al. 2022; POGO's base
+    optimiser, Javaloy and Vergari App. B, as in their reference code; D195):
+
+        m <- b1 m + (1 - b1) g,   v <- b2 v + (1 - b2) ||g||^2,
+        W <- W - lr (m / (1 - b1^t)) / (sqrt(v / (1 - b2^t)) + eps),
+
+    ||.|| the Frobenius norm of the whole core. It is linear in the gradients up to that
+    scalar, so it commutes with a projection onto a tangent space and with unitary gauges,
+    which Adam's element-wise v does not. A core moves by about lr, whatever its size. One
+    very large gradient holds a core still for about 1/(1 - b2) steps. ``capturable`` keeps
+    the step count on the device (D90)."""
+
+    def __init__(self, params, lr: float, betas=(0.9, 0.999), eps: float = 1e-8,
+                 weight_decay: float = 0.0, capturable: bool = False):
+        if weight_decay:
+            raise ValueError(f"vadam takes no weight decay, got {weight_decay}")
+        super().__init__(params, {"lr": lr, "betas": betas, "eps": eps, "capturable": capturable})
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        for group in self.param_groups:
+            b1, b2 = group["betas"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                if not state:
+                    device = p.device if group["capturable"] else "cpu"
+                    state["step"] = torch.zeros((), dtype=torch.float64, device=device)
+                    state["exp_avg"] = torch.zeros_like(p)
+                    # float64: the squared norm of a core's first gradient can be 1e17
+                    state["exp_avg_sq"] = torch.zeros((), dtype=torch.float64, device=p.device)
+                t, m, v = state["step"], state["exp_avg"], state["exp_avg_sq"]
+                t.add_(1)
+                m.mul_(b1).add_(p.grad, alpha=1 - b1)
+                v.mul_(b2).add_(torch.linalg.vector_norm(p.grad).double().square(), alpha=1 - b2)
+                scale = group["lr"] / ((1 - b1 ** t) * ((v / (1 - b2 ** t)).sqrt() + group["eps"]))
+                p.sub_(m * scale.to(p.device, p.real.dtype))
+
+
+# The optimisers whose step is linear in the gradients up to a scalar per parameter tensor:
+# what POGO assumes of its base optimiser (Javaloy and Vergari, Def. 1).
+LINEAR_OPTIMIZERS = (optim.SGD, NormalizedGD, VectorAdam)
+
+
 _OPTIMIZER_MAP = {
+    "vadam": VectorAdam,
     "sgd": optim.SGD,
     "normalizedgd": NormalizedGD,   # trainer.optimizer.name: normalized_gd
     "adam": optim.Adam,

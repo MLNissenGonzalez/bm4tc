@@ -92,10 +92,13 @@ per feature apart, so they compare across embeddings and models (D170,
   (also under `none`); the bond defects, which are costly at large r, only at the first and
   every `defects_every`-th one. Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
   moves by lr along its normalised gradient).
-- **Isometric form** (MPS, D192, `bm4tc/core/pogo.py`): `trainer.riemannian: true` starts
+- **Isometric form** (MPS, D192, D195, `bm4tc/core/pogo.py`): `trainer.riemannian: true` starts
   from the canonical form centred at the class core (QR sweeps, then the class core
   normalised: Z = 1) and keeps every core an isometry towards it with POGO's step after the
-  base optimiser's. The gauge then never changes, and the norm is held by the constraint.
+  base optimiser's. The gauge then never changes, the norm is held by the constraint, and
+  a training step reads log Z from the class core (no norm contraction; evaluation and
+  selection contract it exactly). The base optimiser must be linear in the gradient:
+  `vadam` (one second moment per core, the paper's), `sgd` or `normalized_gd`; Adam raises.
   It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
   can carry), `trainer.norm_control.soft_strength: 0` and `trainer.gauge.kind: none`; the
   Trainer raises otherwise. The training log carries `isometry/defect_max`.

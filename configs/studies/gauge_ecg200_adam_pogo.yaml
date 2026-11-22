@@ -1,3 +1,6 @@
+# RECORD (D195): the run of this study is the first POGO variant (Adam or SGD under the exact
+# norm contraction), from commit 01bb5732. The code since reads log Z from the centre and refuses Adam:
+# do not relaunch it from here.
 # Option 2, stage 1 (D190, D192, notes:gauge): ECG200 beta = 1, d3r10, on D148's folds (seeds 1-5),
 # ecg200_nat's training settings; one arm per study (the optimiser and the gauge are not
 # grid axes, D14). E5: Adam + POGO, the cores kept isometries towards the class core (the

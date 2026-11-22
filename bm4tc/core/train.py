@@ -29,7 +29,7 @@ from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
 from bm4tc.core.gauge import GaugeConfig, check as check_gauge, gauge_diagnostics, gauge_step_
 from bm4tc.core.graphs import Graphs
-from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects
+from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects, log_Z_from_centre
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
@@ -72,9 +72,10 @@ class TrainConfig:
     # A gauge step after the optimiser's (D190, bm4tc/core/gauge.py): ψ unchanged, so it
     # acts only through the optimiser. kind none (the default) leaves the gauge alone.
     gauge: GaugeConfig = field(default_factory=GaugeConfig)
-    # Train on the isometric form (D192, bm4tc/core/pogo.py): the cores kept isometries
-    # towards the class core by POGO, so Z = 1 by the constraint. Needs the model built
-    # with trim_bonds, no gauge step and no norm penalty.
+    # Train on the isometric form (D192, D195, bm4tc/core/pogo.py): the cores kept
+    # isometries towards the class core by POGO, so Z = 1 by the constraint and the
+    # training objective reads it from the class core. Needs the model built with
+    # trim_bonds, a linear optimiser (vadam), no gauge step and no norm penalty.
     riemannian: bool = False
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical
@@ -216,7 +217,8 @@ class Trainer:
         """
         beta = self.cfg.beta
         if self.attack is None:
-            return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug)
+            return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug,
+                                      log_Z=self._centre_log_Z())
 
         adversarial_weight = 1.0 - beta
         objective = None
@@ -225,12 +227,17 @@ class Trainer:
             objective = adversarial_weight * adversarial_objective
         if beta > 0.0:
             generative_objective, clean_log_amp_sq = self.cbm.mixed_nll(
-                inputs, labels, beta=1.0, debug=self._nc.debug)
+                inputs, labels, beta=1.0, debug=self._nc.debug, log_Z=self._centre_log_Z())
             generative_term = beta * generative_objective
             objective = generative_term if objective is None else objective + generative_term
             if adversarial_weight <= 0.0:
                 log_amp_sq = clean_log_amp_sq
         return objective, log_amp_sq
+
+    def _centre_log_Z(self) -> Optional[torch.Tensor]:
+        """log Z as a training step takes it under ``riemannian`` (read from the class
+        core, D195); None: the model contracts it."""
+        return log_Z_from_centre(self.cbm) if self.cfg.riemannian else None
 
     # ------------------------------------------------------------------
     # Collapse report

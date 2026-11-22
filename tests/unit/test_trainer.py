@@ -383,7 +383,7 @@ class _DecompStubCBM:
     def log_Z(self, recompute=False): return torch.tensor(0.0)
     def invalidate_log_Z_cache(self): pass
 
-    def mixed_nll(self, data, labels, beta, debug=False):
+    def mixed_nll(self, data, labels, beta, debug=False, log_Z=None):
         tag = float(data[0, 0])
         self.calls.append((tag, beta))
         # param keeps the result a graph leaf so backward() works in _train_epoch
@@ -719,7 +719,7 @@ def test_gauge_config_is_checked_by_the_trainer():
 
 # ── Training on the isometric form (D192) ──────────────────────────────────
 
-@pytest.mark.parametrize("name", ["sgd", "adam"])
+@pytest.mark.parametrize("name", ["sgd", "vadam", "normalized_gd"])
 def test_riemannian_training_keeps_Z_at_one(name):
     """trainer.riemannian: the trainer starts from the isometric form, POGO keeps it (the
     tiny model's bonds are within their support, so it needs no trimming)."""
@@ -753,3 +753,27 @@ def test_gauge_defects_every_k_th_validation_norms_always():
     has = ["gauge/defect_median" in r["diagnostics"] for r in records]
     assert has == [True, False, False, True]
     assert all("gauge/log_norm" in r["diagnostics"] for r in records)
+
+
+def test_riemannian_refuses_a_non_linear_optimizer():
+    """Adam's element-wise scaling does not commute with POGO's projection (D195)."""
+    cfg = TrainConfig(max_epoch=1, riemannian=True, norm_control=NormControlConfig(soft_strength=0.0),
+                      optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
+    with pytest.raises(ValueError, match="linear in the"):
+        _trainer(cfg).train()
+
+
+def test_riemannian_training_contracts_no_norm_but_validates_with_the_exact_one():
+    cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=True,
+                      norm_control=NormControlConfig(soft_strength=0.0),
+                      optimizer=OptimizerConfig(name="vadam", kwargs={"lr": 1e-2}))
+    t = _trainer(cfg)
+    exact, calls = t.cbm.log_partition_function, []
+
+    def spy():
+        calls.append(torch.is_grad_enabled())
+        return exact()
+
+    t.cbm.log_partition_function = spy
+    t.train()
+    assert calls and not any(calls)      # evaluation only: never inside a step

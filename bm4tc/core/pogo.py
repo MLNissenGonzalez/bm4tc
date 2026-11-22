@@ -1,4 +1,4 @@
-"""Training on the isometric form of the MPS Born machine, by POGO (D192).
+"""Training on the isometric form of the MPS Born machine, by POGO (D192, D195).
 
 Every core left of the class core is kept a left isometry, every core right of it a right
 isometry, and the class core (the root) a unit vector. Seen from the root, each core is then
@@ -12,8 +12,8 @@ centred at the class core), so the optimiser's state never has to follow a chang
 (the failure of Adam with the balanced gauge, D191).
 
 POGO, the Proximal One-step Geometric Orthoptimizer (Javaloy and Vergari, arXiv
-2602.14656; ported from tpm-tn-benchmark's ``pogo.py``): the base optimiser (SGD, Adam, …)
-proposes a step X → X − Δ, Δ scaled to ‖Δ‖_F ≤ 1 per core, and the core moves instead to
+2602.14656; ported from tpm-tn-benchmark's ``pogo.py``): the base optimiser proposes a
+step X → X − Δ, Δ scaled to ‖Δ‖_F ≤ 1 per core, and the core moves instead to
 
     M = X − ½(X Xᴴ Δ − X Δᴴ X)         along the tangent space,
     X ← M + ½(I − M Mᴴ) M              the landing step (λ = ½),
@@ -21,6 +21,15 @@ proposes a step X → X − Δ, Δ scaled to ‖Δ‖_F ≤ 1 per core, and the 
 which keeps X Xᴴ − I of the order of the step's square, step after step. λ is fixed at ½
 (tpm_tn's default), not the root of the landing polynomial, so the step has no host sync
 and a CUDA graph can capture it (D90).
+
+As in the paper (Alg. 1, Def. 1), the base optimiser gets the Euclidean gradient of the NLL
+with log Z read from the centre, log ‖root‖² (``log_Z_from_centre``: no norm contraction),
+and must be linear in the gradient up to a scalar: VAdam (the paper's and ours), SGD or
+``normalized_gd``. Element-wise Adam does not commute with the projection onto the tangent
+space, so the gradient's normal part would leak into the step: refused. Evaluation, and so
+the selection, contracts log Z exactly. The cap on ‖Δ‖ is not the paper's (it asks for ξ < 1
+through lr or a normalising optimiser): a scalar per core, so the step stays linear; VAdam
+below lr ≈ 1 hardly meets it, plain SGD diverges without it.
 
 The edge cores are seen through the fixed obc boundary vectors (D87), as in ``gauge.py``;
 the components the boundary vector does not reach are never read and never written. A
@@ -31,6 +40,8 @@ no isometry onto r > d components): build the model with ``trim_bonds`` (D192).
 from typing import List, Optional
 
 import torch
+
+from bm4tc.core.objective import LINEAR_OPTIMIZERS
 
 # A core counts as an isometry at the start when ‖X Xᴴ − I‖_F is below this (complex64's
 # √ε with a margin: ``isometric_start_`` reaches ≈ 1e-6).
@@ -103,6 +114,13 @@ def isometry_defects(cbm) -> List[float]:
     return defects
 
 
+def log_Z_from_centre(cbm) -> torch.Tensor:
+    """log Z = log ‖root‖², with its gradient (it reaches the class core only): exact on
+    the isometric form, off it up to the isometry defects."""
+    layout = _Layout(cbm)
+    return layout.live(layout.root, layout.cores[layout.root]).abs().square().sum().log()
+
+
 @torch.no_grad()
 def isometric_start_(cbm) -> None:
     """The cores brought into the isometric form, in place: QR sweeps from both edges
@@ -152,11 +170,16 @@ class POGO:
 
     ``step()``: the base optimiser steps; then each core's step Δ = X − X′ (X before, X′
     after, as the matrix of ``_Layout.rows``) is replaced by ``pogo_step``. The cores must
-    be in the isometric form already (``isometric_start_``): ValueError otherwise, and for a
+    be in the isometric form already (``isometric_start_``): ValueError otherwise, for a
+    base optimiser that is not linear in the gradient (``LINEAR_OPTIMIZERS``), and for a
     trainable parameter of the base optimiser that is not a core of ``cbm``. The base
     optimiser's state is its own and stays where it is (no gauge ever changes)."""
 
     def __init__(self, cbm, base: torch.optim.Optimizer):
+        if not isinstance(base, LINEAR_OPTIMIZERS):
+            raise ValueError(f"trainer.riemannian needs a base optimiser that is linear in the "
+                             f"gradient (POGO, Def. 1): trainer.optimizer.name vadam, sgd or "
+                             f"normalized_gd, got {type(base).__name__}")
         self.base = base
         self._layout = _Layout(cbm)
         cores = {id(c) for c in self._layout.cores}

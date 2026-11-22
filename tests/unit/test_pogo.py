@@ -4,7 +4,8 @@ import pytest
 import torch
 
 from bm4tc.core.model import CBMConfig, ConditionalBornMachine, MPSInitConfig, trimmed_bond_dims
-from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects, pogo_step
+from bm4tc.core.objective import VectorAdam
+from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects, log_Z_from_centre, pogo_step
 
 
 def _cbm(trim=True, bond_dim=6, data_dim=8, init_method="randn_eye", seed=0):
@@ -62,12 +63,12 @@ def test_pogo_step_lands_near_the_manifold():
     assert torch.allclose(pogo_step(x, 5 * direction), pogo_step(x, direction), rtol=1e-12, atol=1e-14)
 
 
-@pytest.mark.parametrize("base", ["sgd", "adam"])
+@pytest.mark.parametrize("base", ["sgd", "vadam"])
 def test_pogo_trains_and_keeps_the_isometries(base):
     cbm = _cbm(bond_dim=4)
     isometric_start_(cbm)
     params = [n.tensor for n in cbm._mats_env]
-    opt = torch.optim.SGD(params, lr=0.05) if base == "sgd" else torch.optim.Adam(params, lr=0.01)
+    opt = torch.optim.SGD(params, lr=0.05) if base == "sgd" else VectorAdam(params, lr=0.1)
     pogo = POGO(cbm, opt)
     torch.manual_seed(1)
     x, y = torch.rand(64, 8) * 2 - 1, torch.randint(0, 2, (64,))
@@ -116,3 +117,60 @@ def test_a_trimmed_isometric_model_saves_and_loads(tmp_path):
         assert back.bond_dim == cbm.bond_dim
         assert torch.allclose(back.log_amp_sq(x), cbm.log_amp_sq(x), atol=1e-6)
         assert back.log_partition_function().item() == pytest.approx(0.0, abs=1e-5)
+
+
+def test_pogo_refuses_adam():
+    cbm = _cbm(bond_dim=4)
+    isometric_start_(cbm)
+    with pytest.raises(ValueError, match="linear in the"):
+        POGO(cbm, torch.optim.Adam([n.tensor for n in cbm._mats_env], lr=0.01))
+
+
+def test_log_Z_from_the_centre():
+    """On the isometric form it is the contracted log Z; its gradient is the class core's
+    only, and there the contraction's."""
+    cbm = _cbm(init_method="randn")
+    isometric_start_(cbm)
+    with torch.no_grad():
+        cbm._mats_env[cbm.out_position].tensor.mul_(3.0)     # off Z = 1, still canonical
+    cbm.invalidate_log_Z_cache()
+    cores = [n.tensor for n in cbm._mats_env]
+    read, full = log_Z_from_centre(cbm), cbm.log_partition_function()
+    assert read.item() == pytest.approx(full.item(), abs=1e-5)
+    got = torch.autograd.grad(read, cores, allow_unused=True)
+    assert [g is not None for g in got] == [v == cbm.out_position for v in range(len(cores))]
+    want = torch.autograd.grad(full, cores)[cbm.out_position]
+    assert torch.allclose(got[cbm.out_position], want, atol=1e-4)
+
+
+@pytest.mark.parametrize("capturable", [False, True])
+def test_vector_adam_is_the_papers_rule(capturable):
+    """One second moment per tensor, the squared Frobenius norm (App. B)."""
+    torch.manual_seed(0)
+    p = torch.nn.Parameter(torch.randn(3, 4, 5, dtype=torch.complex128))
+    opt = VectorAdam([p], lr=0.2, capturable=capturable)
+    want, m, v = p.detach().clone(), torch.zeros_like(p.detach()), 0.0
+    for t in range(1, 8):
+        g = torch.randn(3, 4, 5, dtype=torch.complex128)
+        m = 0.9 * m + 0.1 * g
+        v = 0.999 * v + 0.001 * g.abs().square().sum().item()
+        want -= 0.2 * (m / (1 - 0.9 ** t)) / ((v / (1 - 0.999 ** t)) ** 0.5 + 1e-8)
+        p.grad = g
+        opt.step()
+        assert torch.allclose(p.detach(), want, rtol=1e-9, atol=1e-12)
+    assert opt.state[p]["exp_avg_sq"].shape == ()
+
+
+def test_vector_adam_commutes_with_a_unitary_gauge():
+    """Def. 1's consequence: steps on X Q are the steps on X, times Q."""
+    torch.manual_seed(1)
+    x = torch.randn(6, 5, dtype=torch.complex128)
+    q = torch.linalg.qr(torch.randn(5, 5, dtype=torch.complex128))[0]
+    a, b = torch.nn.Parameter(x.clone()), torch.nn.Parameter(x @ q)
+    oa, ob = VectorAdam([a], lr=0.1), VectorAdam([b], lr=0.1)
+    for _ in range(5):
+        g = torch.randn(6, 5, dtype=torch.complex128)
+        a.grad, b.grad = g, g @ q
+        oa.step()
+        ob.step()
+    assert torch.allclose(a.detach() @ q, b.detach(), atol=1e-10)

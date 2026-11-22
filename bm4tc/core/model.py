@@ -620,6 +620,7 @@ class ConditionalBornMachine(SamplingMPS):
         labels: torch.Tensor,
         beta: float,
         debug: bool = False,
+        log_Z: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         The objective (1-β)·L_dis + β·L_gen/N, in nats per variable (D86), with
@@ -632,6 +633,10 @@ class ConditionalBornMachine(SamplingMPS):
 
         β=0  →  -log p(c|x)       (discriminative; log_partition_function not called)
         β=1  →  -log p(x,c) / N   (generative)
+
+        log_Z: the normaliser to use in place of the norm contraction, with its gradient
+        (trainer.riemannian reads it from the canonical centre, D195); it is then this
+        forward's cached log Z. None: contracted. Unused at β = 0.
 
         debug=True: log per-term NaN/inf stats inside the grad-tracked forward.
         """
@@ -667,7 +672,10 @@ class ConditionalBornMachine(SamplingMPS):
                 logger.warning("  [mixed_nll/grad] term2=0 (β=1, not computed)")
 
         if beta > 0.0:
-            log_Z = self.log_Z(recompute=True)
+            if log_Z is None:
+                log_Z = self.log_Z(recompute=True)
+            else:
+                self._log_Z_cache = ((self._params_key(), torch.is_grad_enabled()), log_Z)
             if debug:
                 logger.warning(f"  [mixed_nll/grad] term3(β/N·log_Z): log_Z={log_Z.item():.4g}")
             term3 = (beta / n_vars) * log_Z

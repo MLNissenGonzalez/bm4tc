@@ -1,3 +1,6 @@
+# RECORD (D195): the run of this study is the first POGO variant (Adam or SGD under the exact
+# norm contraction), from commit c0f0001e. The code since reads log Z from the centre and refuses Adam:
+# do not relaunch it from here.
 # Option 2, stage 2 (D190, D192, notes:gauge §9): does r160's late rise of the training
 # objective on full MNIST β = 1 come from the free gauge? This arm: Adam + POGO, the cores
 # kept isometries towards the class core (Z = 1 by the constraint, the gauge never
