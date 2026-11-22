@@ -16,6 +16,8 @@ config:
 hpo:
   trials_per_param: 30         # as mnist_nat (D157)
 analysis:
+  detector_masks:              # D194: the detector's attack also confined to the digit (D193)
+    [{window: 0.67}, {data: 0.1}, {digit: 0}, {digit: 1}]
   batch_size: 512              # as mnist_nat (D133)
   adaptive: {seeds: [1]}       # as mnist_nat (D129)
   sweep_purify:                # as mnist_nat (D132, D158): transfer only

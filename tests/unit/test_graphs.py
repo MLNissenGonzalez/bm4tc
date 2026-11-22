@@ -478,6 +478,28 @@ def test_captured_adaptive_attack_is_bit_identical_to_eager():
         assert len(c.step._captures) == 1
 
 
+@needs_cuda
+def test_captured_masked_detector_attack_is_bit_identical_to_eager():
+    """The detector's attack confined to a mask (D193), replayed from graphs, against
+    the eager attack: a fixed mask and one computed from each batch (like
+    ``{digit: k}``), which the graph recomputes on every replay."""
+    cbm = _analysed_cbm()
+    detector = _adaptive_defences(cbm, Graphs(enabled=False))[2]
+    fixed = torch.tensor([0.0, 1, 1, 1, 1, 0], device=CUDA)
+    masks = [lambda x: fixed, lambda x: (x > 0).to(x.dtype)]
+    graphs, eager_graphs = Graphs(enabled=True), Graphs(enabled=False)
+    eps = torch.tensor(0.2, dtype=torch.float64, device=CUDA)
+    for mask in masks:
+        attack = AdaptivePGD(steps=3, restarts=1, mask=mask)
+        captured, eager = attack.graphed(detector, graphs), attack.graphed(detector, eager_graphs)
+        for data, labels in _batches(cbm, 5):
+            start = (data + 0.1).clamp(*cbm.input_range)
+            c = captured(data, labels, eps, starts=[start])
+            assert torch.equal(c, eager(data, labels, 0.2, starts=[start]))
+            assert torch.equal(c[mask(data).expand_as(data) == 0], data[mask(data).expand_as(data) == 0])
+        assert len(captured.step._captures) == 1
+
+
 def _uq_run(captured: bool):
     cbm = _analysed_cbm()
     data, labels = (torch.cat(parts).cpu() for parts in zip(*_batches(cbm, 5)))

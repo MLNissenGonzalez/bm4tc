@@ -11,6 +11,8 @@ config:
 hpo:
   trials_per_param: 30         # D157: 15 (D81) left three mnist12_nat cells with a bad lr
 analysis:
+  detector_masks:              # D194: the detector's attack also confined to the digit (D193)
+    [{window: 0.67}, {data: 0.1}, {digit: 0}, {digit: 1}]
   batch_size: 512              # D133: 1.3x faster than 256 at an AT unit's memory
   adaptive: {seeds: [1]}       # D129: ≈ 7 h per checkpoint, so one seed per cell
   sweep_purify:                # D132: one sweep, transfer only (adaptive too costly); D158: window 0.3

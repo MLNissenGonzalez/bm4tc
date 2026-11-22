@@ -24,6 +24,8 @@ hpo:                           # four hparams: 60 trials (D81)
     jem.sampler.noise_std: {log: [1e-3, 3e-2]}
     jem.sampler.num_steps: {choice: [20, 40]}
 analysis:
+  detector_masks:              # D194: the detector's attack also confined to the digit (D193)
+    [{window: 0.67}, {data: 0.1}, {digit: 0}, {digit: 1}]
   batch_size: 512              # D133, as mnist_nat
   adaptive: {seeds: [1]}       # D129, as mnist_nat
   sweep_purify:                # as mnist_nat: one SGLD sweep, transfer only; D158: ball 0.3

@@ -23,8 +23,9 @@ PGD is one attack everywhere (D149): :class:`BarePGD`, ``analysis.attack.steps``
 purifiers on ``sweep_purify.subsample``, a prefix of it). Its examples give ``rob``
 and every transfer number, and start the adaptive attacks (D98), which run with
 the same steps and restarts. The attack on the detector also starts one restart on
-the data (:class:`DataStarts`, D156), and on an embedding flat at its ends it runs
-in both boxes (D179, :func:`_attack`).
+the data (:class:`DataStarts`, D156), on an embedding flat at its ends it runs
+in both boxes (D179), and with ``analysis.detector_masks`` it also runs confined to
+each mask of the image (D193; :func:`_attack`).
 
 The model is the run's (``model: mps | jem``); every part but the sweep
 purification is the same code for both (D35, D69). On CUDA, an MPS's per-batch
@@ -47,7 +48,7 @@ from omegaconf import OmegaConf
 
 from bm4tc.pipeline.metrics import key
 from bm4tc.analysis.ceiling import population_ceiling, robust_accuracy_ceiling
-from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, DataStarts, Defense
+from bm4tc.analysis.adaptive import AdaptivePGD, BarePGD, DataStarts, Defense, image_masks
 from bm4tc.analysis.gradients import margin_sensitivity
 from bm4tc.analysis.purification import GibbsPurification, LikelihoodPurification
 from bm4tc.analysis.uq import (UQConfig, UQEvaluation, UQResults, compute_thresholds,
@@ -63,6 +64,7 @@ from bm4tc.core.objective import Evaluation, set_seed
 logger = logging.getLogger(__name__)
 
 SEED = 0
+MASK_SEED = 1   # the masked detector attacks' own random streams (D193)
 SPLIT = "test"
 
 
@@ -94,7 +96,8 @@ SETTINGS = {
     # D156 moved the detector to adaptive_det; adaptive keeps the whole adaptive section
     # in its hash (percentile included), so purification results from before stay valid.
     "adaptive": ("attack", "purify_delta", "purify_steps", "batch_size", "adaptive"),
-    "adaptive_det": ("attack", "batch_size", "adaptive"),
+    # D193: the detector's masks; left out of the hash while empty, so stored results stay valid
+    "adaptive_det": ("attack", "batch_size", "adaptive", "detector_masks"),
     "adaptive_sweep": ("attack", "batch_size", "sweep_purify", "adaptive"),
 }
 
@@ -126,6 +129,8 @@ def part_hash(name: str, analysis, budgets: List[float], run_hash: str) -> str:
                            ("sweep_purify", "adaptive_restarts")):
         if section in settings:
             settings[section].pop(picks, None)
+    if not settings.get("detector_masks"):   # D193: no masks, the hash from before the key
+        settings.pop("detector_masks", None)
     if name in ("gibbs", "sgld", "adaptive_sweep"):
         settings["attack"].pop("subsample")
     if name == "adaptive_sweep":
@@ -433,7 +438,16 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     two scores (D179): a sign step gives a nearly flat end pixel a full step, so the
     attack in ``attack_range`` moves every end pixel and pays in log p, while the one
     in ``input_range`` leaves many on their end, sparse, and evades the detector better
-    at high beta. Neither dominates. Every other embedding has one box."""
+    at high beta. Neither dominates. Every other embedding has one box.
+
+    A detector also faces the attack confined to each mask of ``analysis.detector_masks``
+    (:func:`image_masks`, D193), in every box, from the same starts: on Legendre the
+    attack on every pixel pays log p for the steep background and leaves the detector
+    far higher. Each masked attack draws its random starts from a stream of its own,
+    so the unmasked attack draws as in a run without masks and, within one run, the
+    masks can only lower a point's score. Against stored results that holds only where
+    the unmasked attack replays exactly, which another machine need not do (D194:
+    transfer scores of a re-run moved by up to .008)."""
     a, steps = analysis.adaptive, analysis.attack.steps
     restarts = analysis.attack.restarts if restarts is None else restarts
     cbm.to(device)
@@ -442,16 +456,28 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     range_size = range_size_of(cbm)
     graphs, eager = _graphs(cbm, device), Graphs(enabled=False)
     defences = defences_of(cbm, datahandler, analysis, graphs, device)
+    selective_any = any(d[3] for d in defences)
     boxes = [tuple(cbm.attack_range)]
-    if any(d[3] for d in defences) and tuple(cbm.input_range) != boxes[0]:
+    if selective_any and tuple(cbm.input_range) != boxes[0]:
         boxes.append(tuple(cbm.input_range))
+    masks = (image_masks(list(analysis.detector_masks), datahandler.data["train"],
+                         tuple(cbm.input_range))
+             if selective_any and analysis.detector_masks else [])
     pgds = [BarePGD(steps, restarts, box).graphed(cbm, graphs) for box in boxes]
     data_starts = [DataStarts(d[2], datahandler.data["train"], analysis.batch_size)
                    if d[3] else None for d in defences]
-    # graphed attacks per defence, one per box it faces, captured once for every budget
-    attacks = [([AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot, box=box).graphed(d[2], g)
-                 for box in (boxes if d[3] else boxes[:1])], g)
-               for d, g in ((d, eager if d[2].random else graphs) for d in defences)]
+    # per defence its variants (box index, mask): a detector faces every box unmasked,
+    # then every mask in every box; graphed, captured once for every budget
+    variants = [[(i, None) for i in range(len(boxes))] + [(i, m) for m in masks
+                                                          for i in range(len(boxes))]
+                if d[3] else [(0, None)] for d in defences]
+    attacks = [([(i, m is not None,
+                  AdaptivePGD(steps=steps, restarts=restarts, eot=a.eot, box=boxes[i],
+                              mask=m).graphed(d[2], g))
+                 for i, m in vs], g)
+               for d, vs, g in ((d, vs, eager if d[2].random else graphs)
+                                for d, vs in zip(defences, variants))]
+    cuda = [torch.device(device).index or 0] if torch.device(device).type == "cuda" else []
     # PGD on the points some defence is scored on (sorted); the other rows stay nan
     attacked = torch.unique(torch.cat([fixed_subsample(len(X), d[4]) for d in defences]))
     out = {}
@@ -468,14 +494,19 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
             idx = fixed_subsample(len(X), subsample)
             radius = g.scalar(eps_abs, device)
 
-            def adaptive_craft(adapt, x_pgd):
+            def adaptive_craft(adapt, x_pgd, stream=None):
                 def craft(xb, yb, b):
                     starts = [x_pgd[b]] + ([] if on_data is None else [on_data(xb, yb)])
-                    return adapt(xb, yb, radius, starts)
+                    if stream is None:
+                        return adapt(xb, yb, radius, starts)
+                    with torch.random.fork_rng(devices=cuda):   # the global stream untouched
+                        torch.manual_seed(MASK_SEED + 1_000_003 * stream + int(b[0]))
+                        return adapt(xb, yb, radius, starts)
                 return craft
 
             # each suffix's crafts; a point counts under the lowest of their scores
-            crafts = {"_adapt": [adaptive_craft(*pair) for pair in zip(adapts, x_pgds)]}
+            crafts = {"_adapt": [adaptive_craft(adapt, x_pgds[i], k if masked else None)
+                                 for k, (i, masked, adapt) in enumerate(adapts)]}
             if selective:   # the PGD examples
                 crafts[""] = [lambda xb, yb, b: x_pgds[0][b].to(device)]
             for suffix, crafted in crafts.items():

@@ -145,6 +145,9 @@ class AnalysisConfig:
     batch_size: int = MISSING
     sweep_purify: SweepPurifyConfig = field(default_factory=SweepPurifyConfig)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
+    # the detector's attack also confined to each image mask, a one-key mapping
+    # ({window: s}, {data: f}, {digit: k}; bm4tc.analysis.adaptive.image_masks, D193)
+    detector_masks: List[Dict[str, Any]] = MISSING
 
 
 @dataclass

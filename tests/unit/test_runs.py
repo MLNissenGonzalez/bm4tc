@@ -271,3 +271,24 @@ def test_arch_settings_apply_to_their_arch_only(tmp_path, monkeypatch):
     micro = {c.arch: Job(study, c, 1).compose(hparams={}).trainer.micro_batch_size
              for c in study.cells()}
     assert micro == {"d3r10": None, "d3r40": 256, "d3r80": 128}
+
+
+def test_detector_masks_enter_adaptive_det_hash_only_when_set(monkeypatch):
+    """D193: an empty ``detector_masks`` leaves the hash as before the key existed, so
+    stored detector results stay valid; masks change ``adaptive_det``'s hash only."""
+    from omegaconf import OmegaConf
+    from bm4tc.pipeline import analyse as A
+    analysis = OmegaConf.load("configs/defaults.yaml").analysis
+    assert list(analysis.detector_masks) == []
+    budgets, run = [0.1], "abc"
+    empty = {p: A.part_hash(p, analysis, budgets, run) for p in ("adaptive", "adaptive_det")}
+
+    before = OmegaConf.create(OmegaConf.to_container(analysis))
+    del before["detector_masks"]
+    with monkeypatch.context() as m:
+        m.setitem(A.SETTINGS, "adaptive_det", ("attack", "batch_size", "adaptive"))
+        assert A.part_hash("adaptive_det", before, budgets, run) == empty["adaptive_det"]
+
+    masked = OmegaConf.merge(analysis, {"detector_masks": [{"window": 0.67}]})
+    assert A.part_hash("adaptive_det", masked, budgets, run) != empty["adaptive_det"]
+    assert A.part_hash("adaptive", masked, budgets, run) == empty["adaptive"]
