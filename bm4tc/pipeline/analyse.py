@@ -444,8 +444,10 @@ def _attack(cbm, datahandler, analysis, budgets, device, defences_of,
     (:func:`image_masks`, D193), in every box, from the same starts: on Legendre the
     attack on every pixel pays log p for the steep background and leaves the detector
     far higher. Each masked attack draws its random starts from a stream of its own,
-    so the unmasked attack's draws and scores are those of a run without masks, and a
-    point's score can only fall."""
+    so the unmasked attack draws as in a run without masks and, within one run, the
+    masks can only lower a point's score. Against stored results that holds only where
+    the unmasked attack replays exactly, which another machine need not do (D194:
+    transfer scores of a re-run moved by up to .008)."""
     a, steps = analysis.adaptive, analysis.attack.steps
     restarts = analysis.attack.restarts if restarts is None else restarts
     cbm.to(device)
