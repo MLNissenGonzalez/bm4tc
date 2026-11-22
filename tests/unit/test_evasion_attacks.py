@@ -290,6 +290,18 @@ def test_image_masks_need_square_images():
         image_masks([{"digit": 0}], torch.zeros(2, 5), (0.0, 1.0))
 
 
+def test_a_window_side_is_rounded_to_the_nearest_pixel():
+    """{window: 0.67} frees 19×19 on 28×28 (0.67 · 28 = 18.76), the studies' mask (D194),
+    and 8×8 on 12×12; truncating would give 18×18 without changing a hash."""
+    from bm4tc.analysis.adaptive import image_masks
+    for side, s in ((28, 19), (12, 8)):
+        (window,) = image_masks([{"window": 0.67}], torch.zeros(2, side * side), (0.0, 1.0))
+        expected = torch.zeros(side, side)
+        a = (side - s) // 2
+        expected[a:a + s, a:a + s] = 1
+        assert torch.equal(window(torch.zeros(1, side * side)), expected.flatten())
+
+
 def _detector_attack(model, labels, monkeypatch, masks, score=None, budgets=(0.1,),
                      restarts=1):
     """`_attack` on a detector with ``analysis.detector_masks = masks``: (the variants
@@ -333,6 +345,18 @@ def test_a_detector_faces_every_mask_after_the_unmasked_attack_and_counts_the_lo
     box = tuple(cbm_attack.attack_range)
     assert variants == [(box, False), (box, True)]
     assert rob_sel == pytest.approx(first.mean().item())
+
+
+def test_a_detector_on_a_flat_embedding_faces_every_mask_in_both_boxes(
+        cbm_cosine, labels, monkeypatch):
+    """On cosine each mask runs in both boxes (D179, D193), after the unmasked attack in
+    both."""
+    variants, _ = _detector_attack(cbm_cosine, labels, monkeypatch,
+                                   [{"window": 0.5}, {"digit": 0}])
+    inset, full = tuple(cbm_cosine.attack_range), tuple(cbm_cosine.input_range)
+    assert inset != full
+    assert variants == [(inset, False), (full, False),
+                        (inset, True), (full, True), (inset, True), (full, True)]
 
 
 def test_masks_leave_the_unmasked_attack_unchanged(cbm_attack, labels, monkeypatch):
