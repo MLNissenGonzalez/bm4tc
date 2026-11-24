@@ -1,0 +1,24 @@
+# Option 2, step card notes:gauge §18 (D197's protocol): does rank buy a better density on full
+# MNIST beta = 1 once the lr keeps Adam's step per core at r40's size? Free gauge, Adam, the
+# norm penalty, uniform classes, seed 1, 600 epochs, patience 100: as gauge_mnist_adam_r40.
+# lr = 1.83e-3 * 40 / r (Adam's step per core lr * sqrt(6) * r ~ .18, §11), not
+# mnist_gen_capacity's HPO lr (at r160 a step of 1.29, unstable). Gauge diagnostics every 10th
+# validation (10-30 s per call at r160).
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r80]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 100
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+  trainer.optimizer.kwargs.lr: 0.000915
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
