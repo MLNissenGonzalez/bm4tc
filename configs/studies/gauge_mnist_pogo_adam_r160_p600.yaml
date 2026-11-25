@@ -1,0 +1,23 @@
+# gauge_mnist_pogo_adam_r160 at a fixed 600 epochs (D206), for the seeds whose patience 100
+# ended them on the plateau of epochs 100-200 that seed 1 crossed (§19). Patience only stops,
+# so a seed that never stopped there is this run; §19 reads each seed's 600-epoch run.
+dataset: mnist
+regime: nat
+seeds: [4]
+grid:
+  arch: [d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600        # never reached: no early stop
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: true
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.kwargs.lr: 0.0004575
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
