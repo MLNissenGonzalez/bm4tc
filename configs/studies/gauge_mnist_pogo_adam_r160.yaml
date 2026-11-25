@@ -1,12 +1,13 @@
 # Option 2, step card notes:gauge §18: D192's POGO variant at r160 against gauge_mnist_adam_r160
 # (branch gauge): POGO with element-wise Adam (outside the paper's Def. 1, which D195 follows
 # on gauge), log Z contracted, cores isometries towards the class core, trimmed bonds, no norm
-# penalty. As the free arm: full MNIST beta = 1, seed 1, uniform classes, 600 epochs,
+# penalty. As the free arm: full MNIST beta = 1, uniform classes, 600 epochs,
 # patience 100, lr = 1.83e-3 * 40 / 160 (Adam's step per core ~ .18, §11).
+# Seeds 1-5 (§19, D205): D195's main-text criterion; seed 1 is the run read in §18.1.
 # Cost (bench, 1080 Ti, batch 512): 579 ms/step and 6.1 GiB per process.
 dataset: mnist
 regime: nat
-seeds: 1
+seeds: 5
 grid:
   arch: [d3r160]
   beta: [1]
