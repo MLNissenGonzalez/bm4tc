@@ -141,11 +141,6 @@ class VectorAdam(optim.Optimizer):
                 p.sub_(m * scale.to(p.device, p.real.dtype))
 
 
-# The optimisers whose step is linear in the gradients up to a scalar per parameter tensor:
-# what POGO assumes of its base optimiser (Javaloy and Vergari, Def. 1).
-LINEAR_OPTIMIZERS = (optim.SGD, NormalizedGD, VectorAdam)
-
-
 _OPTIMIZER_MAP = {
     "vadam": VectorAdam,
     "sgd": optim.SGD,

@@ -15,7 +15,7 @@ config:
   trainer.patience: 600        # never reached: no early stop
   trainer.gauge.defects_every: 10
   born.init_kwargs.uniform_classes: true
-  trainer.riemannian: true
+  trainer.riemannian: centre       # POGO as in the paper (D195)
   trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
   born.init_kwargs.trim_bonds: true
   trainer.optimizer.name: vadam

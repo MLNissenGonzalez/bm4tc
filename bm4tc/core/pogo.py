@@ -22,14 +22,18 @@ which keeps X Xᴴ − I of the order of the step's square, step after step. λ 
 (tpm_tn's default), not the root of the landing polynomial, so the step has no host sync
 and a CUDA graph can capture it (D90).
 
-As in the paper (Alg. 1, Def. 1), the base optimiser gets the Euclidean gradient of the NLL
-with log Z read from the centre, log ‖root‖² (``log_Z_from_centre``: no norm contraction),
-and must be linear in the gradient up to a scalar: VAdam (the paper's and ours), SGD or
-``normalized_gd``. Element-wise Adam does not commute with the projection onto the tangent
-space, so the gradient's normal part would leak into the step: refused. Evaluation, and so
-the selection, contracts log Z exactly. The cap on ‖Δ‖ is not the paper's (it asks for ξ < 1
-through lr or a normalising optimiser): a scalar per core, so the step stays linear; VAdam
-below lr ≈ 1 hardly meets it, plain SGD diverges without it.
+The paper (Alg. 1, Def. 1) gives the base optimiser the Euclidean gradient of the NLL with
+log Z read from the centre, log ‖root‖² (``log_Z_from_centre``: no norm contraction;
+``trainer.riemannian: centre``), and asks it to be linear in the gradient up to a scalar:
+VAdam (the paper's and ours), SGD or ``normalized_gd``. Then the gradient's part normal to
+the manifold, which the two log Z reads differ in, is projected away. POGO takes any base
+optimiser all the same (D210): with element-wise Adam, which does not commute with the
+projection, that normal part leaks into the step and the log Z read matters (D192's
+variant contracts the norm, ``trainer.riemannian: contracted``). The landing step keeps
+the cores isometries either way. Evaluation, and so the selection, contracts log Z
+exactly. The cap on ‖Δ‖ is not the paper's (it asks for ξ < 1 through lr or a normalising
+optimiser): a scalar per core, so a linear step stays linear; VAdam below lr ≈ 1 hardly
+meets it, plain SGD diverges without it.
 
 The edge cores are seen through the fixed obc boundary vectors (D87), as in ``gauge.py``;
 the components the boundary vector does not reach are never read and never written. A
@@ -40,8 +44,6 @@ no isometry onto r > d components): build the model with ``trim_bonds`` (D192).
 from typing import List, Optional
 
 import torch
-
-from bm4tc.core.objective import LINEAR_OPTIMIZERS
 
 # A core counts as an isometry at the start when ‖X Xᴴ − I‖_F is below this (complex64's
 # √ε with a margin: ``isometric_start_`` reaches ≈ 1e-6).
@@ -170,16 +172,12 @@ class POGO:
 
     ``step()``: the base optimiser steps; then each core's step Δ = X − X′ (X before, X′
     after, as the matrix of ``_Layout.rows``) is replaced by ``pogo_step``. The cores must
-    be in the isometric form already (``isometric_start_``): ValueError otherwise, for a
-    base optimiser that is not linear in the gradient (``LINEAR_OPTIMIZERS``), and for a
-    trainable parameter of the base optimiser that is not a core of ``cbm``. The base
-    optimiser's state is its own and stays where it is (no gauge ever changes)."""
+    be in the isometric form already (``isometric_start_``): ValueError otherwise, and for a
+    trainable parameter of the base optimiser that is not a core of ``cbm``. Any base
+    optimiser (the module docstring says what Def. 1 asks of it). Its state is its own and
+    stays where it is (no gauge ever changes)."""
 
     def __init__(self, cbm, base: torch.optim.Optimizer):
-        if not isinstance(base, LINEAR_OPTIMIZERS):
-            raise ValueError(f"trainer.riemannian needs a base optimiser that is linear in the "
-                             f"gradient (POGO, Def. 1): trainer.optimizer.name vadam, sgd or "
-                             f"normalized_gd, got {type(base).__name__}")
         self.base = base
         self._layout = _Layout(cbm)
         cores = {id(c) for c in self._layout.cores}

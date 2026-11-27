@@ -653,7 +653,7 @@ class ConditionalBornMachine(SamplingMPS):
         β=1  →  -log p(x,c) / N   (generative)
 
         log_Z: the normaliser to use in place of the norm contraction, with its gradient
-        (trainer.riemannian reads it from the canonical centre, D195); it is then this
+        (``trainer.riemannian: centre`` reads it from the canonical centre, D195); it is then this
         forward's cached log Z. None: contracted. Unused at β = 0.
 
         debug=True: log per-term NaN/inf stats inside the grad-tracked forward.

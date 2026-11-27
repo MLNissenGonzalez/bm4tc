@@ -63,12 +63,15 @@ def test_pogo_step_lands_near_the_manifold():
     assert torch.allclose(pogo_step(x, 5 * direction), pogo_step(x, direction), rtol=1e-12, atol=1e-14)
 
 
-@pytest.mark.parametrize("base", ["sgd", "vadam"])
+@pytest.mark.parametrize("base", ["sgd", "vadam", "adam"])
 def test_pogo_trains_and_keeps_the_isometries(base):
+    """Any base optimiser, element-wise Adam (outside Def. 1) included (D210)."""
     cbm = _cbm(bond_dim=4)
     isometric_start_(cbm)
     params = [n.tensor for n in cbm._mats_env]
-    opt = torch.optim.SGD(params, lr=0.05) if base == "sgd" else VectorAdam(params, lr=0.1)
+    opt = {"sgd": lambda: torch.optim.SGD(params, lr=0.05),
+           "vadam": lambda: VectorAdam(params, lr=0.1),
+           "adam": lambda: torch.optim.Adam(params, lr=0.01)}[base]()
     pogo = POGO(cbm, opt)
     torch.manual_seed(1)
     x, y = torch.rand(64, 8) * 2 - 1, torch.randint(0, 2, (64,))
@@ -117,13 +120,6 @@ def test_a_trimmed_isometric_model_saves_and_loads(tmp_path):
         assert back.bond_dim == cbm.bond_dim
         assert torch.allclose(back.log_amp_sq(x), cbm.log_amp_sq(x), atol=1e-6)
         assert back.log_partition_function().item() == pytest.approx(0.0, abs=1e-5)
-
-
-def test_pogo_refuses_adam():
-    cbm = _cbm(bond_dim=4)
-    isometric_start_(cbm)
-    with pytest.raises(ValueError, match="linear in the"):
-        POGO(cbm, torch.optim.Adam([n.tensor for n in cbm._mats_env], lr=0.01))
 
 
 def test_log_Z_from_the_centre():

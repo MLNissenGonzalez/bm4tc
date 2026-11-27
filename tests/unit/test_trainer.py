@@ -719,12 +719,14 @@ def test_gauge_config_is_checked_by_the_trainer():
 
 # ── Training on the isometric form (D192) ──────────────────────────────────
 
-@pytest.mark.parametrize("name", ["sgd", "vadam", "normalized_gd"])
-def test_riemannian_training_keeps_Z_at_one(name):
+@pytest.mark.parametrize("mode", ["centre", "contracted"])
+@pytest.mark.parametrize("name", ["sgd", "vadam", "normalized_gd", "adam"])
+def test_riemannian_training_keeps_Z_at_one(name, mode):
     """trainer.riemannian: the trainer starts from the isometric form, POGO keeps it (the
-    tiny model's bonds are within their support, so it needs no trimming)."""
+    tiny model's bonds are within their support, so it needs no trimming), whichever log Z
+    the step reads and whichever base optimiser (D210)."""
     nc = NormControlConfig(soft_strength=0.0)
-    cfg = TrainConfig(max_epoch=3, beta=0.5, riemannian=True, norm_control=nc,
+    cfg = TrainConfig(max_epoch=3, beta=0.5, riemannian=mode, norm_control=nc,
                       optimizer=OptimizerConfig(name=name, kwargs={"lr": 1e-2, "weight_decay": 0.0}))
     records = []
     trainer = _trainer(cfg)
@@ -739,7 +741,7 @@ def test_riemannian_training_keeps_Z_at_one(name):
     (lambda cfg: setattr(cfg.norm_control, "soft_strength", 0.1), "soft_strength"),
 ])
 def test_riemannian_refuses_a_gauge_step_and_a_norm_penalty(change, match):
-    cfg = TrainConfig(riemannian=True, norm_control=NormControlConfig(soft_strength=0.0))
+    cfg = TrainConfig(riemannian="centre", norm_control=NormControlConfig(soft_strength=0.0))
     change(cfg)
     with pytest.raises(ValueError, match=match):
         _trainer(cfg)
@@ -755,18 +757,22 @@ def test_gauge_defects_every_k_th_validation_norms_always():
     assert all("gauge/log_norm" in r["diagnostics"] for r in records)
 
 
-def test_riemannian_refuses_a_non_linear_optimizer():
-    """Adam's element-wise scaling does not commute with POGO's projection (D195)."""
-    cfg = TrainConfig(max_epoch=1, riemannian=True, norm_control=NormControlConfig(soft_strength=0.0),
-                      optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
-    with pytest.raises(ValueError, match="linear in the"):
-        _trainer(cfg).train()
+@pytest.mark.parametrize("value", [True, 1, "center", "isometric"])
+def test_riemannian_takes_false_or_a_log_Z_mode_only(value):
+    """True would not say where the step reads log Z (D208's port): it raises, as does any
+    other value, naming the key and the modes."""
+    cfg = TrainConfig(riemannian=value, norm_control=NormControlConfig(soft_strength=0.0))
+    with pytest.raises(ValueError, match=r"trainer\.riemannian.*'centre', 'contracted'"):
+        _trainer(cfg)
 
 
-def test_riemannian_training_contracts_no_norm_but_validates_with_the_exact_one():
-    cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=True,
+@pytest.mark.parametrize("mode, in_step", [("centre", False), ("contracted", True)])
+def test_riemannian_step_reads_log_Z_by_its_mode_and_validates_with_the_exact_one(mode, in_step):
+    """centre: the norm is contracted for evaluation only, never inside a step (D195);
+    contracted: inside every step too (D192's variant). Element-wise Adam either way."""
+    cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=mode,
                       norm_control=NormControlConfig(soft_strength=0.0),
-                      optimizer=OptimizerConfig(name="vadam", kwargs={"lr": 1e-2}))
+                      optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
     t = _trainer(cfg)
     exact, calls = t.cbm.log_partition_function, []
 
@@ -776,4 +782,23 @@ def test_riemannian_training_contracts_no_norm_but_validates_with_the_exact_one(
 
     t.cbm.log_partition_function = spy
     t.train()
-    assert calls and not any(calls)      # evaluation only: never inside a step
+    assert any(calls) == in_step and not all(calls)    # evaluation always contracts it
+
+
+def test_riemannian_contracted_is_the_measured_variant():
+    """``contracted`` + Adam reproduces D192's variant bit for bit: the numbers are this toy
+    run on branch gauge-d192 (riemannian true, ed13f5c7), the code the variant's MNIST and
+    ECG200 runs came from. ``centre`` differs from them."""
+    def run(mode):
+        cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=mode,
+                          norm_control=NormControlConfig(soft_strength=0.0),
+                          optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
+        torch.manual_seed(0)
+        records = []
+        t = _trainer(cfg)
+        t.train(on_epoch_end=lambda epoch, record: records.append(record))
+        return (records[-1]["train"]["objective"], records[-1]["valid"]["objective"],
+                sum(x.abs().double().sum().item() for x in t.cbm.tensors))
+
+    assert run("contracted") == (1.356917679309845, 1.2246100008487701, 5.325620550662279)
+    assert run("centre")[0] != 1.356917679309845

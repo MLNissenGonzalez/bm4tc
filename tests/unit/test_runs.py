@@ -39,6 +39,20 @@ def test_run_dir_is_study_rooted(data_root):
                            "job_type": "train"}
 
 
+@pytest.mark.parametrize("study, want", [
+    ("gauge_mnist_adam_r160", "69e5f42c57fdd1f2"),   # the hash its stored seed-1 run carries
+    ("mnist_nat", "de6c9f2134a75b26"),
+    ("ecg200_nat", "533ebc493cf7c569"),
+    ("jem_mnist_nat", "6ccea90df6095321"),
+])
+def test_config_hash_of_a_free_run_is_stable(study, want):
+    """A run that never sets a new key keeps its hash, so its stored results are reused:
+    pins that ``trainer.riemannian``'s default (false, D208) and any later default leave
+    them alone. The first job of each study, without selected hyperparameters."""
+    job = Study(study).jobs()[0]
+    assert job.config_hash(job.compose(hparams={}), None) == want
+
+
 # ── grids ───────────────────────────────────────────────────────────────────
 
 def test_defaults_fill_the_grid():

@@ -14,7 +14,7 @@ config:
   trainer.max_epoch: 500
   trainer.batch_size: 64
   trainer.patience: 150
-  trainer.riemannian: true
+  trainer.riemannian: centre       # POGO as in the paper (D195)
   trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
   born.init_kwargs.trim_bonds: true
   trainer.optimizer.name: sgd

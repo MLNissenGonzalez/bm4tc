@@ -46,6 +46,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Where a training step under ``trainer.riemannian`` reads log Z (TrainConfig.riemannian).
+RIEMANNIAN_MODES = ("centre", "contracted")
+
 @dataclass
 class TrainConfig:
     beta: float = 0.0  # weight of the generative term per variable (D86)
@@ -72,11 +75,17 @@ class TrainConfig:
     # A gauge step after the optimiser's (D190, bm4tc/core/gauge.py): ψ unchanged, so it
     # acts only through the optimiser. kind none (the default) leaves the gauge alone.
     gauge: GaugeConfig = field(default_factory=GaugeConfig)
-    # Train on the isometric form (D192, D195, bm4tc/core/pogo.py): the cores kept
-    # isometries towards the class core by POGO, so Z = 1 by the constraint and the
-    # training objective reads it from the class core. Needs the model built with
-    # trim_bonds, a linear optimiser (vadam), no gauge step and no norm penalty.
-    riemannian: bool = False
+    # Train on the isometric form (bm4tc/core/pogo.py): the cores kept isometries towards
+    # the class core by POGO, so Z = 1 by the constraint. The value says where a training
+    # step reads log Z (evaluation always contracts it exactly):
+    #   false         off (free training)
+    #   "centre"      log ‖class core‖², no norm contraction: POGO as in the paper (D195)
+    #   "contracted"  the full norm contraction, its gradient reaching every core (D192's
+    #                 variant, D208)
+    # Any base optimiser (D210). Needs the model built with trim_bonds, no gauge step and
+    # no norm penalty. Typed Any, not Optional[str]: off stays false, so the config hash
+    # of every run that never set it is unchanged (Job.config_hash hashes the whole config).
+    riemannian: Any = False
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical
     # to the eager step except for the AT random start, whose draws come from
@@ -114,6 +123,9 @@ class Trainer:
         if cfg.eval_every < 1:
             raise ValueError(f"eval_every must be >= 1, got {cfg.eval_every}")
         check_gauge(cfg.gauge)  # a composed config skips GaugeConfig's own check
+        if not (cfg.riemannian is False or cfg.riemannian in RIEMANNIAN_MODES):
+            raise ValueError(f"trainer.riemannian must be false or one of {RIEMANNIAN_MODES} "
+                             f"(where a training step reads log Z), got {cfg.riemannian!r}")
         if cfg.riemannian:
             if cfg.gauge.kind != "none":
                 raise ValueError(f"trainer.riemannian keeps the cores isometries towards the class "
@@ -235,9 +247,9 @@ class Trainer:
         return objective, log_amp_sq
 
     def _centre_log_Z(self) -> Optional[torch.Tensor]:
-        """log Z as a training step takes it under ``riemannian`` (read from the class
-        core, D195); None: the model contracts it."""
-        return log_Z_from_centre(self.cbm) if self.cfg.riemannian else None
+        """log Z as a training step takes it under ``riemannian: centre`` (read from the
+        class core, D195); None: the model contracts it."""
+        return log_Z_from_centre(self.cbm) if self.cfg.riemannian == "centre" else None
 
     # ------------------------------------------------------------------
     # Collapse report

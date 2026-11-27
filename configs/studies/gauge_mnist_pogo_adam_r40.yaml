@@ -1,0 +1,24 @@
+# D206's control for §19: D192's POGO + Adam at r40 under D201's protocol, against free r40's
+# -1.1675 (gauge_mnist_adam_r40, branch gauge). A gain at r160 only reads as a gauge effect at
+# high rank, a gain at both ranks as a better optimiser. As gauge_mnist_pogo_adam_r160 but r40
+# and lr = 1.83e-3 * 40 / r (free r40's lr): seed 1, 600 epochs, patience 100 as free r40.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 100
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: contracted   # D192's variant (D208)
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.kwargs.lr: 0.001830005364066771
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
