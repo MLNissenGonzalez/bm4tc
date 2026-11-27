@@ -83,6 +83,32 @@ per feature apart, so they compare across embeddings and models (D170,
 - **Norm control** (MPS): a soft penalty strength · (log Z − target)² / N keeps log Z
   near a target, so the amplitudes stay in float range (`trainer.norm_control`;
   optional hard rescaling every k steps).
+- **Gauge** (MPS, D190, `bm4tc/core/gauge.py`): a gauge change (A ← A S, B ← B S⁻ᵀ on a
+  bond) leaves ψ unchanged, so it acts only through the optimiser, which (Adam) is not
+  gauge-equivariant. `trainer.gauge.kind`: `none` (default), `scalar` (every core at the
+  geometric-mean norm; Adam's moments move exactly) or `balanced` (towards A†A = (B†B)ᵀ,
+  the minimal node norm: exact sweeps, or with `rate` one soft step), after every
+  `every`-th step. The training log carries `gauge/*` diagnostics at every validation
+  (also under `none`); the bond defects, which are costly at large r, only at the first and
+  every `defects_every`-th one. Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
+  moves by lr along its normalised gradient).
+- **Isometric form** (MPS, D192, D195, D210, `bm4tc/core/pogo.py`): `trainer.riemannian`
+  other than `false` starts from the canonical form centred at the class core (QR sweeps,
+  then the class core normalised: Z = 1) and keeps every core an isometry towards it with
+  POGO's step after the base optimiser's. The gauge then never changes and the norm is
+  held by the constraint. The value says where a training step reads log Z (evaluation
+  and selection always contract it exactly): `centre`, log ‖class core‖² with no norm
+  contraction (POGO as in the paper), or `contracted`, the full contraction with its
+  gradient reaching every core (D192's variant). Any base optimiser runs; POGO assumes one
+  linear in the gradient (`vadam`, one second moment per core, the paper's; `sgd`;
+  `normalized_gd`). Under element-wise `adam` the gradient's normal part leaks into the
+  step, so the two reads then step differently. It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
+  can carry), `trainer.norm_control.soft_strength: 0` and `trainer.gauge.kind: none`; the
+  Trainer raises otherwise. The training log carries `isometry/defect_max`.
+- **Uniform classes at the start** (MPS, D196): `born.init_kwargs.uniform_classes: true`
+  starts `randn_eye` at p(c|x) = 1/C instead of at class 0 with the others at 1e-9 (whose
+  first gradient freezes the class core under `vadam`). Default off; it raises with another
+  `init_method`.
 - **Selection** (D8): every `eval_every` epochs the same objective is evaluated on the
   validation split (AT: on a fixed attacked subset). The epoch with the lowest
   `objective/valid` is kept. `patience` counts validations. HPO and the choice
@@ -111,7 +137,9 @@ bm4tc/core/        the maths; no files, no configs
   sampling.py        SamplingMPS: tk develop's condition and sample on 1.1.6 (D100, D101)
   embeddings.py      feature maps; budget conversion (rel_to_abs, fmt_budget)
   interface.py       the model interface for analysis (D69)
-  objective.py       losses, mixed objective, norm control, Evaluation / evaluate()
+  objective.py       losses, mixed objective, norm control, optimizers, Evaluation / evaluate()
+  gauge.py           gauge steps after the optimizer's (scalar, balanced) and their diagnostics (D190)
+  pogo.py            the isometric form: its start, POGO's step around the base optimizer (D192)
   train.py           Trainer (MPS, NAT and AT); step and validation captured as CUDA graphs (D90, D92)
   graphs.py          Graphs / Graphed: functions replayed from CUDA graphs (one pool each)
   attacks.py         PGD and the joint (class + density) PGD
@@ -225,7 +253,12 @@ after a crash or a closed terminal, because finished work is recognised on disk:
 - **train**: a run is finished when it has `run.json`. A relaunch skips it if its
   config hash is unchanged, restarts it if it never finished, and refuses to touch it
   if the config changed, unless `--replace` moves the old run to
-  `outputs/<study>/.replaced/<date>/` (D58).
+  `outputs/<study>/.replaced/<date>/` (D58). A config key added later stays out of the
+  hash while it holds the default it was added with (`HASH_NEUTRAL_DEFAULTS` in
+  `bm4tc/pipeline/runs.py`, D212; every new key with a default goes there), so stored
+  runs keep their hashes. The cost: a new job in a stored study runs today's code under
+  that study's old hashes. In a Legendre `randn_eye` study (a new seed or rank) it starts
+  from D131's init, which the stored runs did not have.
 - **analyse**: each analysis part is cached in `analysis.json` under a hash of its
   settings, so changing one setting recomputes only the affected part (D63).
 
@@ -349,8 +382,9 @@ information hidden in one place, no pass-through layers.
   attribute in OmegaConf.
 - Generated datasets are cached in `$BM4TC_DATA_ROOT/.datasets/` under a name with
   every generation setting (D76); delete the file to regenerate it.
-- `randn_eye` initialisation with a non-Fourier embedding rescales the tensors by
-  1/φ₀(0), otherwise the initial amplitude underflows on long chains; use
+- `randn_eye` initialisation with a non-Fourier embedding rescales every data core
+  (not the class core) by 1/φ₀(0), otherwise the initial amplitude underflows on long
+  chains (D131, D190); use
   `init_method: canonical` for Hermite (set in `defaults.yaml`).
 - Complex parameters need torch ≥ 2.1 (an Adam `foreach` bug produced NaNs before).
 - A failed CUDA graph capture poisons the process in torch 2.1, so tests that may fail

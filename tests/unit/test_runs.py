@@ -3,6 +3,7 @@ import json
 import shutil
 
 import pytest
+from omegaconf import DictConfig, OmegaConf
 
 from bm4tc.pipeline import runs
 from bm4tc.pipeline.runs import Cell, Job, RunConflict, Study, find_runs, parse_arch
@@ -37,6 +38,52 @@ def test_run_dir_is_study_rooted(data_root):
     assert job.run_dir == data_root / "outputs/spirals_capacity/legendre/d4r3/b0/s1"
     assert job.wandb() == {"group": "spirals_capacity/legendre/d4r3/b0", "name": "s1",
                            "job_type": "train"}
+
+
+@pytest.mark.parametrize("study, want", [
+    # main at 9675a3d5, before the gauge keys existed: one study per family
+    ("mnist_nat", "642c46fcfbeb38b2"),
+    ("mnist12_nat", "10d8a10a77899095"),
+    ("ecg200_nat", "8655b21e746a914b"),
+    ("spirals_capacity", "6e96d9cb45bffc51"),
+    ("jem_mnist_nat", "8dd4b7bff909ffd2"),
+    # a free gauge study (uniform classes, defects every 10): re-hashed by D212 itself
+    ("gauge_mnist_adam_r160", "22757eeebfb8ca93"),
+])
+def test_config_hash_of_a_free_run_is_stable(study, want):
+    """A run that never sets a key added later keeps its hash, so its stored results are
+    reused: the keys of HASH_NEUTRAL_DEFAULTS at their defaults leave it alone (D212).
+    The first job of each study, without selected hyperparameters."""
+    job = Study(study).jobs()[0]
+    assert job.config_hash(job.compose(hparams={}), None) == want
+
+
+@pytest.mark.parametrize("key, value", [
+    ("born.init_kwargs.trim_bonds", True),
+    ("born.init_kwargs.uniform_classes", True),
+    ("trainer.gauge.kind", "scalar"),
+    ("trainer.gauge.defects_every", 10),
+    ("trainer.riemannian", "centre"),
+])
+def test_config_hash_sees_a_neutral_key_away_from_its_default(key, value):
+    """A key of HASH_NEUTRAL_DEFAULTS set to anything but its default enters the hash."""
+    job = Study("mnist_nat").jobs()[0]
+    cfg = job.compose(hparams={})
+    base = job.config_hash(cfg, None)
+    OmegaConf.update(cfg, key, value)
+    assert job.config_hash(cfg, None) != base
+
+
+def test_hash_neutral_defaults_are_the_schema_defaults_they_were_added_with():
+    """Each entry names a key that exists (a typo would neutralise nothing) at its schema
+    default. Should a default ever move, its entry keeps the old value and this test
+    changes with that decision."""
+    cfg = Study("mnist_nat").jobs()[0].compose(hparams={})
+    for key, default in runs.HASH_NEUTRAL_DEFAULTS.items():
+        value = OmegaConf.select(cfg, key, throw_on_missing=True)
+        if isinstance(value, DictConfig):
+            value = OmegaConf.to_container(value)
+        assert value == default and type(value) is type(default), key
 
 
 # ── grids ───────────────────────────────────────────────────────────────────

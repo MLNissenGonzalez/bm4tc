@@ -1,0 +1,23 @@
+# Option 2, stage 1 (D190, notes:gauge): ECG200 beta = 1, d3r10, on D148's folds (seeds 1-5),
+# ecg200_nat's training settings; one arm per study (the optimiser and the gauge are not
+# grid axes, D14). E2: per-core normalised gradient step, no momentum (TSGO-like, without TSGO's canonical form).
+# Rerun of gauge_ecg200_ngd with the lr range widened to 1 (its best trial sat at the old
+# top, .088 of .1; Martin, 2026-11-18). The analysis is cut to what the comparison reads (acc/test; PGD at one radius).
+dataset: ecg200
+regime: nat
+grid:
+  arch: [d3r10]
+  beta: [1]
+config:
+  trainer.max_epoch: 500
+  trainer.batch_size: 64
+  trainer.patience: 150
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+  trainer.optimizer.name: normalized_gd
+hpo:
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-3, 1]}       # Frobenius step per core per step
+budgets: [0.05]
+analysis:
+  purify_delta: [0.05]
+  adaptive: {enabled: false}

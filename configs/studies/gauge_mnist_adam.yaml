@@ -1,0 +1,26 @@
+# Option 2, stage 2 (D190, D192, notes:gauge §9): does r160's late rise of the training
+# objective on full MNIST β = 1 come from the free gauge? This arm: Adam in the free gauge,
+# on the D131-fixed init, the matched baseline of gauge_mnist_pogo (mnist_gen_capacity's
+# r160 run predates D131). r40 is the control without the rise. mnist_gen_capacity's
+# settings and analysis; no HPO: each cell takes the lr mnist_gen_capacity selected
+# (POGO chose Adam's lr on ECG200). The gauge diagnostics (balance defects, norm excess)
+# are logged at every validation.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 400
+  trainer.batch_size: 512
+  trainer.patience: 40
+  trainer.gauge.defects_every: 10                 # 10-30 s per call at r160 (CPU): epochs 1, 11, 21, ...
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+hpo: null
+hparams_from:
+  study: mnist_gen_capacity
+  params: [trainer.optimizer.kwargs.lr]
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

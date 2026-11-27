@@ -1,0 +1,26 @@
+# Gauge §21 (D209): POGO as in the paper (Javaloy and Vergari, Def. 1): VAdam, log Z read from
+# the class core alone, the cores isometries towards it, no norm penalty, step cap 1, trimmed
+# bonds, uniform classes. lr 0.1 (VAdam's step per core ~ lr, so one lr at both ranks).
+# Martin: no patience, 600 epochs, the best validation epoch kept (D8). Against free Adam at
+# r40 (gauge_mnist_adam_r40_p600) and r160 (gauge_mnist_adam_r160, five seeds).
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600        # never reached: no early stop
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: centre       # POGO as in the paper (D195)
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.name: vadam
+  trainer.optimizer.kwargs.lr: 0.1
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

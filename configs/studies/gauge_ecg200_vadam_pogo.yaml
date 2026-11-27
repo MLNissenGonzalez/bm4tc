@@ -1,0 +1,26 @@
+# Option 2, stage 1 rerun (D195, D196, notes:gauge): ECG200 beta = 1, d3r10, on D148's folds (seeds 1-5),
+# ecg200_nat's training settings; one arm per study (the optimiser and the gauge are not
+# grid axes, D14). POGO + VAdam, log Z from the centre: the POGO method.
+# Every arm of this comparison starts from uniform classes (D196).
+# The analysis is cut to what the comparison reads (acc/test; PGD at one radius).
+dataset: ecg200
+regime: nat
+grid:
+  arch: [d3r10]
+  beta: [1]
+config:
+  trainer.max_epoch: 500
+  trainer.batch_size: 64
+  trainer.patience: 150
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: centre       # POGO as in the paper (D195)
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.name: vadam
+hpo:
+  space:
+    trainer.optimizer.kwargs.lr: {log: [1e-3, 1]}       # about a core's step in Frobenius norm; below 1 (POGO's xi < 1)
+budgets: [0.05]
+analysis:
+  purify_delta: [0.05]
+  adaptive: {enabled: false}

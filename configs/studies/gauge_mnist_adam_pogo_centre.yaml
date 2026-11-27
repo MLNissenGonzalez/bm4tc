@@ -1,0 +1,28 @@
+# D210 (notes:gauge §22): POGO + element-wise Adam with log Z read from the class core. Between
+# POGO as in the paper (gauge_mnist_vadam_pogo_p600_lr*, VAdam, centre) and D192's variant
+# (gauge_mnist_pogo_adam_r*, Adam, contracted), it separates the variant's two departures from
+# Def. 1. Each rank at the variant's lr (1.83e-3 * 40 / r), so the log Z read is the only
+# difference from the variant's seed 1. D209's protocol: 600 epochs, no early stop, the best
+# validation epoch kept; uniform classes, trimmed bonds, no norm penalty, cap 1.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600        # never reached: no early stop
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: centre       # log Z = log ||class core||^2, no norm contraction
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+archs:
+  d3r40: {trainer.optimizer.kwargs.lr: 0.001830005364066771}   # gauge_mnist_pogo_adam_r40's
+  d3r160: {trainer.optimizer.kwargs.lr: 0.0004575}             # gauge_mnist_pogo_adam_r160's
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

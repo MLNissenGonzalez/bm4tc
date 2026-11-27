@@ -1,0 +1,21 @@
+# gauge_mnist_adam_r40 at a fixed 600 epochs (D207's rule, Martin 2026-11-26): patience 100
+# stopped seed 1 at epoch 484 (best 383); D206's r40 control (gauge_mnist_pogo_adam_r40) ran
+# to 600. Patience only stops, so this differs from gauge_mnist_adam_r40 only after epoch 484.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600        # never reached: no early stop
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+  trainer.optimizer.kwargs.lr: 0.001830005364066771
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

@@ -32,6 +32,17 @@ RENORMALIZE_EVERY_BY_EMBEDDING: dict[str, int] = {"legendre": 8}
 class MPSInitConfig:
     in_dim: int = 4
     bond_dim: int = 3
+    # Every bond capped at the rank the cores on its shorter side can reach (the product
+    # of their physical dimensions: bond 0 of d3r10 is 3, bond 1 is 9; D192). It changes
+    # no ψ the model can represent, only drops components that carry nothing; the
+    # isometric form of trainer.riemannian needs it (an edge core of d rows is no
+    # isometry onto r > d bond components).
+    trim_bonds: bool = False
+    # randn_eye only: every class starts at the class-0 slice / sqrt(C), so p(c|x) = 1/C
+    # (D196). randn_eye alone starts psi(x, c > 0) at its 1e-9 noise: a first gradient of
+    # 1e7-1e8 on the class core, which VAdam's one second moment per core keeps for about
+    # 1000 steps (the core then stands still).
+    uniform_classes: bool = False
     out_position: Optional[int] = None
     boundary: Text = "obc"
     init_method: Text = "randn_eye"
@@ -46,6 +57,23 @@ class CBMConfig:
     init_kwargs: MPSInitConfig = field(default_factory=MPSInitConfig)
     embedding: str = "legendre"
     model_path: Optional[str] = None
+
+
+def trimmed_bond_dims(phys_dim: List[int], bond_dim: int) -> List[int]:
+    """Bond k (between sites k and k + 1) capped at min(bond_dim, ∏_{j≤k} phys_dim[j],
+    ∏_{j>k} phys_dim[j]): the largest rank a bond of an open chain can carry."""
+    dims = []
+    for k in range(len(phys_dim) - 1):
+        cap = bond_dim
+        for side in (phys_dim[:k + 1], phys_dim[k + 1:]):
+            reach = 1
+            for d in side:
+                reach *= d
+                if reach >= cap:
+                    break
+            cap = min(cap, reach)
+        dims.append(cap)
+    return dims
 
 
 class ConditionalBornMachine(SamplingMPS):
@@ -121,8 +149,15 @@ class ConditionalBornMachine(SamplingMPS):
 
         # ── MPS super().__init__ ──────────────────────────────────────────
         _init_method = cfg.init_kwargs.init_method
+        _uniform_classes = cfg.init_kwargs.uniform_classes
+        if _uniform_classes and _init_method != "randn_eye":
+            raise ValueError(f"born.init_kwargs.uniform_classes is a start of init_method "
+                             f"'randn_eye', got init_method {_init_method!r}")
         _std = cfg.init_kwargs.std
         _boundary = cfg.init_kwargs.boundary
+
+        if cfg.init_kwargs.trim_bonds:
+            _bond_dim = trimmed_bond_dims(_phys_dim, _bond_dim)
 
         super().__init__(
             n_features=n_features,
@@ -165,24 +200,39 @@ class ConditionalBornMachine(SamplingMPS):
         self._freeze_boundaries()
 
         # ── randn_eye phi_0 rescaling ─────────────────────────────────────
-        # randn_eye sets T[:,0,:] ≈ I; initial amplitude ≈ phi_0^n_sites.
-        # For non-Fourier embeddings phi_0 ≠ 1 → float32 underflow on MNIST.
-        # Rescale by 1/phi_0 so (phi_0 * 1/phi_0)^n = 1. Exact for Legendre
-        # (constant phi_0); partial for Hermite/Chebyshev (use 'canonical').
+        # randn_eye sets T[:,0,:] ≈ I, so the initial amplitude ≈ phi_0^n_data:
+        # for non-Fourier embeddings phi_0 ≠ 1, a float32 underflow on MNIST.
+        # Every data core is rescaled by 1/phi_0, the two edge cores included
+        # (D131, D190: ``self.tensors`` returns the edge cores contracted with the
+        # boundary vectors, as new tensors, so scaling through it missed them), and
+        # the class core, which embeds nothing, is not: the amplitude starts at 1.
+        # Exact for Legendre (constant phi_0); partial for Hermite/Chebyshev (use
+        # 'canonical').
         if tensors is None and _init_method == "randn_eye":
             _x0 = torch.zeros(1)
             _phi_0 = float(self.embedding(_x0).view(-1)[0])
             if abs(_phi_0 - 1.0) > 1e-6:
                 _scale = 1.0 / _phi_0
-                _expected = _phi_0 ** n_features
+                _expected = _phi_0 ** _data_dim
                 logger.warning(
                     f"[CBM] randn_eye + '{self.embedding_name}': phi_0={_phi_0:.4f} "
-                    f"(expected 1.0). Amplitude ≈ {_expected:.2e} for n_sites={n_features} "
-                    f"— float32 underflow risk. Rescaling tensors by 1/phi_0={_scale:.4f}."
+                    f"(expected 1.0). Amplitude ≈ {_expected:.2e} for {_data_dim} data "
+                    f"sites — float32 underflow risk. Rescaling the data cores by "
+                    f"1/phi_0={_scale:.4f}."
                 )
                 with torch.no_grad():
-                    for t in self.tensors:
-                        t.data.mul_(_scale)
+                    for i, node in enumerate(self._mats_env):
+                        if i != _cls_pos:
+                            node.tensor.data.mul_(_scale)
+
+        # ── uniform classes (D196) ────────────────────────────────────────
+        # Each slice keeps its own 1e-9 noise (no further draws), and the norm stays
+        # (an eye spread over C classes / sqrt(C)).
+        if tensors is None and _uniform_classes:
+            with torch.no_grad():
+                core = self._mats_env[_cls_pos].tensor.data
+                core[:, 1:] += core[:, :1]
+                core /= math.sqrt(_num_classes)
 
         # ── Saved attributes ──────────────────────────────────────────────
         cfg.init_kwargs.out_position = _cls_pos
@@ -588,6 +638,7 @@ class ConditionalBornMachine(SamplingMPS):
         labels: torch.Tensor,
         beta: float,
         debug: bool = False,
+        log_Z: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         The objective (1-β)·L_dis + β·L_gen/N, in nats per variable (D86), with
@@ -600,6 +651,10 @@ class ConditionalBornMachine(SamplingMPS):
 
         β=0  →  -log p(c|x)       (discriminative; log_partition_function not called)
         β=1  →  -log p(x,c) / N   (generative)
+
+        log_Z: the normaliser to use in place of the norm contraction, with its gradient
+        (``trainer.riemannian: centre`` reads it from the canonical centre, D195); it is then this
+        forward's cached log Z. None: contracted. Unused at β = 0.
 
         debug=True: log per-term NaN/inf stats inside the grad-tracked forward.
         """
@@ -635,7 +690,10 @@ class ConditionalBornMachine(SamplingMPS):
                 logger.warning("  [mixed_nll/grad] term2=0 (β=1, not computed)")
 
         if beta > 0.0:
-            log_Z = self.log_Z(recompute=True)
+            if log_Z is None:
+                log_Z = self.log_Z(recompute=True)
+            else:
+                self._log_Z_cache = ((self._params_key(), torch.is_grad_enabled()), log_Z)
             if debug:
                 logger.warning(f"  [mixed_nll/grad] term3(β/N·log_Z): log_Z={log_Z.item():.4g}")
             term3 = (beta / n_vars) * log_Z

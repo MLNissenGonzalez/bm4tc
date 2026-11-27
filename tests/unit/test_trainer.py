@@ -13,7 +13,7 @@ from bm4tc.core.graphs import Graphs
 from bm4tc.core.train import Trainer, TrainConfig
 from bm4tc.core.objective import (
     NORM_STATISTICS, NormControlConfig, NormRegularizer, NormTracker, eval_rob, evaluate,
-    mix, norm_statistics,
+    OptimizerConfig, mix, norm_statistics, optimizer,
 )
 
 CPU = torch.device("cpu")
@@ -383,7 +383,7 @@ class _DecompStubCBM:
     def log_Z(self, recompute=False): return torch.tensor(0.0)
     def invalidate_log_Z_cache(self): pass
 
-    def mixed_nll(self, data, labels, beta, debug=False):
+    def mixed_nll(self, data, labels, beta, debug=False, log_Z=None):
         tag = float(data[0, 0])
         self.calls.append((tag, beta))
         # param keeps the result a graph leaf so backward() works in _train_epoch
@@ -671,3 +671,137 @@ def test_pgd_leaves_parameter_gradients_alone():
     x, y = torch.rand(4, 2), torch.randint(0, 2, (4,))
     ProjectedGradientDescent(norm="inf", num_steps=2).generate(cbm, x, y, 0.05, CPU)
     assert all(torch.equal(p.grad, torch.ones_like(p)) for p in cbm.parameters())
+
+
+# ── Optimiser arms and the gauge step (D190) ───────────────────────────────
+
+@pytest.mark.parametrize("name", ["sgd", "normalized_gd"])
+def test_gradient_descent_arms_train(name):
+    """Plain SGD (no momentum) and the per-core normalised step go through the
+    optimizer factory and the training loop."""
+    cfg = TrainConfig(max_epoch=2, beta=0.5,
+                      optimizer=OptimizerConfig(name=name, kwargs={"lr": 1e-2, "weight_decay": 0.0}))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    assert len(records) == 2 and math.isfinite(records[-1]["train"]["objective"])
+
+
+def test_normalized_gd_moves_every_core_by_lr():
+    cbm = _tiny_cbm()
+    before = [p.detach().clone() for p in cbm.parameters() if p.requires_grad]
+    opt = optimizer(cbm.parameters(), OptimizerConfig(name="normalized_gd", kwargs={"lr": 0.3}))
+    x, y = torch.rand(8, 2), torch.randint(0, 2, (8,))
+    loss, _ = cbm.mixed_nll(x, y, beta=0.5)
+    loss.backward()
+    opt.step()
+    after = [p.detach() for p in cbm.parameters() if p.requires_grad]
+    for a, b in zip(before, after):
+        assert torch.linalg.vector_norm(b - a).item() == pytest.approx(0.3, rel=1e-5)
+
+
+def test_gauge_step_runs_in_training_and_is_logged():
+    from bm4tc.core.gauge import GAUGE_DIAGNOSTICS, GaugeConfig
+    cfg = TrainConfig(max_epoch=2, beta=0.5, gauge=GaugeConfig("scalar"))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    diagnostics = records[-1]["diagnostics"]
+    assert set(GAUGE_DIAGNOSTICS) <= diagnostics.keys()
+    assert diagnostics["gauge/log_norm_over_scalar"] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_gauge_config_is_checked_by_the_trainer():
+    cfg = TrainConfig()
+    cfg.gauge.kind = "scalar"
+    cfg.gauge.rate = 0.1
+    with pytest.raises(ValueError, match="rate"):
+        _trainer(cfg)
+
+
+# ── Training on the isometric form (D192) ──────────────────────────────────
+
+@pytest.mark.parametrize("mode", ["centre", "contracted"])
+@pytest.mark.parametrize("name", ["sgd", "vadam", "normalized_gd", "adam"])
+def test_riemannian_training_keeps_Z_at_one(name, mode):
+    """trainer.riemannian: the trainer starts from the isometric form, POGO keeps it (the
+    tiny model's bonds are within their support, so it needs no trimming), whichever log Z
+    the step reads and whichever base optimiser (D210)."""
+    nc = NormControlConfig(soft_strength=0.0)
+    cfg = TrainConfig(max_epoch=3, beta=0.5, riemannian=mode, norm_control=nc,
+                      optimizer=OptimizerConfig(name=name, kwargs={"lr": 1e-2, "weight_decay": 0.0}))
+    records = []
+    trainer = _trainer(cfg)
+    trainer.train(on_epoch_end=lambda epoch, record: records.append(record))
+    assert len(records) == 3 and math.isfinite(records[-1]["train"]["objective"])
+    assert records[-1]["diagnostics"]["isometry/defect_max"] < 1e-3
+    assert records[-1]["diagnostics"]["norm/log_Z_mean"] == pytest.approx(0.0, abs=1e-3)
+
+
+@pytest.mark.parametrize("change, match", [
+    (lambda cfg: setattr(cfg.gauge, "kind", "scalar"), "gauge"),
+    (lambda cfg: setattr(cfg.norm_control, "soft_strength", 0.1), "soft_strength"),
+])
+def test_riemannian_refuses_a_gauge_step_and_a_norm_penalty(change, match):
+    cfg = TrainConfig(riemannian="centre", norm_control=NormControlConfig(soft_strength=0.0))
+    change(cfg)
+    with pytest.raises(ValueError, match=match):
+        _trainer(cfg)
+
+
+def test_gauge_defects_every_k_th_validation_norms_always():
+    from bm4tc.core.gauge import GaugeConfig
+    cfg = TrainConfig(max_epoch=4, beta=0.5, gauge=GaugeConfig("none", defects_every=3))
+    records = []
+    _trainer(cfg).train(on_epoch_end=lambda epoch, record: records.append(record))
+    has = ["gauge/defect_median" in r["diagnostics"] for r in records]
+    assert has == [True, False, False, True]
+    assert all("gauge/log_norm" in r["diagnostics"] for r in records)
+
+
+@pytest.mark.parametrize("value", [True, 1, "center", "isometric"])
+def test_riemannian_takes_false_or_a_log_Z_mode_only(value):
+    """True would not say where the step reads log Z (D208's port): it raises, as does any
+    other value, naming the key and the modes."""
+    cfg = TrainConfig(riemannian=value, norm_control=NormControlConfig(soft_strength=0.0))
+    with pytest.raises(ValueError, match=r"trainer\.riemannian.*'centre', 'contracted'"):
+        _trainer(cfg)
+
+
+@pytest.mark.parametrize("mode, in_step", [("centre", False), ("contracted", True)])
+def test_riemannian_step_reads_log_Z_by_its_mode_and_validates_with_the_exact_one(mode, in_step):
+    """centre: the norm is contracted for evaluation only, never inside a step (D195);
+    contracted: inside every step too (D192's variant). Element-wise Adam either way."""
+    cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=mode,
+                      norm_control=NormControlConfig(soft_strength=0.0),
+                      optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
+    t = _trainer(cfg)
+    exact, calls = t.cbm.log_partition_function, []
+
+    def spy():
+        calls.append(torch.is_grad_enabled())
+        return exact()
+
+    t.cbm.log_partition_function = spy
+    t.train()
+    assert any(calls) == in_step and not all(calls)    # evaluation always contracts it
+
+
+def test_riemannian_contracted_is_the_measured_variant():
+    """``contracted`` + Adam reproduces D192's variant: the numbers are this toy run on
+    branch gauge-d192 (riemannian true, ed13f5c7), the code the variant's MNIST and ECG200
+    runs came from; equal bit for bit on one machine, to ~1e-8 across CPUs (the laptop and
+    G18G01 differ there on both branches), hence rel 1e-6 as the e2e pins' CURVE_TOL.
+    ``centre`` differs from them."""
+    def run(mode):
+        cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=mode,
+                          norm_control=NormControlConfig(soft_strength=0.0),
+                          optimizer=OptimizerConfig(name="adam", kwargs={"lr": 1e-2}))
+        torch.manual_seed(0)
+        records = []
+        t = _trainer(cfg)
+        t.train(on_epoch_end=lambda epoch, record: records.append(record))
+        return (records[-1]["train"]["objective"], records[-1]["valid"]["objective"],
+                sum(x.abs().double().sum().item() for x in t.cbm.tensors))
+
+    want = (1.356917679309845, 1.2246100008487701, 5.325620550662279)
+    assert run("contracted") == pytest.approx(want, rel=1e-6)
+    assert run("centre")[0] != pytest.approx(want[0], rel=1e-6)

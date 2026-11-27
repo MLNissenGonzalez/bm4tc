@@ -46,6 +46,18 @@ REGIMES = ("nat", "at")
 MODELS = ("mps", "jem")
 RAW = "raw"                            # the embedding axis of a JEM study: none
 
+# Config keys added after studies were stored, each with the default it was added with
+# (D212). Job.config_hash leaves a key out while it holds that value, so a run that never
+# set it keeps the hash it was stored under and its results are reused. Every later key
+# with a default goes here, at the value it is added with (not whatever its default
+# becomes later). A dotted key may name a whole section, compared as a whole.
+HASH_NEUTRAL_DEFAULTS: Dict[str, Any] = {
+    "born.init_kwargs.trim_bonds": False,                  # D192
+    "born.init_kwargs.uniform_classes": False,             # D196
+    "trainer.gauge": {"kind": "none", "every": 1, "rate": None, "defects_every": 1},  # D190
+    "trainer.riemannian": False,                           # D192, D210
+}
+
 register()
 
 
@@ -423,9 +435,19 @@ class Job:
 
     def config_hash(self, cfg: DictConfig, init: Optional[Dict[str, str]]) -> str:
         """What makes two runs the same run: the resolved config (W&B settings
-        aside) and the warm start it continues from."""
+        aside) and the warm start it continues from. A key of HASH_NEUTRAL_DEFAULTS
+        at its default is left out."""
         content = OmegaConf.to_container(cfg, resolve=True)
         content.pop("tracking")
+        for key, default in HASH_NEUTRAL_DEFAULTS.items():
+            *path, leaf = key.split(".")
+            section = content
+            for part in path:
+                section = section.get(part) if isinstance(section, dict) else None
+            # json, not ==: false and 0 differ, as they do in the hash
+            if (isinstance(section, dict) and leaf in section
+                    and json.dumps(section[leaf], sort_keys=True) == json.dumps(default, sort_keys=True)):
+                del section[leaf]
         content["seed"] = self.seed
         content["init"] = init and init["hash"]
         blob = json.dumps(content, sort_keys=True, default=str)

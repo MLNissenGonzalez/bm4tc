@@ -27,7 +27,9 @@ from tqdm import tqdm
 from bm4tc.core.model import ConditionalBornMachine
 from bm4tc.core.embeddings import range_size_of, rel_to_abs
 from bm4tc.core.attacks import EvasionConfig, ProjectedGradientDescent, build_attack
+from bm4tc.core.gauge import GaugeConfig, check as check_gauge, gauge_diagnostics, gauge_step_
 from bm4tc.core.graphs import Graphs
+from bm4tc.core.pogo import POGO, isometric_start_, isometry_defects, log_Z_from_centre
 from bm4tc.core.objective import (
     NormControlConfig,
     NormRegularizer,
@@ -43,6 +45,9 @@ from bm4tc.core.objective import (
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Where a training step under ``trainer.riemannian`` reads log Z (TrainConfig.riemannian).
+RIEMANNIAN_MODES = ("centre", "contracted")
 
 @dataclass
 class TrainConfig:
@@ -67,6 +72,20 @@ class TrainConfig:
     curriculum_eps_start_rel: float = 0.0
     curriculum_end: float = 1.0
     norm_control: NormControlConfig = field(default_factory=NormControlConfig)
+    # A gauge step after the optimiser's (D190, bm4tc/core/gauge.py): ψ unchanged, so it
+    # acts only through the optimiser. kind none (the default) leaves the gauge alone.
+    gauge: GaugeConfig = field(default_factory=GaugeConfig)
+    # Train on the isometric form (bm4tc/core/pogo.py): the cores kept isometries towards
+    # the class core by POGO, so Z = 1 by the constraint. The value says where a training
+    # step reads log Z (evaluation always contracts it exactly):
+    #   false         off (free training)
+    #   "centre"      log ‖class core‖², no norm contraction: POGO as in the paper (D195)
+    #   "contracted"  the full norm contraction, its gradient reaching every core (D192's
+    #                 variant, D208)
+    # Any base optimiser (D210). Needs the model built with trim_bonds, no gauge step and
+    # no norm penalty. Typed Any, not Optional[str]: off stays false, the value it was
+    # added with, which runs.HASH_NEUTRAL_DEFAULTS keeps out of the config hash (D212).
+    riemannian: Any = False
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical
     # to the eager step except for the AT random start, whose draws come from
@@ -103,6 +122,19 @@ class Trainer:
     ):
         if cfg.eval_every < 1:
             raise ValueError(f"eval_every must be >= 1, got {cfg.eval_every}")
+        check_gauge(cfg.gauge)  # a composed config skips GaugeConfig's own check
+        if not (cfg.riemannian is False or cfg.riemannian in RIEMANNIAN_MODES):
+            raise ValueError(f"trainer.riemannian must be false or one of {RIEMANNIAN_MODES} "
+                             f"(where a training step reads log Z), got {cfg.riemannian!r}")
+        if cfg.riemannian:
+            if cfg.gauge.kind != "none":
+                raise ValueError(f"trainer.riemannian keeps the cores isometries towards the class "
+                                 f"core, which a gauge step breaks: trainer.gauge.kind must be "
+                                 f"'none', got {cfg.gauge.kind!r}")
+            if cfg.norm_control.soft_strength > 0.0:
+                raise ValueError(f"trainer.riemannian holds Z = 1 by the constraint: "
+                                 f"trainer.norm_control.soft_strength must be 0, got "
+                                 f"{cfg.norm_control.soft_strength}")
         self.cbm = cbm
         self.cfg = cfg
         self.train_loader = train_loader
@@ -197,7 +229,8 @@ class Trainer:
         """
         beta = self.cfg.beta
         if self.attack is None:
-            return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug)
+            return self.cbm.mixed_nll(inputs, labels, beta, debug=self._nc.debug,
+                                      log_Z=self._centre_log_Z())
 
         adversarial_weight = 1.0 - beta
         objective = None
@@ -206,12 +239,17 @@ class Trainer:
             objective = adversarial_weight * adversarial_objective
         if beta > 0.0:
             generative_objective, clean_log_amp_sq = self.cbm.mixed_nll(
-                inputs, labels, beta=1.0, debug=self._nc.debug)
+                inputs, labels, beta=1.0, debug=self._nc.debug, log_Z=self._centre_log_Z())
             generative_term = beta * generative_objective
             objective = generative_term if objective is None else objective + generative_term
             if adversarial_weight <= 0.0:
                 log_amp_sq = clean_log_amp_sq
         return objective, log_amp_sq
+
+    def _centre_log_Z(self) -> Optional[torch.Tensor]:
+        """log Z as a training step takes it under ``riemannian: centre`` (read from the
+        class core, D195); None: the model contracts it."""
+        return log_Z_from_centre(self.cbm) if self.cfg.riemannian == "centre" else None
 
     # ------------------------------------------------------------------
     # Collapse report
@@ -329,8 +367,13 @@ class Trainer:
                 adversarials = self._adversarials(inputs, labels, radius)
                 batch = (inputs, labels) if adversarials is None else (inputs, labels, adversarials)
                 objective, penalty, statistics = self._graphed_train_step(*batch)
-                # A replay changes the parameters without bumping their version
-                # counters, so the model's log Z caches would outlive them (D130).
+                # Eager, after the (possibly replayed) step: it writes the cores and
+                # the optimiser's state in place, where the graph reads them (D190).
+                if self.step % self.cfg.gauge.every == 0:
+                    gauge_step_(self.cbm, self.optimizer, self.cfg.gauge)
+                # A replay (and a gauge step) changes the parameters without bumping
+                # their version counters, so the model's log Z caches would outlive
+                # them (D130).
                 self.cbm.invalidate_log_Z_cache()
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -408,6 +451,7 @@ class Trainer:
         self.epoch = 0
         self.best_epoch = 0
         self.patience_counter = 0
+        self._validations = 0
         self.epoch_times = []
         self._collapsed = False
 
@@ -422,6 +466,10 @@ class Trainer:
         on_cuda = torch.device(self.device).type == "cuda"
         self.optimizer = optimizer(self.cbm.parameters(), cfg.optimizer,
                                    **({"capturable": True} if on_cuda else {}))
+        if cfg.riemannian:
+            isometric_start_(self.cbm)
+            self.cbm.invalidate_log_Z_cache()
+            self.optimizer = POGO(self.cbm, self.optimizer)
         if cfg.cuda_graph and on_cuda and self._nc.debug:
             raise ValueError("norm_control.debug logs with host syncs inside the step; "
                              "set trainer.cuda_graph=false to use it.")
@@ -460,6 +508,15 @@ class Trainer:
             validated = self.epoch % cfg.eval_every == 0
             if validated:
                 valid = self._validate()
+                # Where the gauge is (D190), also under kind none (the optimiser's own
+                # drift); no RNG draws. The bond defects only every defects_every-th
+                # validation: they cost 10-30 s per call at full MNIST d3r160.
+                defects = self._validations % cfg.gauge.defects_every == 0   # the 1st, then every k-th
+                self._validations += 1
+                record["diagnostics"] = {**record["diagnostics"],
+                                         **gauge_diagnostics(self.cbm, defects=defects)}
+                if cfg.riemannian:
+                    record["diagnostics"]["isometry/defect_max"] = max(isometry_defects(self.cbm))
                 postfix["acc"] = f"{valid['acc']:.4f}"
                 logged = dict(valid)
                 if "rob" in valid:

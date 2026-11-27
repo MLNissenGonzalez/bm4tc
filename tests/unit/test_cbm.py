@@ -28,6 +28,27 @@ def test_cbmconfig_defaults():
     assert cfg.init_kwargs.std == 1e-9
 
 
+@pytest.mark.parametrize("data_dim", [2, 20])
+def test_randn_eye_legendre_starts_at_unit_amplitude(data_dim):
+    """D131, D190: every data core, the two edge cores included, is rescaled by
+    1/phi_0, and the class core is not, so |psi(x, 0)|^2 = 1 at init for Legendre
+    (phi_0 is constant) and the other classes start near 0 (the noise, std 1e-9)."""
+    cbm = _tiny_cbm(embedding="legendre", dtype="complex64", data_dim=data_dim,
+                    num_classes=3, bond_dim=4, std=1e-9, in_dim=3)
+    x = torch.rand(8, data_dim) * 2 - 1
+    with torch.no_grad():
+        las = cbm.log_amp_sq(x)
+    assert torch.allclose(las[:, 0], torch.zeros(8), atol=1e-5)
+    assert (las[:, 1:] < -30).all()
+    norms = [float(node.tensor.abs().square().sum()) for node in cbm._mats_env]
+    # the identity slice has bond_dim ones (an edge core one: tk's randn_eye), times
+    # 1/phi_0^2 = 2 on the data cores
+    last = len(norms) - 1
+    for i, n in enumerate(norms):
+        want = 4 if i == cbm.out_position else (2 if i in (0, last) else 8)
+        assert n == pytest.approx(want, rel=1e-5)
+
+
 def test_abs_square_real():
     cbm = _tiny_cbm(dtype="float32")
     t = torch.tensor([2.0, -3.0])
@@ -751,3 +772,78 @@ def test_the_forward_renormalizes_every_k_steps_of_its_embedding(monkeypatch,
                         staticmethod(lambda node, axes: calls.append(1) or norm(node, axes)))
     cbm.log_amp_sq(torch.rand(2, 17))
     assert len(calls) == n_calls
+
+
+# ── randn_eye with uniform classes (D196) ───────────────────────────────
+
+def _eye_start(uniform, trim=False, num_classes=3, data_dim=20):
+    torch.manual_seed(0)
+    cfg = CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(
+        in_dim=3, bond_dim=6, uniform_classes=uniform, trim_bonds=trim))
+    return ConditionalBornMachine(cfg=cfg, data_dim=data_dim, num_classes=num_classes)
+
+
+@pytest.mark.parametrize("num_classes", [2, 3, 10])
+def test_uniform_classes_start_at_one_over_C(num_classes):
+    cbm = _eye_start(True, num_classes=num_classes)
+    x = torch.rand(8, 20) * 2 - 1
+    with torch.no_grad():
+        p = cbm.class_probabilities(x)
+    assert torch.allclose(p, torch.full_like(p, 1 / num_classes), atol=1e-4)
+
+
+@pytest.mark.parametrize("num_classes", [2, 3, 10])
+def test_uniform_classes_keep_the_norm_of_the_class_0_start(num_classes):
+    """C copies of the class-0 slice, each / sqrt(C), hold the norm the class-0 start had:
+    Z is unchanged (without the 1/sqrt(C), log Z grows by log C)."""
+    log_Z = []
+    for uniform in (False, True):
+        m = _eye_start(uniform, num_classes=num_classes)
+        with torch.no_grad():
+            log_Z.append(m.log_Z(recompute=True).item())
+    assert log_Z[1] == pytest.approx(log_Z[0], abs=1e-4)
+
+
+def test_uniform_classes_every_arm_has_the_same_start():
+    """The free gauge, trimmed bonds and the isometric form start from one model."""
+    from bm4tc.core.pogo import isometric_start_
+    x = torch.rand(8, 20) * 2 - 1
+    y = torch.arange(8) % 3
+    models = [_eye_start(True), _eye_start(True, trim=True), _eye_start(True, trim=True)]
+    isometric_start_(models[2])
+    losses = []
+    for m in models:
+        m.invalidate_log_Z_cache()
+        with torch.no_grad():
+            losses.append(m.mixed_nll(x, y, beta=1.0)[0].item())
+    assert max(losses) - min(losses) < 1e-4
+
+
+def test_uniform_classes_have_no_huge_first_gradient():
+    x = torch.rand(8, 20) * 2 - 1
+    y = torch.arange(8) % 3
+    largest = []
+    for uniform in (False, True):
+        m = _eye_start(uniform)
+        m.mixed_nll(x, y, beta=1.0)[0].backward()
+        largest.append(m._mats_env[m.out_position].tensor.grad.abs().max().item())
+    assert largest[0] > 1e4 and largest[1] < 10
+
+
+def test_uniform_classes_refuse_another_init():
+    cfg = CBMConfig(embedding="legendre", init_kwargs=MPSInitConfig(
+        in_dim=3, bond_dim=4, uniform_classes=True, init_method="randn"))
+    with pytest.raises(ValueError, match="uniform_classes"):
+        ConditionalBornMachine(cfg=cfg, data_dim=6, num_classes=2)
+
+
+def test_uniform_classes_are_not_reapplied_on_load(tmp_path):
+    m = _eye_start(True)
+    with torch.no_grad():
+        m._mats_env[m.out_position].tensor[:, 1].mul_(2.0)      # a trained class core
+    m.invalidate_log_Z_cache()
+    m.save(str(tmp_path / "m.pt"))
+    back = ConditionalBornMachine.load(str(tmp_path / "m.pt"))
+    x = torch.rand(8, 20) * 2 - 1
+    with torch.no_grad():
+        assert torch.allclose(back.log_amp_sq(x), m.log_amp_sq(x), atol=1e-5)

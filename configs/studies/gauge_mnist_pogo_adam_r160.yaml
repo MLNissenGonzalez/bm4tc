@@ -1,0 +1,27 @@
+# Option 2, step card notes:gauge §18: D192's POGO variant at r160 against gauge_mnist_adam_r160
+# (branch gauge): POGO with element-wise Adam (outside the paper's Def. 1, which D195 follows
+# on gauge), log Z contracted, cores isometries towards the class core, trimmed bonds, no norm
+# penalty. As the free arm: full MNIST beta = 1, uniform classes, 600 epochs,
+# patience 100, lr = 1.83e-3 * 40 / 160 (Adam's step per core ~ .18, §11).
+# Seeds 1-5 (§19, D205): D195's main-text criterion; seed 1 is the run read in §18.1.
+# Cost (bench, 1080 Ti, batch 512): 579 ms/step and 6.1 GiB per process.
+dataset: mnist
+regime: nat
+seeds: 5
+grid:
+  arch: [d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 100
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.riemannian: contracted   # D192's variant (D208)
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+  trainer.optimizer.kwargs.lr: 0.0004575
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

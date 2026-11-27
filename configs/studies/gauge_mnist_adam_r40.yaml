@@ -1,0 +1,24 @@
+# Option 2, step card notes:gauge §16.1 (b) (D195, D196): MNIST r40 pilot, free gauge, Adam: the
+# baseline of the gauge_mnist_vadam_pogo_lr* studies. Full MNIST beta = 1, seed 1, uniform classes,
+# the lr mnist_gen_capacity selected at d3r40 (stage 2's, Adam's step per core ~ .2 there, §11).
+# 600 epochs and patience 100 instead of D172's 400 / 40: the cap bound D192's variant at
+# epoch 370 of 400, and patience 40 ends runs on the plateau (§11.2). Gauge diagnostics every
+# 10th validation, as in stage 2.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 100
+  trainer.gauge.defects_every: 10
+  born.init_kwargs.uniform_classes: true
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+  trainer.optimizer.kwargs.lr: 0.001830005364066771
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number

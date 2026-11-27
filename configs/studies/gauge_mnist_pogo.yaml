@@ -1,0 +1,31 @@
+# RECORD (D195, D208): the run of this study is the first POGO variant (Adam or SGD under the
+# exact norm contraction, `riemannian: contracted`), from commit c0f0001e. A relaunch from here
+# runs the same variant but need not reproduce that run bit for bit.
+# Option 2, stage 2 (D190, D192, notes:gauge §9): does r160's late rise of the training
+# objective on full MNIST β = 1 come from the free gauge? This arm: Adam + POGO, the cores
+# kept isometries towards the class core (Z = 1 by the constraint, the gauge never
+# changed), on the bonds trimmed to their support (the same ψ class). Against
+# gauge_mnist_adam, the same cells and lrs (mnist_gen_capacity's; POGO chose Adam's lr on
+# ECG200). Cost (bench, 1080 Ti, batch 512): d3r40 227 ms/step, d3r160 579 ms/step and
+# 6.1 GiB per process, +45-47 % over the free gauge.
+dataset: mnist
+regime: nat
+seeds: 1
+grid:
+  arch: [d3r40, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 400
+  trainer.batch_size: 512
+  trainer.patience: 40
+  trainer.gauge.defects_every: 10                 # 10-30 s per call at r160 (CPU): epochs 1, 11, 21, ...
+  trainer.riemannian: contracted   # D192's variant (D208)
+  trainer.norm_control.soft_strength: 0.0          # Z = 1 by the constraint
+  born.init_kwargs.trim_bonds: true
+hpo: null
+hparams_from:
+  study: mnist_gen_capacity
+  params: [trainer.optimizer.kwargs.lr]
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129: a capacity question, no adaptive number
