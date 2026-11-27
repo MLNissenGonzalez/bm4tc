@@ -92,14 +92,17 @@ per feature apart, so they compare across embeddings and models (D170,
   (also under `none`); the bond defects, which are costly at large r, only at the first and
   every `defects_every`-th one. Optimiser arms beside Adam: `sgd`, and `normalized_gd` (each core
   moves by lr along its normalised gradient).
-- **Isometric form** (MPS, D192, D195, `bm4tc/core/pogo.py`): `trainer.riemannian: true` starts
-  from the canonical form centred at the class core (QR sweeps, then the class core
-  normalised: Z = 1) and keeps every core an isometry towards it with POGO's step after the
-  base optimiser's. The gauge then never changes, the norm is held by the constraint, and
-  a training step reads log Z from the class core (no norm contraction; evaluation and
-  selection contract it exactly). The base optimiser must be linear in the gradient:
-  `vadam` (one second moment per core, the paper's), `sgd` or `normalized_gd`; Adam raises.
-  It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
+- **Isometric form** (MPS, D192, D195, D210, `bm4tc/core/pogo.py`): `trainer.riemannian`
+  other than `false` starts from the canonical form centred at the class core (QR sweeps,
+  then the class core normalised: Z = 1) and keeps every core an isometry towards it with
+  POGO's step after the base optimiser's. The gauge then never changes and the norm is
+  held by the constraint. The value says where a training step reads log Z (evaluation
+  and selection always contract it exactly): `centre`, log ‖class core‖² with no norm
+  contraction (POGO as in the paper), or `contracted`, the full contraction with its
+  gradient reaching every core (D192's variant). Any base optimiser runs; POGO assumes one
+  linear in the gradient (`vadam`, one second moment per core, the paper's; `sgd`;
+  `normalized_gd`). Under element-wise `adam` the gradient's normal part leaks into the
+  step, so the two reads then step differently. It needs `born.init_kwargs.trim_bonds: true` (bonds capped at the rank their outer side
   can carry), `trainer.norm_control.soft_strength: 0` and `trainer.gauge.kind: none`; the
   Trainer raises otherwise. The training log carries `isometry/defect_max`.
 - **Uniform classes at the start** (MPS, D196): `born.init_kwargs.uniform_classes: true`
@@ -250,7 +253,12 @@ after a crash or a closed terminal, because finished work is recognised on disk:
 - **train**: a run is finished when it has `run.json`. A relaunch skips it if its
   config hash is unchanged, restarts it if it never finished, and refuses to touch it
   if the config changed, unless `--replace` moves the old run to
-  `outputs/<study>/.replaced/<date>/` (D58).
+  `outputs/<study>/.replaced/<date>/` (D58). A config key added later stays out of the
+  hash while it holds the default it was added with (`HASH_NEUTRAL_DEFAULTS` in
+  `bm4tc/pipeline/runs.py`, D212; every new key with a default goes there), so stored
+  runs keep their hashes. The cost: a new job in a stored study runs today's code under
+  that study's old hashes. In a Legendre `randn_eye` study (a new seed or rank) it starts
+  from D131's init, which the stored runs did not have.
 - **analyse**: each analysis part is cached in `analysis.json` under a hash of its
   settings, so changing one setting recomputes only the affected part (D63).
 

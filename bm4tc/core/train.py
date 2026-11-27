@@ -83,8 +83,8 @@ class TrainConfig:
     #   "contracted"  the full norm contraction, its gradient reaching every core (D192's
     #                 variant, D208)
     # Any base optimiser (D210). Needs the model built with trim_bonds, no gauge step and
-    # no norm penalty. Typed Any, not Optional[str]: off stays false, so the config hash
-    # of every run that never set it is unchanged (Job.config_hash hashes the whole config).
+    # no norm penalty. Typed Any, not Optional[str]: off stays false, the value it was
+    # added with, which runs.HASH_NEUTRAL_DEFAULTS keeps out of the config hash (D212).
     riemannian: Any = False
     save: bool = False
     # On CUDA, capture the training step once and replay it (D90). Bit-identical

@@ -786,9 +786,11 @@ def test_riemannian_step_reads_log_Z_by_its_mode_and_validates_with_the_exact_on
 
 
 def test_riemannian_contracted_is_the_measured_variant():
-    """``contracted`` + Adam reproduces D192's variant bit for bit: the numbers are this toy
-    run on branch gauge-d192 (riemannian true, ed13f5c7), the code the variant's MNIST and
-    ECG200 runs came from. ``centre`` differs from them."""
+    """``contracted`` + Adam reproduces D192's variant: the numbers are this toy run on
+    branch gauge-d192 (riemannian true, ed13f5c7), the code the variant's MNIST and ECG200
+    runs came from; equal bit for bit on one machine, to ~1e-8 across CPUs (the laptop and
+    G18G01 differ there on both branches), hence rel 1e-6 as the e2e pins' CURVE_TOL.
+    ``centre`` differs from them."""
     def run(mode):
         cfg = TrainConfig(max_epoch=2, beta=1.0, riemannian=mode,
                           norm_control=NormControlConfig(soft_strength=0.0),
@@ -800,5 +802,6 @@ def test_riemannian_contracted_is_the_measured_variant():
         return (records[-1]["train"]["objective"], records[-1]["valid"]["objective"],
                 sum(x.abs().double().sum().item() for x in t.cbm.tensors))
 
-    assert run("contracted") == (1.356917679309845, 1.2246100008487701, 5.325620550662279)
-    assert run("centre")[0] != 1.356917679309845
+    want = (1.356917679309845, 1.2246100008487701, 5.325620550662279)
+    assert run("contracted") == pytest.approx(want, rel=1e-6)
+    assert run("centre")[0] != pytest.approx(want[0], rel=1e-6)

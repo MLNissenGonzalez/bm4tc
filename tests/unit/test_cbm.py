@@ -792,6 +792,18 @@ def test_uniform_classes_start_at_one_over_C(num_classes):
     assert torch.allclose(p, torch.full_like(p, 1 / num_classes), atol=1e-4)
 
 
+@pytest.mark.parametrize("num_classes", [2, 3, 10])
+def test_uniform_classes_keep_the_norm_of_the_class_0_start(num_classes):
+    """C copies of the class-0 slice, each / sqrt(C), hold the norm the class-0 start had:
+    Z is unchanged (without the 1/sqrt(C), log Z grows by log C)."""
+    log_Z = []
+    for uniform in (False, True):
+        m = _eye_start(uniform, num_classes=num_classes)
+        with torch.no_grad():
+            log_Z.append(m.log_Z(recompute=True).item())
+    assert log_Z[1] == pytest.approx(log_Z[0], abs=1e-4)
+
+
 def test_uniform_classes_every_arm_has_the_same_start():
     """The free gauge, trimmed bonds and the isometric form start from one model."""
     from bm4tc.core.pogo import isometric_start_
