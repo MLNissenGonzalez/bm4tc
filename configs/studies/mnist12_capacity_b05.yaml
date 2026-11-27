@@ -1,0 +1,24 @@
+# MNIST 12x12 capacity sweep at beta = 0.5 (D213); the protocol is in mnist12_capacity_b1.yaml.
+# lr = 0.0001111 (mnist12_nat's selected r40 lr at beta 0.5) * 40 / r.
+dataset: mnist12
+regime: nat
+seeds: [1]
+grid:
+  arch: [d3r5, d3r10, d3r20, d3r40, d3r80, d3r160]
+  beta: [0.5]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+archs:
+  d3r5: {trainer.optimizer.kwargs.lr: 0.0008886}
+  d3r10: {trainer.optimizer.kwargs.lr: 0.0004443}
+  d3r20: {trainer.optimizer.kwargs.lr: 0.0002222}
+  d3r40: {trainer.optimizer.kwargs.lr: 0.0001111}
+  d3r80: {trainer.optimizer.kwargs.lr: 5.554e-05}
+  d3r160: {trainer.optimizer.kwargs.lr: 2.777e-05}
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129

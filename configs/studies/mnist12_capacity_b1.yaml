@@ -1,0 +1,32 @@
+# MNIST 12x12, NAT: does accuracy at beta > 0 rise with the rank, as on spirals (D213)?
+# One study per beta (_b0, _b05, _b09, _b1), the same protocol in each; it is stated here once.
+# 12x12 was trained up to r40 only (mnist12_nat, 200 epochs, where the cap bound). Seed 1, a
+# fixed 600 epochs (patience 600: D207, patience can stop a run on a plateau it would cross),
+# best epoch on objective/valid (D8). No HPO: lr = lr40(beta) * 40 / r, so Adam's step per core
+# stays at its r40 size at every rank (D201's rule); lr40 = mnist12_nat's selected r40 lr
+# (0.00172 at beta 1). A study sets an lr per arch, not per (beta, arch): hence one file per
+# beta. Adaptive parts off (D129): a capacity question.
+# Cost (1080 Ti, one unit alone): <= ~5.5 / 7 / 12 s per epoch at r40 / r80 / r160, 1.3 GB at
+# r160, so one r160 run of 600 epochs takes ~2 h.
+dataset: mnist12
+regime: nat
+seeds: [1]
+grid:
+  arch: [d3r5, d3r10, d3r20, d3r40, d3r80, d3r160]
+  beta: [1]
+config:
+  trainer.max_epoch: 600
+  trainer.batch_size: 512
+  trainer.patience: 600
+  trainer.norm_control.log_target: "n_features * log(in_dim) / 2"   # pilot A (D84)
+archs:
+  d3r5: {trainer.optimizer.kwargs.lr: 0.01376}
+  d3r10: {trainer.optimizer.kwargs.lr: 0.006878}
+  d3r20: {trainer.optimizer.kwargs.lr: 0.003439}
+  d3r40: {trainer.optimizer.kwargs.lr: 0.00172}
+  d3r80: {trainer.optimizer.kwargs.lr: 0.0008598}
+  d3r160: {trainer.optimizer.kwargs.lr: 0.0004299}
+hpo: null
+analysis:
+  batch_size: 512              # D133
+  adaptive: {enabled: false}   # D129
